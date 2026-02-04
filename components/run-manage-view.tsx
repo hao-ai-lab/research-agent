@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Archive, Undo2, Palette, CheckSquare, Square, MinusSquare } from 'lucide-react'
+import { Archive, Undo2, CheckSquare, Square, MinusSquare, Palette } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -136,55 +136,39 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
 
     return (
       <div
-        className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${
+        role="button"
+        tabIndex={0}
+        onClick={() => toggleSelect(run.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggleSelect(run.id)
+          }
+        }}
+        className={`flex items-center gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
           isSelected
             ? 'border-accent bg-accent/10'
-            : 'border-border bg-card hover:border-muted-foreground/50'
+            : 'border-border bg-card hover:border-muted-foreground/50 hover:bg-secondary/30'
         }`}
       >
-        <button
-          type="button"
-          onClick={() => toggleSelect(run.id)}
-          className="shrink-0"
-        >
+        <div className="shrink-0">
           {isSelected ? (
             <CheckSquare className="h-5 w-5 text-accent" />
           ) : (
             <Square className="h-5 w-5 text-muted-foreground" />
           )}
-        </button>
-
-        <div
-          className="h-4 w-4 rounded-full shrink-0 border border-border"
-          style={{ backgroundColor: run.color || '#4ade80' }}
-        />
-
-        <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-sm text-foreground truncate">
-            <RunName run={run} />
-          </h4>
-          <p className="text-xs text-muted-foreground truncate">
-            {run.config?.model} - {getStatusText(run.status)}
-          </p>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          {run.isArchived && (
-            <Badge
-              variant="outline"
-              className="text-[10px] border-muted-foreground/30 text-muted-foreground"
-            >
-              <Archive className="h-3 w-3 mr-1" />
-              Archived
-            </Badge>
-          )}
+        <div onClick={(e) => e.stopPropagation()}>
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Palette className="h-4 w-4" />
-              </Button>
+              <button
+                type="button"
+                className="h-5 w-5 rounded-full shrink-0 border-2 border-border hover:border-foreground transition-colors"
+                style={{ backgroundColor: run.color || '#4ade80' }}
+              />
             </PopoverTrigger>
-            <PopoverContent className="w-44 p-3" align="end">
+            <PopoverContent className="w-44 p-3" align="start">
               <p className="text-xs font-medium text-muted-foreground mb-2">
                 Color
               </p>
@@ -205,6 +189,27 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
               </div>
             </PopoverContent>
           </Popover>
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <h4 className="font-medium text-sm text-foreground truncate">
+            <RunName run={run} />
+          </h4>
+          <p className="text-xs text-muted-foreground truncate">
+            {run.config?.model} - {getStatusText(run.status)}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          {run.isArchived && (
+            <Badge
+              variant="outline"
+              className="text-[10px] border-muted-foreground/30 text-muted-foreground"
+            >
+              <Archive className="h-3 w-3 mr-1" />
+              Archived
+            </Badge>
+          )}
         </div>
       </div>
     )

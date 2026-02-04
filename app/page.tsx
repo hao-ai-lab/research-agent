@@ -132,11 +132,15 @@ export default function ResearchChat() {
     } else if (activeTab === 'report') {
       items.push({ label: 'Report' })
     } else if (activeTab === 'journey') {
-      items.push({ label: 'Our Journey' })
+      items.push({ 
+        label: 'Settings',
+        onClick: () => setSettingsOpen(true)
+      })
+      items.push({ label: journeySubTab === 'story' ? 'Journey Story' : 'Dev Notes' })
     }
     
     return items
-  }, [activeTab, runsSubTab, selectedRun, showVisibilityManage])
+  }, [activeTab, runsSubTab, selectedRun, showVisibilityManage, journeySubTab])
 
   const handleSendMessage = useCallback(
     (content: string, attachments?: File[], mode?: ChatMode) => {
@@ -491,12 +495,16 @@ export default function ResearchChat() {
         onJourneySubTabChange={setJourneySubTab}
       />
 
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        settings={settings}
-        onSettingsChange={setSettings}
-      />
+<SettingsDialog
+  open={settingsOpen}
+  onOpenChange={setSettingsOpen}
+  settings={settings}
+  onSettingsChange={setSettings}
+  onNavigateToJourney={(subTab) => {
+    setActiveTab('journey')
+    setJourneySubTab(subTab)
+  }}
+  />
     </main>
     </div>
   )
