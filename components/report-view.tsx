@@ -406,65 +406,6 @@ export function ReportView({ runs }: ReportViewProps) {
               
               return (
                 <div key={cell.id} className="relative group">
-                  {/* Cell Toolbar - Shows when selected */}
-                  {isSelected && !isPreviewMode && (
-                    <div className="absolute -top-8 left-0 right-0 flex items-center justify-center z-10">
-                      <div className="flex items-center gap-1 bg-secondary border border-border rounded-lg p-1 shadow-lg">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => executeCell(cell.id)}
-                          className="h-6 w-6 p-0"
-                          disabled={cell.type !== 'code'}
-                        >
-                          <Play className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => moveCell(cell.id, 'up')}
-                          className="h-6 w-6 p-0"
-                          disabled={index === 0}
-                        >
-                          <ChevronUp className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => moveCell(cell.id, 'down')}
-                          className="h-6 w-6 p-0"
-                          disabled={index === cells.length - 1}
-                        >
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => duplicateCell(cell.id)}
-                          className="h-6 w-6 p-0"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => addCellReference(cell.id)}
-                          className="h-6 w-6 p-0 text-primary"
-                        >
-                          <AtSign className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => deleteCell(cell.id)}
-                          className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
                   {/* Cell Container */}
                   <div
                     onClick={() => {
@@ -490,10 +431,92 @@ export function ReportView({ runs }: ReportViewProps) {
                       </div>
                       
                       {!isPreviewMode && (
-                        <div className="ml-auto">
+                        <div className="ml-auto flex items-center gap-0.5">
+                          {/* Inline toolbar - shows when selected */}
+                          {isSelected && (
+                            <>
+                              {cell.type === 'code' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    executeCell(cell.id)
+                                  }}
+                                  className="h-6 w-6 p-0"
+                                  title="Execute"
+                                >
+                                  <Play className="h-3 w-3" />
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  moveCell(cell.id, 'up')
+                                }}
+                                className="h-6 w-6 p-0"
+                                disabled={index === 0}
+                                title="Move up"
+                              >
+                                <ChevronUp className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  moveCell(cell.id, 'down')
+                                }}
+                                className="h-6 w-6 p-0"
+                                disabled={index === cells.length - 1}
+                                title="Move down"
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  duplicateCell(cell.id)
+                                }}
+                                className="h-6 w-6 p-0"
+                                title="Duplicate"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  addCellReference(cell.id)
+                                }}
+                                className="h-6 w-6 p-0 text-primary"
+                                title="Reference in chat"
+                              >
+                                <AtSign className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  deleteCell(cell.id)
+                                }}
+                                className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                              <div className="w-px h-4 bg-border mx-1" />
+                            </>
+                          )}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-5 w-5 p-0">
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
                                 <MoreHorizontal className="h-3.5 w-3.5" />
                               </Button>
                             </DropdownMenuTrigger>
