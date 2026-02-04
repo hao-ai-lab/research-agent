@@ -69,10 +69,10 @@ interface NavPageProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
-  activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report'
+  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
   runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
-  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report') => void
+  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report') => void
   onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
   onNewChat?: () => void
@@ -98,7 +98,7 @@ export function NavPage({
   )
 
   const handleNavClick = (
-    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report',
+    tab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report',
     subTab?: RunsSubTab | JourneySubTab
   ) => {
     onTabChange(tab)
@@ -248,17 +248,17 @@ export function NavPage({
                   <span className="font-medium">Charts</span>
                 </button>
 
-                {/* Insights */}
+                {/* Memory */}
                 <button
                   type="button"
-                  onClick={() => handleNavClick('insights')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'insights'
+                  onClick={() => handleNavClick('memory')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'memory'
                     ? 'bg-primary/10 text-primary border border-primary/20'
                     : 'bg-secondary/50 text-foreground hover:bg-secondary'
                     }`}
                 >
                   <Lightbulb className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Insights</span>
+                  <span className="font-medium">Memory</span>
                 </button>
 
                 {/* Report */}
