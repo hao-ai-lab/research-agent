@@ -52,6 +52,8 @@ import {
   Area,
 } from 'recharts'
 import { TagsDialog } from './tags-dialog'
+import { LogViewer } from './log-viewer'
+import { TmuxTerminalPanel } from './tmux-terminal-panel'
 import type { ExperimentRun, TagDefinition, MetricVisualization } from '@/lib/types'
 import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
 
@@ -67,11 +69,11 @@ interface RunDetailViewProps {
 // Generate mock metric data based on run's loss history
 function generateMetricData(run: ExperimentRun, metricPath: string, layer?: number) {
   if (!run.lossHistory || run.lossHistory.length === 0) return []
-  
+
   return run.lossHistory.map((point, i) => {
     let value = 0
     const noise = (Math.random() - 0.5) * 0.1
-    
+
     switch (metricPath) {
       case 'train/loss':
         value = point.trainLoss
@@ -110,19 +112,19 @@ function generateMetricData(run: ExperimentRun, metricPath: string, layer?: numb
       default:
         value = point.trainLoss + noise
     }
-    
+
     return { step: point.step, value: Math.max(0, value) }
   })
 }
 
 // Single metric chart component with lazy loading
-function MetricChart({ 
-  metric, 
-  run, 
-  isExpanded, 
+function MetricChart({
+  metric,
+  run,
+  isExpanded,
   onToggle,
-  selectedLayer 
-}: { 
+  selectedLayer
+}: {
   metric: MetricVisualization
   run: ExperimentRun
   isExpanded: boolean
@@ -194,12 +196,17 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
   const [notesOpen, setNotesOpen] = useState(false)
   const [editedNotes, setEditedNotes] = useState(run.notes || '')
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
-  
+
   // Charts state
   const [primaryChartsOpen, setPrimaryChartsOpen] = useState(false)
   const [secondaryChartsOpen, setSecondaryChartsOpen] = useState(false)
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
   const [layerSelections, setLayerSelections] = useState<Record<string, number>>({})
+
+  // Logs and Terminal state
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [terminalOpen, setTerminalOpen] = useState(false)
+  const [logsFullPage, setLogsFullPage] = useState(false)
 
   const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
   const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
@@ -291,353 +298,379 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex-1 min-h-0 overflow-hidden">
-      <ScrollArea className="h-full">
-        <div className="p-3 space-y-3">
-          {/* Alias */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">Alias</span>
-            {aliasEditing ? (
-              <div className="flex items-center gap-1 flex-1">
-                <Input
-                  value={editedAlias}
-                  onChange={(e) => setEditedAlias(e.target.value)}
-                  placeholder="Enter alias..."
-                  className="h-7 text-xs flex-1"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSaveAlias()
-                    if (e.key === 'Escape') handleCancelAlias()
-                  }}
-                />
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleSaveAlias}>
-                  <Check className="h-3 w-3 text-green-500" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCancelAlias}>
-                  <X className="h-3 w-3 text-muted-foreground" />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1 flex-1 min-w-0">
-                {run.alias ? (
-                  <span className="text-sm font-medium truncate">{run.alias}</span>
+        <ScrollArea className="h-full">
+          <div className="p-3 space-y-3">
+            {/* Alias */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">Alias</span>
+              {aliasEditing ? (
+                <div className="flex items-center gap-1 flex-1">
+                  <Input
+                    value={editedAlias}
+                    onChange={(e) => setEditedAlias(e.target.value)}
+                    placeholder="Enter alias..."
+                    className="h-7 text-xs flex-1"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveAlias()
+                      if (e.key === 'Escape') handleCancelAlias()
+                    }}
+                  />
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleSaveAlias}>
+                    <Check className="h-3 w-3 text-green-500" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCancelAlias}>
+                    <X className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 flex-1 min-w-0">
+                  {run.alias ? (
+                    <span className="text-sm font-medium truncate">{run.alias}</span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">No alias set</span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 shrink-0"
+                    onClick={() => setAliasEditing(true)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Tags + Quick Actions Row */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto">
+                {run.tags && run.tags.length > 0 ? (
+                  run.tags.map((tagName) => {
+                    const tag = allTags.find((t) => t.name === tagName)
+                    return (
+                      <span
+                        key={tagName}
+                        className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                        style={{
+                          backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
+                          color: tag?.color || '#4ade80',
+                        }}
+                      >
+                        {tagName}
+                      </span>
+                    )
+                  })
                 ) : (
-                  <span className="text-xs text-muted-foreground italic">No alias set</span>
+                  <span className="text-[10px] text-muted-foreground">No tags</span>
                 )}
                 <Button
                   variant="ghost"
                   size="icon"
                   className="h-5 w-5 shrink-0"
-                  onClick={() => setAliasEditing(true)}
+                  onClick={() => setTagsDialogOpen(true)}
                 >
-                  <Pencil className="h-3 w-3" />
+                  <Plus className="h-3 w-3" />
                 </Button>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleToggleFavorite}
+                  className={`h-7 w-7 ${run.isFavorite ? 'text-yellow-500' : 'text-muted-foreground'}`}
+                >
+                  <Star className={`h-4 w-4 ${run.isFavorite ? 'fill-yellow-500' : ''}`} />
+                </Button>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                      <div
+                        className="h-4 w-4 rounded-full border border-border"
+                        style={{ backgroundColor: run.color || '#4ade80' }}
+                      />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-40 p-2" align="end">
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {DEFAULT_RUN_COLORS.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => handleColorChange(color)}
+                          className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${run.color === color ? 'border-foreground' : 'border-transparent'
+                            }`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleArchive}
+                  className={`h-7 w-7 ${run.isArchived ? 'text-muted-foreground' : ''}`}
+                >
+                  <Archive className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Notes Preview/Edit */}
+            {notesOpen ? (
+              <div className="rounded-lg border border-border bg-card p-2">
+                <Textarea
+                  placeholder="Add notes about this run..."
+                  value={editedNotes}
+                  onChange={(e) => setEditedNotes(e.target.value)}
+                  className="min-h-[60px] text-xs resize-none border-0 p-0 focus-visible:ring-0"
+                />
+                <div className="flex justify-end gap-2 mt-2">
+                  <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setNotesOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" className="h-6 text-xs" onClick={handleSaveNotes}>
+                    Save
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setNotesOpen(true)}
+                className="w-full text-left rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground hover:bg-secondary transition-colors"
+              >
+                {run.notes ? (
+                  <span className="line-clamp-1">{run.notes}</span>
+                ) : (
+                  <span className="italic">Add notes...</span>
+                )}
+              </button>
+            )}
+
+            {/* Status and Progress */}
+            {run.status === 'running' && (
+              <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-muted-foreground">Progress</span>
+                    <span className="text-xs font-medium text-foreground">{run.progress}%</span>
+                  </div>
+                  <Progress value={run.progress} className="h-1.5" />
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] text-muted-foreground">Duration</p>
+                  <p className="text-sm font-medium text-foreground">{formatDuration(run.startTime, run.endTime)}</p>
+                </div>
               </div>
             )}
-          </div>
 
-          {/* Tags + Quick Actions Row */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto">
-              {run.tags && run.tags.length > 0 ? (
-                run.tags.map((tagName) => {
-                  const tag = allTags.find((t) => t.name === tagName)
-                  return (
-                    <span
-                      key={tagName}
-                      className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                      style={{
-                        backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
-                        color: tag?.color || '#4ade80',
-                      }}
-                    >
-                      {tagName}
-                    </span>
-                  )
-                })
-              ) : (
-                <span className="text-[10px] text-muted-foreground">No tags</span>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 shrink-0"
-                onClick={() => setTagsDialogOpen(true)}
-              >
-                <Plus className="h-3 w-3" />
-              </Button>
-            </div>
-            
-            <div className="flex items-center gap-1 shrink-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleToggleFavorite}
-                className={`h-7 w-7 ${run.isFavorite ? 'text-yellow-500' : 'text-muted-foreground'}`}
-              >
-                <Star className={`h-4 w-4 ${run.isFavorite ? 'fill-yellow-500' : ''}`} />
-              </Button>
-
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7">
-                    <div
-                      className="h-4 w-4 rounded-full border border-border"
-                      style={{ backgroundColor: run.color || '#4ade80' }}
-                    />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-40 p-2" align="end">
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {DEFAULT_RUN_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        onClick={() => handleColorChange(color)}
-                        className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${
-                          run.color === color ? 'border-foreground' : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleArchive}
-                className={`h-7 w-7 ${run.isArchived ? 'text-muted-foreground' : ''}`}
-              >
-                <Archive className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-          {/* Notes Preview/Edit */}
-          {notesOpen ? (
-            <div className="rounded-lg border border-border bg-card p-2">
-              <Textarea
-                placeholder="Add notes about this run..."
-                value={editedNotes}
-                onChange={(e) => setEditedNotes(e.target.value)}
-                className="min-h-[60px] text-xs resize-none border-0 p-0 focus-visible:ring-0"
-              />
-              <div className="flex justify-end gap-2 mt-2">
-                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setNotesOpen(false)}>
-                  Cancel
-                </Button>
-                <Button size="sm" className="h-6 text-xs" onClick={handleSaveNotes}>
-                  Save
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setNotesOpen(true)}
-              className="w-full text-left rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground hover:bg-secondary transition-colors"
-            >
-              {run.notes ? (
-                <span className="line-clamp-1">{run.notes}</span>
-              ) : (
-                <span className="italic">Add notes...</span>
-              )}
-            </button>
-          )}
-
-          {/* Status and Progress */}
-          {run.status === 'running' && (
-            <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-muted-foreground">Progress</span>
-                  <span className="text-xs font-medium text-foreground">{run.progress}%</span>
+            {/* Metrics */}
+            {run.metrics && (
+              <div className="grid grid-cols-3 gap-2">
+                <div className="text-center p-2 rounded-lg bg-card border border-border">
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Loss</p>
+                  <p className="text-sm font-semibold text-foreground">{run.metrics.loss.toFixed(3)}</p>
                 </div>
-                <Progress value={run.progress} className="h-1.5" />
+                <div className="text-center p-2 rounded-lg bg-card border border-border">
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Accuracy</p>
+                  <p className="text-sm font-semibold text-foreground">{run.metrics.accuracy.toFixed(1)}%</p>
+                </div>
+                <div className="text-center p-2 rounded-lg bg-card border border-border">
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Epoch</p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {run.metrics.epoch}{run.config?.maxEpochs && `/${run.config.maxEpochs}`}
+                  </p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-[10px] text-muted-foreground">Duration</p>
-                <p className="text-sm font-medium text-foreground">{formatDuration(run.startTime, run.endTime)}</p>
-              </div>
-            </div>
-          )}
+            )}
 
-          {/* Metrics */}
-          {run.metrics && (
-            <div className="grid grid-cols-3 gap-2">
-              <div className="text-center p-2 rounded-lg bg-card border border-border">
-                <p className="text-[10px] text-muted-foreground mb-0.5">Loss</p>
-                <p className="text-sm font-semibold text-foreground">{run.metrics.loss.toFixed(3)}</p>
-              </div>
-              <div className="text-center p-2 rounded-lg bg-card border border-border">
-                <p className="text-[10px] text-muted-foreground mb-0.5">Accuracy</p>
-                <p className="text-sm font-semibold text-foreground">{run.metrics.accuracy.toFixed(1)}%</p>
-              </div>
-              <div className="text-center p-2 rounded-lg bg-card border border-border">
-                <p className="text-[10px] text-muted-foreground mb-0.5">Epoch</p>
-                <p className="text-sm font-semibold text-foreground">
-                  {run.metrics.epoch}{run.config?.maxEpochs && `/${run.config.maxEpochs}`}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Charts Section - Primary */}
-          {run.lossHistory && run.lossHistory.length > 0 && (
-            <Collapsible open={primaryChartsOpen} onOpenChange={setPrimaryChartsOpen}>
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <span className="text-xs font-medium text-foreground">Primary Metrics</span>
-                    <div className="flex items-center gap-2">
-                      {primaryChartsOpen && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-5 px-2 text-[10px]"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            toggleAllInCategory(primaryMetrics, !allPrimaryExpanded)
-                          }}
-                        >
-                          {allPrimaryExpanded ? 'Collapse All' : 'Expand All'}
-                        </Button>
-                      )}
-                      {primaryChartsOpen ? (
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                      )}
-                    </div>
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-2 pb-2">
-                    {primaryMetrics.map((metric) => (
-                      <MetricChart
-                        key={metric.id}
-                        metric={metric}
-                        run={run}
-                        isExpanded={expandedCharts.has(metric.id)}
-                        onToggle={() => toggleChart(metric.id)}
-                      />
-                    ))}
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-          )}
-
-          {/* Charts Section - Secondary */}
-          {run.lossHistory && run.lossHistory.length > 0 && (
-            <Collapsible open={secondaryChartsOpen} onOpenChange={setSecondaryChartsOpen}>
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <span className="text-xs font-medium text-foreground">Secondary Metrics</span>
-                    <div className="flex items-center gap-2">
-                      {secondaryChartsOpen && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-5 px-2 text-[10px]"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            toggleAllInCategory(secondaryMetrics, !allSecondaryExpanded)
-                          }}
-                        >
-                          {allSecondaryExpanded ? 'Collapse All' : 'Expand All'}
-                        </Button>
-                      )}
-                      {secondaryChartsOpen ? (
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                      )}
-                    </div>
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-2 pb-2">
-                    {secondaryMetrics.map((metric) => (
-                      <div key={metric.id}>
-                        {metric.layerSelector && (
-                          <div className="flex items-center gap-2 px-3 pt-2">
-                            <span className="text-[10px] text-muted-foreground">Layer:</span>
-                            <select
-                              className="text-[10px] bg-secondary border-0 rounded px-1.5 py-0.5 text-foreground"
-                              value={layerSelections[metric.id] || 0}
-                              onChange={(e) => setLayerSelections(prev => ({ ...prev, [metric.id]: Number(e.target.value) }))}
-                            >
-                              {Array.from({ length: 12 }, (_, i) => (
-                                <option key={i} value={i}>Layer {i}</option>
-                              ))}
-                            </select>
-                          </div>
+            {/* Charts Section - Primary */}
+            {run.lossHistory && run.lossHistory.length > 0 && (
+              <Collapsible open={primaryChartsOpen} onOpenChange={setPrimaryChartsOpen}>
+                <div className="rounded-lg border border-border bg-card overflow-hidden">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <span className="text-xs font-medium text-foreground">Primary Metrics</span>
+                      <div className="flex items-center gap-2">
+                        {primaryChartsOpen && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 px-2 text-[10px]"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleAllInCategory(primaryMetrics, !allPrimaryExpanded)
+                            }}
+                          >
+                            {allPrimaryExpanded ? 'Collapse All' : 'Expand All'}
+                          </Button>
                         )}
+                        {primaryChartsOpen ? (
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </div>
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border px-2 pb-2">
+                      {primaryMetrics.map((metric) => (
                         <MetricChart
+                          key={metric.id}
                           metric={metric}
                           run={run}
                           isExpanded={expandedCharts.has(metric.id)}
                           onToggle={() => toggleChart(metric.id)}
-                          selectedLayer={layerSelections[metric.id]}
                         />
-                      </div>
-                    ))}
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-          )}
-
-          {/* Command */}
-          <Collapsible open={commandOpen} onOpenChange={setCommandOpen}>
-            <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <CollapsibleTrigger asChild>
-                <button type="button" className="flex w-full items-center justify-between p-3">
-                  <div className="flex items-center gap-2">
-                    <Terminal className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-xs font-medium text-foreground">Command</span>
-                  </div>
-                  {commandOpen ? (
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                  )}
-                </button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div className="border-t border-border px-3 pb-3">
-                  <div className="mt-2 relative">
-                    <pre className="rounded bg-secondary p-2 text-[10px] text-foreground overflow-x-auto font-mono">
-                      {run.command}
-                    </pre>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={copyCommand}
-                      className="absolute right-1 top-1 h-6 w-6"
-                    >
-                      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                    </Button>
-                  </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
                 </div>
-              </CollapsibleContent>
-            </div>
-          </Collapsible>
+              </Collapsible>
+            )}
 
-          {/* Hyperparameters */}
-          {run.config && (
-            <Collapsible open={configOpen} onOpenChange={setConfigOpen}>
+            {/* Charts Section - Secondary */}
+            {run.lossHistory && run.lossHistory.length > 0 && (
+              <Collapsible open={secondaryChartsOpen} onOpenChange={setSecondaryChartsOpen}>
+                <div className="rounded-lg border border-border bg-card overflow-hidden">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <span className="text-xs font-medium text-foreground">Secondary Metrics</span>
+                      <div className="flex items-center gap-2">
+                        {secondaryChartsOpen && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 px-2 text-[10px]"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleAllInCategory(secondaryMetrics, !allSecondaryExpanded)
+                            }}
+                          >
+                            {allSecondaryExpanded ? 'Collapse All' : 'Expand All'}
+                          </Button>
+                        )}
+                        {secondaryChartsOpen ? (
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </div>
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border px-2 pb-2">
+                      {secondaryMetrics.map((metric) => (
+                        <div key={metric.id}>
+                          {metric.layerSelector && (
+                            <div className="flex items-center gap-2 px-3 pt-2">
+                              <span className="text-[10px] text-muted-foreground">Layer:</span>
+                              <select
+                                className="text-[10px] bg-secondary border-0 rounded px-1.5 py-0.5 text-foreground"
+                                value={layerSelections[metric.id] || 0}
+                                onChange={(e) => setLayerSelections(prev => ({ ...prev, [metric.id]: Number(e.target.value) }))}
+                              >
+                                {Array.from({ length: 12 }, (_, i) => (
+                                  <option key={i} value={i}>Layer {i}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          <MetricChart
+                            metric={metric}
+                            run={run}
+                            isExpanded={expandedCharts.has(metric.id)}
+                            onToggle={() => toggleChart(metric.id)}
+                            selectedLayer={layerSelections[metric.id]}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            )}
+
+            {/* Logs Section */}
+            <Collapsible open={logsOpen} onOpenChange={setLogsOpen}>
               <div className="rounded-lg border border-border bg-card overflow-hidden">
                 <CollapsibleTrigger asChild>
                   <button type="button" className="flex w-full items-center justify-between p-3">
                     <div className="flex items-center gap-2">
-                      <Settings className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-xs font-medium text-foreground">Hyperparameters</span>
+                      <FileCode className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-medium text-foreground">Logs</span>
+                      {run.status === 'running' && (
+                        <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                      )}
                     </div>
-                    {configOpen ? (
+                    {logsOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border">
+                    <LogViewer
+                      runId={run.id}
+                      isFullPage={logsFullPage}
+                      onExpand={() => setLogsFullPage(true)}
+                    />
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+
+            {/* Terminal Section */}
+            <Collapsible open={terminalOpen} onOpenChange={setTerminalOpen}>
+              <div className="rounded-lg border border-border bg-card overflow-hidden">
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <Terminal className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-medium text-foreground">Terminal</span>
+                      {(run as any).tmux_window && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
+                          {(run as any).tmux_window}
+                        </span>
+                      )}
+                    </div>
+                    {terminalOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border">
+                    <TmuxTerminalPanel
+                      runId={run.id}
+                      tmuxWindow={(run as any).tmux_window}
+                      tmuxPane={(run as any).tmux_pane}
+                    />
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+
+            {/* Command */}
+            <Collapsible open={commandOpen} onOpenChange={setCommandOpen}>
+              <div className="rounded-lg border border-border bg-card overflow-hidden">
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <Terminal className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-medium text-foreground">Command</span>
+                    </div>
+                    {commandOpen ? (
                       <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                     ) : (
                       <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -646,71 +679,108 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="border-t border-border px-3 pb-3">
-                    <div className="mt-2 space-y-1">
-                      {Object.entries(run.config).map(([key, value]) => (
-                        <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
-                          <span className="text-[10px] text-muted-foreground capitalize">
-                            {key.replace(/([A-Z])/g, ' $1').trim()}
-                          </span>
-                          <span className="text-[10px] font-mono text-foreground">
-                            {typeof value === 'number' && value < 0.01 ? value.toExponential(1) : String(value)}
-                          </span>
-                        </div>
-                      ))}
+                    <div className="mt-2 relative">
+                      <pre className="rounded bg-secondary p-2 text-[10px] text-foreground overflow-x-auto font-mono">
+                        {run.command}
+                      </pre>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={copyCommand}
+                        className="absolute right-1 top-1 h-6 w-6"
+                      >
+                        {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                      </Button>
                     </div>
                   </div>
                 </CollapsibleContent>
               </div>
             </Collapsible>
-          )}
 
-          {/* Artifacts */}
-          {run.artifacts && run.artifacts.length > 0 && (
-            <Collapsible open={artifactsOpen} onOpenChange={setArtifactsOpen}>
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-xs font-medium text-foreground">Artifacts ({run.artifacts.length})</span>
-                    </div>
-                    {artifactsOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-3 pb-3">
-                    <div className="mt-2 space-y-2">
-                      {run.artifacts.map((artifact) => (
-                        <div key={artifact.id} className="rounded border border-border bg-secondary/50 p-2">
-                          <div className="flex items-center gap-1.5 mb-1">
-                            {getArtifactIcon(artifact.type)}
-                            <span className="text-[10px] font-medium text-foreground flex-1 truncate">{artifact.name}</span>
-                            <Badge variant="outline" className="text-[8px] h-4">{artifact.type}</Badge>
+            {/* Hyperparameters */}
+            {run.config && (
+              <Collapsible open={configOpen} onOpenChange={setConfigOpen}>
+                <div className="rounded-lg border border-border bg-card overflow-hidden">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <div className="flex items-center gap-2">
+                        <Settings className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium text-foreground">Hyperparameters</span>
+                      </div>
+                      {configOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border px-3 pb-3">
+                      <div className="mt-2 space-y-1">
+                        {Object.entries(run.config).map(([key, value]) => (
+                          <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
+                            <span className="text-[10px] text-muted-foreground capitalize">
+                              {key.replace(/([A-Z])/g, ' $1').trim()}
+                            </span>
+                            <span className="text-[10px] font-mono text-foreground">
+                              {typeof value === 'number' && value < 0.01 ? value.toExponential(1) : String(value)}
+                            </span>
                           </div>
-                          {artifact.content && (
-                            <pre className="text-[9px] text-muted-foreground whitespace-pre-wrap font-mono bg-background rounded p-1.5 max-h-20 overflow-y-auto">
-                              {artifact.content}
-                            </pre>
-                          )}
-                          {artifact.url && (
-                            <a href={artifact.url} className="text-[10px] text-accent hover:underline">
-                              Download
-                            </a>
-                          )}
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-          )}
-        </div>
-      </ScrollArea>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            )}
+
+            {/* Artifacts */}
+            {run.artifacts && run.artifacts.length > 0 && (
+              <Collapsible open={artifactsOpen} onOpenChange={setArtifactsOpen}>
+                <div className="rounded-lg border border-border bg-card overflow-hidden">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <div className="flex items-center gap-2">
+                        <Package className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium text-foreground">Artifacts ({run.artifacts.length})</span>
+                      </div>
+                      {artifactsOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border px-3 pb-3">
+                      <div className="mt-2 space-y-2">
+                        {run.artifacts.map((artifact) => (
+                          <div key={artifact.id} className="rounded border border-border bg-secondary/50 p-2">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              {getArtifactIcon(artifact.type)}
+                              <span className="text-[10px] font-medium text-foreground flex-1 truncate">{artifact.name}</span>
+                              <Badge variant="outline" className="text-[8px] h-4">{artifact.type}</Badge>
+                            </div>
+                            {artifact.content && (
+                              <pre className="text-[9px] text-muted-foreground whitespace-pre-wrap font-mono bg-background rounded p-1.5 max-h-20 overflow-y-auto">
+                                {artifact.content}
+                              </pre>
+                            )}
+                            {artifact.url && (
+                              <a href={artifact.url} className="text-[10px] text-accent hover:underline">
+                                Download
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            )}
+          </div>
+        </ScrollArea>
       </div>
 
       <TagsDialog

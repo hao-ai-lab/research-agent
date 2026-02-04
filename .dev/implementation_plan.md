@@ -57,12 +57,19 @@ Runs are **never deleted**, only transitioned through states:
 
 | Status | Description |
 |--------|-------------|
-| `queued` | Created, waiting to be started |
-| `launching` | Spawning sidecar in tmux |
-| `running` | Command executing |
-| `finished` | Completed successfully (exit 0) |
-| `failed` | Completed with error |
-| `stopped` | Manually canceled |
+| `ready` | ✅ Created but not yet submitted for execution |
+| `queued` | ✅ Submitted, waiting to be started |
+| `launching` | ✅ Spawning sidecar in tmux |
+| `running` | ✅ Command executing |
+| `finished` | ✅ Completed successfully (exit 0) |
+| `failed` | ✅ Completed with error |
+| `stopped` | ✅ Manually canceled |
+
+```
+ready → queued → launching → running → finished/failed/stopped
+  │         │
+  └─────────┴── /runs/{id}/start (direct) or /runs/{id}/queue then /start
+```
 
 Runs can be **archived** (hidden from default view) but never removed.
 
@@ -129,20 +136,30 @@ NavPage
 
 ## API Endpoints
 
-### Runs
+### Runs ✅
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/runs` | GET | List runs (`?archived=false&limit=50`) |
-| `/runs` | POST | Create run (queued) |
+| `/runs` | POST | Create run (ready or queued) |
 | `/runs/{id}` | GET | Get run details |
-| `/runs/{id}/start` | POST | Start queued run |
+| `/runs/{id}/queue` | POST | Move ready → queued |
+| `/runs/{id}/start` | POST | Start queued/ready run |
 | `/runs/{id}/stop` | POST | Stop running job |
 | `/runs/{id}/archive` | POST | Archive run |
 | `/runs/{id}/unarchive` | POST | Unarchive run |
 | `/runs/{id}/status` | POST | Sidecar callback |
 
-### Logs
+### Sweeps ✅
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/sweeps` | GET | List sweeps |
+| `/sweeps` | POST | Create sweep with child runs |
+| `/sweeps/{id}` | GET | Get sweep details |
+| `/sweeps/{id}/start` | POST | Start sweep runs (`?parallel=N`) |
+
+### Logs ✅
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
