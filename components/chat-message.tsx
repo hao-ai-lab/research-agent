@@ -134,7 +134,7 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
   }
 
   return (
-    <div className="px-0.5 py-2">
+    <div className="px-1 py-2">
       <div className="space-y-2">
         {message.thinking && (
           <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
