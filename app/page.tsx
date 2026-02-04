@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import { FloatingNav } from '@/components/floating-nav'
-import { LeftPanel, type RunsSubTab } from '@/components/left-panel'
+import { NavPage, type RunsSubTab } from '@/components/nav-page'
 import { ChatView } from '@/components/chat-view'
 import { RunsView } from '@/components/runs-view'
 import { ChartsView } from '@/components/charts-view'
@@ -337,7 +337,7 @@ export default function ResearchChat() {
         )}
       </div>
 
-      <LeftPanel 
+      <NavPage 
         open={leftPanelOpen} 
         onOpenChange={setLeftPanelOpen}
         onSettingsClick={() => setSettingsOpen(true)}

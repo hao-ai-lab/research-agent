@@ -9,18 +9,13 @@ import {
   Lightbulb,
   Plus,
   ChevronRight,
+  X,
   LayoutDashboard,
   List,
   Wrench,
   Bell,
   Sparkles,
 } from 'lucide-react'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -28,11 +23,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 export type RunsSubTab = 'overview' | 'details' | 'manage' | 'events'
 
-interface LeftPanelProps {
+interface NavPageProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
@@ -42,15 +37,15 @@ interface LeftPanelProps {
   onRunsSubTabChange: (subTab: RunsSubTab) => void
 }
 
-export function LeftPanel({ 
-  open, 
-  onOpenChange, 
+export function NavPage({
+  open,
+  onOpenChange,
   onSettingsClick,
   activeTab,
   runsSubTab,
   onTabChange,
   onRunsSubTabChange,
-}: LeftPanelProps) {
+}: NavPageProps) {
   const [runsExpanded, setRunsExpanded] = useState(() => {
     // Check localStorage for saved state, default to true (expanded)
     if (typeof window !== 'undefined') {
@@ -76,16 +71,41 @@ export function LeftPanel({
     onOpenChange(false)
   }
 
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="left" className="w-[280px] p-0">
-        <SheetHeader className="border-b border-border p-4">
-          <SheetTitle className="flex items-center gap-2 text-left">
-            <FlaskConical className="h-5 w-5 text-accent" />
-            Research Lab
-          </SheetTitle>
-        </SheetHeader>
+  if (!open) return null
 
+  return (
+    <>
+      {/* Overlay backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/50"
+        onClick={() => onOpenChange(false)}
+      />
+
+      {/* Navigation Page - slides in from left */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-background shadow-lg transition-transform duration-300 ease-out ${
+          open ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* Header */}
+        <div className="border-b border-border p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="h-5 w-5 text-accent" />
+              <span className="font-semibold text-foreground">Research Lab</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <X className="h-5 w-5" />
+              <span className="sr-only">Close navigation</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
         <div className="flex flex-col h-[calc(100%-65px)]">
           <div className="p-4">
             <Button className="w-full gap-2 bg-accent text-accent-foreground hover:bg-accent/90">
@@ -94,6 +114,7 @@ export function LeftPanel({
             </Button>
           </div>
 
+          {/* Navigation Menu */}
           <nav className="flex-1 overflow-y-auto px-2">
             <div className="space-y-1">
               {/* Chat */}
@@ -123,8 +144,8 @@ export function LeftPanel({
                   >
                     <FlaskConical className="h-4 w-4" />
                     <span className="flex-1 text-left">Runs</span>
-                    <ChevronRight 
-                      className={`h-4 w-4 transition-transform ${runsExpanded ? 'rotate-90' : ''}`} 
+                    <ChevronRight
+                      className={`h-4 w-4 transition-transform ${runsExpanded ? 'rotate-90' : ''}`}
                     />
                   </button>
                 </CollapsibleTrigger>
@@ -214,6 +235,7 @@ export function LeftPanel({
 
           <Separator />
 
+          {/* Bottom Menu */}
           <div className="p-2">
             <button
               type="button"
@@ -247,7 +269,7 @@ export function LeftPanel({
             </button>
           </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </>
   )
 }
