@@ -131,10 +131,10 @@
 }
 
 /* Mobile viewport scaling - ensures app doesn't crop on very small screens */
-@media (max-width: 389px) {
+@media (max-width: 299px) {
   .mobile-viewport-wrapper {
     transform-origin: top left;
-    transform: scale(calc(100vw / 390));
+    transform: scale(calc(100vw / 300));
   }
 }
 
@@ -145,9 +145,9 @@
   }
 }
 
-@media (max-width: 389px) and (max-height: 643px) {
+@media (max-width: 299px) and (max-height: 643px) {
   .mobile-viewport-wrapper {
     transform-origin: top left;
-    transform: scale(min(calc(100vw / 390), calc(100dvh / 644)));
+    transform: scale(min(calc(100vw / 300), calc(100dvh / 644)));
   }
 }

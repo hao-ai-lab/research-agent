@@ -270,8 +270,8 @@ export default function ResearchChat() {
   }, [])
 
   // Calculate scale for very small screens
-  const MOBILE_WIDTH = 390
-  const MOBILE_HEIGHT = 844
+  const MOBILE_WIDTH = 300
+  const MOBILE_HEIGHT = 644
 
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
