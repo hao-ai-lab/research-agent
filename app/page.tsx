@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useMemo } from 'react'
+import { useMobileViewportSize } from '@/hooks/use-mobile'
 import { FloatingNav } from '@/components/floating-nav'
 import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
 import { ChatView } from '@/components/chat-view'
@@ -368,17 +369,16 @@ export default function ResearchChat() {
     setShowVisibilityManage(false)
   }, [])
 
-  // Calculate scale for very small screens
-  const MOBILE_WIDTH = 300
-  const MOBILE_HEIGHT = 644
+  // Use window-query based viewport sizing
+  const { minWidth, minHeight } = useMobileViewportSize()
 
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main 
         className="mobile-viewport-wrapper flex flex-col bg-background overflow-hidden w-full h-full md:w-full md:h-full"
         style={{
-          minWidth: `${MOBILE_WIDTH}px`,
-          minHeight: `${MOBILE_HEIGHT}px`,
+          minWidth: `${minWidth}px`,
+          minHeight: `${minHeight}px`,
         }}
       >
       <FloatingNav
