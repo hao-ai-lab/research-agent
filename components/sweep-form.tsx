@@ -34,7 +34,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { ScrollArea } from '@/components/ui/scroll-area'
+
 import type { SweepConfig, SweepHyperparameter, SweepMetric, SweepInsight } from '@/lib/types'
 import { createDefaultSweepConfig } from '@/lib/mock-data'
 
@@ -144,7 +144,7 @@ export function SweepForm({
   const isValid = config.name.trim() && config.command.trim() && config.metrics.length > 0
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full bg-background overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
@@ -164,7 +164,7 @@ export function SweepForm({
       </div>
 
       {/* Form Content */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-4 space-y-3">
           {/* Name */}
           <div>
@@ -570,7 +570,7 @@ export function SweepForm({
             </CollapsibleContent>
           </Collapsible>
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Footer Actions */}
       <div className="p-3 border-t border-border space-y-2">
