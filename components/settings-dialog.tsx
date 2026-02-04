@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   Search,
   Slack,
@@ -15,6 +15,10 @@ import {
   ChevronRight,
   Sparkles,
   Code,
+  Server,
+  Wifi,
+  WifiOff,
+  RotateCcw,
 } from 'lucide-react'
 import {
   Dialog,
@@ -27,6 +31,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
+import { useApiConfig } from '@/lib/api-config'
 import type { AppSettings } from '@/lib/types'
 
 interface SettingsDialogProps {
@@ -49,7 +54,43 @@ export function SettingsDialog({
   const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
 
+  // API Configuration
+  const { apiUrl, useMock, setApiUrl, setUseMock, resetToDefaults, testConnection } = useApiConfig()
+  const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
+
+  // Sync apiUrlInput when apiUrl changes (e.g. on reset)
+  React.useEffect(() => {
+    setApiUrlInput(apiUrl)
+  }, [apiUrl])
+
+  const handleTestConnection = async () => {
+    setConnectionStatus('testing')
+    const isConnected = await testConnection()
+    setConnectionStatus(isConnected ? 'connected' : 'failed')
+    // Reset after 3 seconds
+    setTimeout(() => setConnectionStatus('idle'), 3000)
+  }
+
+  const handleSaveApiUrl = () => {
+    setApiUrl(apiUrlInput)
+    setConnectionStatus('idle')
+  }
+
   const settingsSections = useMemo(() => [
+    {
+      id: 'api',
+      title: 'API Configuration',
+      items: [
+        {
+          id: 'apiConfig',
+          label: 'Server Connection',
+          description: 'Configure API server URL and connection mode',
+          icon: Server,
+          type: 'custom' as const,
+        },
+      ],
+    },
     {
       id: 'integrations',
       title: 'Integrations',
@@ -134,7 +175,7 @@ export function SettingsDialog({
 
   const filteredSections = useMemo(() => {
     if (!searchQuery.trim()) return settingsSections
-    
+
     const query = searchQuery.toLowerCase()
     return settingsSections
       .map((section) => ({
@@ -285,11 +326,10 @@ export function SettingsDialog({
                     if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                     if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
                   }}
-                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize transition-colors ${
-                    item.value === option
-                      ? 'bg-accent text-accent-foreground'
-                      : 'bg-background text-muted-foreground hover:text-foreground'
-                  }`}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize transition-colors ${item.value === option
+                    ? 'bg-accent text-accent-foreground'
+                    : 'bg-background text-muted-foreground hover:text-foreground'
+                    }`}
                 >
                   {option}
                 </button>
@@ -317,6 +357,104 @@ export function SettingsDialog({
             />
           </div>
         )
+      case 'custom':
+        if (item.id === 'apiConfig') {
+          return (
+            <div className="rounded-lg bg-secondary/50 p-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                  <Server className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">Server Connection</p>
+                  <p className="text-xs text-muted-foreground">Configure API server URL and mode</p>
+                </div>
+                {useMock && (
+                  <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-500">
+                    Demo Mode
+                  </span>
+                )}
+              </div>
+
+              {/* Mock Mode Toggle */}
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <p className="text-sm text-foreground">Use Demo Mode</p>
+                  <p className="text-xs text-muted-foreground">Use mock data instead of real server</p>
+                </div>
+                <Switch
+                  checked={useMock}
+                  onCheckedChange={setUseMock}
+                />
+              </div>
+
+              {/* Server URL (hidden in mock mode) */}
+              {!useMock && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <Label htmlFor="api-url" className="text-xs">Server URL</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="api-url"
+                        placeholder="http://localhost:10000"
+                        value={apiUrlInput}
+                        onChange={(e) => setApiUrlInput(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSaveApiUrl}
+                        disabled={apiUrlInput === apiUrl}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Connection Test */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTestConnection}
+                      disabled={connectionStatus === 'testing'}
+                      className="flex-1"
+                    >
+                      {connectionStatus === 'testing' ? (
+                        <><RotateCcw className="h-3 w-3 mr-2 animate-spin" />Testing...</>
+                      ) : connectionStatus === 'connected' ? (
+                        <><Wifi className="h-3 w-3 mr-2 text-green-500" />Connected</>
+                      ) : connectionStatus === 'failed' ? (
+                        <><WifiOff className="h-3 w-3 mr-2 text-red-500" />Failed</>
+                      ) : (
+                        <>Test Connection</>
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        resetToDefaults()
+                        setConnectionStatus('idle')
+                      }}
+                    >
+                      Reset
+                    </Button>
+                  </div>
+
+                  {connectionStatus === 'failed' && (
+                    <p className="text-xs text-amber-500">
+                      Tip: Enable Demo Mode above to use the app without a server.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        }
+        return null
       default:
         return null
     }

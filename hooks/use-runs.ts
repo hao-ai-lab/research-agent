@@ -10,14 +10,14 @@ import {
     unarchiveRun,
     type Run,
     type CreateRunRequest
-} from '@/lib/api'
+} from '@/lib/api-client'
 import type { ExperimentRun } from '@/lib/types'
 
 // Convert API Run to ExperimentRun for UI compatibility
 function apiRunToExperimentRun(run: Run): ExperimentRun {
     // Map API status to UI status
     const statusMap: Record<Run['status'], ExperimentRun['status']> = {
-        'ready': 'queued',  // Map ready to queued for now (UI doesn't have ready)
+        'ready': 'ready',
         'queued': 'queued',
         'launching': 'running',
         'running': 'running',
@@ -31,7 +31,7 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         name: run.name,
         command: run.command,
         status: statusMap[run.status],
-        progress: run.status === 'running' ? 50 : run.status === 'finished' ? 100 : 0,
+        progress: run.progress ?? (run.status === 'running' ? 50 : run.status === 'finished' ? 100 : 0),
         startTime: new Date(run.created_at * 1000),
         endTime: run.ended_at ? new Date(run.ended_at * 1000) : undefined,
         isArchived: run.is_archived,
@@ -39,6 +39,10 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         tags: [],
         notes: '',
         color: '#4ade80',
+        // Pass through metrics/charts from API (mock or real)
+        lossHistory: run.lossHistory,
+        metrics: run.metrics,
+        config: run.config as ExperimentRun['config'],
         // Include API-specific fields for terminal panel
         tmux_window: run.tmux_window,
         tmux_pane: run.tmux_pane,
@@ -139,17 +143,13 @@ export function useRuns(): UseRunsResult {
     // Archive a run
     const archiveExistingRun = useCallback(async (runId: string): Promise<void> => {
         await archiveRun(runId)
-        setRuns(prev => prev.map(r =>
-            r.id === runId ? { ...r, isArchived: true } : r
-        ))
-    }, [])
+        await fetchRuns()
+    }, [fetchRuns])
 
     // Unarchive a run
     const unarchiveExistingRun = useCallback(async (runId: string): Promise<void> => {
         await unarchiveRun(runId)
-        setRuns(prev => prev.map(r =>
-            r.id === runId ? { ...r, isArchived: false } : r
-        ))
+        await fetchRuns()
     }, [])
 
     // Update a run locally (for UI changes like favorites, notes, etc.)

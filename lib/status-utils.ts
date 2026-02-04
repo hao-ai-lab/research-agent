@@ -2,6 +2,8 @@ import type { RunStatus } from './types'
 
 export function getStatusText(status: RunStatus): string {
   switch (status) {
+    case 'ready':
+      return 'Ready'
     case 'running':
       return 'Running'
     case 'completed':
@@ -19,6 +21,8 @@ export function getStatusText(status: RunStatus): string {
 
 export function getStatusBadgeClass(status: RunStatus): string {
   switch (status) {
+    case 'ready':
+      return 'border-amber-500/50 bg-amber-500/10 text-amber-400'
     case 'running':
       return 'border-blue-500/50 bg-blue-500/10 text-blue-400'
     case 'failed':
@@ -36,6 +40,8 @@ export function getStatusBadgeClass(status: RunStatus): string {
 
 export function getStatusDotColor(status: RunStatus): string {
   switch (status) {
+    case 'ready':
+      return 'bg-amber-400'
     case 'running':
       return 'bg-blue-400'
     case 'failed':

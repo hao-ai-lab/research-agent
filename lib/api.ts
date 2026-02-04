@@ -1,7 +1,9 @@
 'use client'
 
-// API Configuration
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10000'
+import { getApiUrl } from './api-config'
+
+// Get API URL dynamically at runtime (supports localStorage override)
+const API_URL = () => getApiUrl()
 
 // Types
 export interface ChatSession {
@@ -41,7 +43,7 @@ export interface StreamEvent {
  * List all chat sessions
  */
 export async function listSessions(): Promise<ChatSession[]> {
-    const response = await fetch(`${API_URL}/sessions`)
+    const response = await fetch(`${API_URL()}/sessions`)
     if (!response.ok) {
         throw new Error(`Failed to list sessions: ${response.statusText}`)
     }
@@ -52,7 +54,7 @@ export async function listSessions(): Promise<ChatSession[]> {
  * Create a new chat session
  */
 export async function createSession(title?: string): Promise<ChatSession> {
-    const response = await fetch(`${API_URL}/sessions`, {
+    const response = await fetch(`${API_URL()}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(title ? { title } : {}),
@@ -67,7 +69,7 @@ export async function createSession(title?: string): Promise<ChatSession> {
  * Get a session with all messages
  */
 export async function getSession(sessionId: string): Promise<SessionWithMessages> {
-    const response = await fetch(`${API_URL}/sessions/${sessionId}`)
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}`)
     if (!response.ok) {
         throw new Error(`Failed to get session: ${response.statusText}`)
     }
@@ -78,7 +80,7 @@ export async function getSession(sessionId: string): Promise<SessionWithMessages
  * Delete a chat session
  */
 export async function deleteSession(sessionId: string): Promise<void> {
-    const response = await fetch(`${API_URL}/sessions/${sessionId}`, {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}`, {
         method: 'DELETE',
     })
     if (!response.ok) {
@@ -95,7 +97,7 @@ export async function* streamChat(
     message: string,
     wildMode: boolean = false
 ): AsyncGenerator<StreamEvent, void, unknown> {
-    const response = await fetch(`${API_URL}/chat`, {
+    const response = await fetch(`${API_URL()}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -159,7 +161,7 @@ export async function* streamChat(
  */
 export async function checkApiHealth(): Promise<boolean> {
     try {
-        const response = await fetch(`${API_URL}/`, {
+        const response = await fetch(`${API_URL()}/`, {
             method: 'GET',
             signal: AbortSignal.timeout(3000)
         })
@@ -196,6 +198,11 @@ export interface Run {
     wandb_dir?: string | null
     sweep_id?: string | null
     sweep_params?: Record<string, unknown> | null
+    // Optional fields for metrics/charts (from mock or W&B)
+    progress?: number
+    config?: Record<string, unknown>
+    metrics?: { loss: number; accuracy: number; epoch: number }
+    lossHistory?: { step: number; trainLoss: number; valLoss?: number }[]
 }
 
 export interface CreateRunRequest {
@@ -228,7 +235,7 @@ export interface Artifact {
  * List all runs
  */
 export async function listRuns(includeArchived: boolean = false): Promise<Run[]> {
-    const response = await fetch(`${API_URL}/runs?archived=${includeArchived}`)
+    const response = await fetch(`${API_URL()}/runs?archived=${includeArchived}`)
     if (!response.ok) {
         throw new Error(`Failed to list runs: ${response.statusText}`)
     }
@@ -239,7 +246,7 @@ export async function listRuns(includeArchived: boolean = false): Promise<Run[]>
  * Create a new run (in queued state)
  */
 export async function createRun(request: CreateRunRequest): Promise<Run> {
-    const response = await fetch(`${API_URL}/runs`, {
+    const response = await fetch(`${API_URL()}/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
@@ -254,7 +261,7 @@ export async function createRun(request: CreateRunRequest): Promise<Run> {
  * Get a single run by ID
  */
 export async function getRun(runId: string): Promise<Run> {
-    const response = await fetch(`${API_URL}/runs/${runId}`)
+    const response = await fetch(`${API_URL()}/runs/${runId}`)
     if (!response.ok) {
         throw new Error(`Failed to get run: ${response.statusText}`)
     }
@@ -265,7 +272,7 @@ export async function getRun(runId: string): Promise<Run> {
  * Start a queued run
  */
 export async function startRun(runId: string): Promise<{ message: string; tmux_window: string }> {
-    const response = await fetch(`${API_URL}/runs/${runId}/start`, {
+    const response = await fetch(`${API_URL()}/runs/${runId}/start`, {
         method: 'POST',
     })
     if (!response.ok) {
@@ -279,7 +286,7 @@ export async function startRun(runId: string): Promise<{ message: string; tmux_w
  * Stop a running job
  */
 export async function stopRun(runId: string): Promise<void> {
-    const response = await fetch(`${API_URL}/runs/${runId}/stop`, {
+    const response = await fetch(`${API_URL()}/runs/${runId}/stop`, {
         method: 'POST',
     })
     if (!response.ok) {
@@ -291,7 +298,7 @@ export async function stopRun(runId: string): Promise<void> {
  * Archive a run
  */
 export async function archiveRun(runId: string): Promise<void> {
-    const response = await fetch(`${API_URL}/runs/${runId}/archive`, {
+    const response = await fetch(`${API_URL()}/runs/${runId}/archive`, {
         method: 'POST',
     })
     if (!response.ok) {
@@ -303,7 +310,7 @@ export async function archiveRun(runId: string): Promise<void> {
  * Unarchive a run
  */
 export async function unarchiveRun(runId: string): Promise<void> {
-    const response = await fetch(`${API_URL}/runs/${runId}/unarchive`, {
+    const response = await fetch(`${API_URL()}/runs/${runId}/unarchive`, {
         method: 'POST',
     })
     if (!response.ok) {
@@ -323,7 +330,7 @@ export async function getRunLogs(
     limit: number = 10000
 ): Promise<LogResponse> {
     const response = await fetch(
-        `${API_URL}/runs/${runId}/logs?offset=${offset}&limit=${limit}`
+        `${API_URL()}/runs/${runId}/logs?offset=${offset}&limit=${limit}`
     )
     if (!response.ok) {
         throw new Error(`Failed to get run logs: ${response.statusText}`)
@@ -341,7 +348,7 @@ export async function* streamRunLogs(runId: string): AsyncGenerator<{
     status?: string
     error?: string
 }> {
-    const response = await fetch(`${API_URL}/runs/${runId}/logs/stream`)
+    const response = await fetch(`${API_URL()}/runs/${runId}/logs/stream`)
 
     if (!response.ok) {
         throw new Error(`Failed to stream logs: ${response.statusText}`)
@@ -386,7 +393,7 @@ export async function* streamRunLogs(runId: string): AsyncGenerator<{
  * Get run artifacts
  */
 export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
-    const response = await fetch(`${API_URL}/runs/${runId}/artifacts`)
+    const response = await fetch(`${API_URL()}/runs/${runId}/artifacts`)
     if (!response.ok) {
         throw new Error(`Failed to get artifacts: ${response.statusText}`)
     }
@@ -397,7 +404,7 @@ export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
  * Queue a ready run
  */
 export async function queueRun(runId: string): Promise<Run> {
-    const response = await fetch(`${API_URL}/runs/${runId}/queue`, {
+    const response = await fetch(`${API_URL()}/runs/${runId}/queue`, {
         method: 'POST',
     })
     if (!response.ok) {
@@ -446,7 +453,7 @@ export interface CreateSweepRequest {
  * List all sweeps
  */
 export async function listSweeps(): Promise<Sweep[]> {
-    const response = await fetch(`${API_URL}/sweeps`)
+    const response = await fetch(`${API_URL()}/sweeps`)
     if (!response.ok) {
         throw new Error(`Failed to list sweeps: ${response.statusText}`)
     }
@@ -457,7 +464,7 @@ export async function listSweeps(): Promise<Sweep[]> {
  * Create a new sweep with child runs
  */
 export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
-    const response = await fetch(`${API_URL}/sweeps`, {
+    const response = await fetch(`${API_URL()}/sweeps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
@@ -472,7 +479,7 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
  * Get sweep details
  */
 export async function getSweep(sweepId: string): Promise<Sweep> {
-    const response = await fetch(`${API_URL}/sweeps/${sweepId}`)
+    const response = await fetch(`${API_URL()}/sweeps/${sweepId}`)
     if (!response.ok) {
         throw new Error(`Failed to get sweep: ${response.statusText}`)
     }
@@ -483,7 +490,7 @@ export async function getSweep(sweepId: string): Promise<Sweep> {
  * Start all ready/queued runs in a sweep
  */
 export async function startSweep(sweepId: string, parallel: number = 1): Promise<{ message: string }> {
-    const response = await fetch(`${API_URL}/sweeps/${sweepId}/start?parallel=${parallel}`, {
+    const response = await fetch(`${API_URL()}/sweeps/${sweepId}/start?parallel=${parallel}`, {
         method: 'POST',
     })
     if (!response.ok) {

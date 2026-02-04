@@ -20,6 +20,10 @@ import {
   MoreHorizontal,
   Pencil,
   X,
+  RefreshCw,
+  Play,
+  Square,
+  BarChart3,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -64,6 +68,9 @@ interface RunDetailViewProps {
   onUpdateRun?: (run: ExperimentRun) => void
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
+  onRefresh?: () => void
+  onStartRun?: (runId: string) => Promise<void>
+  onStopRun?: (runId: string) => Promise<void>
 }
 
 // Generate mock metric data based on run's loss history
@@ -186,7 +193,7 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag }: RunDetailViewProps) {
+export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
@@ -196,6 +203,9 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
   const [notesOpen, setNotesOpen] = useState(false)
   const [editedNotes, setEditedNotes] = useState(run.notes || '')
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isStarting, setIsStarting] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
 
   // Charts state
   const [primaryChartsOpen, setPrimaryChartsOpen] = useState(false)
@@ -249,6 +259,36 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
 
   const handleArchive = () => {
     onUpdateRun?.({ ...run, isArchived: !run.isArchived })
+  }
+
+  const handleRefresh = async () => {
+    if (!onRefresh) return
+    setIsRefreshing(true)
+    try {
+      await onRefresh()
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const handleStartRun = async () => {
+    if (!onStartRun) return
+    setIsStarting(true)
+    try {
+      await onStartRun(run.id)
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
+  const handleStopRun = async () => {
+    if (!onStopRun) return
+    setIsStopping(true)
+    try {
+      await onStopRun(run.id)
+    } finally {
+      setIsStopping(false)
+    }
   }
 
   const handleSaveNotes = () => {
@@ -375,6 +415,46 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
+                {/* Job Control Buttons */}
+                {(run.status === 'ready' || run.status === 'queued') && onStartRun && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleStartRun}
+                    disabled={isStarting}
+                    className="h-7 w-7 text-green-500 hover:text-green-400"
+                    title="Start Run"
+                  >
+                    <Play className={`h-4 w-4 ${isStarting ? 'animate-pulse' : ''}`} />
+                  </Button>
+                )}
+                {run.status === 'running' && onStopRun && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleStopRun}
+                    disabled={isStopping}
+                    className="h-7 w-7 text-destructive hover:text-destructive/80"
+                    title="Stop Run"
+                  >
+                    <Square className={`h-4 w-4 ${isStopping ? 'animate-pulse' : ''}`} />
+                  </Button>
+                )}
+
+                {/* Refresh Button */}
+                {onRefresh && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    className="h-7 w-7 text-muted-foreground"
+                    title="Refresh"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  </Button>
+                )}
+
                 <Button
                   variant="ghost"
                   size="icon"
@@ -470,24 +550,32 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
             )}
 
             {/* Metrics */}
-            {run.metrics && (
+            <Collapsible open={run.metrics !== undefined} disabled={!run.metrics}>
               <div className="grid grid-cols-3 gap-2">
-                <div className="text-center p-2 rounded-lg bg-card border border-border">
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Loss</p>
-                  <p className="text-sm font-semibold text-foreground">{run.metrics.loss.toFixed(3)}</p>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-card border border-border">
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Accuracy</p>
-                  <p className="text-sm font-semibold text-foreground">{run.metrics.accuracy.toFixed(1)}%</p>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-card border border-border">
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Epoch</p>
-                  <p className="text-sm font-semibold text-foreground">
-                    {run.metrics.epoch}{run.config?.maxEpochs && `/${run.config.maxEpochs}`}
-                  </p>
-                </div>
+                {run.metrics ? (
+                  <>
+                    <div className="text-center p-2 rounded-lg bg-card border border-border">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">Loss</p>
+                      <p className="text-sm font-semibold text-foreground">{run.metrics.loss.toFixed(3)}</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-card border border-border">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">Accuracy</p>
+                      <p className="text-sm font-semibold text-foreground">{run.metrics.accuracy.toFixed(1)}%</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-card border border-border">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">Epoch</p>
+                      <p className="text-sm font-semibold text-foreground">
+                        {run.metrics.epoch}{run.config?.maxEpochs && `/${run.config.maxEpochs}`}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="col-span-3 text-center p-3 rounded-lg bg-card border border-border border-dashed">
+                    <p className="text-[10px] text-muted-foreground">No metrics collected yet</p>
+                  </div>
+                )}
               </div>
-            )}
+            </Collapsible>
 
             {/* Charts Section - Primary */}
             {run.lossHistory && run.lossHistory.length > 0 && (
@@ -597,6 +685,28 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
               </Collapsible>
             )}
 
+            {/* Charts Section - Empty State */}
+            {(!run.lossHistory || run.lossHistory.length === 0) && (
+              <Collapsible>
+                <div className="rounded-lg border border-border border-dashed bg-card overflow-hidden">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <div className="flex items-center gap-2">
+                        <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium text-muted-foreground">Charts</span>
+                      </div>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border px-3 py-6 text-center">
+                      <p className="text-xs text-muted-foreground">No chart data available</p>
+                    </div>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            )}
+
             {/* Logs Section */}
             <Collapsible open={logsOpen} onOpenChange={setLogsOpen}>
               <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -698,24 +808,24 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
             </Collapsible>
 
             {/* Hyperparameters */}
-            {run.config && (
-              <Collapsible open={configOpen} onOpenChange={setConfigOpen}>
-                <div className="rounded-lg border border-border bg-card overflow-hidden">
-                  <CollapsibleTrigger asChild>
-                    <button type="button" className="flex w-full items-center justify-between p-3">
-                      <div className="flex items-center gap-2">
-                        <Settings className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-xs font-medium text-foreground">Hyperparameters</span>
-                      </div>
-                      {configOpen ? (
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                      )}
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border px-3 pb-3">
+            <Collapsible open={configOpen} onOpenChange={setConfigOpen}>
+              <div className={`rounded-lg border bg-card overflow-hidden ${run.config ? 'border-border' : 'border-border border-dashed'}`}>
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <Settings className="h-4 w-4 text-muted-foreground" />
+                      <span className={`text-xs font-medium ${run.config ? 'text-foreground' : 'text-muted-foreground'}`}>Hyperparameters</span>
+                    </div>
+                    {configOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border px-3 pb-3">
+                    {run.config ? (
                       <div className="mt-2 space-y-1">
                         {Object.entries(run.config).map(([key, value]) => (
                           <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
@@ -728,31 +838,37 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
                           </div>
                         ))}
                       </div>
-                    </div>
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
-            )}
+                    ) : (
+                      <div className="mt-2 py-4 text-center">
+                        <p className="text-xs text-muted-foreground">No hyperparameters configured</p>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
 
             {/* Artifacts */}
-            {run.artifacts && run.artifacts.length > 0 && (
-              <Collapsible open={artifactsOpen} onOpenChange={setArtifactsOpen}>
-                <div className="rounded-lg border border-border bg-card overflow-hidden">
-                  <CollapsibleTrigger asChild>
-                    <button type="button" className="flex w-full items-center justify-between p-3">
-                      <div className="flex items-center gap-2">
-                        <Package className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-xs font-medium text-foreground">Artifacts ({run.artifacts.length})</span>
-                      </div>
-                      {artifactsOpen ? (
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                      )}
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border px-3 pb-3">
+            <Collapsible open={artifactsOpen} onOpenChange={setArtifactsOpen}>
+              <div className={`rounded-lg border bg-card overflow-hidden ${run.artifacts && run.artifacts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                      <span className={`text-xs font-medium ${run.artifacts && run.artifacts.length > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        Artifacts {run.artifacts && run.artifacts.length > 0 && `(${run.artifacts.length})`}
+                      </span>
+                    </div>
+                    {artifactsOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border px-3 pb-3">
+                    {run.artifacts && run.artifacts.length > 0 ? (
                       <div className="mt-2 space-y-2">
                         {run.artifacts.map((artifact) => (
                           <div key={artifact.id} className="rounded border border-border bg-secondary/50 p-2">
@@ -774,11 +890,15 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
                           </div>
                         ))}
                       </div>
-                    </div>
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
-            )}
+                    ) : (
+                      <div className="mt-2 py-4 text-center">
+                        <p className="text-xs text-muted-foreground">No artifacts saved</p>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
           </div>
         </ScrollArea>
       </div>

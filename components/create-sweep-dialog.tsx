@@ -21,7 +21,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { createSweep, type CreateSweepRequest } from '@/lib/api'
+import { createSweep, type CreateSweepRequest } from '@/lib/api-client'
 
 interface CreateSweepDialogProps {
     open: boolean

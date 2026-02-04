@@ -21,7 +21,7 @@ interface BreadcrumbItem {
 }
 
 interface FloatingNavProps {
-  activeTab: 'chat' | 'runs' | 'charts' | 'insights'
+  activeTab: 'chat' | 'runs' | 'charts' | 'memory'
   runsSubTab: RunsSubTab
   onMenuClick: () => void
   breadcrumbs?: BreadcrumbItem[]
@@ -40,7 +40,7 @@ const tabLabels: Record<string, string> = {
   chat: 'Chat',
   runs: 'Runs',
   charts: 'Charts',
-  insights: 'Insights',
+  memory: 'Memory',
 }
 
 const runsSubTabLabels: Record<RunsSubTab, string> = {
@@ -49,10 +49,10 @@ const runsSubTabLabels: Record<RunsSubTab, string> = {
   manage: 'Manage',
 }
 
-export function FloatingNav({ 
-  activeTab, 
-  runsSubTab, 
-  onMenuClick, 
+export function FloatingNav({
+  activeTab,
+  runsSubTab,
+  onMenuClick,
   breadcrumbs,
   eventCount = 0,
   onAlertClick,
@@ -67,7 +67,7 @@ export function FloatingNav({
   const defaultBreadcrumbs: BreadcrumbItem[] = [
     { label: tabLabels[activeTab] }
   ]
-  
+
   if (activeTab === 'runs') {
     defaultBreadcrumbs.push({ label: runsSubTabLabels[runsSubTab] })
   }
@@ -91,7 +91,7 @@ export function FloatingNav({
         {items.map((item, index) => {
           const isLast = index === items.length - 1
           const isClickable = !!item.onClick
-          
+
           return (
             <div key={index} className="flex items-center gap-1.5 min-w-0">
               {index > 0 && (
@@ -127,8 +127,8 @@ export function FloatingNav({
           >
             <Bell className="h-4 w-4" />
             {eventCount > 0 && (
-              <Badge 
-                variant="destructive" 
+              <Badge
+                variant="destructive"
                 className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] flex items-center justify-center"
               >
                 {eventCount > 99 ? '99+' : eventCount}
@@ -152,7 +152,7 @@ export function FloatingNav({
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Chat Settings</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem 
+              <DropdownMenuItem
                 className="flex items-center justify-between cursor-pointer"
                 onSelect={(e) => {
                   e.preventDefault()
@@ -167,7 +167,7 @@ export function FloatingNav({
                   onClick={(e) => e.stopPropagation()}
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem 
+              <DropdownMenuItem
                 className="flex items-center justify-between cursor-pointer"
                 onSelect={(e) => {
                   e.preventDefault()
@@ -182,7 +182,7 @@ export function FloatingNav({
                   onClick={(e) => e.stopPropagation()}
                 />
               </DropdownMenuItem>
-              <DropdownMenuItem 
+              <DropdownMenuItem
                 className="flex items-center justify-between cursor-pointer"
                 onSelect={(e) => {
                   e.preventDefault()
