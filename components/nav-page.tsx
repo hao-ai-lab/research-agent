@@ -25,17 +25,17 @@ import {
 } from '@/components/ui/collapsible'
 import { useState, useEffect } from 'react'
 
-export type RunsSubTab = 'overview' | 'details' | 'manage' | 'events'
+export type RunsSubTab = 'overview' | 'details' | 'manage'
 export type JourneySubTab = 'story' | 'devnotes'
 
 interface NavPageProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
-  activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey'
+  activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey'
   runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
-  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => void
+  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey') => void
   onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
 }
@@ -86,7 +86,7 @@ export function NavPage({
   }
 
   const handleNavClick = (
-    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey',
+    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey',
     subTab?: RunsSubTab | JourneySubTab
   ) => {
     onTabChange(tab)
@@ -209,20 +209,22 @@ export function NavPage({
                       <Wrench className="h-3.5 w-3.5" />
                       Manage
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'events')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'events'
-                        ? 'bg-secondary/70 text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                        }`}
-                    >
-                      <Bell className="h-3.5 w-3.5" />
-                      Events
-                    </button>
                   </div>
                 </CollapsibleContent>
               </Collapsible>
+
+              {/* Events - Top level */}
+              <button
+                type="button"
+                onClick={() => handleNavClick('events')}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'events'
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                  }`}
+              >
+                <Bell className="h-4 w-4" />
+                Events
+              </button>
 
               {/* Charts */}
               <button

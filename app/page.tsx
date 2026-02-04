@@ -27,13 +27,14 @@ const defaultSettings: AppSettings = {
   },
 }
 
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'insights' | 'journey'
+type ActiveTab = 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey'
 
 const tabLabels: Record<ActiveTab, string> = {
   chat: 'Chat',
   runs: 'Runs',
   charts: 'Charts',
   insights: 'Insights',
+  events: 'Events',
   journey: 'Journey',
 }
 
@@ -41,7 +42,6 @@ const runsSubTabLabels: Record<RunsSubTab, string> = {
   overview: 'Overview',
   details: 'Details',
   manage: 'Manage',
-  events: 'Events',
 }
 
 export default function ResearchChat() {
@@ -117,6 +117,8 @@ export default function ResearchChat() {
       } else {
         items.push({ label: 'Charts' })
       }
+    } else if (activeTab === 'events') {
+      items.push({ label: 'Events' })
     } else if (activeTab === 'insights') {
       items.push({ label: 'Insights' })
     } else if (activeTab === 'journey') {
@@ -306,7 +308,7 @@ export default function ResearchChat() {
             onShowVisibilityManageChange={setShowVisibilityManage}
           />
         )}
-        {activeTab === 'runs' && runsSubTab === 'events' && (
+        {activeTab === 'events' && (
           <EventsView
             events={events}
             onNavigateToRun={handleNavigateToRun}
