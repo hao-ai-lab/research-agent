@@ -245,6 +245,8 @@ async def chat_endpoint(req: ChatRequest):
                             
                             part = props.get("part", {})
                             event_sid = props.get("sessionID") or part.get("sessionID")
+
+                            logger.info(f"received: {event_data}")
                             
                             if event_sid != opencode_session_id:
                                 continue

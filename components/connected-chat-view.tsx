@@ -83,11 +83,15 @@ export function ConnectedChatView({
 
     // Handle send - create session if needed
     const handleSend = async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
-        if (!currentSessionId) {
+        let sessionId = currentSessionId
+        if (!sessionId) {
             // Auto-create a session on first message
-            await createNewSession()
+            sessionId = await createNewSession()
+            if (!sessionId) {
+                return // Session creation failed
+            }
         }
-        await sendMessage(message, msgMode || mode)
+        await sendMessage(message, msgMode || mode, sessionId)
     }
 
     // Connection error state

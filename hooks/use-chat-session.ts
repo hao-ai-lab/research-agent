@@ -37,7 +37,7 @@ export interface UseChatSessionResult {
     sessions: ChatSession[]
     currentSessionId: string | null
     currentSession: ChatSession | null
-    createNewSession: () => Promise<void>
+    createNewSession: () => Promise<string | null>
     selectSession: (sessionId: string) => Promise<void>
     removeSession: (sessionId: string) => Promise<void>
     refreshSessions: () => Promise<void>
@@ -48,8 +48,8 @@ export interface UseChatSessionResult {
     // Streaming state for current response
     streamingState: StreamingState
 
-    // Send message
-    sendMessage: (content: string, mode: ChatMode) => Promise<void>
+    // Send message - optional sessionId override for newly created sessions
+    sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string) => Promise<void>
 }
 
 const initialStreamingState: StreamingState = {
@@ -110,8 +110,8 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [isConnected, refreshSessions])
 
-    // Create new session
-    const createNewSession = useCallback(async () => {
+    // Create new session - returns the new session ID
+    const createNewSession = useCallback(async (): Promise<string | null> => {
         try {
             setError(null)
             const newSession = await createSession()
@@ -119,9 +119,11 @@ export function useChatSession(): UseChatSessionResult {
             setCurrentSessionId(newSession.id)
             setMessages([])
             setStreamingState(initialStreamingState)
+            return newSession.id
         } catch (err) {
             console.error('Failed to create session:', err)
             setError(err instanceof Error ? err.message : 'Failed to create session')
+            return null
         }
     }, [])
 
@@ -167,9 +169,10 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [currentSessionId])
 
-    // Send a message
-    const sendMessage = useCallback(async (content: string, mode: ChatMode) => {
-        if (!currentSessionId) {
+    // Send a message - accepts optional sessionIdOverride for newly created sessions
+    const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string) => {
+        const targetSessionId = sessionIdOverride || currentSessionId
+        if (!targetSessionId) {
             setError('No active session. Please create or select a chat.')
             return
         }
@@ -205,7 +208,7 @@ export function useChatSession(): UseChatSessionResult {
             let finalText = ''
             let finalThinking = ''
 
-            for await (const event of streamChat(currentSessionId, content, wildMode)) {
+            for await (const event of streamChat(targetSessionId, content, wildMode)) {
                 if (event.type === 'part_delta') {
                     if (event.ptype === 'text') {
                         finalText += event.delta || ''

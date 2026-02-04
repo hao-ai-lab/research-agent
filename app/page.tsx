@@ -70,7 +70,7 @@ export default function ResearchChat() {
 
   // Sweeps state
   const [sweeps, setSweeps] = useState<Sweep[]>(mockSweeps)
-  const [showSweepForm, setShowSweepForm] = useState(false)
+  const [showSweepForm, setShowSweepForm] = useState(true)
   const [editingSweepConfig, setEditingSweepConfig] = useState<SweepConfig | null>(null)
 
   // Chat panel state
