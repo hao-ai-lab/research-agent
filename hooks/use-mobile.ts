@@ -1,7 +1,7 @@
 import * as React from 'react'
 
 const MOBILE_BREAKPOINT = 768
-export const MOBILE_WIDTH = 300
+export const MOBILE_WIDTH = 288
 export const MOBILE_HEIGHT = 644
 
 export function useIsMobile() {
