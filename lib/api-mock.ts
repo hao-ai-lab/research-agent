@@ -66,7 +66,7 @@ const mockRuns: Map<string, Run> = new Map([
         sweep_params: { lr: '1e-5', batch_size: 8 },
         config: { learningRate: 0.00001, batchSize: 8, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.234, accuracy: 92.1, epoch: 3 },
-        lossHistory: [2.4, 1.8, 1.2, 0.85, 0.52, 0.34, 0.28, 0.24, 0.234],
+        lossHistory: [{ step: 1, trainLoss: 2.4 }, { step: 2, trainLoss: 1.8 }, { step: 3, trainLoss: 1.2 }, { step: 4, trainLoss: 0.85 }, { step: 5, trainLoss: 0.52 }, { step: 6, trainLoss: 0.34 }, { step: 7, trainLoss: 0.28 }, { step: 8, trainLoss: 0.24 }, { step: 9, trainLoss: 0.234 }],
     }],
     ['run-qwen-002', {
         id: 'run-qwen-002',
@@ -84,7 +84,7 @@ const mockRuns: Map<string, Run> = new Map([
         sweep_params: { lr: '1e-5', batch_size: 16 },
         config: { learningRate: 0.00001, batchSize: 16, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.312, accuracy: 89.3, epoch: 3 },
-        lossHistory: [2.5, 1.9, 1.4, 0.95, 0.62, 0.45, 0.38, 0.33, 0.312],
+        lossHistory: [{ step: 1, trainLoss: 2.5 }, { step: 2, trainLoss: 1.9 }, { step: 3, trainLoss: 1.4 }, { step: 4, trainLoss: 0.95 }, { step: 5, trainLoss: 0.62 }, { step: 6, trainLoss: 0.45 }, { step: 7, trainLoss: 0.38 }, { step: 8, trainLoss: 0.33 }, { step: 9, trainLoss: 0.312 }],
     }],
     ['run-qwen-003', {
         id: 'run-qwen-003',
@@ -102,7 +102,7 @@ const mockRuns: Map<string, Run> = new Map([
         sweep_params: { lr: '1e-5', batch_size: 32 },
         config: { learningRate: 0.00001, batchSize: 32, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.421, accuracy: 86.8, epoch: 3 },
-        lossHistory: [2.6, 2.1, 1.6, 1.2, 0.82, 0.58, 0.48, 0.44, 0.421],
+        lossHistory: [{ step: 1, trainLoss: 2.6 }, { step: 2, trainLoss: 2.1 }, { step: 3, trainLoss: 1.6 }, { step: 4, trainLoss: 1.2 }, { step: 5, trainLoss: 0.82 }, { step: 6, trainLoss: 0.58 }, { step: 7, trainLoss: 0.48 }, { step: 8, trainLoss: 0.44 }, { step: 9, trainLoss: 0.421 }],
     }],
     ['run-qwen-004', {
         id: 'run-qwen-004',
@@ -120,7 +120,7 @@ const mockRuns: Map<string, Run> = new Map([
         sweep_params: { lr: '5e-5', batch_size: 8 },
         config: { learningRate: 0.00005, batchSize: 8, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.189, accuracy: 94.2, epoch: 3 },
-        lossHistory: [2.3, 1.5, 0.9, 0.55, 0.35, 0.26, 0.21, 0.19, 0.189],
+        lossHistory: [{ step: 1, trainLoss: 2.3 }, { step: 2, trainLoss: 1.5 }, { step: 3, trainLoss: 0.9 }, { step: 4, trainLoss: 0.55 }, { step: 5, trainLoss: 0.35 }, { step: 6, trainLoss: 0.26 }, { step: 7, trainLoss: 0.21 }, { step: 8, trainLoss: 0.19 }, { step: 9, trainLoss: 0.189 }],
     }],
     ['run-qwen-005', {
         id: 'run-qwen-005',
@@ -137,6 +137,8 @@ const mockRuns: Map<string, Run> = new Map([
         config: { learningRate: 0.00005, batchSize: 16, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         progress: 65,
         tmux_window: 'ra-qwen005',
+        metrics: { loss: 0.42, accuracy: 85.3, epoch: 2 },
+        lossHistory: [{ step: 1, trainLoss: 2.4 }, { step: 2, trainLoss: 1.7 }, { step: 3, trainLoss: 1.1 }, { step: 4, trainLoss: 0.72 }, { step: 5, trainLoss: 0.52 }, { step: 6, trainLoss: 0.42 }],
     }],
     ['run-qwen-006', {
         id: 'run-qwen-006',
@@ -153,6 +155,8 @@ const mockRuns: Map<string, Run> = new Map([
         config: { learningRate: 0.00005, batchSize: 32, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         progress: 32,
         tmux_window: 'ra-qwen006',
+        metrics: { loss: 0.85, accuracy: 78.1, epoch: 1 },
+        lossHistory: [{ step: 1, trainLoss: 2.5 }, { step: 2, trainLoss: 1.8 }, { step: 3, trainLoss: 0.85 }],
     }],
     ['run-qwen-007', {
         id: 'run-qwen-007',

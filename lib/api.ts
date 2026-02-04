@@ -198,6 +198,11 @@ export interface Run {
     wandb_dir?: string | null
     sweep_id?: string | null
     sweep_params?: Record<string, unknown> | null
+    // Optional fields for metrics/charts (from mock or W&B)
+    progress?: number
+    config?: Record<string, unknown>
+    metrics?: { loss: number; accuracy: number; epoch: number }
+    lossHistory?: { step: number; trainLoss: number; valLoss?: number }[]
 }
 
 export interface CreateRunRequest {

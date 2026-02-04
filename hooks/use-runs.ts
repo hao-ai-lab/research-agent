@@ -31,7 +31,7 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         name: run.name,
         command: run.command,
         status: statusMap[run.status],
-        progress: run.status === 'running' ? 50 : run.status === 'finished' ? 100 : 0,
+        progress: run.progress ?? (run.status === 'running' ? 50 : run.status === 'finished' ? 100 : 0),
         startTime: new Date(run.created_at * 1000),
         endTime: run.ended_at ? new Date(run.ended_at * 1000) : undefined,
         isArchived: run.is_archived,
@@ -39,6 +39,10 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         tags: [],
         notes: '',
         color: '#4ade80',
+        // Pass through metrics/charts from API (mock or real)
+        lossHistory: run.lossHistory,
+        metrics: run.metrics,
+        config: run.config as ExperimentRun['config'],
         // Include API-specific fields for terminal panel
         tmux_window: run.tmux_window,
         tmux_pane: run.tmux_pane,
