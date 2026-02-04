@@ -129,3 +129,25 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Mobile viewport scaling - ensures app doesn't crop on very small screens */
+@media (max-width: 389px) {
+  .mobile-viewport-wrapper {
+    transform-origin: top left;
+    transform: scale(calc(100vw / 390));
+  }
+}
+
+@media (max-height: 643px) and (max-width: 767px) {
+  .mobile-viewport-wrapper {
+    transform-origin: top left;
+    transform: scale(calc(100dvh / 644));
+  }
+}
+
+@media (max-width: 389px) and (max-height: 643px) {
+  .mobile-viewport-wrapper {
+    transform-origin: top left;
+    transform: scale(min(calc(100vw / 390), calc(100dvh / 644)));
+  }
+}

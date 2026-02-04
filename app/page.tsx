@@ -269,8 +269,19 @@ export default function ResearchChat() {
     setShowVisibilityManage(false)
   }, [])
 
+  // Calculate scale for very small screens
+  const MOBILE_WIDTH = 390
+  const MOBILE_HEIGHT = 844
+
   return (
-    <main className="flex h-dvh flex-col bg-background overflow-hidden">
+    <div className="w-screen h-dvh overflow-hidden bg-background">
+      <main 
+        className="mobile-viewport-wrapper flex flex-col bg-background overflow-hidden w-full h-full md:w-full md:h-full"
+        style={{
+          minWidth: `${MOBILE_WIDTH}px`,
+          minHeight: `${MOBILE_HEIGHT}px`,
+        }}
+      >
       <FloatingNav
         activeTab={activeTab}
         runsSubTab={runsSubTab}
@@ -367,5 +378,6 @@ export default function ResearchChat() {
         onSettingsChange={setSettings}
       />
     </main>
+    </div>
   )
 }
