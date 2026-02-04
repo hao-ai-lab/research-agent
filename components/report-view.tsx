@@ -345,24 +345,40 @@ export function ReportView({ runs }: ReportViewProps) {
       {/* Top Toolbar */}
       <div className="shrink-0 border-b border-border px-3 py-2 flex items-center justify-between bg-background">
         <div className="flex items-center gap-2">
-          <Button
-            variant={isPreviewMode ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setIsPreviewMode(true)}
-            className="h-8 gap-1.5"
-          >
-            <Eye className="h-3.5 w-3.5" />
-            Preview
-          </Button>
-          <Button
-            variant={!isPreviewMode ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setIsPreviewMode(false)}
-            className="h-8 gap-1.5"
-          >
-            <Edit3 className="h-3.5 w-3.5" />
-            Edit
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                {isPreviewMode ? (
+                  <>
+                    <Eye className="h-3.5 w-3.5" />
+                    Preview
+                  </>
+                ) : (
+                  <>
+                    <Edit3 className="h-3.5 w-3.5" />
+                    Edit
+                  </>
+                )}
+                <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem 
+                onClick={() => setIsPreviewMode(true)}
+                className={isPreviewMode ? 'bg-secondary' : ''}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                Preview
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => setIsPreviewMode(false)}
+                className={!isPreviewMode ? 'bg-secondary' : ''}
+              >
+                <Edit3 className="h-4 w-4 mr-2" />
+                Edit
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         
         <div className="flex items-center gap-2">
