@@ -5,7 +5,6 @@ import {
   MessageSquare,
   FlaskConical,
   Settings,
-  HelpCircle,
   BarChart3,
   Lightbulb,
   Plus,
@@ -18,6 +17,7 @@ import {
   List,
   Wrench,
   Search,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -69,10 +69,10 @@ interface NavPageProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
-  activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey'
+  activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report'
   runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
-  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey') => void
+  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report') => void
   onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
 }
@@ -96,7 +96,7 @@ export function NavPage({
   )
 
   const handleNavClick = (
-    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey',
+    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report',
     subTab?: RunsSubTab | JourneySubTab
   ) => {
     onTabChange(tab)
@@ -257,6 +257,20 @@ export function NavPage({
                 >
                   <Lightbulb className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Insights</span>
+                </button>
+
+                {/* Report */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('report')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'report'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <FileText className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Report</span>
                 </button>
 
                 {/* Journey - Story */}
