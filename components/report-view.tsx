@@ -681,14 +681,14 @@ export function ReportView({ runs }: ReportViewProps) {
             )}
 
             {/* Chat Input */}
-            <div className="shrink-0 p-3 border-t border-border">
-              <div className="flex gap-2">
+            <div className="shrink-0 px-3 py-2 border-t border-border">
+              <div className="flex gap-1.5 items-end">
                 <Textarea
                   ref={chatInputRef}
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask AI to help with your report..."
-                  className="min-h-[40px] max-h-[100px] resize-none"
+                  placeholder="Ask AI about your report..."
+                  className="min-h-[36px] max-h-[80px] resize-none text-sm py-2 px-3"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
@@ -699,10 +699,10 @@ export function ReportView({ runs }: ReportViewProps) {
                 <Button
                   onClick={sendChatMessage}
                   size="icon"
-                  className="shrink-0"
+                  className="shrink-0 h-7 w-7 rounded-md"
                   disabled={!chatInput.trim() && referencedCells.length === 0}
                 >
-                  <Send className="h-4 w-4" />
+                  <Send className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
