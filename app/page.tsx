@@ -30,13 +30,13 @@ const defaultSettings: AppSettings = {
   },
 }
 
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report'
+type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
 
 const tabLabels: Record<ActiveTab, string> = {
   chat: 'Chat',
   runs: 'Runs',
   charts: 'Charts',
-  insights: 'Insights',
+  memory: 'Memory',
   events: 'Events',
   journey: 'Journey',
   report: 'Report',
@@ -133,8 +133,8 @@ export default function ResearchChat() {
       }
     } else if (activeTab === 'events') {
       items.push({ label: 'Events' })
-    } else if (activeTab === 'insights') {
-      items.push({ label: 'Insights' })
+    } else if (activeTab === 'memory') {
+      items.push({ label: 'Memory' })
     } else if (activeTab === 'report') {
       items.push({ label: 'Report' })
     } else if (activeTab === 'journey') {
@@ -380,7 +380,7 @@ export default function ResearchChat() {
               onShowVisibilityManageChange={setShowVisibilityManage}
             />
           )}
-          {activeTab === 'insights' && (
+          {activeTab === 'memory' && (
             <InsightsView
               rules={memoryRules}
               onToggleRule={handleToggleRule}
