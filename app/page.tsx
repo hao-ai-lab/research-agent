@@ -284,12 +284,8 @@ export default function ResearchChat() {
           <ChatView
             messages={messages}
             runs={runs}
-            events={events}
             onSendMessage={handleSendMessage}
             onRunClick={handleRunClick}
-            onNavigateToRun={handleNavigateToRun}
-            onNavigateToEvents={handleNavigateToEvents}
-            onDismissEvent={handleDismissEvent}
             mode={chatMode}
             onModeChange={setChatMode}
             showArtifacts={showArtifacts}

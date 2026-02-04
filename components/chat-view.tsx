@@ -2,7 +2,6 @@
 
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { AlertBar } from './alert-bar'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
 import { ArtifactsPanel } from './artifacts-panel'
@@ -10,20 +9,14 @@ import { HistoryPanel } from './history-panel'
 import type {
   ChatMessage as ChatMessageType,
   ExperimentRun,
-  RunEvent,
   Artifact,
 } from '@/lib/types'
 
 interface ChatViewProps {
   messages: ChatMessageType[]
   runs: ExperimentRun[]
-  events: RunEvent[]
   onSendMessage: (message: string, attachments?: File[], mode?: ChatMode) => void
   onRunClick: (run: ExperimentRun) => void
-  onNavigateToRun: (runId: string) => void
-  onNavigateToEvents: () => void
-  onDismissEvent: (eventId: string) => void
-  
   mode: ChatMode
   onModeChange: (mode: ChatMode) => void
   showArtifacts?: boolean
@@ -34,13 +27,8 @@ interface ChatViewProps {
 export function ChatView({
   messages,
   runs,
-  events,
   onSendMessage,
   onRunClick,
-  onNavigateToRun,
-  onNavigateToEvents,
-  onDismissEvent,
-  
   mode,
   onModeChange,
   showArtifacts = false,
@@ -93,14 +81,6 @@ export function ChatView({
     <div className="flex h-full overflow-hidden">
       {/* Main Chat Area */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        {/* Alert Bar - Fixed at top */}
-        <AlertBar 
-          events={events} 
-          onNavigateToEvents={onNavigateToEvents}
-          onNavigateToRun={onNavigateToRun}
-          onDismissEvent={onDismissEvent}
-        />
-
         {/* Artifacts Panel - Collapsible section below nav */}
         {showArtifacts && (
           <ArtifactsPanel artifacts={allArtifacts} />
