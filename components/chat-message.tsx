@@ -10,14 +10,30 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { LossChart } from './loss-chart'
-import type { ChatMessage as ChatMessageType } from '@/lib/types'
+import type { ChatMessage as ChatMessageType, Sweep, SweepConfig } from '@/lib/types'
+import { SweepArtifact } from './sweep-artifact'
+import { SweepStatus } from './sweep-status'
+import type { ExperimentRun } from '@/lib/types'
 
 interface ChatMessageProps {
   message: ChatMessageType
   collapseArtifacts?: boolean
+  sweeps?: Sweep[]
+  runs?: ExperimentRun[]
+  onEditSweep?: (config: SweepConfig) => void
+  onLaunchSweep?: (config: SweepConfig) => void
+  onRunClick?: (run: ExperimentRun) => void
 }
 
-export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageProps) {
+export function ChatMessage({ 
+  message, 
+  collapseArtifacts = false,
+  sweeps = [],
+  runs = [],
+  onEditSweep,
+  onLaunchSweep,
+  onRunClick,
+}: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
   const isUser = message.role === 'user'
@@ -174,6 +190,40 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
                 <LossChart data={message.chart.data} title={message.chart.title} />
               </CollapsibleContent>
             </Collapsible>
+          )}
+
+          {/* Sweep Config Artifact */}
+          {message.sweepConfig && (
+            <div className="mb-2">
+              {(() => {
+                const sweep = message.sweepId 
+                  ? sweeps.find(s => s.id === message.sweepId)
+                  : undefined
+                
+                if (sweep && sweep.status !== 'draft') {
+                  // Show sweep status if the sweep is running/completed
+                  return (
+                    <SweepStatus
+                      sweep={sweep}
+                      runs={runs}
+                      onRunClick={onRunClick}
+                      isCollapsed={collapseArtifacts}
+                    />
+                  )
+                }
+                
+                // Show sweep artifact (config) if draft or no sweep yet
+                return (
+                  <SweepArtifact
+                    config={message.sweepConfig}
+                    sweep={sweep}
+                    onEdit={onEditSweep}
+                    onLaunch={onLaunchSweep}
+                    isCollapsed={collapseArtifacts}
+                  />
+                )
+              })()}
+            </div>
           )}
 
           <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">

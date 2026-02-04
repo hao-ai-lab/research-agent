@@ -112,6 +112,8 @@ export interface ChatMessage {
     title: string
     data: LossDataPoint[]
   }
+  sweepConfig?: SweepConfig
+  sweepId?: string
 }
 
 export interface LossDataPoint {
@@ -172,4 +174,76 @@ export interface VisibilityGroup {
   name: string
   color: string
   runIds: string[]
+}
+
+// Sweep types
+export type SweepStatus = 'draft' | 'pending' | 'running' | 'completed' | 'failed' | 'canceled'
+
+export interface SweepHyperparameter {
+  name: string
+  type: 'range' | 'choice' | 'fixed'
+  values?: (string | number)[] // For choice type
+  min?: number // For range type
+  max?: number // For range type
+  step?: number // For range type
+  fixedValue?: string | number // For fixed type
+}
+
+export interface SweepMetric {
+  name: string
+  path: string
+  goal: 'minimize' | 'maximize'
+  isPrimary: boolean
+}
+
+export interface SweepInsight {
+  id: string
+  type: 'failure' | 'suspicious' | 'review'
+  condition: string
+  description: string
+  action?: string
+}
+
+export interface SweepConfig {
+  id: string
+  name: string
+  description: string
+  goal: string
+  command: string
+  script?: string
+  hyperparameters: SweepHyperparameter[]
+  metrics: SweepMetric[]
+  insights: SweepInsight[]
+  maxRuns?: number
+  parallelRuns?: number
+  earlyStoppingEnabled?: boolean
+  earlyStoppingPatience?: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface Sweep {
+  id: string
+  config: SweepConfig
+  status: SweepStatus
+  runIds: string[]
+  bestRunId?: string
+  bestMetricValue?: number
+  startedAt?: Date
+  completedAt?: Date
+  createdAt: Date
+  progress: {
+    completed: number
+    total: number
+    failed: number
+    running: number
+  }
+}
+
+export interface SweepArtifact {
+  id: string
+  type: 'sweep-config'
+  sweepId: string
+  config: SweepConfig
+  timestamp: Date
 }

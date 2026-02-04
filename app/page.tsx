@@ -12,8 +12,9 @@ import { JourneyView } from '@/components/journey-view'
 import { ReportView } from '@/components/report-view'
 import { SettingsDialog } from '@/components/settings-dialog'
 import type { ChatMode } from '@/components/chat-input'
-import { mockRuns, mockMessages, generateLossData, mockMemoryRules, mockInsightCharts, defaultTags, getRunEvents } from '@/lib/mock-data'
-import type { ChatMessage, ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus } from '@/lib/types'
+import { mockRuns, mockMessages, generateLossData, mockMemoryRules, mockInsightCharts, defaultTags, getRunEvents, mockSweeps, createDefaultSweepConfig } from '@/lib/mock-data'
+import type { ChatMessage, ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
+import { SweepForm } from '@/components/sweep-form'
 
 const defaultSettings: AppSettings = {
   appearance: {
@@ -67,6 +68,11 @@ export default function ResearchChat() {
   
   // Events state
   const [events, setEvents] = useState<RunEvent[]>(() => getRunEvents(mockRuns))
+
+  // Sweeps state
+  const [sweeps, setSweeps] = useState<Sweep[]>(mockSweeps)
+  const [showSweepForm, setShowSweepForm] = useState(false)
+  const [editingSweepConfig, setEditingSweepConfig] = useState<SweepConfig | null>(null)
 
   // Chat panel state
   const [showArtifacts, setShowArtifacts] = useState(false)
@@ -135,7 +141,7 @@ export default function ResearchChat() {
   const handleSendMessage = useCallback(
     (content: string, attachments?: File[], mode?: ChatMode) => {
       const currentMode = mode || chatMode
-      const modePrefix = currentMode === 'wild' ? '[Wild Mode] ' : '[Debug Mode] '
+      const modePrefix = currentMode === 'wild' ? '[Wild Mode] ' : currentMode === 'debug' ? '[Debug Mode] ' : '[Sweep Mode] '
       
       const userMessage: ChatMessage = {
         id: Date.now().toString(),
@@ -151,16 +157,53 @@ export default function ResearchChat() {
       setMessages((prev) => [...prev, userMessage])
 
       setTimeout(() => {
-        const aiMessage: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: currentMode === 'wild'
-            ? `${modePrefix}I've received your message: "${content}"\n\nRunning in Wild Mode - I'll autonomously explore the parameter space and launch experiments to optimize your model. Based on your current runs, I'm initiating a hyperparameter sweep for learning rates between 1e-5 and 5e-4.\n\n**Automated Actions:**\n- Queued 5 new training runs\n- Set up early stopping at epoch 20\n- Configured loss monitoring\n\nI'll notify you when significant improvements are found.`
-            : `${modePrefix}I've received your message: "${content}"\n\nRunning in Debug Mode - I'll provide detailed analysis before any actions. Your active runs show promising results with the GPT-4 fine-tuning achieving a loss of 0.234 at epoch 15.\n\n**Analysis:**\n- Training is progressing smoothly\n- No signs of overfitting detected\n- GPU utilization is optimal\n\n**Would you like me to:**\n1. Launch a comparative experiment?\n2. Adjust hyperparameters?\n3. Export current metrics?`,
-          thinking: `${modePrefix}Processing user query...\n\nAnalyzing context:\n- User has ${runs.length} experiments\n- ${runs.filter((r) => r.status === 'running').length} currently running\n- Mode: ${currentMode}\n\nFormulating response based on mode and available data...`,
-          timestamp: new Date(),
+        // Handle sweep mode - generate a sweep config based on user input
+        if (currentMode === 'sweep') {
+          const generatedConfig: SweepConfig = {
+            ...createDefaultSweepConfig(),
+            id: `sweep-config-${Date.now()}`,
+            name: content.includes('learning rate') ? 'Learning Rate Sweep' : 
+                  content.includes('batch') ? 'Batch Size Sweep' : 
+                  'Hyperparameter Sweep',
+            description: `Generated from: "${content}"`,
+            goal: content,
+            command: 'python train.py --lr {learning_rate} --batch-size {batch_size} --epochs {epochs}',
+            hyperparameters: [
+              { name: 'learning_rate', type: 'range', min: 0.00001, max: 0.001, step: 0.0001 },
+              { name: 'batch_size', type: 'choice', values: [8, 16, 32, 64] },
+              { name: 'epochs', type: 'fixed', fixedValue: 25 },
+            ],
+            metrics: [
+              { name: 'Validation Loss', path: 'val/loss', goal: 'minimize', isPrimary: true },
+              { name: 'Training Loss', path: 'train/loss', goal: 'minimize', isPrimary: false },
+            ],
+            insights: [
+              { id: 'i1', type: 'failure', condition: 'loss > 10 or NaN', description: 'Training diverged' },
+              { id: 'i2', type: 'suspicious', condition: 'val_loss increases for 3 epochs', description: 'Possible overfitting' },
+            ],
+          }
+
+          const aiMessage: ChatMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `${modePrefix}I've analyzed your request and generated a sweep configuration.\n\n**Goal:** ${content}\n\nI've set up a sweep with the following:\n- **3 hyperparameters** to explore (learning rate, batch size, epochs)\n- **2 metrics** to track (validation and training loss)\n- **2 insight rules** to detect failures and overfitting\n\nYou can review and edit the configuration below, then launch the sweep when ready.`,
+            thinking: `${modePrefix}Processing sweep request...\n\nAnalyzing user intent:\n- User wants to explore: "${content}"\n- Generating appropriate hyperparameter ranges\n- Setting up metrics and insight detection\n\nCreating sweep configuration...`,
+            timestamp: new Date(),
+            sweepConfig: generatedConfig,
+          }
+          setMessages((prev) => [...prev, aiMessage])
+        } else {
+          const aiMessage: ChatMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: currentMode === 'wild'
+              ? `${modePrefix}I've received your message: "${content}"\n\nRunning in Wild Mode - I'll autonomously explore the parameter space and launch experiments to optimize your model. Based on your current runs, I'm initiating a hyperparameter sweep for learning rates between 1e-5 and 5e-4.\n\n**Automated Actions:**\n- Queued 5 new training runs\n- Set up early stopping at epoch 20\n- Configured loss monitoring\n\nI'll notify you when significant improvements are found.`
+              : `${modePrefix}I've received your message: "${content}"\n\nRunning in Debug Mode - I'll provide detailed analysis before any actions. Your active runs show promising results with the GPT-4 fine-tuning achieving a loss of 0.234 at epoch 15.\n\n**Analysis:**\n- Training is progressing smoothly\n- No signs of overfitting detected\n- GPU utilization is optimal\n\n**Would you like me to:**\n1. Launch a comparative experiment?\n2. Adjust hyperparameters?\n3. Export current metrics?`,
+            thinking: `${modePrefix}Processing user query...\n\nAnalyzing context:\n- User has ${runs.length} experiments\n- ${runs.filter((r) => r.status === 'running').length} currently running\n- Mode: ${currentMode}\n\nFormulating response based on mode and available data...`,
+            timestamp: new Date(),
+          }
+          setMessages((prev) => [...prev, aiMessage])
         }
-        setMessages((prev) => [...prev, aiMessage])
       }, 1000)
     },
     [runs, chatMode]
@@ -256,6 +299,68 @@ export default function ResearchChat() {
     )
   }, [])
 
+  // Sweep handlers
+  const handleEditSweep = useCallback((config: SweepConfig) => {
+    setEditingSweepConfig(config)
+    setShowSweepForm(true)
+  }, [])
+
+  const handleSaveSweep = useCallback((config: SweepConfig) => {
+    // Check if this is an edit or new sweep
+    const existingSweepIndex = sweeps.findIndex(s => s.config.id === config.id)
+    if (existingSweepIndex >= 0) {
+      // Update existing sweep's config
+      setSweeps(prev => prev.map(s => 
+        s.config.id === config.id 
+          ? { ...s, config: { ...config, updatedAt: new Date() } }
+          : s
+      ))
+    }
+    // Add a message confirming the save
+    const saveMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `[Sweep Mode] Sweep configuration "${config.name}" has been saved as a draft. You can launch it anytime from the chat or by using the launch button.`,
+      timestamp: new Date(),
+      sweepConfig: config,
+    }
+    setMessages(prev => [...prev, saveMessage])
+    setShowSweepForm(false)
+    setEditingSweepConfig(null)
+  }, [sweeps])
+
+  const handleLaunchSweep = useCallback((config: SweepConfig) => {
+    // Create a new sweep from the config
+    const newSweep: Sweep = {
+      id: `sweep-${Date.now()}`,
+      config,
+      status: 'running',
+      runIds: [], // Will be populated as runs are created
+      startedAt: new Date(),
+      createdAt: new Date(),
+      progress: {
+        completed: 0,
+        total: config.maxRuns || 10,
+        failed: 0,
+        running: Math.min(config.parallelRuns || 2, config.maxRuns || 10),
+      },
+    }
+    setSweeps(prev => [...prev, newSweep])
+    
+    // Add a message confirming the launch
+    const launchMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `[Sweep Mode] Launching sweep "${config.name}"!\n\n**Configuration:**\n- Max runs: ${config.maxRuns || 10}\n- Parallel runs: ${config.parallelRuns || 2}\n- Primary metric: ${config.metrics.find(m => m.isPrimary)?.name || 'N/A'}\n\nThe sweep is now running. You can track its progress below.`,
+      timestamp: new Date(),
+      sweepConfig: config,
+      sweepId: newSweep.id,
+    }
+    setMessages(prev => [...prev, launchMessage])
+    setShowSweepForm(false)
+    setEditingSweepConfig(null)
+  }, [])
+
   // Clear run selection when changing tabs
   const handleTabChange = useCallback((tab: ActiveTab) => {
     setActiveTab(tab)
@@ -298,17 +403,31 @@ export default function ResearchChat() {
       />
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        {activeTab === 'chat' && (
+        {activeTab === 'chat' && !showSweepForm && (
           <ChatView
             messages={messages}
             runs={runs}
+            sweeps={sweeps}
             onSendMessage={handleSendMessage}
             onRunClick={handleRunClick}
+            onEditSweep={handleEditSweep}
+            onLaunchSweep={handleLaunchSweep}
             mode={chatMode}
             onModeChange={setChatMode}
             showArtifacts={showArtifacts}
             collapseChats={collapseChats}
             collapseArtifactsInChat={collapseArtifactsInChat}
+          />
+        )}
+        {activeTab === 'chat' && showSweepForm && (
+          <SweepForm
+            initialConfig={editingSweepConfig || undefined}
+            onSave={handleSaveSweep}
+            onCancel={() => {
+              setShowSweepForm(false)
+              setEditingSweepConfig(null)
+            }}
+            onLaunch={handleLaunchSweep}
           />
         )}
         {activeTab === 'runs' && runsSubTab !== 'events' && (

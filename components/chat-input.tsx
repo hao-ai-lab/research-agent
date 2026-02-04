@@ -15,6 +15,7 @@ import {
   Command,
   Mic,
   MicOff,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,7 +24,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 
-export type ChatMode = 'wild' | 'debug'
+export type ChatMode = 'wild' | 'debug' | 'sweep'
 
 interface ChatInputProps {
   onSend: (message: string, attachments?: File[], mode?: ChatMode) => void
@@ -145,15 +146,19 @@ export function ChatInput({
                 className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
                   mode === 'wild'
                     ? 'bg-accent/20 text-accent'
-                    : 'bg-blue-500/20 text-blue-400'
+                    : mode === 'debug'
+                    ? 'bg-blue-500/20 text-blue-400'
+                    : 'bg-purple-500/20 text-purple-400'
                 }`}
               >
                 {mode === 'wild' ? (
                   <Zap className="h-3 w-3" />
-                ) : (
+                ) : mode === 'debug' ? (
                   <Bug className="h-3 w-3" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
                 )}
-                {mode === 'wild' ? 'Wild' : 'Debug'}
+                {mode === 'wild' ? 'Wild' : mode === 'debug' ? 'Debug' : 'Sweep'}
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-56 p-1.5">
@@ -196,6 +201,26 @@ export function ChatInput({
                   <div>
                     <p className="text-xs font-medium text-foreground">Debug Mode</p>
                     <p className="text-[10px] text-muted-foreground">Careful, detailed</p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onModeChange('sweep')
+                    setIsModeOpen(false)
+                  }}
+                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                    mode === 'sweep'
+                      ? 'bg-purple-400/10 border border-purple-400/30'
+                      : 'hover:bg-secondary'
+                  }`}
+                >
+                  <Sparkles
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'sweep' ? 'text-purple-400' : 'text-muted-foreground'}`}
+                  />
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Sweep Mode</p>
+                    <p className="text-[10px] text-muted-foreground">Create experiment sweeps</p>
                   </div>
                 </button>
               </div>
@@ -315,6 +340,17 @@ export function ChatInput({
                 >
                   <span className="text-accent">/compare</span>
                   <span className="text-muted-foreground text-[10px]">Compare</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    insertText('/sweep ')
+                    setIsCommandOpen(false)
+                  }}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
+                >
+                  <span className="text-purple-400">/sweep</span>
+                  <span className="text-muted-foreground text-[10px]">Create sweep</span>
                 </button>
               </div>
             </PopoverContent>

@@ -1,4 +1,4 @@
-import type { ExperimentRun, ChatMessage, LossDataPoint, MemoryRule, InsightChart, TagDefinition, MetricVisualization, RunEvent } from './types'
+import type { ExperimentRun, ChatMessage, LossDataPoint, MemoryRule, InsightChart, TagDefinition, MetricVisualization, RunEvent, Sweep, SweepConfig } from './types'
 
 export const DEFAULT_TAG_COLORS = [
   '#4ade80', // green
@@ -741,3 +741,107 @@ export const mockInsightCharts: InsightChart[] = [
     metric: 'GB',
   },
 ]
+
+// Mock Sweep Configs
+export const mockSweepConfigs: SweepConfig[] = [
+  {
+    id: 'sweep-config-1',
+    name: 'Learning Rate Sweep',
+    description: 'Hyperparameter sweep to find optimal learning rate for GPT-4 fine-tuning',
+    goal: 'Find the optimal learning rate that minimizes validation loss while maintaining stable training',
+    command: 'python train.py --model gpt-4-base --lr {learning_rate} --batch-size {batch_size} --epochs 25',
+    hyperparameters: [
+      {
+        name: 'learning_rate',
+        type: 'range',
+        min: 0.00001,
+        max: 0.001,
+        step: 0.00001,
+      },
+      {
+        name: 'batch_size',
+        type: 'choice',
+        values: [8, 16, 32, 64],
+      },
+      {
+        name: 'warmup_steps',
+        type: 'choice',
+        values: [100, 200, 500, 1000],
+      },
+    ],
+    metrics: [
+      { name: 'Validation Loss', path: 'val/loss', goal: 'minimize', isPrimary: true },
+      { name: 'Training Loss', path: 'train/loss', goal: 'minimize', isPrimary: false },
+      { name: 'Accuracy', path: 'val/accuracy', goal: 'maximize', isPrimary: false },
+    ],
+    insights: [
+      {
+        id: 'insight-1',
+        type: 'failure',
+        condition: 'loss > 10 or NaN',
+        description: 'Training has diverged, likely due to too high learning rate',
+        action: 'Cancel run and exclude from analysis',
+      },
+      {
+        id: 'insight-2',
+        type: 'suspicious',
+        condition: 'val_loss increases for 3 consecutive epochs',
+        description: 'Possible overfitting detected',
+        action: 'Flag for review',
+      },
+      {
+        id: 'insight-3',
+        type: 'review',
+        condition: 'accuracy > 95%',
+        description: 'Unusually high accuracy may indicate data leakage',
+        action: 'Human review required',
+      },
+    ],
+    maxRuns: 20,
+    parallelRuns: 4,
+    earlyStoppingEnabled: true,
+    earlyStoppingPatience: 5,
+    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+  },
+]
+
+// Mock Sweeps
+export const mockSweeps: Sweep[] = [
+  {
+    id: 'sweep-1',
+    config: mockSweepConfigs[0],
+    status: 'running',
+    runIds: ['1', '2'],
+    bestRunId: '1',
+    bestMetricValue: 0.234,
+    startedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    progress: {
+      completed: 5,
+      total: 20,
+      failed: 1,
+      running: 2,
+    },
+  },
+]
+
+// Helper to create a default sweep config
+export const createDefaultSweepConfig = (): SweepConfig => ({
+  id: `sweep-config-${Date.now()}`,
+  name: '',
+  description: '',
+  goal: '',
+  command: '',
+  hyperparameters: [],
+  metrics: [
+    { name: 'Validation Loss', path: 'val/loss', goal: 'minimize', isPrimary: true },
+  ],
+  insights: [],
+  maxRuns: 10,
+  parallelRuns: 2,
+  earlyStoppingEnabled: true,
+  earlyStoppingPatience: 3,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+})
