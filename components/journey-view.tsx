@@ -5,6 +5,8 @@ import { ArrowLeft, MessageSquare, Sparkles, Heart, Code, ChevronRight } from 'l
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
+import { DevNotes } from './dev-notes'
+import type { JourneySubTab } from './nav-page'
 
 interface JourneyEntry {
   id: string
@@ -125,10 +127,16 @@ const journeyEntries: JourneyEntry[] = [
 
 interface JourneyViewProps {
   onBack: () => void
+  subTab: JourneySubTab
 }
 
-export function JourneyView({ onBack }: JourneyViewProps) {
+export function JourneyView({ onBack, subTab }: JourneyViewProps) {
   const [selectedEntry, setSelectedEntry] = useState<JourneyEntry | null>(null)
+
+  // Route to dev notes if that subtab is active
+  if (subTab === 'devnotes') {
+    return <DevNotes onBack={onBack} />
+  }
 
   if (selectedEntry) {
     return (
