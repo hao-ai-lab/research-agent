@@ -299,15 +299,6 @@ export function NavPage({
                   <Settings className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Settings</span>
                 </button>
-
-                {/* Help */}
-                <button
-                  type="button"
-                  className="flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left bg-secondary/50 text-foreground hover:bg-secondary"
-                >
-                  <HelpCircle className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Help</span>
-                </button>
               </div>
             </ScrollArea>
           </div>
