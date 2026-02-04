@@ -1,53 +1,110 @@
 'use client'
 
 /**
- * API Client - Environment-based API switching
+ * API Client - Runtime-configurable API switching
  * 
- * In development: Uses real backend at localhost:10000
- * On Vercel (NEXT_PUBLIC_USE_MOCK=true): Uses mock API with demo data
+ * Uses localStorage for persistence (survives page refresh)
+ * - API URL: configurable via Settings
+ * - Mock mode: toggleable via Settings
  */
 
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === 'true'
-
-// Dynamically re-export based on environment
-// Note: We use conditional exports to enable tree-shaking
-
-export * from './api'
-
-// Override with mock implementations when in mock mode
-if (USE_MOCK) {
-    console.log('[API] Running in MOCK mode - using demo data')
-}
-
-// For mock mode, we need to use dynamic imports at runtime
-// This approach works with Next.js client components
-
+import { getApiUrl, isUsingMock } from './api-config'
 import * as realApi from './api'
 import * as mockApi from './api-mock'
 
-const api = USE_MOCK ? mockApi : realApi
+// Export types from real API
+export type {
+    ChatSession,
+    ChatMessageData,
+    SessionWithMessages,
+    StreamEventType,
+    StreamEvent,
+    RunStatus,
+    Run,
+    CreateRunRequest,
+    LogResponse,
+    Artifact,
+    Sweep,
+    CreateSweepRequest,
+} from './api'
 
-// Re-export all functions
-export const listSessions = api.listSessions
-export const createSession = api.createSession
-export const getSession = api.getSession
-export const deleteSession = api.deleteSession
-export const streamChat = api.streamChat
-export const checkApiHealth = api.checkApiHealth
+// Dynamic API selection based on runtime config
+function getApi() {
+    return isUsingMock() ? mockApi : realApi
+}
 
-export const listRuns = api.listRuns
-export const createRun = api.createRun
-export const getRun = api.getRun
-export const startRun = api.startRun
-export const stopRun = api.stopRun
-export const archiveRun = api.archiveRun
-export const unarchiveRun = api.unarchiveRun
-export const getRunLogs = api.getRunLogs
-export const streamRunLogs = api.streamRunLogs
-export const getRunArtifacts = api.getRunArtifacts
-export const queueRun = api.queueRun
+// Re-export all functions with dynamic switching
+export const listSessions = (...args: Parameters<typeof realApi.listSessions>) =>
+    getApi().listSessions(...args)
 
-export const listSweeps = api.listSweeps
-export const createSweep = api.createSweep
-export const getSweep = api.getSweep
-export const startSweep = api.startSweep
+export const createSession = (...args: Parameters<typeof realApi.createSession>) =>
+    getApi().createSession(...args)
+
+export const getSession = (...args: Parameters<typeof realApi.getSession>) =>
+    getApi().getSession(...args)
+
+export const deleteSession = (...args: Parameters<typeof realApi.deleteSession>) =>
+    getApi().deleteSession(...args)
+
+export const streamChat = (...args: Parameters<typeof realApi.streamChat>) =>
+    getApi().streamChat(...args)
+
+export const checkApiHealth = async (): Promise<boolean> => {
+    if (isUsingMock()) {
+        return true // Mock is always "healthy"
+    }
+    try {
+        const response = await fetch(`${getApiUrl()}/`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000)
+        })
+        return response.ok
+    } catch {
+        return false
+    }
+}
+
+export const listRuns = (...args: Parameters<typeof realApi.listRuns>) =>
+    getApi().listRuns(...args)
+
+export const createRun = (...args: Parameters<typeof realApi.createRun>) =>
+    getApi().createRun(...args)
+
+export const getRun = (...args: Parameters<typeof realApi.getRun>) =>
+    getApi().getRun(...args)
+
+export const startRun = (...args: Parameters<typeof realApi.startRun>) =>
+    getApi().startRun(...args)
+
+export const stopRun = (...args: Parameters<typeof realApi.stopRun>) =>
+    getApi().stopRun(...args)
+
+export const archiveRun = (...args: Parameters<typeof realApi.archiveRun>) =>
+    getApi().archiveRun(...args)
+
+export const unarchiveRun = (...args: Parameters<typeof realApi.unarchiveRun>) =>
+    getApi().unarchiveRun(...args)
+
+export const getRunLogs = (...args: Parameters<typeof realApi.getRunLogs>) =>
+    getApi().getRunLogs(...args)
+
+export const streamRunLogs = (...args: Parameters<typeof realApi.streamRunLogs>) =>
+    getApi().streamRunLogs(...args)
+
+export const getRunArtifacts = (...args: Parameters<typeof realApi.getRunArtifacts>) =>
+    getApi().getRunArtifacts(...args)
+
+export const queueRun = (...args: Parameters<typeof realApi.queueRun>) =>
+    getApi().queueRun(...args)
+
+export const listSweeps = (...args: Parameters<typeof realApi.listSweeps>) =>
+    getApi().listSweeps(...args)
+
+export const createSweep = (...args: Parameters<typeof realApi.createSweep>) =>
+    getApi().createSweep(...args)
+
+export const getSweep = (...args: Parameters<typeof realApi.getSweep>) =>
+    getApi().getSweep(...args)
+
+export const startSweep = (...args: Parameters<typeof realApi.startSweep>) =>
+    getApi().startSweep(...args)
