@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   MessageSquare,
   FlaskConical,
@@ -16,9 +17,11 @@ import {
   LayoutDashboard,
   List,
   Wrench,
+  Search,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Input } from '@/components/ui/input'
 
 export type RunsSubTab = 'overview' | 'details' | 'manage'
 export type JourneySubTab = 'story' | 'devnotes'
@@ -85,6 +88,13 @@ export function NavPage({
   onRunsSubTabChange,
   onJourneySubTabChange,
 }: NavPageProps) {
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredChats = mockChatHistory.filter(chat => 
+    chat.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    chat.preview.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   const handleNavClick = (
     tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey',
     subTab?: RunsSubTab | JourneySubTab
@@ -276,30 +286,30 @@ export function NavPage({
                   <Code className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Dev Notes</span>
                 </button>
+
+                {/* Settings */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenChange(false)
+                    onSettingsClick()
+                  }}
+                  className="flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left bg-secondary/50 text-foreground hover:bg-secondary"
+                >
+                  <Settings className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Settings</span>
+                </button>
+
+                {/* Help */}
+                <button
+                  type="button"
+                  className="flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left bg-secondary/50 text-foreground hover:bg-secondary"
+                >
+                  <HelpCircle className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Help</span>
+                </button>
               </div>
             </ScrollArea>
-
-            {/* Quick Actions Row */}
-            <div className="flex gap-2 mt-3 pt-3 border-t border-border/50">
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenChange(false)
-                  onSettingsClick()
-                }}
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
-              >
-                <Settings className="h-3.5 w-3.5" />
-                Settings
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
-              >
-                <HelpCircle className="h-3.5 w-3.5" />
-                Help
-              </button>
-            </div>
           </div>
         </div>
 
@@ -308,36 +318,56 @@ export function NavPage({
           <div className="px-4 py-3 border-b border-border/50">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Recent Chats</h2>
           </div>
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 min-h-0">
             <div className="p-2 space-y-1">
-              {mockChatHistory.map((chat) => (
-                <button
-                  key={chat.id}
-                  type="button"
-                  onClick={() => handleNavClick('chat')}
-                  className="w-full text-left p-3 rounded-lg hover:bg-secondary/50 transition-colors group"
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <h3 className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">
-                      {chat.title}
-                    </h3>
-                    <span className="text-[10px] text-muted-foreground shrink-0 flex items-center gap-1" suppressHydrationWarning>
-                      <Clock className="h-3 w-3" />
-                      {formatRelativeTime(chat.timestamp)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate mb-1.5">
-                    {chat.preview}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground/70">
-                      {chat.messageCount} messages
-                    </span>
-                  </div>
-                </button>
-              ))}
+              {filteredChats.length === 0 ? (
+                <div className="text-center py-6 text-sm text-muted-foreground">
+                  No chats found
+                </div>
+              ) : (
+                filteredChats.map((chat) => (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    onClick={() => handleNavClick('chat')}
+                    className="w-full text-left p-3 rounded-lg hover:bg-secondary/50 transition-colors group"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h3 className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">
+                        {chat.title}
+                      </h3>
+                      <span className="text-[10px] text-muted-foreground shrink-0 flex items-center gap-1" suppressHydrationWarning>
+                        <Clock className="h-3 w-3" />
+                        {formatRelativeTime(chat.timestamp)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mb-1.5">
+                      {chat.preview}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground/70">
+                        {chat.messageCount} messages
+                      </span>
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
           </ScrollArea>
+          
+          {/* Search Bar at Bottom */}
+          <div className="shrink-0 p-3 border-t border-border">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search chats..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-sm"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
