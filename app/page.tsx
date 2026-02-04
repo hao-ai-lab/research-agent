@@ -408,6 +408,7 @@ export default function ResearchChat() {
             messages={messages}
             runs={runs}
             sweeps={sweeps}
+            charts={insightCharts}
             onSendMessage={handleSendMessage}
             onRunClick={handleRunClick}
             onEditSweep={handleEditSweep}

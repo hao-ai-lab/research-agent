@@ -11,12 +11,14 @@ import type {
   Artifact,
   Sweep,
   SweepConfig,
+  InsightChart,
 } from '@/lib/types'
 
 interface ChatViewProps {
   messages: ChatMessageType[]
   runs: ExperimentRun[]
   sweeps?: Sweep[]
+  charts?: InsightChart[]
   onSendMessage: (message: string, attachments?: File[], mode?: ChatMode) => void
   onRunClick: (run: ExperimentRun) => void
   onEditSweep?: (config: SweepConfig) => void
@@ -32,6 +34,7 @@ export function ChatView({
   messages,
   runs,
   sweeps = [],
+  charts = [],
   onSendMessage,
   onRunClick,
   onEditSweep,
@@ -161,6 +164,10 @@ export function ChatView({
             onSend={onSendMessage} 
             mode={mode}
             onModeChange={onModeChange}
+            runs={runs}
+            artifacts={allArtifacts}
+            charts={charts}
+            messages={messages}
           />
         </div>
       </div>
