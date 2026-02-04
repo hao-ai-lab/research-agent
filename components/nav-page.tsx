@@ -75,6 +75,7 @@ interface NavPageProps {
   onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report') => void
   onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
+  onNewChat?: () => void
 }
 
 export function NavPage({
@@ -87,10 +88,11 @@ export function NavPage({
   onTabChange,
   onRunsSubTabChange,
   onJourneySubTabChange,
+  onNewChat,
 }: NavPageProps) {
   const [searchQuery, setSearchQuery] = useState('')
 
-  const filteredChats = mockChatHistory.filter(chat => 
+  const filteredChats = mockChatHistory.filter(chat =>
     chat.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     chat.preview.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -152,12 +154,19 @@ export function NavPage({
           <div className="p-4 h-full flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Pages</h2>
-              <Button size="sm" className="gap-1.5 h-8">
+              <Button
+                size="sm"
+                className="gap-1.5 h-8"
+                onClick={() => {
+                  onNewChat?.()
+                  onOpenChange(false)
+                }}
+              >
                 <Plus className="h-3.5 w-3.5" />
                 New Chat
               </Button>
             </div>
-            
+
             {/* Navigation Grid - All pages flattened */}
             <ScrollArea className="flex-1">
               <div className="grid grid-cols-2 gap-2 content-start pb-2">
@@ -165,11 +174,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('chat')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'chat'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'chat'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <MessageSquare className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Chat</span>
@@ -179,11 +187,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('runs', 'overview')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'runs' && runsSubTab === 'overview'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'overview'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <LayoutDashboard className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Runs Overview</span>
@@ -193,11 +200,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('runs', 'details')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'runs' && runsSubTab === 'details'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'details'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <List className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Runs Details</span>
@@ -207,11 +213,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('runs', 'manage')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'runs' && runsSubTab === 'manage'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'manage'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <Wrench className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Runs Manage</span>
@@ -221,11 +226,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('events')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'events'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'events'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <Bell className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Events</span>
@@ -235,11 +239,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('charts')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'charts'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'charts'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <BarChart3 className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Charts</span>
@@ -249,11 +252,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('insights')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'insights'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'insights'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <Lightbulb className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Insights</span>
@@ -263,11 +265,10 @@ export function NavPage({
                 <button
                   type="button"
                   onClick={() => handleNavClick('report')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'report'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'report'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    }`}
                 >
                   <FileText className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Report</span>
@@ -331,7 +332,7 @@ export function NavPage({
               )}
             </div>
           </ScrollArea>
-          
+
           {/* Search Bar at Bottom */}
           <div className="shrink-0 p-3 border-t border-border">
             <div className="relative">

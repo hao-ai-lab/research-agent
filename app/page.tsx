@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { FloatingNav } from '@/components/floating-nav'
 import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
-import { ConnectedChatView } from '@/components/connected-chat-view'
+import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
 import { RunsView } from '@/components/runs-view'
 import { ChartsView } from '@/components/charts-view'
 import { InsightsView } from '@/components/insights-view'
@@ -70,13 +70,16 @@ export default function ResearchChat() {
 
   // Sweeps state
   const [sweeps, setSweeps] = useState<Sweep[]>(mockSweeps)
-  const [showSweepForm, setShowSweepForm] = useState(true)
+  const [showSweepForm, setShowSweepForm] = useState(false)
   const [editingSweepConfig, setEditingSweepConfig] = useState<SweepConfig | null>(null)
 
   // Chat panel state
   const [showArtifacts, setShowArtifacts] = useState(false)
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+
+  // Chat session hook for New Chat functionality
+  const { createNewSession } = useChatSession()
 
   // Build breadcrumbs based on current state
   const breadcrumbs = useMemo(() => {
@@ -400,6 +403,10 @@ export default function ResearchChat() {
           onTabChange={handleTabChange}
           onRunsSubTabChange={handleRunsSubTabChange}
           onJourneySubTabChange={setJourneySubTab}
+          onNewChat={async () => {
+            await createNewSession()
+            setActiveTab('chat')
+          }}
         />
 
         <SettingsDialog
