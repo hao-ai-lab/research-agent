@@ -32,6 +32,8 @@ interface FloatingNavProps {
   onToggleArtifacts?: () => void
   collapseChats?: boolean
   onToggleCollapseChats?: () => void
+  collapseArtifactsInChat?: boolean
+  onToggleCollapseArtifactsInChat?: () => void
   showHistory?: boolean
   onToggleHistory?: () => void
 }
@@ -60,6 +62,8 @@ export function FloatingNav({
   onToggleArtifacts,
   collapseChats = false,
   onToggleCollapseChats,
+  collapseArtifactsInChat = false,
+  onToggleCollapseArtifactsInChat,
   showHistory = false,
   onToggleHistory,
 }: FloatingNavProps) {
@@ -164,6 +168,7 @@ export function FloatingNav({
                   id="show-artifacts"
                   checked={showArtifacts}
                   onCheckedChange={onToggleArtifacts}
+                  onClick={(e) => e.stopPropagation()}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem 
@@ -178,6 +183,22 @@ export function FloatingNav({
                   id="collapse-chats"
                   checked={collapseChats}
                   onCheckedChange={onToggleCollapseChats}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                className="flex items-center justify-between cursor-pointer"
+                onSelect={(e) => {
+                  e.preventDefault()
+                  onToggleCollapseArtifactsInChat?.()
+                }}
+              >
+                <Label htmlFor="collapse-artifacts" className="cursor-pointer">Collapse artifacts in chat</Label>
+                <Switch
+                  id="collapse-artifacts"
+                  checked={collapseArtifactsInChat}
+                  onCheckedChange={onToggleCollapseArtifactsInChat}
+                  onClick={(e) => e.stopPropagation()}
                 />
               </DropdownMenuItem>
             </DropdownMenuContent>

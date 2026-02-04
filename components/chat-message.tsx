@@ -14,10 +14,12 @@ import type { ChatMessage as ChatMessageType } from '@/lib/types'
 
 interface ChatMessageProps {
   message: ChatMessageType
+  collapseArtifacts?: boolean
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
+  const [isChartOpen, setIsChartOpen] = useState(true)
   const isUser = message.role === 'user'
 
   const formatDateTime = (date: Date) => {
@@ -168,9 +170,19 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
           {/* Embedded Chart - rendered before text content */}
           {message.chart && (
-            <div className="mb-3">
-              <LossChart data={message.chart.data} title={message.chart.title} />
-            </div>
+            <Collapsible open={!collapseArtifacts && isChartOpen} onOpenChange={setIsChartOpen}>
+              <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground mb-2">
+                {(!collapseArtifacts && isChartOpen) ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                <span>{message.chart.title}</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mb-3">
+                <LossChart data={message.chart.data} title={message.chart.title} />
+              </CollapsibleContent>
+            </Collapsible>
           )}
 
           <div className="rounded-2xl rounded-tl-md bg-card px-4 py-3 text-sm leading-relaxed">

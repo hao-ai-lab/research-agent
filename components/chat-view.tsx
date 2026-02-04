@@ -21,6 +21,7 @@ interface ChatViewProps {
   onModeChange: (mode: ChatMode) => void
   showArtifacts?: boolean
   collapseChats?: boolean
+  collapseArtifactsInChat?: boolean
   showHistory?: boolean
 }
 
@@ -33,6 +34,7 @@ export function ChatView({
   onModeChange,
   showArtifacts = false,
   collapseChats = false,
+  collapseArtifactsInChat = false,
   showHistory = false,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -94,12 +96,12 @@ export function ChatView({
                 {collapseChats ? (
                   // Collapsed view - show pairs
                   messagePairs.map((pair, index) => (
-                    <CollapsibleChatPair key={pair.user.id || index} pair={pair} />
+                    <CollapsibleChatPair key={pair.user.id || index} pair={pair} collapseArtifacts={collapseArtifactsInChat} />
                   ))
                 ) : (
                   // Normal view
                   messages.map((message) => (
-                    <ChatMessage key={message.id} message={message} />
+                    <ChatMessage key={message.id} message={message} collapseArtifacts={collapseArtifactsInChat} />
                   ))
                 )}
               </div>
@@ -158,7 +160,7 @@ export function ChatView({
 }
 
 // Collapsible chat pair component
-function CollapsibleChatPair({ pair }: { pair: { user: ChatMessageType; assistant?: ChatMessageType } }) {
+function CollapsibleChatPair({ pair, collapseArtifacts = false }: { pair: { user: ChatMessageType; assistant?: ChatMessageType }; collapseArtifacts?: boolean }) {
   const [expanded, setExpanded] = useState(false)
   
   // Don't render if user message is empty (system placeholder)
@@ -187,8 +189,8 @@ function CollapsibleChatPair({ pair }: { pair: { user: ChatMessageType; assistan
       </button>
       {expanded && (
         <div className="pb-2">
-          <ChatMessage message={pair.user} />
-          {pair.assistant && <ChatMessage message={pair.assistant} />}
+          <ChatMessage message={pair.user} collapseArtifacts={collapseArtifacts} />
+          {pair.assistant && <ChatMessage message={pair.assistant} collapseArtifacts={collapseArtifacts} />}
         </div>
       )}
     </div>

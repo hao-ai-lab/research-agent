@@ -68,6 +68,7 @@ export default function ResearchChat() {
   // Chat panel state
   const [showArtifacts, setShowArtifacts] = useState(false)
   const [collapseChats, setCollapseChats] = useState(false)
+  const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
 
   // Build breadcrumbs based on current state
@@ -275,6 +276,8 @@ export default function ResearchChat() {
         onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
         collapseChats={collapseChats}
         onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
+        collapseArtifactsInChat={collapseArtifactsInChat}
+        onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
         showHistory={showHistory}
         onToggleHistory={() => setShowHistory(prev => !prev)}
       />
@@ -290,6 +293,7 @@ export default function ResearchChat() {
             onModeChange={setChatMode}
             showArtifacts={showArtifacts}
             collapseChats={collapseChats}
+            collapseArtifactsInChat={collapseArtifactsInChat}
             showHistory={showHistory}
           />
         )}
