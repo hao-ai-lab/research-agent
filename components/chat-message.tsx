@@ -3,7 +3,7 @@
 import React from "react"
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Brain, User } from 'lucide-react'
+import { ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import {
   Collapsible,
   CollapsibleContent,
@@ -125,26 +125,17 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
 
   if (isUser) {
     return (
-      <div className="flex justify-end px-4 py-2">
-        <div className="flex max-w-[85%] items-end gap-2">
-          <div className="rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-accent-foreground">
-            <p className="text-sm leading-relaxed">{message.content}</p>
-          </div>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/20">
-            <User className="h-4 w-4 text-accent" />
-          </div>
+      <div className="px-0.5 py-2">
+        <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
+          <p className="text-sm leading-relaxed">{message.content}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="px-4 py-2">
-      <div className="flex max-w-full items-start gap-2">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary">
-          <Brain className="h-4 w-4 text-foreground" />
-        </div>
-        <div className="flex-1 min-w-0 space-y-2">
+    <div className="px-0.5 py-2">
+      <div className="space-y-2">
           {message.thinking && (
             <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
               <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
@@ -185,14 +176,13 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
             </Collapsible>
           )}
 
-          <div className="rounded-2xl rounded-tl-md bg-card px-4 py-3 text-sm leading-relaxed">
+          <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
             {renderMarkdown(message.content)}
           </div>
 
           <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
             {formatDateTime(message.timestamp)}
           </span>
-        </div>
       </div>
     </div>
   )
