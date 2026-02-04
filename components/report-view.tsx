@@ -617,36 +617,39 @@ export function ReportView({ runs }: ReportViewProps) {
               )
             })}
 
-            {/* Add cell button at bottom */}
+            {/* Ghost cell - Add new cell at bottom */}
             {!isPreviewMode && (
-              <div className="flex justify-center py-4">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-full mt-2 mb-4 p-4 border-2 border-dashed border-border/50 rounded-lg hover:border-primary/50 hover:bg-secondary/20 transition-colors group cursor-pointer"
+                  >
+                    <div className="flex items-center justify-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
                       <Plus className="h-4 w-4" />
-                      Add Cell
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuItem onClick={() => addCell('markdown')}>
-                      <Type className="h-4 w-4 mr-2" />
-                      Markdown
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => addCell('code')}>
-                      <Code className="h-4 w-4 mr-2" />
-                      Code
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => addCell('chart')}>
-                      <BarChart3 className="h-4 w-4 mr-2" />
-                      Chart
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => addCell('insight')}>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Insight
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                      <span className="text-sm">Add cell</span>
+                    </div>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center">
+                  <DropdownMenuItem onClick={() => addCell('markdown')}>
+                    <Type className="h-4 w-4 mr-2" />
+                    Markdown
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => addCell('code')}>
+                    <Code className="h-4 w-4 mr-2" />
+                    Code
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => addCell('chart')}>
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                    Chart
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => addCell('insight')}>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Insight
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </ScrollArea>
