@@ -125,7 +125,7 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
 
   if (isUser) {
     return (
-      <div className="px-2 py-2">
+      <div className="px-1 py-2">
         <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
           <p className="text-sm leading-relaxed">{message.content}</p>
         </div>
