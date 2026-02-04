@@ -163,8 +163,7 @@ export default function ResearchChat() {
   }, [runs])
 
   const handleNavigateToEvents = useCallback(() => {
-    setActiveTab('runs')
-    setRunsSubTab('events')
+    setActiveTab('events')
   }, [])
 
   const handleDismissEvent = useCallback((eventId: string) => {

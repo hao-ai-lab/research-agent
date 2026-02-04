@@ -22,7 +22,7 @@ interface BreadcrumbItem {
 }
 
 interface FloatingNavProps {
-  activeTab: 'chat' | 'runs' | 'charts' | 'memory'
+  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
   runsSubTab: RunsSubTab
   onMenuClick: () => void
   breadcrumbs?: BreadcrumbItem[]
@@ -48,6 +48,7 @@ const runsSubTabLabels: Record<RunsSubTab, string> = {
   overview: 'Overview',
   details: 'Details',
   manage: 'Manage',
+  events: 'Events',
 }
 
 export function FloatingNav({

@@ -43,7 +43,8 @@ export function RunVisibilitySelector({
 
   return (
     <div className={`border-t border-border ${compact ? 'pt-2' : 'pt-3'}`}>
-      <div className="flex items-center justify-between mb-2">
+
+      {/* <div className="flex items-center justify-between mb-2">
         <p className="text-xs text-muted-foreground">Toggle visibility:</p>
         {onOpenManage && (
           <Button
@@ -56,7 +57,7 @@ export function RunVisibilitySelector({
             Manage
           </Button>
         )}
-      </div>
+      </div> */}
 
       {/* Visibility Groups */}
       {visibilityGroups.length > 0 && (
@@ -68,11 +69,10 @@ export function RunVisibilitySelector({
                 key={group.id}
                 type="button"
                 onClick={() => handleGroupClick(group.id)}
-                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all border ${
-                  isActive
+                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all border ${isActive
                     ? 'border-accent bg-accent/20 text-accent'
                     : 'border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:border-muted-foreground/50'
-                }`}
+                  }`}
               >
                 <div
                   className="h-2 w-2 rounded-full"
@@ -95,11 +95,10 @@ export function RunVisibilitySelector({
               key={run.id}
               type="button"
               onClick={() => onToggleVisibility(run.id)}
-              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
-                isVisible
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${isVisible
                   ? 'bg-secondary text-foreground'
                   : 'bg-secondary/30 text-muted-foreground'
-              }`}
+                }`}
             >
               <div
                 className={`h-2 w-2 rounded-full ${!isVisible && 'opacity-40'}`}

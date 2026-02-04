@@ -38,7 +38,7 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         isFavorite: false,
         tags: [],
         notes: '',
-        color: '#4ade80',
+        color: run.color || '#4ade80',
         // Pass through metrics/charts from API (mock or real)
         lossHistory: run.lossHistory,
         metrics: run.metrics,

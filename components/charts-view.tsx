@@ -9,6 +9,7 @@ import {
   Layers,
   BarChart3,
   ArrowLeft,
+  Settings,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,6 +21,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import {
   LineChart,
   Line,
@@ -50,18 +58,18 @@ interface ChartsViewProps {
 
 // Generate mock metric data
 const generateMetricData = (metricId: string, runs: ExperimentRun[], visibleRunIds: Set<string>) => {
-  const data: { step: number; [key: string]: number }[] = []
+  const data: { step: number;[key: string]: number }[] = []
   const visibleRuns = runs.filter(r => visibleRunIds.has(r.id))
-  
+
   for (let i = 0; i <= 100; i += 5) {
-    const point: { step: number; [key: string]: number } = { step: i * 100 }
+    const point: { step: number;[key: string]: number } = { step: i * 100 }
     visibleRuns.forEach((run) => {
       if (!run.isArchived && run.lossHistory) {
-        const baseValue = metricId.includes('loss') 
-          ? 2.5 * Math.exp(-i / 30) + 0.1 
-          : metricId.includes('grad') 
-          ? 1.5 * Math.exp(-i / 50) + 0.5 + Math.random() * 0.2
-          : Math.random() * 0.5 + 0.3
+        const baseValue = metricId.includes('loss')
+          ? 2.5 * Math.exp(-i / 30) + 0.1
+          : metricId.includes('grad')
+            ? 1.5 * Math.exp(-i / 50) + 0.5 + Math.random() * 0.2
+            : Math.random() * 0.5 + 0.3
         point[run.name] = Number(baseValue.toFixed(4))
       }
     })
@@ -75,12 +83,13 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
   const [metrics, setMetrics] = useState<MetricVisualization[]>(defaultMetricVisualizations)
   const [selectedLayer, setSelectedLayer] = useState<Record<string, number>>({})
   const [showVisibilityManage, setShowVisibilityManageInternal] = useState(false)
-  
+  const [showVisibilitySection, setShowVisibilitySection] = useState(false)
+
   const setShowVisibilityManage = (show: boolean) => {
     setShowVisibilityManageInternal(show)
     onShowVisibilityManageChange?.(show)
   }
-  
+
   // Visibility state
   const activeRuns = runs.filter(r => !r.isArchived && r.lossHistory && r.lossHistory.length > 0)
   const [visibleRunIds, setVisibleRunIds] = useState<Set<string>>(
@@ -133,20 +142,20 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
   }
 
   const handleToggleMetricPin = (metricId: string) => {
-    setMetrics(prev => prev.map(m => 
+    setMetrics(prev => prev.map(m =>
       m.id === metricId ? { ...m, isPinned: !m.isPinned } : m
     ))
   }
 
   const handleToggleMetricOverview = (metricId: string) => {
-    setMetrics(prev => prev.map(m => 
+    setMetrics(prev => prev.map(m =>
       m.id === metricId ? { ...m, isInOverview: !m.isInOverview } : m
     ))
   }
 
   const renderMetricChart = (metric: MetricVisualization) => {
     const data = generateMetricData(metric.id, runs, visibleRunIds)
-    
+
     const ChartComponent = metric.type === 'area' ? AreaChart : LineChart
     const DataComponent = metric.type === 'area' ? Area : Line
 
@@ -198,21 +207,21 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
         <div className="h-36">
           <ResponsiveContainer width="100%" height="100%">
             <ChartComponent data={data}>
-              <XAxis 
-                dataKey="step" 
+              <XAxis
+                dataKey="step"
                 tick={{ fontSize: 10, fill: '#888' }}
                 axisLine={{ stroke: '#333' }}
                 tickLine={false}
               />
-              <YAxis 
+              <YAxis
                 tick={{ fontSize: 10, fill: '#888' }}
                 axisLine={{ stroke: '#333' }}
                 tickLine={false}
                 width={35}
               />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1a1a1a', 
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#1a1a1a',
                   border: '1px solid #333',
                   borderRadius: '8px',
                   fontSize: '11px'
@@ -352,46 +361,70 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     <div className="flex flex-col h-full overflow-hidden">
       {/* Section Tabs */}
       <div className="shrink-0 border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2 rounded-lg bg-secondary p-1">
-          <button
-            type="button"
-            onClick={() => setActiveSection('standard')}
-            className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-              activeSection === 'standard'
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-2 rounded-lg bg-secondary p-1">
+            <button
+              type="button"
+              onClick={() => setActiveSection('standard')}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeSection === 'standard'
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Layers className="h-4 w-4" />
-            Standard
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSection('custom')}
-            className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-              activeSection === 'custom'
+                }`}
+            >
+              <Layers className="h-4 w-4" />
+              Standard
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('custom')}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeSection === 'custom'
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <BarChart3 className="h-4 w-4" />
-            Custom
-          </button>
+                }`}
+            >
+              <BarChart3 className="h-4 w-4" />
+              Custom
+            </button>
+          </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9">
+                <Settings className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56">
+              <div className="space-y-4">
+                <h4 className="font-medium text-sm">Chart Settings</h4>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="show-visibility" className="text-sm">
+                    Show visibility toggle
+                  </Label>
+                  <Switch
+                    id="show-visibility"
+                    checked={showVisibilitySection}
+                    onCheckedChange={setShowVisibilitySection}
+                  />
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
-      {/* Run Visibility Selector - Sticky */}
-      <div className="shrink-0 border-b border-border bg-background px-4 py-3">
-        <RunVisibilitySelector
-          runs={activeRuns}
-          visibleRunIds={visibleRunIds}
-          onToggleVisibility={toggleRunVisibility}
-          visibilityGroups={visibilityGroups}
-          activeGroupId={activeGroupId}
-          onSelectGroup={handleSelectGroup}
-          onOpenManage={() => setShowVisibilityManage(true)}
-        />
-      </div>
+      {/* Run Visibility Selector - Sticky (conditionally shown) */}
+      {showVisibilitySection && (
+        <div className="shrink-0 border-b border-border bg-background px-4 py-3">
+          <RunVisibilitySelector
+            runs={activeRuns}
+            visibleRunIds={visibleRunIds}
+            onToggleVisibility={toggleRunVisibility}
+            visibilityGroups={visibilityGroups}
+            activeGroupId={activeGroupId}
+            onSelectGroup={handleSelectGroup}
+            onOpenManage={() => setShowVisibilityManage(true)}
+          />
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
