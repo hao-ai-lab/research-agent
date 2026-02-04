@@ -14,6 +14,7 @@ import {
   Star,
   ArrowLeft,
   ChevronRight,
+  ChevronDown,
   AlertTriangle,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -250,17 +251,49 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <div
-                className="h-3 w-3 rounded-full shrink-0"
-                style={{ backgroundColor: selectedRun.color || '#4ade80' }}
-              />
-              <h2 className="font-semibold text-foreground truncate"><RunName run={selectedRun} /></h2>
-              {selectedRun.isFavorite && <Star className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0" />}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {selectedRun.config?.model}
-            </p>
+            <Select 
+              value={selectedRun.id} 
+              onValueChange={(id) => {
+                const newRun = runs.find(r => r.id === id)
+                if (newRun) setSelectedRun(newRun)
+              }}
+            >
+              <SelectTrigger className="h-auto p-0 border-0 bg-transparent hover:bg-secondary/50 rounded-lg px-2 py-1 -ml-2 focus:ring-0 focus:ring-offset-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div
+                    className="h-3 w-3 rounded-full shrink-0"
+                    style={{ backgroundColor: selectedRun.color || '#4ade80' }}
+                  />
+                  <div className="text-left min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground truncate"><RunName run={selectedRun} /></span>
+                      {selectedRun.isFavorite && <Star className="h-3.5 w-3.5 text-yellow-500 fill-yellow-500 shrink-0" />}
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {selectedRun.config?.model}
+                    </p>
+                  </div>
+                </div>
+              </SelectTrigger>
+              <SelectContent align="start" className="max-h-[300px]">
+                {runs.map((r) => (
+                  <SelectItem key={r.id} value={r.id} className="py-2">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="h-2.5 w-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: r.color || '#4ade80' }}
+                      />
+                      <span className="truncate max-w-[180px]"><RunName run={r} /></span>
+                      {r.isFavorite && <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0" />}
+                      <span className={`ml-auto text-[10px] ${getStatusDotColor(r.status).replace('bg-', 'text-')}`}>
+                        {getStatusText(r.status)}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <Badge variant="outline" className={getStatusBadgeClass(selectedRun.status)}>
             {getStatusText(selectedRun.status)}
@@ -268,7 +301,9 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
         </div>
         <div className="flex-1 min-h-0 overflow-hidden">
           <RunDetailView 
-            run={selectedRun} 
+            run={selectedRun}
+            runs={runs}
+            onRunSelect={(r) => setSelectedRun(r)}
             onUpdateRun={onUpdateRun}
             allTags={allTags}
             onCreateTag={onCreateTag}
