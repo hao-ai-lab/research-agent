@@ -273,34 +273,6 @@ export function NavPage({
                   <span className="font-medium">Report</span>
                 </button>
 
-                {/* Journey - Story */}
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('journey', 'story')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'journey' && journeySubTab === 'story'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
-                >
-                  <Sparkles className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Journey Story</span>
-                </button>
-
-                {/* Journey - Dev Notes */}
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('journey', 'devnotes')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                    activeTab === 'journey' && journeySubTab === 'devnotes'
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                  }`}
-                >
-                  <Code className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Dev Notes</span>
-                </button>
-
                 {/* Settings */}
                 <button
                   type="button"

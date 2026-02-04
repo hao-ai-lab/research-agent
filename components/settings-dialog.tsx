@@ -13,6 +13,8 @@ import {
   X,
   Check,
   ChevronRight,
+  Sparkles,
+  Code,
 } from 'lucide-react'
 import {
   Dialog,
@@ -32,6 +34,7 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void
   settings: AppSettings
   onSettingsChange: (settings: AppSettings) => void
+  onNavigateToJourney?: (subTab: 'story' | 'devnotes') => void
 }
 
 export function SettingsDialog({
@@ -39,6 +42,7 @@ export function SettingsDialog({
   onOpenChange,
   settings,
   onSettingsChange,
+  onNavigateToJourney,
 }: SettingsDialogProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
@@ -103,6 +107,26 @@ export function SettingsDialog({
           icon: Bell,
           type: 'toggle' as const,
           value: settings.notifications.alertsEnabled,
+        },
+      ],
+    },
+    {
+      id: 'about',
+      title: 'About',
+      items: [
+        {
+          id: 'journeyStory',
+          label: 'Journey Story',
+          description: 'Learn about our development journey',
+          icon: Sparkles,
+          type: 'nav' as const,
+        },
+        {
+          id: 'devNotes',
+          label: 'Dev Notes',
+          description: 'Technical notes and documentation',
+          icon: Code,
+          type: 'nav' as const,
         },
       ],
     },
@@ -184,6 +208,33 @@ export function SettingsDialog({
     const Icon = item.icon
 
     switch (item.type) {
+      case 'nav':
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (item.id === 'journeyStory') {
+                onNavigateToJourney?.('story')
+                onOpenChange(false)
+              } else if (item.id === 'devNotes') {
+                onNavigateToJourney?.('devnotes')
+                onOpenChange(false)
+              }
+            }}
+            className="flex w-full items-center justify-between rounded-lg bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                <Icon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        )
       case 'action':
         return (
           <button
