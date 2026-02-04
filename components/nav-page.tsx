@@ -13,6 +13,9 @@ import {
   Sparkles,
   Clock,
   Code,
+  LayoutDashboard,
+  List,
+  Wrench,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -145,95 +148,139 @@ export function NavPage({
               </Button>
             </div>
             
-            {/* Navigation Grid */}
-            <div className="grid grid-cols-2 gap-2 flex-1 content-start">
-              {/* Chat */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('chat')}
-                className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                  activeTab === 'chat'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                }`}
-              >
-                <MessageSquare className="h-5 w-5 shrink-0" />
-                <span className="font-medium">Chat</span>
-              </button>
+            {/* Navigation Grid - All pages flattened */}
+            <ScrollArea className="flex-1">
+              <div className="grid grid-cols-2 gap-2 content-start pb-2">
+                {/* Chat */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('chat')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'chat'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <MessageSquare className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Chat</span>
+                </button>
 
-              {/* Runs */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('runs', 'overview')}
-                className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                  activeTab === 'runs'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                }`}
-              >
-                <FlaskConical className="h-5 w-5 shrink-0" />
-                <span className="font-medium">Runs</span>
-              </button>
+                {/* Runs - Overview */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('runs', 'overview')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'runs' && runsSubTab === 'overview'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <LayoutDashboard className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Runs Overview</span>
+                </button>
 
-              {/* Events */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('events')}
-                className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                  activeTab === 'events'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                }`}
-              >
-                <Bell className="h-5 w-5 shrink-0" />
-                <span className="font-medium">Events</span>
-              </button>
+                {/* Runs - Details */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('runs', 'details')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'runs' && runsSubTab === 'details'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <List className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Runs Details</span>
+                </button>
 
-              {/* Charts */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('charts')}
-                className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                  activeTab === 'charts'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                }`}
-              >
-                <BarChart3 className="h-5 w-5 shrink-0" />
-                <span className="font-medium">Charts</span>
-              </button>
+                {/* Runs - Manage */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('runs', 'manage')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'runs' && runsSubTab === 'manage'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Wrench className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Runs Manage</span>
+                </button>
 
-              {/* Insights */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('insights')}
-                className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                  activeTab === 'insights'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                }`}
-              >
-                <Lightbulb className="h-5 w-5 shrink-0" />
-                <span className="font-medium">Insights</span>
-              </button>
+                {/* Events */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('events')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'events'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Bell className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Events</span>
+                </button>
 
-              {/* Journey */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('journey', 'story')}
-                className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
-                  activeTab === 'journey'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                }`}
-              >
-                <Sparkles className="h-5 w-5 shrink-0" />
-                <span className="font-medium">Journey</span>
-              </button>
-            </div>
+                {/* Charts */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('charts')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'charts'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <BarChart3 className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Charts</span>
+                </button>
+
+                {/* Insights */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('insights')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'insights'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Lightbulb className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Insights</span>
+                </button>
+
+                {/* Journey - Story */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('journey', 'story')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'journey' && journeySubTab === 'story'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Sparkles className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Journey Story</span>
+                </button>
+
+                {/* Journey - Dev Notes */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('journey', 'devnotes')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'journey' && journeySubTab === 'devnotes'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Code className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Dev Notes</span>
+                </button>
+              </div>
+            </ScrollArea>
 
             {/* Quick Actions Row */}
-            <div className="flex gap-2 mt-4 pt-3 border-t border-border/50">
+            <div className="flex gap-2 mt-3 pt-3 border-t border-border/50">
               <button
                 type="button"
                 onClick={() => {
@@ -251,14 +298,6 @@ export function NavPage({
               >
                 <HelpCircle className="h-3.5 w-3.5" />
                 Help
-              </button>
-              <button
-                type="button"
-                onClick={() => handleNavClick('journey', 'devnotes')}
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
-              >
-                <Code className="h-3.5 w-3.5" />
-                Dev Notes
               </button>
             </div>
           </div>
