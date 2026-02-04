@@ -108,6 +108,10 @@ export interface ChatMessage {
     type: string
     url: string
   }[]
+  chart?: {
+    title: string
+    data: LossDataPoint[]
+  }
 }
 
 export interface LossDataPoint {

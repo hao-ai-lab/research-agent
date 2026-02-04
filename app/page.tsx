@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import { FloatingNav } from '@/components/floating-nav'
-import { LeftPanel, type RunsSubTab } from '@/components/left-panel'
+import { NavPage, type RunsSubTab } from '@/components/nav-page'
 import { ChatView } from '@/components/chat-view'
 import { RunsView } from '@/components/runs-view'
 import { ChartsView } from '@/components/charts-view'
@@ -64,6 +64,11 @@ export default function ResearchChat() {
   
   // Events state
   const [events, setEvents] = useState<RunEvent[]>(() => getRunEvents(mockRuns))
+
+  // Chat panel state
+  const [showArtifacts, setShowArtifacts] = useState(false)
+  const [collapseChats, setCollapseChats] = useState(false)
+  const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
 
   // Build breadcrumbs based on current state
   const breadcrumbs = useMemo(() => {
@@ -264,6 +269,14 @@ export default function ResearchChat() {
         runsSubTab={runsSubTab}
         onMenuClick={() => setLeftPanelOpen(true)}
         breadcrumbs={breadcrumbs}
+        eventCount={events.filter(e => e.status === 'new').length}
+        onAlertClick={handleNavigateToEvents}
+        showArtifacts={showArtifacts}
+        onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
+        collapseChats={collapseChats}
+        onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
+        collapseArtifactsInChat={collapseArtifactsInChat}
+        onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
       />
 
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -271,15 +284,13 @@ export default function ResearchChat() {
           <ChatView
             messages={messages}
             runs={runs}
-            events={events}
-            lossData={lossData}
             onSendMessage={handleSendMessage}
             onRunClick={handleRunClick}
-            onNavigateToRun={handleNavigateToRun}
-            onNavigateToEvents={handleNavigateToEvents}
-            onDismissEvent={handleDismissEvent}
             mode={chatMode}
             onModeChange={setChatMode}
+            showArtifacts={showArtifacts}
+            collapseChats={collapseChats}
+            collapseArtifactsInChat={collapseArtifactsInChat}
           />
         )}
         {activeTab === 'runs' && runsSubTab !== 'events' && (
@@ -326,7 +337,7 @@ export default function ResearchChat() {
         )}
       </div>
 
-      <LeftPanel 
+      <NavPage 
         open={leftPanelOpen} 
         onOpenChange={setLeftPanelOpen}
         onSettingsClick={() => setSettingsOpen(true)}
