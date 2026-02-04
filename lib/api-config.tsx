@@ -36,22 +36,25 @@ export function getApiUrl(): string {
 /**
  * Check if mock mode is enabled
  * This can be called outside of React components
+ * Pure runtime behavior - defaults to demo mode (true)
  */
 export function isUsingMock(): boolean {
     if (typeof window === 'undefined') {
-        return process.env.NEXT_PUBLIC_USE_MOCK === 'true'
+        // Server-side: default to demo mode
+        return true
     }
 
     const stored = localStorage.getItem(STORAGE_KEY_USE_MOCK)
     if (stored !== null) {
         return stored === 'true'
     }
-    return process.env.NEXT_PUBLIC_USE_MOCK === 'true'
+    // Default to demo mode if not explicitly set
+    return true
 }
 
 export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
     const [apiUrl, setApiUrlState] = useState<string>(DEFAULT_API_URL)
-    const [useMock, setUseMockState] = useState<boolean>(false)
+    const [useMock, setUseMockState] = useState<boolean>(true) // Default to demo mode
     const [isHydrated, setIsHydrated] = useState(false)
 
     // Load from localStorage on mount
@@ -65,11 +68,11 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
             setApiUrlState(process.env.NEXT_PUBLIC_API_URL)
         }
 
+        // Pure runtime: use localStorage value or default to true
         if (storedMock !== null) {
             setUseMockState(storedMock === 'true')
-        } else if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
-            setUseMockState(true)
         }
+        // If no stored value, keep the default (true)
 
         setIsHydrated(true)
     }, [])

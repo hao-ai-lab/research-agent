@@ -101,11 +101,28 @@ export function ConnectedChatView({
                 <WifiOff className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold text-foreground">Cannot Connect to Backend</h3>
                 <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                    Make sure the backend server is running at localhost:10000
+                    Make sure the backend server is running, or try Demo Mode to explore the app.
                 </p>
                 <code className="mt-4 rounded bg-secondary px-3 py-1 text-xs text-muted-foreground">
-                    cd server-tmp && python server.py
+                    python server.py --workdir /your/project/root
                 </code>
+
+                <div className="mt-6 flex flex-col gap-3">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            // Open settings dialog - uses the global settings trigger
+                            const settingsBtn = document.querySelector('[data-settings-trigger]') as HTMLButtonElement
+                            settingsBtn?.click()
+                        }}
+                        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                    >
+                        Enable Demo Mode
+                    </button>
+                    <p className="text-xs text-muted-foreground">
+                        You can also change the server URL in Settings
+                    </p>
+                </div>
             </div>
         )
     }

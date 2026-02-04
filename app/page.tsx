@@ -414,6 +414,15 @@ export default function ResearchChat() {
           }}
         />
 
+        {/* Hidden trigger for programmatic settings access */}
+        <button
+          type="button"
+          data-settings-trigger
+          onClick={() => setSettingsOpen(true)}
+          className="hidden"
+          aria-hidden="true"
+        />
+
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}

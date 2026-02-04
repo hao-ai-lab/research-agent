@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { useApiConfig } from '@/lib/api-config'
 import type { RunsSubTab } from './left-panel'
 
 interface BreadcrumbItem {
@@ -74,18 +75,29 @@ export function FloatingNav({
 
   const items = breadcrumbs || defaultBreadcrumbs
   const isChat = activeTab === 'chat'
+  const { useMock: isDemoMode } = useApiConfig()
 
   return (
     <header className="shrink-0 h-12 flex items-center gap-3 px-3 border-b border-border bg-background">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onMenuClick}
-        className="h-9 w-9 shrink-0"
-      >
-        <Menu className="h-5 w-5" />
-        <span className="sr-only">Open menu</span>
-      </Button>
+      <div className="relative">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onMenuClick}
+          className={`h-9 w-9 shrink-0 ${isDemoMode ? 'ring-2 ring-red-500/50 ring-offset-1 ring-offset-background' : ''}`}
+        >
+          <Menu className={`h-5 w-5 ${isDemoMode ? 'text-red-500' : ''}`} />
+          <span className="sr-only">Open menu</span>
+        </Button>
+        {isDemoMode && (
+          <Badge
+            variant="destructive"
+            className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold"
+          >
+            dev
+          </Badge>
+        )}
+      </div>
 
       <nav className="flex items-center gap-1.5 text-sm min-w-0 overflow-hidden flex-1">
         {items.map((item, index) => {
