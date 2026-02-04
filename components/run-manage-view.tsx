@@ -216,68 +216,11 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden max-w-full">
       {/* Header with title, selection count, actions, and select all */}
-      <div className="shrink-0 border-b border-border px-4 py-3">
+      <div className="shrink-0 border-b border-border px-4 py-3 overflow-hidden">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3 min-w-0">
-            <h3 className="text-sm font-medium text-foreground shrink-0">Manage Runs</h3>
-            {selectedIds.size > 0 && (
-              <>
-                <span className="text-xs text-muted-foreground shrink-0">
-                  {selectedIds.size} selected
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={archiveSelected}
-                    className="h-7 text-xs px-2 bg-transparent"
-                  >
-                    <Archive className="h-3 w-3 mr-1" />
-                    Archive
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={unarchiveSelected}
-                    className="h-7 text-xs px-2 bg-transparent"
-                  >
-                    <Undo2 className="h-3 w-3 mr-1" />
-                    Unarchive
-                  </Button>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs px-2 bg-transparent"
-                      >
-                        <Palette className="h-3 w-3 mr-1" />
-                        Color
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-44 p-3" align="start">
-                      <p className="text-xs font-medium text-muted-foreground mb-2">
-                        Color for selected
-                      </p>
-                      <div className="grid grid-cols-5 gap-2">
-                        {DEFAULT_RUN_COLORS.map((color) => (
-                          <button
-                            key={color}
-                            type="button"
-                            onClick={() => setColorForSelected(color)}
-                            className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-foreground"
-                            style={{ backgroundColor: color }}
-                          />
-                        ))}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </>
-            )}
-          </div>
+          <h3 className="text-sm font-medium text-foreground shrink-0">Manage Runs</h3>
           <Button
             variant="ghost"
             size="sm"
@@ -287,6 +230,61 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
             {selectedIds.size === runs.length ? 'Deselect All' : 'Select All'}
           </Button>
         </div>
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <span className="text-xs text-muted-foreground shrink-0">
+              {selectedIds.size} selected
+            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={archiveSelected}
+                className="h-7 text-xs px-2 bg-transparent"
+              >
+                <Archive className="h-3 w-3 mr-1" />
+                Archive
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={unarchiveSelected}
+                className="h-7 text-xs px-2 bg-transparent"
+              >
+                <Undo2 className="h-3 w-3 mr-1" />
+                Unarchive
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs px-2 bg-transparent"
+                  >
+                    <Palette className="h-3 w-3 mr-1" />
+                    Color
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-44 p-3" align="start">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                    Color for selected
+                  </p>
+                  <div className="grid grid-cols-5 gap-2">
+                    {DEFAULT_RUN_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setColorForSelected(color)}
+                        className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-foreground"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
