@@ -9,13 +9,20 @@ import type {
   ChatMessage as ChatMessageType,
   ExperimentRun,
   Artifact,
+  Sweep,
+  SweepConfig,
+  InsightChart,
 } from '@/lib/types'
 
 interface ChatViewProps {
   messages: ChatMessageType[]
   runs: ExperimentRun[]
+  sweeps?: Sweep[]
+  charts?: InsightChart[]
   onSendMessage: (message: string, attachments?: File[], mode?: ChatMode) => void
   onRunClick: (run: ExperimentRun) => void
+  onEditSweep?: (config: SweepConfig) => void
+  onLaunchSweep?: (config: SweepConfig) => void
   mode: ChatMode
   onModeChange: (mode: ChatMode) => void
   showArtifacts?: boolean
@@ -26,8 +33,12 @@ interface ChatViewProps {
 export function ChatView({
   messages,
   runs,
+  sweeps = [],
+  charts = [],
   onSendMessage,
   onRunClick,
+  onEditSweep,
+  onLaunchSweep,
   mode,
   onModeChange,
   showArtifacts = false,
@@ -98,7 +109,16 @@ export function ChatView({
                 ) : (
                   // Normal view
                   messages.map((message) => (
-                    <ChatMessage key={message.id} message={message} collapseArtifacts={collapseArtifactsInChat} />
+                    <ChatMessage 
+                      key={message.id} 
+                      message={message} 
+                      collapseArtifacts={collapseArtifactsInChat}
+                      sweeps={sweeps}
+                      runs={runs}
+                      onEditSweep={onEditSweep}
+                      onLaunchSweep={onLaunchSweep}
+                      onRunClick={onRunClick}
+                    />
                   ))
                 )}
               </div>
@@ -144,6 +164,10 @@ export function ChatView({
             onSend={onSendMessage} 
             mode={mode}
             onModeChange={onModeChange}
+            runs={runs}
+            artifacts={allArtifacts}
+            charts={charts}
+            messages={messages}
           />
         </div>
       </div>

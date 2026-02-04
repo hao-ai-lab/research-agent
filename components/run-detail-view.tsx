@@ -57,6 +57,8 @@ import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data
 
 interface RunDetailViewProps {
   run: ExperimentRun
+  runs?: ExperimentRun[]
+  onRunSelect?: (run: ExperimentRun) => void
   onUpdateRun?: (run: ExperimentRun) => void
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
@@ -182,7 +184,7 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, onUpdateRun, allTags, onCreateTag }: RunDetailViewProps) {
+export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
