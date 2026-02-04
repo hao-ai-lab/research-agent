@@ -3,7 +3,6 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AlertBar } from './alert-bar'
-import { LossChart } from './loss-chart'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
 import { ArtifactsPanel } from './artifacts-panel'
@@ -11,7 +10,6 @@ import { HistoryPanel } from './history-panel'
 import type {
   ChatMessage as ChatMessageType,
   ExperimentRun,
-  LossDataPoint,
   RunEvent,
   Artifact,
 } from '@/lib/types'
@@ -20,13 +18,12 @@ interface ChatViewProps {
   messages: ChatMessageType[]
   runs: ExperimentRun[]
   events: RunEvent[]
-  lossData: LossDataPoint[]
   onSendMessage: (message: string, attachments?: File[], mode?: ChatMode) => void
   onRunClick: (run: ExperimentRun) => void
   onNavigateToRun: (runId: string) => void
   onNavigateToEvents: () => void
   onDismissEvent: (eventId: string) => void
-  showChart?: boolean
+  
   mode: ChatMode
   onModeChange: (mode: ChatMode) => void
   showArtifacts?: boolean
@@ -38,13 +35,12 @@ export function ChatView({
   messages,
   runs,
   events,
-  lossData,
   onSendMessage,
   onRunClick,
   onNavigateToRun,
   onNavigateToEvents,
   onDismissEvent,
-  showChart = true,
+  
   mode,
   onModeChange,
   showArtifacts = false,
@@ -114,12 +110,6 @@ export function ChatView({
         <div className="flex-1 min-h-0 overflow-hidden">
           <ScrollArea className="h-full" ref={scrollRef}>
             <div className="pb-4">
-              {showChart && messages.length > 0 && (
-                <div className="px-4 pt-4">
-                  <LossChart data={lossData} title="GPT-4 Fine-tune Training Loss" />
-                </div>
-              )}
-
               <div className="mt-4 space-y-1">
                 {collapseChats ? (
                   // Collapsed view - show pairs
@@ -195,6 +185,12 @@ function CollapsibleChatPair({ pair }: { pair: { user: ChatMessageType; assistan
   if (!pair.user.content) return null
 
   const preview = pair.user.content.slice(0, 60) + (pair.user.content.length > 60 ? '...' : '')
+  
+  const formatDateTime = (date: Date) => {
+    const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return `${dateStr}, ${timeStr}`
+  }
 
   return (
     <div className="border-b border-border/50">
@@ -206,7 +202,7 @@ function CollapsibleChatPair({ pair }: { pair: { user: ChatMessageType; assistan
         <span className={`text-xs transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
         <span className="text-sm text-muted-foreground truncate flex-1">{preview}</span>
         <span className="text-xs text-muted-foreground/60">
-          {new Date(pair.user.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {formatDateTime(new Date(pair.user.timestamp))}
         </span>
       </button>
       {expanded && (

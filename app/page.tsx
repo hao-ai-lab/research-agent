@@ -285,7 +285,6 @@ export default function ResearchChat() {
             messages={messages}
             runs={runs}
             events={events}
-            lossData={lossData}
             onSendMessage={handleSendMessage}
             onRunClick={handleRunClick}
             onNavigateToRun={handleNavigateToRun}

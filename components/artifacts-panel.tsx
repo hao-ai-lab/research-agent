@@ -53,7 +53,7 @@ export function ArtifactsPanel({ artifacts }: ArtifactsPanelProps) {
                     {artifact.name}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    {new Date(artifact.timestamp).toLocaleDateString()}
+                    {new Date(artifact.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </p>
                 </div>
               </button>

@@ -9,6 +9,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { LossChart } from './loss-chart'
 import type { ChatMessage as ChatMessageType } from '@/lib/types'
 
 interface ChatMessageProps {
@@ -19,8 +20,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const isUser = message.role === 'user'
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const formatDateTime = (date: Date) => {
+    const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return `${dateStr}, ${timeStr}`
   }
 
   const renderMarkdown = (content: string) => {
@@ -139,7 +142,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary">
           <Brain className="h-4 w-4 text-foreground" />
         </div>
-        <div className="flex-1 space-y-2">
+        <div className="flex-1 min-w-0 space-y-2">
           {message.thinking && (
             <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
               <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
@@ -152,7 +155,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
                 <span>Thinking process</span>
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-2">
-                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
+                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
                   {message.thinking.split('\n').map((line, i) => (
                     <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                       {line}
@@ -163,12 +166,19 @@ export function ChatMessage({ message }: ChatMessageProps) {
             </Collapsible>
           )}
 
+          {/* Embedded Chart - rendered before text content */}
+          {message.chart && (
+            <div className="mb-3">
+              <LossChart data={message.chart.data} title={message.chart.title} />
+            </div>
+          )}
+
           <div className="rounded-2xl rounded-tl-md bg-card px-4 py-3 text-sm leading-relaxed">
             {renderMarkdown(message.content)}
           </div>
 
           <span className="text-[10px] text-muted-foreground">
-            {formatTime(message.timestamp)}
+            {formatDateTime(message.timestamp)}
           </span>
         </div>
       </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, ChevronRight, Bell, FileBox, Settings, History } from 'lucide-react'
+import { Menu, ChevronRight, Bell, Settings, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -137,17 +137,6 @@ export function FloatingNav({
             <span className="sr-only">View alerts ({eventCount})</span>
           </Button>
 
-          {/* Artifact Button */}
-          <Button
-            variant={showArtifacts ? 'secondary' : 'ghost'}
-            size="icon"
-            onClick={onToggleArtifacts}
-            className="h-8 w-8"
-          >
-            <FileBox className="h-4 w-4" />
-            <span className="sr-only">Toggle artifacts</span>
-          </Button>
-
           {/* Settings Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -163,6 +152,20 @@ export function FloatingNav({
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Chat Settings</DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="flex items-center justify-between cursor-pointer"
+                onSelect={(e) => {
+                  e.preventDefault()
+                  onToggleArtifacts?.()
+                }}
+              >
+                <Label htmlFor="show-artifacts" className="cursor-pointer">Show artifacts</Label>
+                <Switch
+                  id="show-artifacts"
+                  checked={showArtifacts}
+                  onCheckedChange={onToggleArtifacts}
+                />
+              </DropdownMenuItem>
               <DropdownMenuItem 
                 className="flex items-center justify-between cursor-pointer"
                 onSelect={(e) => {

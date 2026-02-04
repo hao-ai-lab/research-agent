@@ -360,6 +360,21 @@ export const mockRuns: ExperimentRun[] = [
   },
 ]
 
+// Helper function to generate loss data for embedded charts
+const generateEmbeddedLossData = (): { step: number; trainLoss: number; valLoss?: number }[] => {
+  const data: { step: number; trainLoss: number; valLoss?: number }[] = []
+  for (let i = 0; i <= 100; i += 2) {
+    const trainLoss = 2.5 * Math.exp(-i / 30) + 0.1 + Math.random() * 0.05
+    const valLoss = 2.5 * Math.exp(-i / 35) + 0.15 + Math.random() * 0.08
+    data.push({
+      step: i * 100,
+      trainLoss: Number(trainLoss.toFixed(4)),
+      valLoss: Number(valLoss.toFixed(4)),
+    })
+  }
+  return data
+}
+
 export const mockMessages: ChatMessage[] = [
   {
     id: '1',
@@ -405,6 +420,10 @@ Evaluating hyperparameters:
 
 Generating recommendations based on trajectory...`,
     timestamp: new Date(Date.now() - 9 * 60 * 1000),
+    chart: {
+      title: 'GPT-4 Fine-tune Training Loss',
+      data: generateEmbeddedLossData(),
+    },
   },
   {
     id: '3',
