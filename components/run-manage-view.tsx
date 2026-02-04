@@ -136,23 +136,28 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
 
     return (
       <div
-        className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${
+        role="button"
+        tabIndex={0}
+        onClick={() => toggleSelect(run.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggleSelect(run.id)
+          }
+        }}
+        className={`flex items-center gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
           isSelected
             ? 'border-accent bg-accent/10'
-            : 'border-border bg-card hover:border-muted-foreground/50'
+            : 'border-border bg-card hover:border-muted-foreground/50 hover:bg-secondary/30'
         }`}
       >
-        <button
-          type="button"
-          onClick={() => toggleSelect(run.id)}
-          className="shrink-0"
-        >
+        <div className="shrink-0">
           {isSelected ? (
             <CheckSquare className="h-5 w-5 text-accent" />
           ) : (
             <Square className="h-5 w-5 text-muted-foreground" />
           )}
-        </button>
+        </div>
 
         <div
           className="h-4 w-4 rounded-full shrink-0 border border-border"
@@ -168,7 +173,7 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           {run.isArchived && (
             <Badge
               variant="outline"
