@@ -94,7 +94,7 @@ export function FloatingNav({
             variant="destructive"
             className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold"
           >
-            dev
+            demo
           </Badge>
         )}
       </div>
