@@ -9,6 +9,7 @@ import { ChartsView } from '@/components/charts-view'
 import { InsightsView } from '@/components/insights-view'
 import { EventsView } from '@/components/events-view'
 import { JourneyView } from '@/components/journey-view'
+import { ReportView } from '@/components/report-view'
 import { SettingsDialog } from '@/components/settings-dialog'
 import type { ChatMode } from '@/components/chat-input'
 import { mockRuns, mockMessages, generateLossData, mockMemoryRules, mockInsightCharts, defaultTags, getRunEvents } from '@/lib/mock-data'
@@ -27,21 +28,22 @@ const defaultSettings: AppSettings = {
   },
 }
 
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'insights' | 'journey'
+type ActiveTab = 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report'
 
 const tabLabels: Record<ActiveTab, string> = {
   chat: 'Chat',
   runs: 'Runs',
   charts: 'Charts',
   insights: 'Insights',
+  events: 'Events',
   journey: 'Journey',
+  report: 'Report',
 }
 
 const runsSubTabLabels: Record<RunsSubTab, string> = {
   overview: 'Overview',
   details: 'Details',
   manage: 'Manage',
-  events: 'Events',
 }
 
 export default function ResearchChat() {
@@ -117,8 +119,12 @@ export default function ResearchChat() {
       } else {
         items.push({ label: 'Charts' })
       }
+    } else if (activeTab === 'events') {
+      items.push({ label: 'Events' })
     } else if (activeTab === 'insights') {
       items.push({ label: 'Insights' })
+    } else if (activeTab === 'report') {
+      items.push({ label: 'Report' })
     } else if (activeTab === 'journey') {
       items.push({ label: 'Our Journey' })
     }
@@ -306,7 +312,7 @@ export default function ResearchChat() {
             onShowVisibilityManageChange={setShowVisibilityManage}
           />
         )}
-        {activeTab === 'runs' && runsSubTab === 'events' && (
+        {activeTab === 'events' && (
           <EventsView
             events={events}
             onNavigateToRun={handleNavigateToRun}
@@ -331,7 +337,10 @@ export default function ResearchChat() {
             onAddRule={handleAddRule}
           />
         )}
-{activeTab === 'journey' && (
+        {activeTab === 'report' && (
+          <ReportView runs={runs} />
+        )}
+        {activeTab === 'journey' && (
             <JourneyView
               onBack={() => setActiveTab('chat')}
               subTab={journeySubTab}

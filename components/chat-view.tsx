@@ -175,7 +175,7 @@ function CollapsibleChatPair({ pair, collapseArtifacts = false }: { pair: { user
       >
         <span className={`text-xs transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
         <span className="text-sm text-muted-foreground truncate flex-1">{preview}</span>
-        <span className="text-xs text-muted-foreground/60">
+        <span className="text-xs text-muted-foreground/60" suppressHydrationWarning>
           {formatDateTime(new Date(pair.user.timestamp))}
         </span>
       </button>

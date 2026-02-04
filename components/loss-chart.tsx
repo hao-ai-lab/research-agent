@@ -6,7 +6,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  ResponsiveContainer,
   Legend,
 } from 'recharts'
 import {
@@ -38,45 +37,43 @@ export function LossChart({ data, title = 'Training Loss' }: LossChartProps) {
         }}
         className="h-[180px] w-full"
       >
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-            <XAxis
-              dataKey="step"
-              tick={{ fill: '#888', fontSize: 10 }}
-              tickLine={{ stroke: '#444' }}
-              axisLine={{ stroke: '#444' }}
-              tickFormatter={(value) => `${value / 1000}k`}
-            />
-            <YAxis
-              tick={{ fill: '#888', fontSize: 10 }}
-              tickLine={{ stroke: '#444' }}
-              axisLine={{ stroke: '#444' }}
-              domain={[0, 'auto']}
-            />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            <Legend
-              wrapperStyle={{ fontSize: '12px' }}
-              iconSize={8}
-            />
-            <Line
-              type="monotone"
-              dataKey="trainLoss"
-              stroke="#4ade80"
-              strokeWidth={2}
-              dot={false}
-              name="Train Loss"
-            />
-            <Line
-              type="monotone"
-              dataKey="valLoss"
-              stroke="#60a5fa"
-              strokeWidth={2}
-              dot={false}
-              name="Val Loss"
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+          <XAxis
+            dataKey="step"
+            tick={{ fill: '#888', fontSize: 10 }}
+            tickLine={{ stroke: '#444' }}
+            axisLine={{ stroke: '#444' }}
+            tickFormatter={(value) => `${value / 1000}k`}
+          />
+          <YAxis
+            tick={{ fill: '#888', fontSize: 10 }}
+            tickLine={{ stroke: '#444' }}
+            axisLine={{ stroke: '#444' }}
+            domain={[0, 'auto']}
+          />
+          <ChartTooltip content={<ChartTooltipContent />} />
+          <Legend
+            wrapperStyle={{ fontSize: '12px' }}
+            iconSize={8}
+          />
+          <Line
+            type="monotone"
+            dataKey="trainLoss"
+            stroke="#4ade80"
+            strokeWidth={2}
+            dot={false}
+            name="Train Loss"
+          />
+          <Line
+            type="monotone"
+            dataKey="valLoss"
+            stroke="#60a5fa"
+            strokeWidth={2}
+            dot={false}
+            name="Val Loss"
+          />
+        </LineChart>
       </ChartContainer>
     </div>
   )

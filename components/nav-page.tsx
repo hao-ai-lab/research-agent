@@ -1,41 +1,78 @@
 'use client'
 
+import { useState } from 'react'
 import {
   MessageSquare,
   FlaskConical,
   Settings,
-  HelpCircle,
   BarChart3,
   Lightbulb,
   Plus,
-  ChevronRight,
-  X,
+  ChevronLeft,
+  Bell,
+  Sparkles,
+  Clock,
+  Code,
   LayoutDashboard,
   List,
   Wrench,
-  Bell,
-  Sparkles,
+  Search,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import { useState, useEffect } from 'react'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Input } from '@/components/ui/input'
 
-export type RunsSubTab = 'overview' | 'details' | 'manage' | 'events'
+export type RunsSubTab = 'overview' | 'details' | 'manage'
 export type JourneySubTab = 'story' | 'devnotes'
+
+// Mock chat history data
+const mockChatHistory = [
+  {
+    id: 'chat-1',
+    title: 'GPT-4 Fine-tuning Analysis',
+    preview: 'Can you analyze the loss curve for my GPT-4 fine-tuning run?',
+    timestamp: new Date(Date.now() - 10 * 60 * 1000),
+    messageCount: 8,
+  },
+  {
+    id: 'chat-2',
+    title: 'Hyperparameter Optimization',
+    preview: 'What learning rate should I use for my transformer model?',
+    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    messageCount: 12,
+  },
+  {
+    id: 'chat-3',
+    title: 'Debugging OOM Errors',
+    preview: 'My training keeps running out of memory on the A100...',
+    timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    messageCount: 15,
+  },
+  {
+    id: 'chat-4',
+    title: 'Dataset Preprocessing',
+    preview: 'How should I tokenize my dataset for BERT fine-tuning?',
+    timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+    messageCount: 6,
+  },
+  {
+    id: 'chat-5',
+    title: 'Model Comparison',
+    preview: 'Compare the performance of GPT-3.5 vs GPT-4 on my task',
+    timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    messageCount: 20,
+  },
+]
 
 interface NavPageProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
-  activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey'
+  activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report'
   runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
-  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => void
+  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report') => void
   onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
 }
@@ -51,42 +88,15 @@ export function NavPage({
   onRunsSubTabChange,
   onJourneySubTabChange,
 }: NavPageProps) {
-  const [runsExpanded, setRunsExpanded] = useState(() => {
-    // Check localStorage for saved state, default to true (expanded)
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('runsExpanded')
-      return saved !== null ? JSON.parse(saved) : true
-    }
-    return true
-  })
+  const [searchQuery, setSearchQuery] = useState('')
 
-  const [journeyExpanded, setJourneyExpanded] = useState(() => {
-    // Check localStorage for saved state, default to false
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('journeyExpanded')
-      return saved !== null ? JSON.parse(saved) : false
-    }
-    return false
-  })
-
-  // Update localStorage when runsExpanded changes
-  const handleRunsExpandedChange = (expanded: boolean) => {
-    setRunsExpanded(expanded)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('runsExpanded', JSON.stringify(expanded))
-    }
-  }
-
-  // Update localStorage when journeyExpanded changes
-  const handleJourneyExpandedChange = (expanded: boolean) => {
-    setJourneyExpanded(expanded)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('journeyExpanded', JSON.stringify(expanded))
-    }
-  }
+  const filteredChats = mockChatHistory.filter(chat => 
+    chat.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    chat.preview.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
   const handleNavClick = (
-    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey',
+    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'events' | 'journey' | 'report',
     subTab?: RunsSubTab | JourneySubTab
   ) => {
     onTabChange(tab)
@@ -99,228 +109,272 @@ export function NavPage({
     onOpenChange(false)
   }
 
+  const formatRelativeTime = (date: Date) => {
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays < 7) return `${diffDays}d ago`
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  }
+
   if (!open) return null
 
   return (
-    <>
-      {/* Overlay backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/50"
-        onClick={() => onOpenChange(false)}
-      />
+    <div className="fixed inset-0 z-50 bg-background flex flex-col animate-in slide-in-from-left duration-200">
+      {/* Header */}
+      <header className="shrink-0 border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <FlaskConical className="h-5 w-5 text-primary" />
+            <span className="font-semibold text-foreground">Research Lab</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            className="gap-2"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Back
+          </Button>
+        </div>
+      </header>
 
-      {/* Navigation Page - slides in from left */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-background shadow-lg transition-transform duration-300 ease-out ${open ? 'translate-x-0' : '-translate-x-full'
-          }`}
-      >
-        {/* Header */}
-        <div className="border-b border-border p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <FlaskConical className="h-5 w-5 text-accent" />
-              <span className="font-semibold text-foreground">Research Lab</span>
+      {/* Main Content - Split into two halves */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Half - Navigation Pages */}
+        <div className="flex-1 min-h-0 border-b border-border">
+          <div className="p-4 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Pages</h2>
+              <Button size="sm" className="gap-1.5 h-8">
+                <Plus className="h-3.5 w-3.5" />
+                New Chat
+              </Button>
             </div>
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <X className="h-5 w-5" />
-              <span className="sr-only">Close navigation</span>
-            </button>
+            
+            {/* Navigation Grid - All pages flattened */}
+            <ScrollArea className="flex-1">
+              <div className="grid grid-cols-2 gap-2 content-start pb-2">
+                {/* Chat */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('chat')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'chat'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <MessageSquare className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Chat</span>
+                </button>
+
+                {/* Runs - Overview */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('runs', 'overview')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'runs' && runsSubTab === 'overview'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <LayoutDashboard className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Runs Overview</span>
+                </button>
+
+                {/* Runs - Details */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('runs', 'details')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'runs' && runsSubTab === 'details'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <List className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Runs Details</span>
+                </button>
+
+                {/* Runs - Manage */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('runs', 'manage')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'runs' && runsSubTab === 'manage'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Wrench className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Runs Manage</span>
+                </button>
+
+                {/* Events */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('events')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'events'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Bell className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Events</span>
+                </button>
+
+                {/* Charts */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('charts')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'charts'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <BarChart3 className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Charts</span>
+                </button>
+
+                {/* Insights */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('insights')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'insights'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Lightbulb className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Insights</span>
+                </button>
+
+                {/* Report */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('report')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'report'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <FileText className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Report</span>
+                </button>
+
+                {/* Journey - Story */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('journey', 'story')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'journey' && journeySubTab === 'story'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Sparkles className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Journey Story</span>
+                </button>
+
+                {/* Journey - Dev Notes */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('journey', 'devnotes')}
+                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${
+                    activeTab === 'journey' && journeySubTab === 'devnotes'
+                      ? 'bg-primary/10 text-primary border border-primary/20'
+                      : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <Code className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Dev Notes</span>
+                </button>
+
+                {/* Settings */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenChange(false)
+                    onSettingsClick()
+                  }}
+                  className="flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left bg-secondary/50 text-foreground hover:bg-secondary"
+                >
+                  <Settings className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Settings</span>
+                </button>
+              </div>
+            </ScrollArea>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex flex-col h-[calc(100%-65px)]">
-          <div className="p-4">
-            <Button className="w-full gap-2 bg-accent text-accent-foreground hover:bg-accent/90">
-              <Plus className="h-4 w-4" />
-              New Chat
-            </Button>
+        {/* Bottom Half - Chat History */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="px-4 py-3 border-b border-border/50">
+            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Recent Chats</h2>
           </div>
-
-          {/* Navigation Menu */}
-          <nav className="flex-1 overflow-y-auto px-2">
-            <div className="space-y-1">
-              {/* Chat */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('chat')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'chat'
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-              >
-                <MessageSquare className="h-4 w-4" />
-                Chat
-              </button>
-
-              {/* Runs with sub-navigation */}
-              <Collapsible open={runsExpanded} onOpenChange={handleRunsExpandedChange}>
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'runs'
-                      ? 'bg-secondary text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
-                  >
-                    <FlaskConical className="h-4 w-4" />
-                    <span className="flex-1 text-left">Runs</span>
-                    <ChevronRight
-                      className={`h-4 w-4 transition-transform ${runsExpanded ? 'rotate-90' : ''}`}
-                    />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'overview')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'overview'
-                        ? 'bg-secondary/70 text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                        }`}
-                    >
-                      <LayoutDashboard className="h-3.5 w-3.5" />
-                      Overview
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'details')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'details'
-                        ? 'bg-secondary/70 text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                        }`}
-                    >
-                      <List className="h-3.5 w-3.5" />
-                      Details
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'manage')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'manage'
-                        ? 'bg-secondary/70 text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                        }`}
-                    >
-                      <Wrench className="h-3.5 w-3.5" />
-                      Manage
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'events')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'events'
-                        ? 'bg-secondary/70 text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                        }`}
-                    >
-                      <Bell className="h-3.5 w-3.5" />
-                      Events
-                    </button>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-
-              {/* Charts */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('charts')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'charts'
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-              >
-                <BarChart3 className="h-4 w-4" />
-                Charts
-              </button>
-
-              {/* Insights */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('insights')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'insights'
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-              >
-                <Lightbulb className="h-4 w-4" />
-                Insights
-              </button>
-            </div>
-          </nav>
-
-          <Separator />
-
-          {/* Bottom Menu */}
-          <div className="p-2">
-            <button
-              type="button"
-              onClick={() => {
-                onOpenChange(false)
-                onSettingsClick()
-              }}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <Settings className="h-4 w-4" />
-              Settings
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <HelpCircle className="h-4 w-4" />
-              Help & Support
-            </button>
-            <Collapsible open={journeyExpanded} onOpenChange={handleJourneyExpandedChange}>
-              <CollapsibleTrigger asChild>
-                <button
-                  type="button"
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'journey'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-                    }`}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  <span className="flex-1 text-left">Our Journey</span>
-                  <ChevronRight
-                    className={`h-4 w-4 transition-transform ${journeyExpanded ? 'rotate-90' : ''}`}
-                  />
-                </button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
-                  <button
-                    type="button"
-                    onClick={() => handleNavClick('journey', 'story')}
-                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'journey' && journeySubTab === 'story'
-                      ? 'bg-secondary/70 text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Story
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleNavClick('journey', 'devnotes')}
-                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'journey' && journeySubTab === 'devnotes'
-                      ? 'bg-secondary/70 text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
-                  >
-                    {/* <Code className="h-3.5 w-3.5" /> */}
-                    <Sparkles className="h-4 w-4" />
-                    Dev Notes
-                  </button>
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-2 space-y-1">
+              {filteredChats.length === 0 ? (
+                <div className="text-center py-6 text-sm text-muted-foreground">
+                  No chats found
                 </div>
-              </CollapsibleContent>
-            </Collapsible>
+              ) : (
+                filteredChats.map((chat) => (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    onClick={() => handleNavClick('chat')}
+                    className="w-full text-left p-3 rounded-lg hover:bg-secondary/50 transition-colors group"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h3 className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">
+                        {chat.title}
+                      </h3>
+                      <span className="text-[10px] text-muted-foreground shrink-0 flex items-center gap-1" suppressHydrationWarning>
+                        <Clock className="h-3 w-3" />
+                        {formatRelativeTime(chat.timestamp)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mb-1.5">
+                      {chat.preview}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground/70">
+                        {chat.messageCount} messages
+                      </span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+          
+          {/* Search Bar at Bottom */}
+          <div className="shrink-0 p-3 border-t border-border">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search chats..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-sm"
+              />
+            </div>
           </div>
         </div>
       </div>
-    </>
+    </div>
   )
 }
