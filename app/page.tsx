@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import { FloatingNav } from '@/components/floating-nav'
-import { NavPage, type RunsSubTab } from '@/components/nav-page'
+import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
 import { ChatView } from '@/components/chat-view'
 import { RunsView } from '@/components/runs-view'
 import { ChartsView } from '@/components/charts-view'
@@ -47,6 +47,7 @@ const runsSubTabLabels: Record<RunsSubTab, string> = {
 export default function ResearchChat() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
   const [runsSubTab, setRunsSubTab] = useState<RunsSubTab>('overview')
+  const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages)
@@ -330,11 +331,12 @@ export default function ResearchChat() {
             onAddRule={handleAddRule}
           />
         )}
-        {activeTab === 'journey' && (
-          <JourneyView
-            onBack={() => setActiveTab('chat')}
-          />
-        )}
+{activeTab === 'journey' && (
+            <JourneyView
+              onBack={() => setActiveTab('chat')}
+              subTab={journeySubTab}
+            />
+          )}
       </div>
 
       <NavPage 
@@ -343,8 +345,10 @@ export default function ResearchChat() {
         onSettingsClick={() => setSettingsOpen(true)}
         activeTab={activeTab}
         runsSubTab={runsSubTab}
+        journeySubTab={journeySubTab}
         onTabChange={handleTabChange}
         onRunsSubTabChange={handleRunsSubTabChange}
+        onJourneySubTabChange={setJourneySubTab}
       />
 
       <SettingsDialog

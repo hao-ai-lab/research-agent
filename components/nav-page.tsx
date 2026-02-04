@@ -26,6 +26,7 @@ import {
 import { useState, useEffect } from 'react'
 
 export type RunsSubTab = 'overview' | 'details' | 'manage' | 'events'
+export type JourneySubTab = 'story' | 'devnotes'
 
 interface NavPageProps {
   open: boolean
@@ -33,8 +34,10 @@ interface NavPageProps {
   onSettingsClick: () => void
   activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey'
   runsSubTab: RunsSubTab
+  journeySubTab: JourneySubTab
   onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => void
   onRunsSubTabChange: (subTab: RunsSubTab) => void
+  onJourneySubTabChange: (subTab: JourneySubTab) => void
 }
 
 export function NavPage({
@@ -43,8 +46,10 @@ export function NavPage({
   onSettingsClick,
   activeTab,
   runsSubTab,
+  journeySubTab,
   onTabChange,
   onRunsSubTabChange,
+  onJourneySubTabChange,
 }: NavPageProps) {
   const [runsExpanded, setRunsExpanded] = useState(() => {
     // Check localStorage for saved state, default to true (expanded)
@@ -55,6 +60,15 @@ export function NavPage({
     return true
   })
 
+  const [journeyExpanded, setJourneyExpanded] = useState(() => {
+    // Check localStorage for saved state, default to false
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('journeyExpanded')
+      return saved !== null ? JSON.parse(saved) : false
+    }
+    return false
+  })
+
   // Update localStorage when runsExpanded changes
   const handleRunsExpandedChange = (expanded: boolean) => {
     setRunsExpanded(expanded)
@@ -63,10 +77,24 @@ export function NavPage({
     }
   }
 
-  const handleNavClick = (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey', subTab?: RunsSubTab) => {
+  // Update localStorage when journeyExpanded changes
+  const handleJourneyExpandedChange = (expanded: boolean) => {
+    setJourneyExpanded(expanded)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('journeyExpanded', JSON.stringify(expanded))
+    }
+  }
+
+  const handleNavClick = (
+    tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey',
+    subTab?: RunsSubTab | JourneySubTab
+  ) => {
     onTabChange(tab)
     if (tab === 'runs' && subTab) {
-      onRunsSubTabChange(subTab)
+      onRunsSubTabChange(subTab as RunsSubTab)
+    }
+    if (tab === 'journey' && subTab) {
+      onJourneySubTabChange(subTab as JourneySubTab)
     }
     onOpenChange(false)
   }
@@ -83,9 +111,8 @@ export function NavPage({
 
       {/* Navigation Page - slides in from left */}
       <div
-        className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-background shadow-lg transition-transform duration-300 ease-out ${
-          open ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-background shadow-lg transition-transform duration-300 ease-out ${open ? 'translate-x-0' : '-translate-x-full'
+          }`}
       >
         {/* Header */}
         <div className="border-b border-border p-4">
@@ -121,11 +148,10 @@ export function NavPage({
               <button
                 type="button"
                 onClick={() => handleNavClick('chat')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeTab === 'chat'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                }`}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'chat'
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                  }`}
               >
                 <MessageSquare className="h-4 w-4" />
                 Chat
@@ -136,11 +162,10 @@ export function NavPage({
                 <CollapsibleTrigger asChild>
                   <button
                     type="button"
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                      activeTab === 'runs'
-                        ? 'bg-secondary text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                    }`}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'runs'
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                      }`}
                   >
                     <FlaskConical className="h-4 w-4" />
                     <span className="flex-1 text-left">Runs</span>
@@ -154,11 +179,10 @@ export function NavPage({
                     <button
                       type="button"
                       onClick={() => handleNavClick('runs', 'overview')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'overview'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'overview'
+                        ? 'bg-secondary/70 text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                        }`}
                     >
                       <LayoutDashboard className="h-3.5 w-3.5" />
                       Overview
@@ -166,11 +190,10 @@ export function NavPage({
                     <button
                       type="button"
                       onClick={() => handleNavClick('runs', 'details')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'details'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'details'
+                        ? 'bg-secondary/70 text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                        }`}
                     >
                       <List className="h-3.5 w-3.5" />
                       Details
@@ -178,11 +201,10 @@ export function NavPage({
                     <button
                       type="button"
                       onClick={() => handleNavClick('runs', 'manage')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'manage'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'manage'
+                        ? 'bg-secondary/70 text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                        }`}
                     >
                       <Wrench className="h-3.5 w-3.5" />
                       Manage
@@ -190,11 +212,10 @@ export function NavPage({
                     <button
                       type="button"
                       onClick={() => handleNavClick('runs', 'events')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'events'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'runs' && runsSubTab === 'events'
+                        ? 'bg-secondary/70 text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                        }`}
                     >
                       <Bell className="h-3.5 w-3.5" />
                       Events
@@ -207,11 +228,10 @@ export function NavPage({
               <button
                 type="button"
                 onClick={() => handleNavClick('charts')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeTab === 'charts'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                }`}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'charts'
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                  }`}
               >
                 <BarChart3 className="h-4 w-4" />
                 Charts
@@ -221,11 +241,10 @@ export function NavPage({
               <button
                 type="button"
                 onClick={() => handleNavClick('insights')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeTab === 'insights'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                }`}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'insights'
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                  }`}
               >
                 <Lightbulb className="h-4 w-4" />
                 Insights
@@ -255,18 +274,50 @@ export function NavPage({
               <HelpCircle className="h-4 w-4" />
               Help & Support
             </button>
-            <button
-              type="button"
-              onClick={() => handleNavClick('journey')}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                activeTab === 'journey'
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-              }`}
-            >
-              <Sparkles className="h-4 w-4" />
-              Our Journey
-            </button>
+            <Collapsible open={journeyExpanded} onOpenChange={handleJourneyExpandedChange}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'journey'
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                    }`}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span className="flex-1 text-left">Our Journey</span>
+                  <ChevronRight
+                    className={`h-4 w-4 transition-transform ${journeyExpanded ? 'rotate-90' : ''}`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
+                  <button
+                    type="button"
+                    onClick={() => handleNavClick('journey', 'story')}
+                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'journey' && journeySubTab === 'story'
+                      ? 'bg-secondary/70 text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                      }`}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Story
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleNavClick('journey', 'devnotes')}
+                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${activeTab === 'journey' && journeySubTab === 'devnotes'
+                      ? 'bg-secondary/70 text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                      }`}
+                  >
+                    {/* <Code className="h-3.5 w-3.5" /> */}
+                    <Sparkles className="h-4 w-4" />
+                    Dev Notes
+                  </button>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         </div>
       </div>
