@@ -1,40 +1,64 @@
 #!/usr/bin/env python3
 """
-Minimal Chat Server for Research Agent
+Research Agent Server
 
-This is a focused chat server that provides:
-- Multi-session chat management
-- Streaming responses via NDJSON
-- Integration with OpenCode API for AI responses
+Provides:
+- Multi-session chat management with OpenCode integration
+- Tmux-based job scheduling and monitoring
+- Real-time log streaming
 
-Run with: python server.py
+Run with: python server.py --workdir /path/to/project
 """
 
+import argparse
 import json
 import os
+import sys
 import time
 import uuid
 import logging
-from typing import Dict, Optional, AsyncIterator
+from typing import Dict, Optional, AsyncIterator, List
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+import libtmux
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("chat-server")
+logger = logging.getLogger("research-agent-server")
 
+# =============================================================================
 # Configuration
+# =============================================================================
+
 OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://127.0.0.1:4099")
 OPENCODE_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 MODEL_PROVIDER = "opencode"
 MODEL_ID = "kimi-k2.5-free"
-DATA_FILE = os.path.join(os.path.dirname(__file__), "chat_data.json")
+
+# Will be set by CLI args
+WORKDIR = os.getcwd()
+DATA_DIR = ""
+CHAT_DATA_FILE = ""
+JOBS_DATA_FILE = ""
+TMUX_SESSION_NAME = "research-agent"
+
+
+def init_paths(workdir: str):
+    """Initialize all paths based on workdir."""
+    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE
+    WORKDIR = os.path.abspath(workdir)
+    DATA_DIR = os.path.join(WORKDIR, ".agents")
+    CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
+    JOBS_DATA_FILE = os.path.join(DATA_DIR, "jobs.json")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
+    logger.info(f"Initialized with workdir: {WORKDIR}")
 
 
 def get_auth() -> Optional[httpx.BasicAuth]:
@@ -42,8 +66,11 @@ def get_auth() -> Optional[httpx.BasicAuth]:
     return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else None
 
 
-# FastAPI app
-app = FastAPI(title="Research Agent Chat Server")
+# =============================================================================
+# FastAPI App
+# =============================================================================
+
+app = FastAPI(title="Research Agent Server")
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,10 +80,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# =============================================================================
 # Models
+# =============================================================================
+
+# Chat Models
 class ChatMessage(BaseModel):
-    role: str  # user, assistant
+    role: str
     content: str
     thinking: Optional[str] = None
     timestamp: Optional[float] = None
@@ -72,35 +102,178 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
 
 
+# Run Models
+# Run State Machine: ready -> queued -> launching -> running -> finished/failed/stopped
+# - ready: Created but not submitted for execution
+# - queued: Submitted, waiting to be picked up
+# - launching: Tmux window being created
+# - running: Command actively executing
+# - finished/failed/stopped: Terminal states
+
+class RunCreate(BaseModel):
+    name: str
+    command: str
+    workdir: Optional[str] = None
+    sweep_id: Optional[str] = None  # If part of a sweep
+    auto_start: bool = False  # If True, skip ready and go straight to queued
+
+
+class RunStatusUpdate(BaseModel):
+    status: str  # launching, running, finished, failed, stopped
+    exit_code: Optional[int] = None
+    error: Optional[str] = None
+    tmux_pane: Optional[str] = None
+    wandb_dir: Optional[str] = None
+
+
+class SweepCreate(BaseModel):
+    name: str
+    base_command: str
+    workdir: Optional[str] = None
+    parameters: dict  # e.g., {"lr": [0.001, 0.01], "batch_size": [32, 64]}
+    max_runs: int = 10
+    auto_start: bool = False
+
+
+# =============================================================================
 # State
+# =============================================================================
+
 chat_sessions: Dict[str, dict] = {}
+runs: Dict[str, dict] = {}
+sweeps: Dict[str, dict] = {}
 
 
-def save_state():
+def save_chat_state():
     """Persist chat sessions to disk."""
     try:
-        with open(DATA_FILE, "w") as f:
+        with open(CHAT_DATA_FILE, "w") as f:
             json.dump({"chat_sessions": chat_sessions}, f, indent=2, default=str)
     except Exception as e:
-        logger.error(f"Error saving state: {e}")
+        logger.error(f"Error saving chat state: {e}")
 
 
-def load_state():
+def load_chat_state():
     """Load chat sessions from disk."""
     global chat_sessions
-    if os.path.exists(DATA_FILE):
+    if os.path.exists(CHAT_DATA_FILE):
         try:
-            with open(DATA_FILE, "r") as f:
+            with open(CHAT_DATA_FILE, "r") as f:
                 data = json.load(f)
                 chat_sessions = data.get("chat_sessions", {})
         except Exception as e:
-            logger.error(f"Error loading state: {e}")
+            logger.error(f"Error loading chat state: {e}")
 
 
-load_state()
+def save_runs_state():
+    """Persist runs and sweeps to disk."""
+    try:
+        with open(JOBS_DATA_FILE, "w") as f:
+            json.dump({"runs": runs, "sweeps": sweeps}, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving runs state: {e}")
 
 
-# OpenCode integration helpers
+def load_runs_state():
+    """Load runs and sweeps from disk."""
+    global runs, sweeps
+    if os.path.exists(JOBS_DATA_FILE):
+        try:
+            with open(JOBS_DATA_FILE, "r") as f:
+                data = json.load(f)
+                runs = data.get("runs", {})
+                sweeps = data.get("sweeps", {})
+        except Exception as e:
+            logger.error(f"Error loading runs state: {e}")
+
+
+# =============================================================================
+# Tmux Helpers
+# =============================================================================
+
+def get_tmux_server():
+    """Get or create tmux server connection."""
+    try:
+        return libtmux.Server()
+    except Exception as e:
+        logger.error(f"Failed to connect to tmux server: {e}")
+        return None
+
+
+def get_or_create_session(session_name: str = TMUX_SESSION_NAME):
+    """Get or create the research-agent tmux session."""
+    server = get_tmux_server()
+    if not server:
+        return None
+    
+    try:
+        session = server.sessions.get(session_name=session_name, default=None)
+        if not session:
+            logger.info(f"Creating new tmux session: {session_name}")
+            session = server.new_session(session_name=session_name)
+        return session
+    except Exception as e:
+        logger.error(f"Error getting/creating tmux session: {e}")
+        return None
+
+
+def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
+    """Launch a run in a new tmux window with sidecar."""
+    session = get_or_create_session()
+    if not session:
+        raise Exception("Tmux session not available. Start tmux first.")
+    
+    # Create window name
+    run_name = run_data.get("name", run_id)[:20].replace(" ", "-")
+    tmux_window_name = f"ra-{run_id[:8]}"
+    
+    logger.info(f"Launching run {run_id} in window {tmux_window_name}")
+    
+    # Create window
+    window = session.new_window(window_name=tmux_window_name, attach=False)
+    pane = window.active_pane
+    
+    # Setup run directory
+    run_dir = os.path.join(DATA_DIR, "runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    
+    # Write command to file
+    command_file = os.path.join(run_dir, "command.txt")
+    with open(command_file, "w") as f:
+        f.write(run_data["command"])
+    
+    # Get sidecar path
+    server_dir = os.path.dirname(os.path.abspath(__file__))
+    sidecar_path = os.path.join(server_dir, "job_sidecar.py")
+    
+    # Build sidecar command
+    server_url = "http://localhost:10000"
+    run_workdir = run_data.get("workdir") or WORKDIR
+    
+    sidecar_cmd = (
+        f'{sys.executable} "{sidecar_path}" '
+        f'--job_id {run_id} '
+        f'--server_url {server_url} '
+        f'--command_file "{command_file}" '
+        f'--agent_run_dir "{run_dir}" '
+        f'--workdir "{run_workdir}"'
+    )
+    
+    logger.info(f"Executing sidecar: {sidecar_cmd}")
+    pane.send_keys(sidecar_cmd)
+    
+    # Update run data
+    run_data["status"] = "launching"
+    run_data["tmux_window"] = tmux_window_name
+    run_data["run_dir"] = run_dir
+    run_data["launched_at"] = time.time()
+    
+    return tmux_window_name
+
+
+# =============================================================================
+# OpenCode Integration
+# =============================================================================
 
 async def get_opencode_session_for_chat(chat_session_id: str) -> str:
     """Get or create an OpenCode session for a specific chat session."""
@@ -116,7 +289,7 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         resp.raise_for_status()
         opencode_id = resp.json().get("id")
         session["opencode_session_id"] = opencode_id
-        save_state()
+        save_chat_state()
         logger.info(f"Created new OpenCode session {opencode_id} for chat {chat_session_id}")
         return opencode_id
 
@@ -127,58 +300,35 @@ async def send_prompt_to_opencode(client: httpx.AsyncClient, session_id: str, co
         "model": {"providerID": MODEL_PROVIDER, "modelID": MODEL_ID},
         "parts": [{"type": "text", "text": content}]
     }
-    logger.info(f"Sending prompt to OpenCode session {session_id} (Model: {MODEL_PROVIDER}/{MODEL_ID})")
     resp = await client.post(
         f"{OPENCODE_URL}/session/{session_id}/prompt_async",
         json=prompt_payload,
         auth=get_auth()
     )
     resp.raise_for_status()
-    logger.info(f"Sent to OpenCode session {session_id}")
 
 
 def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[dict]:
-    """
-    Parse an OpenCode SSE event and translate it to our protocol.
-    Returns None if the event should be skipped.
-    """
+    """Parse an OpenCode SSE event and translate it to our protocol."""
     payload = event_data.get("payload", {})
     etype = payload.get("type", "")
     props = payload.get("properties", {})
     part = props.get("part", {})
     
-    # Check if this event belongs to our session
     event_sid = props.get("sessionID") or part.get("sessionID")
     if event_sid != target_session_id:
         return None
     
-    # Translate event types
     if etype == "message.part.updated":
         ptype = part.get("type")
         delta = props.get("delta", "")
         
         if ptype == "text":
-            return {
-                "type": "part_delta",
-                "id": part.get("id"),
-                "ptype": "text",
-                "delta": delta
-            }
+            return {"type": "part_delta", "id": part.get("id"), "ptype": "text", "delta": delta}
         elif ptype == "reasoning":
-            return {
-                "type": "part_delta",
-                "id": part.get("id"),
-                "ptype": "reasoning",
-                "delta": delta
-            }
+            return {"type": "part_delta", "id": part.get("id"), "ptype": "reasoning", "delta": delta}
         elif ptype == "tool":
-            return {
-                "type": "part_update",
-                "id": part.get("id"),
-                "ptype": "tool",
-                "state": part.get("state"),
-                "name": part.get("name")
-            }
+            return {"type": "part_update", "id": part.get("id"), "ptype": "tool", "state": part.get("state"), "name": part.get("name")}
     
     elif etype == "session.status":
         if props.get("status", {}).get("type") == "idle":
@@ -187,33 +337,22 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
     return None
 
 
-async def stream_opencode_events(
-    client: httpx.AsyncClient, 
-    session_id: str
-) -> AsyncIterator[tuple[Optional[dict], str, str]]:
-    """
-    Stream events from OpenCode and yield parsed events.
-    Yields: (translated_event, text_delta, thinking_delta)
-    """
+async def stream_opencode_events(client: httpx.AsyncClient, session_id: str) -> AsyncIterator[tuple]:
+    """Stream events from OpenCode and yield parsed events."""
     url = f"{OPENCODE_URL}/global/event"
     headers = {"Accept": "text/event-stream"}
     
     async with client.stream("GET", url, headers=headers, auth=get_auth()) as response:
-        logger.info(f"Start streaming from OpenCode session {session_id}")
-        
         async for line in response.aiter_lines():
             if not line.startswith("data: "):
                 continue
             
             try:
                 event_data = json.loads(line[6:])
-                logger.info(f"received: {event_data}")
-                
                 translated = parse_opencode_event(event_data, session_id)
                 if translated is None:
                     continue
                 
-                # Extract deltas for accumulation
                 text_delta = ""
                 thinking_delta = ""
                 if translated.get("ptype") == "text":
@@ -223,26 +362,26 @@ async def stream_opencode_events(
                 
                 yield translated, text_delta, thinking_delta
                 
-                # Check if we're done
                 if translated.get("_done"):
                     break
-                    
             except Exception as e:
                 logger.error(f"Error parsing event line: {e}")
                 continue
 
 
-# Endpoints
+# =============================================================================
+# Chat Endpoints
+# =============================================================================
 
 @app.get("/")
 async def health():
     """Health check endpoint."""
-    return {"status": "ok", "service": "chat-server"}
+    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
 
 
 @app.get("/sessions")
 async def list_sessions():
-    """List all chat sessions with metadata."""
+    """List all chat sessions."""
     sessions = [
         {
             "id": sid,
@@ -267,14 +406,8 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "messages": [],
         "opencode_session_id": None
     }
-    save_state()
-    logger.info(f"Created new chat session: {session_id}")
-    return {
-        "id": session_id,
-        "title": title,
-        "created_at": chat_sessions[session_id]["created_at"],
-        "message_count": 0
-    }
+    save_chat_state()
+    return {"id": session_id, "title": title, "created_at": chat_sessions[session_id]["created_at"], "message_count": 0}
 
 
 @app.get("/sessions/{session_id}")
@@ -297,8 +430,7 @@ async def delete_session(session_id: str):
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     del chat_sessions[session_id]
-    save_state()
-    logger.info(f"Deleted chat session: {session_id}")
+    save_chat_state()
     return {"message": "Session deleted"}
 
 
@@ -313,26 +445,19 @@ async def chat_endpoint(req: ChatRequest):
     session = chat_sessions[session_id]
     messages = session.get("messages", [])
     
-    # Add user message
-    user_msg = {
-        "role": "user",
-        "content": req.message,
-        "timestamp": time.time()
-    }
+    user_msg = {"role": "user", "content": req.message, "timestamp": time.time()}
     messages.append(user_msg)
     session["messages"] = messages
     
-    # Auto-generate title from first message
     if session.get("title") == "New Chat" and len(messages) == 1:
         session["title"] = req.message[:50] + ("..." if len(req.message) > 50 else "")
     
-    save_state()
+    save_chat_state()
 
     async def response_generator():
         try:
             opencode_session_id = await get_opencode_session_for_chat(session_id)
             
-            # Build prompt content
             wild_mode_note = ""
             if req.wild_mode:
                 wild_mode_note = "[SYSTEM] Wild mode is ON. Be proactive but confirm before launching actions.\n\n"
@@ -341,7 +466,6 @@ async def chat_endpoint(req: ChatRequest):
             async with httpx.AsyncClient(timeout=None) as client:
                 await send_prompt_to_opencode(client, opencode_session_id, content)
                 
-                # Stream and accumulate responses
                 full_text = ""
                 full_thinking = ""
                 
@@ -349,11 +473,9 @@ async def chat_endpoint(req: ChatRequest):
                     full_text += text_delta
                     full_thinking += thinking_delta
                     
-                    # Remove internal marker before sending
                     event_to_send = {k: v for k, v in event.items() if not k.startswith("_")}
                     yield json.dumps(event_to_send) + "\n"
 
-                # Save assistant response
                 if full_text or full_thinking:
                     assistant_msg = {
                         "role": "assistant",
@@ -362,7 +484,7 @@ async def chat_endpoint(req: ChatRequest):
                         "timestamp": time.time()
                     }
                     session["messages"].append(assistant_msg)
-                    save_state()
+                    save_chat_state()
 
         except Exception as e:
             logger.error(f"Chat error: {e}", exc_info=True)
@@ -371,6 +493,503 @@ async def chat_endpoint(req: ChatRequest):
     return StreamingResponse(response_generator(), media_type="application/x-ndjson")
 
 
+# =============================================================================
+# Run Endpoints
+# =============================================================================
+
+@app.get("/runs")
+async def list_runs(
+    archived: bool = Query(False, description="Include archived runs"),
+    limit: int = Query(100, description="Max runs to return")
+):
+    """List all runs."""
+    result = []
+    for run_id, run in runs.items():
+        if not archived and run.get("is_archived", False):
+            continue
+        result.append({"id": run_id, **run})
+    
+    # Sort by created_at descending
+    result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return result[:limit]
+
+
+@app.post("/runs")
+async def create_run(req: RunCreate):
+    """Create a new run. Starts in 'ready' state unless auto_start=True."""
+    run_id = uuid.uuid4().hex[:12]
+    
+    initial_status = "queued" if req.auto_start else "ready"
+    
+    run_data = {
+        "name": req.name,
+        "command": req.command,
+        "workdir": req.workdir or WORKDIR,
+        "status": initial_status,
+        "created_at": time.time(),
+        "is_archived": False,
+        "sweep_id": req.sweep_id,
+        "tmux_window": None,
+        "run_dir": None,
+        "exit_code": None,
+        "error": None,
+        "wandb_dir": None,
+    }
+    
+    runs[run_id] = run_data
+    save_runs_state()
+    
+    logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
+    return {"id": run_id, **run_data}
+
+
+@app.get("/runs/{run_id}")
+async def get_run(run_id: str):
+    """Get run details."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {"id": run_id, **runs[run_id]}
+
+
+@app.post("/runs/{run_id}/queue")
+async def queue_run(run_id: str):
+    """Queue a ready run for execution."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    run = runs[run_id]
+    if run["status"] != "ready":
+        raise HTTPException(status_code=400, detail=f"Run is not ready (status: {run['status']})")
+    
+    run["status"] = "queued"
+    run["queued_at"] = time.time()
+    save_runs_state()
+    
+    return {"message": "Run queued", "id": run_id, **run}
+
+
+@app.post("/runs/{run_id}/start")
+async def start_run(run_id: str):
+    """Start a queued run."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    run = runs[run_id]
+    if run["status"] not in ["queued", "ready"]:
+        raise HTTPException(status_code=400, detail=f"Run cannot be started (status: {run['status']})")
+    
+    # If ready, move to queued first
+    if run["status"] == "ready":
+        run["status"] = "queued"
+        run["queued_at"] = time.time()
+    
+    try:
+        tmux_window = launch_run_in_tmux(run_id, run)
+        save_runs_state()
+        return {"message": "Run started", "tmux_window": tmux_window}
+    except Exception as e:
+        logger.error(f"Failed to start run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/runs/{run_id}/stop")
+async def stop_run(run_id: str):
+    """Stop a running job."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    run = runs[run_id]
+    if run["status"] not in ["launching", "running"]:
+        raise HTTPException(status_code=400, detail=f"Run is not active (status: {run['status']})")
+    
+    # Kill tmux window
+    tmux_window = run.get("tmux_window")
+    if tmux_window:
+        session = get_or_create_session()
+        if session:
+            window = session.windows.get(window_name=tmux_window, default=None)
+            if window:
+                window.kill()
+                logger.info(f"Killed tmux window {tmux_window}")
+    
+    run["status"] = "stopped"
+    run["stopped_at"] = time.time()
+    save_runs_state()
+    
+    return {"message": "Run stopped"}
+
+
+@app.post("/runs/{run_id}/archive")
+async def archive_run(run_id: str):
+    """Archive a run."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    runs[run_id]["is_archived"] = True
+    save_runs_state()
+    return {"message": "Run archived"}
+
+
+@app.post("/runs/{run_id}/unarchive")
+async def unarchive_run(run_id: str):
+    """Unarchive a run."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    runs[run_id]["is_archived"] = False
+    save_runs_state()
+    return {"message": "Run unarchived"}
+
+
+@app.post("/runs/{run_id}/status")
+async def update_run_status(run_id: str, update: RunStatusUpdate):
+    """Update run status (called by sidecar)."""
+    logger.info(f"Status update for {run_id}: {update.status}")
+    
+    if run_id not in runs:
+        # Create minimal entry if doesn't exist
+        runs[run_id] = {"created_at": time.time()}
+    
+    run = runs[run_id]
+    
+    # Update fields
+    run["status"] = update.status
+    if update.exit_code is not None:
+        run["exit_code"] = update.exit_code
+    if update.error:
+        run["error"] = update.error
+    if update.tmux_pane:
+        run["tmux_pane"] = update.tmux_pane
+    if update.wandb_dir:
+        run["wandb_dir"] = update.wandb_dir
+    
+    # Track timestamps
+    if update.status == "running" and "started_at" not in run:
+        run["started_at"] = time.time()
+    elif update.status in ["finished", "failed"]:
+        run["ended_at"] = time.time()
+    
+    save_runs_state()
+    return {"message": "Status updated"}
+
+
+# =============================================================================
+# Sweep Endpoints
+# =============================================================================
+
+def expand_parameter_grid(parameters: dict, max_runs: int) -> list:
+    """Expand parameter dict into list of parameter combinations."""
+    import itertools
+    
+    keys = list(parameters.keys())
+    values = [parameters[k] if isinstance(parameters[k], list) else [parameters[k]] for k in keys]
+    
+    combinations = list(itertools.product(*values))[:max_runs]
+    
+    return [dict(zip(keys, combo)) for combo in combinations]
+
+
+def build_command_with_params(base_command: str, params: dict) -> str:
+    """Insert parameters into command string."""
+    # Simple approach: append as CLI args
+    param_str = " ".join([f"--{k}={v}" for k, v in params.items()])
+    return f"{base_command} {param_str}"
+
+
+@app.get("/sweeps")
+async def list_sweeps(
+    limit: int = Query(50, description="Max sweeps to return")
+):
+    """List all sweeps."""
+    result = []
+    for sweep_id, sweep in sweeps.items():
+        result.append({"id": sweep_id, **sweep})
+    
+    result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return result[:limit]
+
+
+@app.post("/sweeps")
+async def create_sweep(req: SweepCreate):
+    """Create a new sweep with associated runs."""
+    sweep_id = uuid.uuid4().hex[:12]
+    
+    # Expand parameters into run configurations
+    param_combinations = expand_parameter_grid(req.parameters, req.max_runs)
+    
+    # Create runs for each combination
+    run_ids = []
+    for i, params in enumerate(param_combinations):
+        run_id = uuid.uuid4().hex[:12]
+        command = build_command_with_params(req.base_command, params)
+        
+        run_data = {
+            "name": f"{req.name} #{i+1}",
+            "command": command,
+            "workdir": req.workdir or WORKDIR,
+            "status": "queued" if req.auto_start else "ready",
+            "created_at": time.time(),
+            "is_archived": False,
+            "sweep_id": sweep_id,
+            "sweep_params": params,
+            "tmux_window": None,
+            "run_dir": None,
+            "exit_code": None,
+            "error": None,
+            "wandb_dir": None,
+        }
+        
+        runs[run_id] = run_data
+        run_ids.append(run_id)
+    
+    # Create sweep record
+    sweep_data = {
+        "name": req.name,
+        "base_command": req.base_command,
+        "workdir": req.workdir or WORKDIR,
+        "parameters": req.parameters,
+        "run_ids": run_ids,
+        "status": "running" if req.auto_start else "ready",
+        "created_at": time.time(),
+        "progress": {
+            "total": len(run_ids),
+            "completed": 0,
+            "failed": 0,
+            "running": 0,
+        },
+    }
+    
+    sweeps[sweep_id] = sweep_data
+    save_runs_state()
+    
+    logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs")
+    return {"id": sweep_id, **sweep_data}
+
+
+@app.get("/sweeps/{sweep_id}")
+async def get_sweep(sweep_id: str):
+    """Get sweep details with run status summary."""
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+    
+    sweep = sweeps[sweep_id]
+    
+    # Calculate progress from runs
+    sweep_runs = [runs[rid] for rid in sweep.get("run_ids", []) if rid in runs]
+    progress = {
+        "total": len(sweep_runs),
+        "completed": sum(1 for r in sweep_runs if r.get("status") == "finished"),
+        "failed": sum(1 for r in sweep_runs if r.get("status") == "failed"),
+        "running": sum(1 for r in sweep_runs if r.get("status") == "running"),
+        "ready": sum(1 for r in sweep_runs if r.get("status") == "ready"),
+        "queued": sum(1 for r in sweep_runs if r.get("status") == "queued"),
+    }
+    
+    return {"id": sweep_id, **sweep, "progress": progress}
+
+
+@app.post("/sweeps/{sweep_id}/start")
+async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max parallel runs")):
+    """Start all ready/queued runs in a sweep."""
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+    
+    sweep = sweeps[sweep_id]
+    started = 0
+    
+    for run_id in sweep.get("run_ids", []):
+        if run_id in runs:
+            run = runs[run_id]
+            if run["status"] in ["ready", "queued"] and started < parallel:
+                try:
+                    # Queue if ready
+                    if run["status"] == "ready":
+                        run["status"] = "queued"
+                        run["queued_at"] = time.time()
+                    
+                    launch_run_in_tmux(run_id, run)
+                    started += 1
+                except Exception as e:
+                    logger.error(f"Failed to start run {run_id}: {e}")
+    
+    sweep["status"] = "running"
+    save_runs_state()
+    
+    return {"message": f"Started {started} runs", "sweep_id": sweep_id}
+
+
+# =============================================================================
+# Log Endpoints
+# =============================================================================
+
+@app.get("/runs/{run_id}/logs")
+async def get_run_logs(
+    run_id: str,
+    offset: int = Query(-10000, description="Byte offset. Negative = from end."),
+    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
+):
+    """Get run logs with byte-offset pagination."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+    
+    if not run_dir:
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+    
+    log_file = os.path.join(run_dir, "run.log")
+    if not os.path.exists(log_file):
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+    
+    # Cap limit at 100KB
+    limit = min(limit, 100 * 1024)
+    
+    try:
+        total_size = os.path.getsize(log_file)
+        
+        # Calculate actual offset
+        if offset < 0:
+            actual_offset = max(0, total_size + offset)
+        else:
+            actual_offset = min(offset, total_size)
+        
+        with open(log_file, "r", errors="replace") as f:
+            f.seek(actual_offset)
+            content = f.read(limit)
+        
+        bytes_read = len(content.encode('utf-8'))
+        end_offset = actual_offset + bytes_read
+        
+        return {
+            "content": content,
+            "offset": actual_offset,
+            "total_size": total_size,
+            "has_more_before": actual_offset > 0,
+            "has_more_after": end_offset < total_size
+        }
+    except Exception as e:
+        logger.error(f"Error reading logs for {run_id}: {e}")
+        return {"content": f"Error reading logs: {e}", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+
+@app.get("/runs/{run_id}/logs/stream")
+async def stream_run_logs(run_id: str):
+    """Stream run logs via SSE."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+    
+    async def log_generator():
+        if not run_dir:
+            yield f"data: {json.dumps({'error': 'No run directory'})}\n\n"
+            return
+        
+        log_file = os.path.join(run_dir, "run.log")
+        last_size = 0
+        
+        # Send initial content
+        if os.path.exists(log_file):
+            with open(log_file, "r", errors="replace") as f:
+                content = f.read()
+                last_size = len(content.encode('utf-8'))
+                yield f"data: {json.dumps({'type': 'initial', 'content': content})}\n\n"
+        
+        # Stream updates
+        while True:
+            await asyncio.sleep(0.5)
+            
+            # Check if run is still active
+            current_run = runs.get(run_id, {})
+            if current_run.get("status") in ["finished", "failed", "stopped"]:
+                # Send final content and close
+                if os.path.exists(log_file):
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        if new_content:
+                            yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'status': current_run.get('status')})}\n\n"
+                break
+            
+            # Check for new content
+            if os.path.exists(log_file):
+                current_size = os.path.getsize(log_file)
+                if current_size > last_size:
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        last_size = current_size
+                        yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+    
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+
+# =============================================================================
+# Artifact Endpoints
+# =============================================================================
+
+@app.get("/runs/{run_id}/artifacts")
+async def list_artifacts(run_id: str):
+    """List artifacts for a run."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+    artifacts = []
+    
+    if run_dir:
+        artifacts_dir = os.path.join(run_dir, "artifacts")
+        if os.path.exists(artifacts_dir):
+            for name in os.listdir(artifacts_dir):
+                path = os.path.join(artifacts_dir, name)
+                # Resolve symlinks to get actual path
+                actual_path = os.path.realpath(path) if os.path.islink(path) else path
+                artifacts.append({
+                    "name": name,
+                    "path": actual_path,
+                    "type": "other"  # TODO: detect type
+                })
+    
+    # Add wandb_dir if present
+    if run.get("wandb_dir"):
+        artifacts.append({
+            "name": "wandb",
+            "path": run["wandb_dir"],
+            "type": "wandb"
+        })
+    
+    return artifacts
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+import asyncio
+
+def main():
+    parser = argparse.ArgumentParser(description="Research Agent Server")
+    parser.add_argument("--workdir", default=os.getcwd(), help="Working directory for runs and data")
+    parser.add_argument("--port", type=int, default=10000, help="Server port")
+    parser.add_argument("--host", default="0.0.0.0", help="Server host")
+    args = parser.parse_args()
+    
+    # Initialize paths
+    init_paths(args.workdir)
+    
+    # Load state
+    load_chat_state()
+    load_runs_state()
+    
+    logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
+    logger.info(f"Working directory: {WORKDIR}")
+    
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
 if __name__ == "__main__":
-    logger.info("Starting Chat Server on port 10000...")
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+    main()

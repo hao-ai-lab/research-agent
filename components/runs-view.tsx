@@ -16,10 +16,20 @@ import {
   ChevronRight,
   ChevronDown,
   AlertTriangle,
+  Repeat,
+  PlugZap,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import {
   Select,
   SelectContent,
@@ -31,13 +41,105 @@ import { AllRunsChart } from './all-runs-chart'
 import { RunDetailView } from './run-detail-view'
 import { RunManageView } from './run-manage-view'
 import { VisibilityManageView } from './visibility-manage-view'
+import { CreateSweepDialog } from './create-sweep-dialog'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import { getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
+import { createSweep } from '@/lib/api'
 
 type RunsSubTab = 'overview' | 'details' | 'manage'
-type DetailsView = 'priority' | 'time'
+type DetailsView = 'time' | 'priority'
+
+// Inline sweep form for popover
+function SweepFormPopover({ onClose }: { onClose: () => void }) {
+  const [name, setName] = React.useState('')
+  const [command, setCommand] = React.useState('')
+  const [params, setParams] = React.useState('')
+  const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const handleSubmit = async () => {
+    if (!name.trim() || !command.trim() || !params.trim()) {
+      setError('All fields required')
+      return
+    }
+
+    // Parse params: "lr=0.001,0.01;batch=32,64" -> {lr: [0.001, 0.01], batch: [32, 64]}
+    const paramObj: Record<string, unknown[]> = {}
+    try {
+      params.split(';').forEach(p => {
+        const [key, vals] = p.split('=')
+        if (key && vals) {
+          paramObj[key.trim()] = vals.split(',').map(v => {
+            const num = Number(v.trim())
+            return isNaN(num) ? v.trim() : num
+          })
+        }
+      })
+    } catch {
+      setError('Invalid param format')
+      return
+    }
+
+    if (Object.keys(paramObj).length === 0) {
+      setError('At least one parameter required')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await createSweep({
+        name: name.trim(),
+        base_command: command.trim(),
+        parameters: paramObj,
+        max_runs: 10,
+        auto_start: false,
+      })
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="font-medium text-sm">Create Sweep</div>
+      <div className="space-y-2">
+        <Input
+          placeholder="Sweep name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="h-8 text-xs"
+        />
+        <Textarea
+          placeholder="python train.py"
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          className="h-16 text-xs font-mono"
+        />
+        <Input
+          placeholder="lr=0.001,0.01;batch=32,64"
+          value={params}
+          onChange={(e) => setParams(e.target.value)}
+          className="h-8 text-xs font-mono"
+        />
+        <p className="text-[10px] text-muted-foreground">
+          Format: key=val1,val2;key2=val3,val4
+        </p>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+        <Button size="sm" onClick={handleSubmit} disabled={isSubmitting} className="flex-1">
+          {isSubmitting ? 'Creating...' : 'Create'}
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 interface RunsViewProps {
   runs: ExperimentRun[]
@@ -52,13 +154,14 @@ interface RunsViewProps {
 
 export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange }: RunsViewProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [detailsView, setDetailsView] = useState<DetailsView>('priority')
+  const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [visibleRunIds, setVisibleRunIds] = useState<Set<string>>(
     new Set(runs.filter((r) => !r.isArchived).map((r) => r.id))
   )
   const [visibilityGroups, setVisibilityGroups] = useState<VisibilityGroup[]>([])
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
+  const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
   const scrollPositionRef = useRef<number>(0)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
@@ -176,7 +279,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <div 
+          <div
             className="h-3 w-3 rounded-full shrink-0"
             style={{ backgroundColor: run.color || '#4ade80' }}
           />
@@ -251,11 +354,11 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1 min-w-0">
-            <Select 
-              value={selectedRun.id} 
+            <Select
+              value={selectedRun.id}
               onValueChange={(id) => {
                 const newRun = runs.find(r => r.id === id)
-                if (newRun) setSelectedRun(newRun)
+                if (newRun) handleRunClick(newRun)
               }}
             >
               <SelectTrigger className="h-auto p-0 border-0 bg-transparent hover:bg-secondary/50 rounded-lg px-2 py-1 -ml-2 focus:ring-0 focus:ring-offset-0">
@@ -300,15 +403,26 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
           </Badge>
         </div>
         <div className="flex-1 min-h-0 overflow-hidden">
-          <RunDetailView 
+          <RunDetailView
             run={selectedRun}
             runs={runs}
-            onRunSelect={(r) => setSelectedRun(r)}
+            onRunSelect={(r) => handleRunClick(r)}
             onUpdateRun={onUpdateRun}
             allTags={allTags}
             onCreateTag={onCreateTag}
           />
         </div>
+
+        {/* Sweep Dialog */}
+        <CreateSweepDialog
+          open={sweepDialogOpen}
+          onOpenChange={setSweepDialogOpen}
+          baseCommand={selectedRun.command}
+          onSweepCreated={(sweepId, runCount) => {
+            // Dialog will close, runs will be refetched by polling
+            console.log(`Created sweep ${sweepId} with ${runCount} runs`)
+          }}
+        />
       </div>
     )
   }
@@ -336,18 +450,35 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <div className="shrink-0 border-b border-border px-4 py-3 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-foreground">All Runs</h3>
-          <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
-            <SelectTrigger className="w-28 h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="priority">Priority</SelectItem>
-              <SelectItem value="time">Time</SelectItem>
-            </SelectContent>
-          </Select>
+          <h3 className="text-sm font-medium text-foreground">Runs</h3>
+          <div className="flex items-center gap-2">
+            <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="Create Sweep"
+                >
+                  <PlugZap className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80" align="end">
+                <SweepFormPopover onClose={() => setSweepDialogOpen(false)} />
+              </PopoverContent>
+            </Popover>
+            <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
+              <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="time">Time</SelectItem>
+                <SelectItem value="priority">Priority</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        
+
         <div className="flex-1 min-h-0 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="p-4 space-y-5">
@@ -492,8 +623,8 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
               <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
                 Charts
               </h3>
-              <AllRunsChart 
-                runs={activeRuns} 
+              <AllRunsChart
+                runs={activeRuns}
                 visibleRunIds={visibleRunIds}
                 onToggleVisibility={toggleRunVisibility}
                 visibilityGroups={visibilityGroups}
@@ -517,6 +648,15 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
           </div>
         </ScrollArea>
       </div>
+
+      {/* Sweep Dialog */}
+      <CreateSweepDialog
+        open={sweepDialogOpen}
+        onOpenChange={setSweepDialogOpen}
+        onSweepCreated={(sweepId, runCount) => {
+          console.log(`Created sweep ${sweepId} with ${runCount} runs`)
+        }}
+      />
     </div>
   )
 }

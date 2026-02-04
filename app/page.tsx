@@ -11,8 +11,9 @@ import { EventsView } from '@/components/events-view'
 import { JourneyView } from '@/components/journey-view'
 import { ReportView } from '@/components/report-view'
 import { SettingsDialog } from '@/components/settings-dialog'
+import { useRuns } from '@/hooks/use-runs'
 import type { ChatMode } from '@/components/chat-input'
-import { mockRuns, mockMessages, generateLossData, mockMemoryRules, mockInsightCharts, defaultTags, getRunEvents, mockSweeps, createDefaultSweepConfig } from '@/lib/mock-data'
+import { mockMessages, generateLossData, mockMemoryRules, mockInsightCharts, defaultTags, getRunEvents, mockSweeps, createDefaultSweepConfig } from '@/lib/mock-data'
 import type { ChatMessage, ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
 
@@ -53,7 +54,10 @@ export default function ResearchChat() {
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [runs, setRuns] = useState<ExperimentRun[]>(mockRuns)
+
+  // Use real API data via useRuns hook
+  const { runs, updateRun: apiUpdateRun, isLoading: runsLoading, error: runsError } = useRuns()
+
   const [lossData] = useState(() => generateLossData())
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
   const [insightCharts, setInsightCharts] = useState<InsightChart[]>(mockInsightCharts)
@@ -65,8 +69,8 @@ export default function ResearchChat() {
   const [selectedRun, setSelectedRun] = useState<ExperimentRun | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
 
-  // Events state
-  const [events, setEvents] = useState<RunEvent[]>(() => getRunEvents(mockRuns))
+  // Events state (will be updated when runs change)
+  const [events, setEvents] = useState<RunEvent[]>([])
 
   // Sweeps state
   const [sweeps, setSweeps] = useState<Sweep[]>(mockSweeps)
@@ -181,16 +185,14 @@ export default function ResearchChat() {
   }, [])
 
   const handleUpdateRun = useCallback((updatedRun: ExperimentRun) => {
-    setRuns((prev) =>
-      prev.map((run) => (run.id === updatedRun.id ? updatedRun : run))
-    )
+    apiUpdateRun(updatedRun)
     // Update selected run if it's the one being updated
     if (selectedRun?.id === updatedRun.id) {
       setSelectedRun(updatedRun)
     }
     // Regenerate events when runs change
     setEvents(getRunEvents(runs.map(r => r.id === updatedRun.id ? updatedRun : r)))
-  }, [selectedRun, runs])
+  }, [selectedRun, runs, apiUpdateRun])
 
   const handleToggleRule = useCallback((ruleId: string) => {
     setMemoryRules(prev =>

@@ -1,0 +1,222 @@
+{
+  "runs": {
+    "a8cee71d1a8f": {
+      "name": "LR Sweep #1",
+      "command": "python train.py --lr=0.001",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770237620.866008,
+      "is_archived": false,
+      "sweep_id": "e41087729438",
+      "sweep_params": {
+        "lr": 0.001
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "f0b200cf83c4": {
+      "name": "LR Sweep #2",
+      "command": "python train.py --lr=0.01",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770237620.866015,
+      "is_archived": false,
+      "sweep_id": "e41087729438",
+      "sweep_params": {
+        "lr": 0.01
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "9d28abb220e8": {
+      "name": "LR Sweep #3",
+      "command": "python train.py --lr=0.1",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770237620.866019,
+      "is_archived": false,
+      "sweep_id": "e41087729438",
+      "sweep_params": {
+        "lr": 0.1
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "5b3512fc324d": {
+      "name": "mysweep #1",
+      "command": "python train,py --lr=0.1 --batch=32",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770238420.27472,
+      "is_archived": false,
+      "sweep_id": "b7dfa40de83b",
+      "sweep_params": {
+        "lr": 0.1,
+        "batch": 32
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "7dee60247397": {
+      "name": "mysweep #2",
+      "command": "python train,py --lr=0.1 --batch=64",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770238420.2747478,
+      "is_archived": false,
+      "sweep_id": "b7dfa40de83b",
+      "sweep_params": {
+        "lr": 0.1,
+        "batch": 64
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "dea1d091dc42": {
+      "name": "mysweep #3",
+      "command": "python train,py --lr=0.4 --batch=32",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770238420.27476,
+      "is_archived": false,
+      "sweep_id": "b7dfa40de83b",
+      "sweep_params": {
+        "lr": 0.4,
+        "batch": 32
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "7e4f91191359": {
+      "name": "mysweep #4",
+      "command": "python train,py --lr=0.4 --batch=64",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770238420.274772,
+      "is_archived": false,
+      "sweep_id": "b7dfa40de83b",
+      "sweep_params": {
+        "lr": 0.4,
+        "batch": 64
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "fc0d8917bb0f": {
+      "name": "mysweep #5",
+      "command": "python train,py --lr=0.7 --batch=32",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770238420.274781,
+      "is_archived": false,
+      "sweep_id": "b7dfa40de83b",
+      "sweep_params": {
+        "lr": 0.7,
+        "batch": 32
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    },
+    "e1ac79d709b5": {
+      "name": "mysweep #6",
+      "command": "python train,py --lr=0.7 --batch=64",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "status": "ready",
+      "created_at": 1770238420.274792,
+      "is_archived": false,
+      "sweep_id": "b7dfa40de83b",
+      "sweep_params": {
+        "lr": 0.7,
+        "batch": 64
+      },
+      "tmux_window": null,
+      "run_dir": null,
+      "exit_code": null,
+      "error": null,
+      "wandb_dir": null
+    }
+  },
+  "sweeps": {
+    "e41087729438": {
+      "name": "LR Sweep",
+      "base_command": "python train.py",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "parameters": {
+        "lr": [
+          0.001,
+          0.01,
+          0.1
+        ]
+      },
+      "run_ids": [
+        "a8cee71d1a8f",
+        "f0b200cf83c4",
+        "9d28abb220e8"
+      ],
+      "status": "ready",
+      "created_at": 1770237620.8660202,
+      "progress": {
+        "total": 3,
+        "completed": 0,
+        "failed": 0,
+        "running": 0
+      }
+    },
+    "b7dfa40de83b": {
+      "name": "mysweep",
+      "base_command": "python train,py",
+      "workdir": "/Users/mike/Project/GitHub/v0-research-agent-mobile/server",
+      "parameters": {
+        "lr": [
+          0.1,
+          0.4,
+          0.7
+        ],
+        "batch": [
+          32,
+          64
+        ]
+      },
+      "run_ids": [
+        "5b3512fc324d",
+        "7dee60247397",
+        "dea1d091dc42",
+        "7e4f91191359",
+        "fc0d8917bb0f",
+        "e1ac79d709b5"
+      ],
+      "status": "ready",
+      "created_at": 1770238420.274795,
+      "progress": {
+        "total": 6,
+        "completed": 0,
+        "failed": 0,
+        "running": 0
+      }
+    }
+  }
+}
