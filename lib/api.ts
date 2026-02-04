@@ -203,6 +203,7 @@ export interface Run {
     config?: Record<string, unknown>
     metrics?: { loss: number; accuracy: number; epoch: number }
     lossHistory?: { step: number; trainLoss: number; valLoss?: number }[]
+    color?: string
 }
 
 export interface CreateRunRequest {

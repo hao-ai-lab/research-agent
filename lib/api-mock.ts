@@ -24,6 +24,20 @@ export type { ChatMessageData, StreamEventType } from './api'
 // Mock Data Store
 // =============================================================================
 
+// Color palette for runs
+const RUN_COLORS = [
+    '#4ade80', // green
+    '#60a5fa', // blue
+    '#f472b6', // pink
+    '#facc15', // yellow
+    '#a78bfa', // purple
+    '#fb923c', // orange
+    '#2dd4bf', // teal
+    '#f87171', // red
+    '#818cf8', // indigo
+    '#34d399', // emerald
+]
+
 const mockSessions: Map<string, SessionWithMessages> = new Map([
     ['demo-session-1', {
         id: 'demo-session-1',
@@ -67,6 +81,7 @@ const mockRuns: Map<string, Run> = new Map([
         config: { learningRate: 0.00001, batchSize: 8, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.234, accuracy: 92.1, epoch: 3 },
         lossHistory: [{ step: 1, trainLoss: 2.4 }, { step: 2, trainLoss: 1.8 }, { step: 3, trainLoss: 1.2 }, { step: 4, trainLoss: 0.85 }, { step: 5, trainLoss: 0.52 }, { step: 6, trainLoss: 0.34 }, { step: 7, trainLoss: 0.28 }, { step: 8, trainLoss: 0.24 }, { step: 9, trainLoss: 0.234 }],
+        color: RUN_COLORS[0],
     }],
     ['run-qwen-002', {
         id: 'run-qwen-002',
@@ -85,6 +100,7 @@ const mockRuns: Map<string, Run> = new Map([
         config: { learningRate: 0.00001, batchSize: 16, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.312, accuracy: 89.3, epoch: 3 },
         lossHistory: [{ step: 1, trainLoss: 2.5 }, { step: 2, trainLoss: 1.9 }, { step: 3, trainLoss: 1.4 }, { step: 4, trainLoss: 0.95 }, { step: 5, trainLoss: 0.62 }, { step: 6, trainLoss: 0.45 }, { step: 7, trainLoss: 0.38 }, { step: 8, trainLoss: 0.33 }, { step: 9, trainLoss: 0.312 }],
+        color: RUN_COLORS[1],
     }],
     ['run-qwen-003', {
         id: 'run-qwen-003',
@@ -103,6 +119,7 @@ const mockRuns: Map<string, Run> = new Map([
         config: { learningRate: 0.00001, batchSize: 32, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.421, accuracy: 86.8, epoch: 3 },
         lossHistory: [{ step: 1, trainLoss: 2.6 }, { step: 2, trainLoss: 2.1 }, { step: 3, trainLoss: 1.6 }, { step: 4, trainLoss: 1.2 }, { step: 5, trainLoss: 0.82 }, { step: 6, trainLoss: 0.58 }, { step: 7, trainLoss: 0.48 }, { step: 8, trainLoss: 0.44 }, { step: 9, trainLoss: 0.421 }],
+        color: RUN_COLORS[2],
     }],
     ['run-qwen-004', {
         id: 'run-qwen-004',
@@ -121,6 +138,7 @@ const mockRuns: Map<string, Run> = new Map([
         config: { learningRate: 0.00005, batchSize: 8, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
         metrics: { loss: 0.189, accuracy: 94.2, epoch: 3 },
         lossHistory: [{ step: 1, trainLoss: 2.3 }, { step: 2, trainLoss: 1.5 }, { step: 3, trainLoss: 0.9 }, { step: 4, trainLoss: 0.55 }, { step: 5, trainLoss: 0.35 }, { step: 6, trainLoss: 0.26 }, { step: 7, trainLoss: 0.21 }, { step: 8, trainLoss: 0.19 }, { step: 9, trainLoss: 0.189 }],
+        color: RUN_COLORS[3],
     }],
     ['run-qwen-005', {
         id: 'run-qwen-005',
@@ -139,6 +157,7 @@ const mockRuns: Map<string, Run> = new Map([
         tmux_window: 'ra-qwen005',
         metrics: { loss: 0.42, accuracy: 85.3, epoch: 2 },
         lossHistory: [{ step: 1, trainLoss: 2.4 }, { step: 2, trainLoss: 1.7 }, { step: 3, trainLoss: 1.1 }, { step: 4, trainLoss: 0.72 }, { step: 5, trainLoss: 0.52 }, { step: 6, trainLoss: 0.42 }],
+        color: RUN_COLORS[4],
     }],
     ['run-qwen-006', {
         id: 'run-qwen-006',
@@ -157,6 +176,7 @@ const mockRuns: Map<string, Run> = new Map([
         tmux_window: 'ra-qwen006',
         metrics: { loss: 0.85, accuracy: 78.1, epoch: 1 },
         lossHistory: [{ step: 1, trainLoss: 2.5 }, { step: 2, trainLoss: 1.8 }, { step: 3, trainLoss: 0.85 }],
+        color: RUN_COLORS[5],
     }],
     ['run-qwen-007', {
         id: 'run-qwen-007',
@@ -170,6 +190,7 @@ const mockRuns: Map<string, Run> = new Map([
         sweep_id: 'sweep-qwen',
         sweep_params: { lr: '1e-4', batch_size: 8 },
         config: { learningRate: 0.0001, batchSize: 8, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
+        color: RUN_COLORS[6],
     }],
     ['run-qwen-008', {
         id: 'run-qwen-008',
@@ -182,6 +203,7 @@ const mockRuns: Map<string, Run> = new Map([
         sweep_id: 'sweep-qwen',
         sweep_params: { lr: '1e-4', batch_size: 16 },
         config: { learningRate: 0.0001, batchSize: 16, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
+        color: RUN_COLORS[7],
     }],
     ['run-qwen-009', {
         id: 'run-qwen-009',
@@ -194,6 +216,7 @@ const mockRuns: Map<string, Run> = new Map([
         sweep_id: 'sweep-qwen',
         sweep_params: { lr: '1e-4', batch_size: 32 },
         config: { learningRate: 0.0001, batchSize: 32, epochs: 3, warmupSteps: 100, model: 'qwen-8b' },
+        color: RUN_COLORS[8],
     }],
 ])
 
