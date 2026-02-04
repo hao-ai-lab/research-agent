@@ -5,7 +5,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
 import { ArtifactsPanel } from './artifacts-panel'
-import { HistoryPanel } from './history-panel'
 import type {
   ChatMessage as ChatMessageType,
   ExperimentRun,
@@ -22,7 +21,6 @@ interface ChatViewProps {
   showArtifacts?: boolean
   collapseChats?: boolean
   collapseArtifactsInChat?: boolean
-  showHistory?: boolean
 }
 
 export function ChatView({
@@ -35,7 +33,6 @@ export function ChatView({
   showArtifacts = false,
   collapseChats = false,
   collapseArtifactsInChat = false,
-  showHistory = false,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -150,11 +147,6 @@ export function ChatView({
           />
         </div>
       </div>
-
-      {/* History Panel - Right side */}
-      {showHistory && (
-        <HistoryPanel messagePairs={messagePairs} />
-      )}
     </div>
   )
 }

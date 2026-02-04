@@ -69,7 +69,6 @@ export default function ResearchChat() {
   const [showArtifacts, setShowArtifacts] = useState(false)
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
-  const [showHistory, setShowHistory] = useState(false)
 
   // Build breadcrumbs based on current state
   const breadcrumbs = useMemo(() => {
@@ -278,8 +277,6 @@ export default function ResearchChat() {
         onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
         collapseArtifactsInChat={collapseArtifactsInChat}
         onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
-        showHistory={showHistory}
-        onToggleHistory={() => setShowHistory(prev => !prev)}
       />
 
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -294,7 +291,6 @@ export default function ResearchChat() {
             showArtifacts={showArtifacts}
             collapseChats={collapseChats}
             collapseArtifactsInChat={collapseArtifactsInChat}
-            showHistory={showHistory}
           />
         )}
         {activeTab === 'runs' && runsSubTab !== 'events' && (

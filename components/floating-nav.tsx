@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, ChevronRight, Bell, Settings, History } from 'lucide-react'
+import { Menu, ChevronRight, Bell, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -34,8 +34,6 @@ interface FloatingNavProps {
   onToggleCollapseChats?: () => void
   collapseArtifactsInChat?: boolean
   onToggleCollapseArtifactsInChat?: () => void
-  showHistory?: boolean
-  onToggleHistory?: () => void
 }
 
 const tabLabels: Record<string, string> = {
@@ -64,8 +62,6 @@ export function FloatingNav({
   onToggleCollapseChats,
   collapseArtifactsInChat = false,
   onToggleCollapseArtifactsInChat,
-  showHistory = false,
-  onToggleHistory,
 }: FloatingNavProps) {
   // Build default breadcrumbs if not provided
   const defaultBreadcrumbs: BreadcrumbItem[] = [
@@ -203,17 +199,6 @@ export function FloatingNav({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-
-          {/* History Button */}
-          <Button
-            variant={showHistory ? 'secondary' : 'ghost'}
-            size="icon"
-            onClick={onToggleHistory}
-            className="h-8 w-8"
-          >
-            <History className="h-4 w-4" />
-            <span className="sr-only">Toggle history</span>
-          </Button>
         </div>
       )}
     </header>
