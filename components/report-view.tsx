@@ -32,6 +32,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu'
 import type { ExperimentRun } from '@/lib/types'
 
@@ -158,6 +161,10 @@ export function ReportView({ runs }: ReportViewProps) {
 
   const updateCellContent = useCallback((id: string, content: string) => {
     setCells(prev => prev.map(c => c.id === id ? { ...c, content } : c))
+  }, [])
+
+  const changeCellType = useCallback((id: string, newType: CellType) => {
+    setCells(prev => prev.map(c => c.id === id ? { ...c, type: newType, output: undefined, executionCount: undefined } : c))
   }, [])
 
   const executeCell = useCallback((id: string) => {
@@ -537,6 +544,43 @@ export function ReportView({ runs }: ReportViewProps) {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger>
+                                  {getCellTypeIcon(cell.type)}
+                                  <span className="ml-2">Cell Type</span>
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent>
+                                  <DropdownMenuItem 
+                                    onClick={() => changeCellType(cell.id, 'markdown')}
+                                    className={cell.type === 'markdown' ? 'bg-secondary' : ''}
+                                  >
+                                    <Type className="h-4 w-4 mr-2" />
+                                    Markdown
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    onClick={() => changeCellType(cell.id, 'code')}
+                                    className={cell.type === 'code' ? 'bg-secondary' : ''}
+                                  >
+                                    <Code className="h-4 w-4 mr-2" />
+                                    Code
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    onClick={() => changeCellType(cell.id, 'chart')}
+                                    className={cell.type === 'chart' ? 'bg-secondary' : ''}
+                                  >
+                                    <BarChart3 className="h-4 w-4 mr-2" />
+                                    Chart
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    onClick={() => changeCellType(cell.id, 'insight')}
+                                    className={cell.type === 'insight' ? 'bg-secondary' : ''}
+                                  >
+                                    <Sparkles className="h-4 w-4 mr-2" />
+                                    Insight
+                                  </DropdownMenuItem>
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => addCell('markdown', cell.id)}>
                                 <Plus className="h-4 w-4 mr-2" />
                                 Add cell below
