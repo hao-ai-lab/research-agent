@@ -125,7 +125,7 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
 
   if (isUser) {
     return (
-      <div className="px-0.5 py-2">
+      <div className="px-1 py-2">
         <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
           <p className="text-sm leading-relaxed">{message.content}</p>
         </div>
@@ -136,53 +136,53 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
   return (
     <div className="px-0.5 py-2">
       <div className="space-y-2">
-          {message.thinking && (
-            <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
-              <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-                {isThinkingOpen ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-                <Brain className="h-3 w-3" />
-                <span>Thinking process</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2">
-                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
-                  {message.thinking.split('\n').map((line, i) => (
-                    <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
-                      {line}
-                    </p>
-                  ))}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
+        {message.thinking && (
+          <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
+            <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+              {isThinkingOpen ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              <Brain className="h-3 w-3" />
+              <span>Thinking process</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+              <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                {message.thinking.split('\n').map((line, i) => (
+                  <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                    {line}
+                  </p>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
 
-          {/* Embedded Chart - rendered before text content */}
-          {message.chart && (
-            <Collapsible open={!collapseArtifacts && isChartOpen} onOpenChange={setIsChartOpen}>
-              <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground mb-2">
-                {(!collapseArtifacts && isChartOpen) ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-                <span>{message.chart.title}</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mb-3">
-                <LossChart data={message.chart.data} title={message.chart.title} />
-              </CollapsibleContent>
-            </Collapsible>
-          )}
+        {/* Embedded Chart - rendered before text content */}
+        {message.chart && (
+          <Collapsible open={!collapseArtifacts && isChartOpen} onOpenChange={setIsChartOpen}>
+            <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground mb-2">
+              {(!collapseArtifacts && isChartOpen) ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              <span>{message.chart.title}</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mb-3">
+              <LossChart data={message.chart.data} title={message.chart.title} />
+            </CollapsibleContent>
+          </Collapsible>
+        )}
 
-          <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
-            {renderMarkdown(message.content)}
-          </div>
+        <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+          {renderMarkdown(message.content)}
+        </div>
 
-          <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
-            {formatDateTime(message.timestamp)}
-          </span>
+        <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
+          {formatDateTime(message.timestamp)}
+        </span>
       </div>
     </div>
   )
