@@ -133,7 +133,7 @@ export function SweepArtifact({
               <Terminal className="h-3 w-3" />
               <span>Command</span>
             </div>
-            <div className="bg-background rounded-md px-2 py-1.5 font-mono text-[10px] text-foreground/80 overflow-x-auto">
+            <div className="bg-background rounded-md px-2 py-1.5 font-mono text-[10px] text-foreground/80 break-all whitespace-pre-wrap">
               {config.command || 'No command specified'}
             </div>
           </div>
