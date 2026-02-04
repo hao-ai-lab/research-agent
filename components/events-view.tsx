@@ -189,17 +189,16 @@ export function EventsView({
                     <Clock className="h-3 w-3" />
                     {formatTimestamp(event.timestamp)}
                   </span>
-                  <button
-                    type="button"
+                  <span
                     onClick={(e) => {
                       e.stopPropagation()
                       onNavigateToRun(event.runId)
                     }}
-                    className="flex items-center gap-1 hover:text-foreground"
+                    className="flex items-center gap-1 hover:text-foreground cursor-pointer"
                   >
                     <ExternalLink className="h-3 w-3" />
                     {event.runAlias || event.runName}
-                  </button>
+                  </span>
                 </div>
               </div>
               <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
