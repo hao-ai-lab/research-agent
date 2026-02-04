@@ -35,7 +35,7 @@ logger = logging.getLogger("research-agent-server")
 # Configuration
 # =============================================================================
 
-OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://127.0.0.1:4099")
+OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://127.0.0.1:4096")
 OPENCODE_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 MODEL_PROVIDER = "opencode"
@@ -59,6 +59,8 @@ def init_paths(workdir: str):
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
     logger.info(f"Initialized with workdir: {WORKDIR}")
+    # Change the current working directory to the workdir
+    os.chdir(WORKDIR)
 
 
 def get_auth() -> Optional[httpx.BasicAuth]:
@@ -970,6 +972,19 @@ async def list_artifacts(run_id: str):
 # =============================================================================
 
 import asyncio
+import subprocess
+
+def start_opencode_server_subprocess(args):
+    # Start OpenCode server subprocess
+    opencode_process = subprocess.Popen(
+        ["opencode", "serve"],
+        cwd=args.workdir,
+        # TODO: Open up logging
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    logger.info(f"Started OpenCode server (PID: {opencode_process.pid}) in {args.workdir}")
+    return
 
 def main():
     parser = argparse.ArgumentParser(description="Research Agent Server")
@@ -980,6 +995,9 @@ def main():
     
     # Initialize paths
     init_paths(args.workdir)
+    
+    # Start OpenCode server subprocess
+    start_opencode_server_subprocess(args)
     
     # Load state
     load_chat_state()

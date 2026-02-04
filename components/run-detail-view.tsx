@@ -20,6 +20,9 @@ import {
   MoreHorizontal,
   Pencil,
   X,
+  RefreshCw,
+  Play,
+  Square,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -64,6 +67,9 @@ interface RunDetailViewProps {
   onUpdateRun?: (run: ExperimentRun) => void
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
+  onRefresh?: () => void
+  onStartRun?: (runId: string) => Promise<void>
+  onStopRun?: (runId: string) => Promise<void>
 }
 
 // Generate mock metric data based on run's loss history
@@ -186,7 +192,7 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag }: RunDetailViewProps) {
+export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
@@ -196,6 +202,9 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
   const [notesOpen, setNotesOpen] = useState(false)
   const [editedNotes, setEditedNotes] = useState(run.notes || '')
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isStarting, setIsStarting] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
 
   // Charts state
   const [primaryChartsOpen, setPrimaryChartsOpen] = useState(false)
@@ -249,6 +258,36 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
 
   const handleArchive = () => {
     onUpdateRun?.({ ...run, isArchived: !run.isArchived })
+  }
+
+  const handleRefresh = async () => {
+    if (!onRefresh) return
+    setIsRefreshing(true)
+    try {
+      await onRefresh()
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const handleStartRun = async () => {
+    if (!onStartRun) return
+    setIsStarting(true)
+    try {
+      await onStartRun(run.id)
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
+  const handleStopRun = async () => {
+    if (!onStopRun) return
+    setIsStopping(true)
+    try {
+      await onStopRun(run.id)
+    } finally {
+      setIsStopping(false)
+    }
   }
 
   const handleSaveNotes = () => {
@@ -375,6 +414,46 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
+                {/* Job Control Buttons */}
+                {(run.status === 'ready' || run.status === 'queued') && onStartRun && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleStartRun}
+                    disabled={isStarting}
+                    className="h-7 w-7 text-green-500 hover:text-green-400"
+                    title="Start Run"
+                  >
+                    <Play className={`h-4 w-4 ${isStarting ? 'animate-pulse' : ''}`} />
+                  </Button>
+                )}
+                {run.status === 'running' && onStopRun && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleStopRun}
+                    disabled={isStopping}
+                    className="h-7 w-7 text-destructive hover:text-destructive/80"
+                    title="Stop Run"
+                  >
+                    <Square className={`h-4 w-4 ${isStopping ? 'animate-pulse' : ''}`} />
+                  </Button>
+                )}
+
+                {/* Refresh Button */}
+                {onRefresh && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    className="h-7 w-7 text-muted-foreground"
+                    title="Refresh"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  </Button>
+                )}
+
                 <Button
                   variant="ghost"
                   size="icon"

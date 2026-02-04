@@ -1,4 +1,4 @@
-export type RunStatus = 'running' | 'completed' | 'failed' | 'queued' | 'canceled'
+export type RunStatus = 'ready' | 'running' | 'completed' | 'failed' | 'queued' | 'canceled'
 
 export interface Artifact {
   id: string

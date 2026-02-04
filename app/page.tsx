@@ -56,7 +56,7 @@ export default function ResearchChat() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Use real API data via useRuns hook
-  const { runs, updateRun: apiUpdateRun, isLoading: runsLoading, error: runsError } = useRuns()
+  const { runs, updateRun: apiUpdateRun, isLoading: runsLoading, error: runsError, refetch, startExistingRun, stopExistingRun } = useRuns()
 
   const [lossData] = useState(() => generateLossData())
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
@@ -357,6 +357,9 @@ export default function ResearchChat() {
               onCreateTag={handleCreateTag}
               onSelectedRunChange={setSelectedRun}
               onShowVisibilityManageChange={setShowVisibilityManage}
+              onRefresh={refetch}
+              onStartRun={startExistingRun}
+              onStopRun={stopExistingRun}
             />
           )}
           {activeTab === 'events' && (

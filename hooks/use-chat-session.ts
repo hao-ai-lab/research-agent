@@ -11,7 +11,7 @@ import {
     type ChatSession,
     type ChatMessageData,
     type StreamEvent,
-} from '@/lib/api'
+} from '@/lib/api-client'
 import type { ChatMode } from '@/components/chat-input'
 
 export interface ToolCallState {

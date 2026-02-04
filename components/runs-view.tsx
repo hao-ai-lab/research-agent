@@ -46,13 +46,13 @@ import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import { getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
-import { createSweep } from '@/lib/api'
+import { createSweep } from '@/lib/api-client'
 
 type RunsSubTab = 'overview' | 'details' | 'manage'
 type DetailsView = 'time' | 'priority'
 
 // Inline sweep form for popover
-function SweepFormPopover({ onClose }: { onClose: () => void }) {
+function SweepFormPopover({ onClose, onRefresh }: { onClose: () => void; onRefresh?: () => void }) {
   const [name, setName] = React.useState('')
   const [command, setCommand] = React.useState('')
   const [params, setParams] = React.useState('')
@@ -97,6 +97,7 @@ function SweepFormPopover({ onClose }: { onClose: () => void }) {
         auto_start: false,
       })
       onClose()
+      onRefresh?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed')
     } finally {
@@ -150,9 +151,12 @@ interface RunsViewProps {
   onCreateTag?: (tag: TagDefinition) => void
   onSelectedRunChange?: (run: ExperimentRun | null) => void
   onShowVisibilityManageChange?: (show: boolean) => void
+  onRefresh?: () => Promise<void>
+  onStartRun?: (runId: string) => Promise<void>
+  onStopRun?: (runId: string) => Promise<void>
 }
 
-export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange }: RunsViewProps) {
+export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [visibleRunIds, setVisibleRunIds] = useState<Set<string>>(
@@ -410,6 +414,9 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
             onUpdateRun={onUpdateRun}
             allTags={allTags}
             onCreateTag={onCreateTag}
+            onRefresh={onRefresh}
+            onStartRun={onStartRun}
+            onStopRun={onStopRun}
           />
         </div>
 
@@ -464,7 +471,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-80" align="end">
-                <SweepFormPopover onClose={() => setSweepDialogOpen(false)} />
+                <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
               </PopoverContent>
             </Popover>
             <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>

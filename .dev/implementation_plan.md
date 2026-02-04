@@ -322,6 +322,19 @@ Add run management functions:
 
 ---
 
+### Phase 5: Sweeps & Refinements ✅
+
+#### [NEW] [create-sweep-dialog.tsx](file:///Users/mike/Project/GitHub/v0-research-agent-mobile/components/create-sweep-dialog.tsx)
+- Parameter configuration form (key-value pairs)
+- Expansion logic preview (count runs)
+
+#### [MODIFY] [runs-view.tsx](file:///Users/mike/Project/GitHub/v0-research-agent-mobile/components/runs-view.tsx)
+- Add "Sweep" button to main Runs navbar (Popover)
+- Inline `SweepFormPopover` for quick creation
+- Filter/Sort options for runs list
+
+---
+
 ## Verification Plan
 
 1. **Server workdir**: Start with `--workdir /tmp/test`, verify `.agents/` created there

@@ -10,14 +10,14 @@ import {
     unarchiveRun,
     type Run,
     type CreateRunRequest
-} from '@/lib/api'
+} from '@/lib/api-client'
 import type { ExperimentRun } from '@/lib/types'
 
 // Convert API Run to ExperimentRun for UI compatibility
 function apiRunToExperimentRun(run: Run): ExperimentRun {
     // Map API status to UI status
     const statusMap: Record<Run['status'], ExperimentRun['status']> = {
-        'ready': 'queued',  // Map ready to queued for now (UI doesn't have ready)
+        'ready': 'ready',
         'queued': 'queued',
         'launching': 'running',
         'running': 'running',
@@ -139,17 +139,13 @@ export function useRuns(): UseRunsResult {
     // Archive a run
     const archiveExistingRun = useCallback(async (runId: string): Promise<void> => {
         await archiveRun(runId)
-        setRuns(prev => prev.map(r =>
-            r.id === runId ? { ...r, isArchived: true } : r
-        ))
-    }, [])
+        await fetchRuns()
+    }, [fetchRuns])
 
     // Unarchive a run
     const unarchiveExistingRun = useCallback(async (runId: string): Promise<void> => {
         await unarchiveRun(runId)
-        setRuns(prev => prev.map(r =>
-            r.id === runId ? { ...r, isArchived: false } : r
-        ))
+        await fetchRuns()
     }, [])
 
     // Update a run locally (for UI changes like favorites, notes, etc.)
