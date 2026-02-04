@@ -86,33 +86,23 @@ export default function ResearchChat() {
     if (activeTab === 'chat') {
       items.push({ label: 'Chat' })
     } else if (activeTab === 'runs') {
-      // First level: Runs (clickable if we're deeper)
-      if (selectedRun || showVisibilityManage) {
-        items.push({ 
-          label: 'Runs', 
-          onClick: () => {
-            setSelectedRun(null)
-            setShowVisibilityManage(false)
-          }
-        })
-      } else {
-        items.push({ label: 'Runs' })
-      }
-      
-      // Second level: Sub-tab (clickable if we're deeper)
+      // Show sub-tab as the primary label (no "Runs >" prefix)
       if (selectedRun) {
+        // Sub-tab is clickable when viewing a specific run
         items.push({ 
           label: runsSubTabLabels[runsSubTab], 
           onClick: () => setSelectedRun(null)
         })
         items.push({ label: selectedRun.alias || selectedRun.name })
       } else if (showVisibilityManage) {
+        // Sub-tab is clickable when in visibility management
         items.push({ 
           label: runsSubTabLabels[runsSubTab], 
           onClick: () => setShowVisibilityManage(false)
         })
         items.push({ label: 'Visibility' })
       } else {
+        // Just show the sub-tab name (e.g., "Overview", "Details", "Manage")
         items.push({ label: runsSubTabLabels[runsSubTab] })
       }
     } else if (activeTab === 'charts') {
