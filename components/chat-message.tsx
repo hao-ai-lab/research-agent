@@ -189,7 +189,7 @@ export function ChatMessage({ message, collapseArtifacts = false }: ChatMessageP
             {renderMarkdown(message.content)}
           </div>
 
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
             {formatDateTime(message.timestamp)}
           </span>
         </div>
