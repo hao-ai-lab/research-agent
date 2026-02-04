@@ -1,7 +1,18 @@
 'use client'
 
-import { Menu, ChevronRight } from 'lucide-react'
+import { Menu, ChevronRight, Bell, FileBox, Settings, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import type { RunsSubTab } from './left-panel'
 
 interface BreadcrumbItem {
@@ -14,6 +25,15 @@ interface FloatingNavProps {
   runsSubTab: RunsSubTab
   onMenuClick: () => void
   breadcrumbs?: BreadcrumbItem[]
+  // Chat-specific props
+  eventCount?: number
+  onAlertClick?: () => void
+  showArtifacts?: boolean
+  onToggleArtifacts?: () => void
+  collapseChats?: boolean
+  onToggleCollapseChats?: () => void
+  showHistory?: boolean
+  onToggleHistory?: () => void
 }
 
 const tabLabels: Record<string, string> = {
@@ -29,7 +49,20 @@ const runsSubTabLabels: Record<RunsSubTab, string> = {
   manage: 'Manage',
 }
 
-export function FloatingNav({ activeTab, runsSubTab, onMenuClick, breadcrumbs }: FloatingNavProps) {
+export function FloatingNav({ 
+  activeTab, 
+  runsSubTab, 
+  onMenuClick, 
+  breadcrumbs,
+  eventCount = 0,
+  onAlertClick,
+  showArtifacts = false,
+  onToggleArtifacts,
+  collapseChats = false,
+  onToggleCollapseChats,
+  showHistory = false,
+  onToggleHistory,
+}: FloatingNavProps) {
   // Build default breadcrumbs if not provided
   const defaultBreadcrumbs: BreadcrumbItem[] = [
     { label: tabLabels[activeTab] }
@@ -40,6 +73,7 @@ export function FloatingNav({ activeTab, runsSubTab, onMenuClick, breadcrumbs }:
   }
 
   const items = breadcrumbs || defaultBreadcrumbs
+  const isChat = activeTab === 'chat'
 
   return (
     <header className="shrink-0 h-12 flex items-center gap-3 px-3 border-b border-border bg-background">
@@ -53,7 +87,7 @@ export function FloatingNav({ activeTab, runsSubTab, onMenuClick, breadcrumbs }:
         <span className="sr-only">Open menu</span>
       </Button>
 
-      <nav className="flex items-center gap-1.5 text-sm min-w-0 overflow-hidden">
+      <nav className="flex items-center gap-1.5 text-sm min-w-0 overflow-hidden flex-1">
         {items.map((item, index) => {
           const isLast = index === items.length - 1
           const isClickable = !!item.onClick
@@ -80,6 +114,84 @@ export function FloatingNav({ activeTab, runsSubTab, onMenuClick, breadcrumbs }:
           )
         })}
       </nav>
+
+      {/* Right side buttons - only show in chat */}
+      {isChat && (
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Alert Button with Badge */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onAlertClick}
+            className="h-8 w-8 relative"
+          >
+            <Bell className="h-4 w-4" />
+            {eventCount > 0 && (
+              <Badge 
+                variant="destructive" 
+                className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] flex items-center justify-center"
+              >
+                {eventCount > 99 ? '99+' : eventCount}
+              </Badge>
+            )}
+            <span className="sr-only">View alerts ({eventCount})</span>
+          </Button>
+
+          {/* Artifact Button */}
+          <Button
+            variant={showArtifacts ? 'secondary' : 'ghost'}
+            size="icon"
+            onClick={onToggleArtifacts}
+            className="h-8 w-8"
+          >
+            <FileBox className="h-4 w-4" />
+            <span className="sr-only">Toggle artifacts</span>
+          </Button>
+
+          {/* Settings Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+              >
+                <Settings className="h-4 w-4" />
+                <span className="sr-only">Chat settings</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Chat Settings</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="flex items-center justify-between cursor-pointer"
+                onSelect={(e) => {
+                  e.preventDefault()
+                  onToggleCollapseChats?.()
+                }}
+              >
+                <Label htmlFor="collapse-chats" className="cursor-pointer">Collapse all chats</Label>
+                <Switch
+                  id="collapse-chats"
+                  checked={collapseChats}
+                  onCheckedChange={onToggleCollapseChats}
+                />
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* History Button */}
+          <Button
+            variant={showHistory ? 'secondary' : 'ghost'}
+            size="icon"
+            onClick={onToggleHistory}
+            className="h-8 w-8"
+          >
+            <History className="h-4 w-4" />
+            <span className="sr-only">Toggle history</span>
+          </Button>
+        </div>
+      )}
     </header>
   )
 }

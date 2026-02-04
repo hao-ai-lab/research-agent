@@ -65,6 +65,11 @@ export default function ResearchChat() {
   // Events state
   const [events, setEvents] = useState<RunEvent[]>(() => getRunEvents(mockRuns))
 
+  // Chat panel state
+  const [showArtifacts, setShowArtifacts] = useState(false)
+  const [collapseChats, setCollapseChats] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+
   // Build breadcrumbs based on current state
   const breadcrumbs = useMemo(() => {
     const items: { label: string; onClick?: () => void }[] = []
@@ -264,6 +269,14 @@ export default function ResearchChat() {
         runsSubTab={runsSubTab}
         onMenuClick={() => setLeftPanelOpen(true)}
         breadcrumbs={breadcrumbs}
+        eventCount={events.filter(e => e.status === 'new').length}
+        onAlertClick={handleNavigateToEvents}
+        showArtifacts={showArtifacts}
+        onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
+        collapseChats={collapseChats}
+        onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
+        showHistory={showHistory}
+        onToggleHistory={() => setShowHistory(prev => !prev)}
       />
 
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -280,6 +293,9 @@ export default function ResearchChat() {
             onDismissEvent={handleDismissEvent}
             mode={chatMode}
             onModeChange={setChatMode}
+            showArtifacts={showArtifacts}
+            collapseChats={collapseChats}
+            showHistory={showHistory}
           />
         )}
         {activeTab === 'runs' && runsSubTab !== 'events' && (
