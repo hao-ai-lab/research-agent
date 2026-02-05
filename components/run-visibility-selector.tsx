@@ -44,7 +44,7 @@ export function RunVisibilitySelector({
   return (
     <div className={`border-t border-border ${compact ? 'pt-2' : 'pt-3'}`}>
 
-      {/* <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2">
         <p className="text-xs text-muted-foreground">Toggle visibility:</p>
         {onOpenManage && (
           <Button
@@ -57,7 +57,7 @@ export function RunVisibilitySelector({
             Manage
           </Button>
         )}
-      </div> */}
+      </div>
 
       {/* Visibility Groups */}
       {visibilityGroups.length > 0 && (
