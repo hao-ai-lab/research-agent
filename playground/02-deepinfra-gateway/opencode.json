@@ -1,0 +1,109 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+        "my-deepinfra": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "MyCustomDeepInfra",
+            "options": {
+                "baseURL": "https://api.deepinfra.com/v1/openai",
+                "apiKey": "{env:DEEPINFRA_TOKEN}"
+            },
+            "models": {
+                "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo": {
+                    "name": "Llama 3.1 8B Turbo",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                }
+            }
+        },
+        "my-openai": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "MyGateway",
+            "options": {
+                "baseURL": "https://hao-ai-lab--openai-gateway-v2-api.modal.run/v1",
+                "apiKey": "{env:HAOAILABKEY}"
+            },
+            "models": {
+                "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo": {
+                    "name": "Llama 3.1 8B Turbo via Gateway",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "meta-llama/Meta-Llama-3.1-70B-Instruct": {
+                    "name": "Llama 3.1 70B Instruct via Gateway",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "Qwen/Qwen2.5-Coder-32B-Instruct": {
+                    "name": "Qwen 2.5 Coder 32B via Gateway",
+                    "limit": {
+                        "context": 32768,
+                        "output": 4096
+                    }
+                },
+                "deepseek-ai/DeepSeek-V3": {
+                    "name": "DeepSeek V3 via Gateway",
+                    "limit": {
+                        "context": 64000,
+                        "output": 8000
+                    }
+                },
+                "moonshotai/Kimi-K2.5": {
+                    "name": "Kimi K2.5",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "zai-org/GLM-4.7-Flash": {
+                    "name": "GLM 4.7 Flash",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "MiniMaxAI/MiniMax-M2.1": {
+                    "name": "MiniMax M2.1",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "allenai/Olmo-3.1-32B-Instruct": {
+                    "name": "Olmo 3.1 32B",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "anthropic/claude-4-opus": {
+                    "name": "Claude 4 Opus",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "anthropic/claude-3-7-sonnet-latest": {
+                    "name": "Claude 3.7 Sonnet",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                },
+                "anthropic/claude-4-sonnet": {
+                    "name": "Claude 4 Sonnet",
+                    "limit": {
+                        "context": 128000,
+                        "output": 4096
+                    }
+                }
+            }
+        }
+    }
+}

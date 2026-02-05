@@ -38,8 +38,8 @@ logger = logging.getLogger("research-agent-server")
 OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://127.0.0.1:4096")
 OPENCODE_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
-MODEL_PROVIDER = "opencode"
-MODEL_ID = "kimi-k2.5-free"
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
+MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
 
 # Will be set by CLI args
 WORKDIR = os.getcwd()
