@@ -22,17 +22,27 @@ OPENCODE_URL = "http://localhost:4096"
 MODEL_PROVIDER = "opencode"
 MODEL_ID = "kimi-k2.5-free"
 
-# Configure logging
-os.makedirs(".agents/logs", exist_ok=True)
+# Configure console-only logging initially (file logging added in init_paths)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(".agents/logs/master_agent.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger("master-agent")
+
+def init_paths():
+    """Initialize paths and configure file logging after WORKDIR is validated."""
+    log_dir = os.path.join(os.getcwd(), ".agents", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Add file handler to root logger
+    log_file = os.path.join(log_dir, "master_agent.log")
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logging.getLogger().addHandler(file_handler)
+    
+    logger.info(f"Logging initialized. File log: {log_file}")
 
 app = FastAPI(title="Master Agent API")
 
@@ -804,6 +814,9 @@ if __name__ == "__main__":
         print("CRITICAL ERROR: .agents/AGENTS.md not found in the working directory.")
         print("The Master Agent requires being run from a directory with a valid .agents/ configuration.")
         sys.exit(1)
+
+    # Initialize paths and file logging after WORKDIR validation
+    init_paths()
 
     # Custom uvicorn logging config to include timestamps in access logs
     log_config = uvicorn.config.LOGGING_CONFIG
