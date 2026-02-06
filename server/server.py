@@ -27,6 +27,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
+# Import Telegram handler
+try:
+    from telegram_handler import router as telegram_router
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
+
 # Configure logging
 # logging.basicConfig(level=logging.INFO)
 logging.basicConfig(level=logging.DEBUG)
@@ -91,6 +98,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include Telegram router if available
+if TELEGRAM_AVAILABLE:
+    app.include_router(telegram_router)
 
 
 @app.middleware("http")

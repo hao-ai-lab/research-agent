@@ -61,6 +61,11 @@ export interface AppSettings {
       apiKey?: string
       channel?: string
     }
+    telegram?: {
+      enabled: boolean
+      botToken?: string   // From @BotFather
+      chatId?: string     // Target chat/user ID for notifications
+    }
   }
   notifications: {
     alertsEnabled: boolean

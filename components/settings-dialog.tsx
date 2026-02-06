@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react'
 import {
   Search,
   Slack,
+  Send,
   Moon,
   Sun,
   Monitor,
@@ -57,6 +58,12 @@ export function SettingsDialog({
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
   const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
+
+  // Telegram state
+  const [telegramDialogOpen, setTelegramDialogOpen] = useState(false)
+  const [telegramBotToken, setTelegramBotToken] = useState(settings.integrations.telegram?.botToken || '')
+  const [telegramChatId, setTelegramChatId] = useState(settings.integrations.telegram?.chatId || '')
+  const [telegramTestStatus, setTelegramTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle')
 
   // API Configuration
   const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
@@ -128,6 +135,13 @@ export function SettingsDialog({
           label: 'Slack',
           description: 'Connect to Slack for notifications',
           icon: Slack,
+          type: 'action' as const,
+        },
+        {
+          id: 'telegram',
+          label: 'Telegram',
+          description: 'Connect to Telegram for notifications & commands',
+          icon: Send,
           type: 'action' as const,
         },
       ],
@@ -273,6 +287,61 @@ export function SettingsDialog({
     setSlackChannel('')
   }
 
+  const handleTelegramTestConnection = async () => {
+    if (!telegramBotToken.trim() || !telegramChatId.trim()) return
+    setTelegramTestStatus('testing')
+    try {
+      const response = await fetch(
+        `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: telegramChatId,
+            text: '✅ Research Agent connected successfully!\n\nAvailable commands:\n/status - System status\n/runs - List experiments\n/link - Get webapp URL\n/help - Show commands',
+            parse_mode: 'HTML',
+          }),
+        }
+      )
+      const data = await response.json()
+      if (data.ok) {
+        setTelegramTestStatus('success')
+      } else {
+        setTelegramTestStatus('failed')
+      }
+    } catch {
+      setTelegramTestStatus('failed')
+    }
+    setTimeout(() => setTelegramTestStatus('idle'), 3000)
+  }
+
+  const handleTelegramSave = () => {
+    onSettingsChange({
+      ...settings,
+      integrations: {
+        ...settings.integrations,
+        telegram: {
+          enabled: true,
+          botToken: telegramBotToken,
+          chatId: telegramChatId,
+        },
+      },
+    })
+    setTelegramDialogOpen(false)
+  }
+
+  const handleTelegramDisconnect = () => {
+    onSettingsChange({
+      ...settings,
+      integrations: {
+        ...settings.integrations,
+        telegram: undefined,
+      },
+    })
+    setTelegramBotToken('')
+    setTelegramChatId('')
+  }
+
   const renderSettingItem = (item: typeof settingsSections[0]['items'][0]) => {
     const Icon = item.icon
 
@@ -310,6 +379,7 @@ export function SettingsDialog({
             type="button"
             onClick={() => {
               if (item.id === 'slack') setSlackDialogOpen(true)
+              if (item.id === 'telegram') setTelegramDialogOpen(true)
             }}
             className="flex w-full items-center justify-between rounded-lg bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary"
           >
@@ -324,6 +394,11 @@ export function SettingsDialog({
             </div>
             <div className="flex items-center gap-2">
               {settings.integrations.slack?.enabled && item.id === 'slack' && (
+                <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs text-accent">
+                  Connected
+                </span>
+              )}
+              {settings.integrations.telegram?.enabled && item.id === 'telegram' && (
                 <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs text-accent">
                   Connected
                 </span>
@@ -625,6 +700,103 @@ export function SettingsDialog({
                   disabled={!slackApiKey.trim()}
                 >
                   Connect to Slack
+                </Button>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Telegram Integration Dialog */}
+      <Dialog open={telegramDialogOpen} onOpenChange={setTelegramDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5" />
+              Telegram Integration
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {settings.integrations.telegram?.enabled ? (
+              <>
+                <div className="rounded-lg bg-accent/10 border border-accent/30 p-3">
+                  <div className="flex items-center gap-2 text-accent">
+                    <Check className="h-4 w-4" />
+                    <span className="text-sm font-medium">Connected</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Chat ID: {settings.integrations.telegram.chatId || 'Not set'}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full bg-transparent"
+                  onClick={handleTelegramDisconnect}
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Disconnect
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="telegram-token" className="text-xs">
+                      Bot Token
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Get from @BotFather on Telegram
+                    </p>
+                    <Input
+                      id="telegram-token"
+                      type="password"
+                      placeholder="123456:ABC-DEF..."
+                      value={telegramBotToken}
+                      onChange={(e) => setTelegramBotToken(e.target.value)}
+                      className="mt-1.5"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="telegram-chat" className="text-xs">
+                      Chat ID
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Your Telegram user or group ID
+                    </p>
+                    <Input
+                      id="telegram-chat"
+                      placeholder="123456789"
+                      value={telegramChatId}
+                      onChange={(e) => setTelegramChatId(e.target.value)}
+                      className="mt-1.5"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={handleTelegramTestConnection}
+                    disabled={!telegramBotToken.trim() || !telegramChatId.trim() || telegramTestStatus === 'testing'}
+                  >
+                    {telegramTestStatus === 'testing' ? (
+                      <><RotateCcw className="h-3 w-3 mr-2 animate-spin" />Testing...</>
+                    ) : telegramTestStatus === 'success' ? (
+                      <><Check className="h-3 w-3 mr-2 text-green-500" />Sent!</>
+                    ) : telegramTestStatus === 'failed' ? (
+                      <><X className="h-3 w-3 mr-2 text-red-500" />Failed</>
+                    ) : (
+                      <>Test Connection</>
+                    )}
+                  </Button>
+                </div>
+                <Button
+                  className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
+                  onClick={handleTelegramSave}
+                  disabled={!telegramBotToken.trim() || !telegramChatId.trim()}
+                >
+                  Connect to Telegram
                 </Button>
               </>
             )}
