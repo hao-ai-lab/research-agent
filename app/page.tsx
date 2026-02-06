@@ -207,8 +207,24 @@ export default function ResearchChat() {
   }, [])
 
   const handleResolveByChat = useCallback((event: RunEvent) => {
-    // Navigate to chat - user can type their own message about the event
+    // Navigate to chat and propagate the alert
     setActiveTab('chat')
+    // Add alert message to chat
+    propagateEventToChat(event)
+  }, [])
+
+  // Propagate event to chat as a system message
+  const propagateEventToChat = useCallback((event: RunEvent) => {
+    // Store the event in sessionStorage for the chat component to pick up
+    const chatAlerts = JSON.parse(sessionStorage.getItem('chat-alerts') || '[]')
+    chatAlerts.push({
+      ...event,
+      timestamp: event.timestamp.toISOString(),
+    })
+    sessionStorage.setItem('chat-alerts', JSON.stringify(chatAlerts))
+    
+    // Dispatch custom event to notify chat component
+    window.dispatchEvent(new CustomEvent('chat-alert', { detail: event }))
   }, [])
 
   const handleUpdateRun = useCallback((updatedRun: ExperimentRun) => {
@@ -362,6 +378,9 @@ export default function ResearchChat() {
               onModeChange={setChatMode}
               collapseArtifactsInChat={collapseArtifactsInChat}
               chatSession={chatSession}
+              onNavigateToRun={handleNavigateToRun}
+              onUpdateEventStatus={handleUpdateEventStatus}
+              onDismissEvent={handleDismissEvent}
             />
           )}
           {activeTab === 'chat' && showSweepForm && (
@@ -375,7 +394,7 @@ export default function ResearchChat() {
               onLaunch={handleLaunchSweep}
             />
           )}
-          {activeTab === 'runs' && runsSubTab !== 'events' && (
+          {activeTab === 'runs' && (
             <RunsView
               runs={runs}
               subTab={runsSubTab}

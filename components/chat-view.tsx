@@ -12,6 +12,7 @@ import type {
   Sweep,
   SweepConfig,
   InsightChart,
+  EventStatus,
 } from '@/lib/types'
 
 interface ChatViewProps {
@@ -28,6 +29,9 @@ interface ChatViewProps {
   showArtifacts?: boolean
   collapseChats?: boolean
   collapseArtifactsInChat?: boolean
+  onNavigateToRun?: (runId: string) => void
+  onUpdateEventStatus?: (eventId: string, status: EventStatus) => void
+  onDismissEvent?: (eventId: string) => void
 }
 
 export function ChatView({
@@ -44,6 +48,9 @@ export function ChatView({
   showArtifacts = false,
   collapseChats = false,
   collapseArtifactsInChat = false,
+  onNavigateToRun,
+  onUpdateEventStatus,
+  onDismissEvent,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -107,19 +114,22 @@ export function ChatView({
                     <CollapsibleChatPair key={pair.user.id || index} pair={pair} collapseArtifacts={collapseArtifactsInChat} />
                   ))
                 ) : (
-                  // Normal view
-                  messages.map((message) => (
-                    <ChatMessage 
-                      key={message.id} 
-                      message={message} 
-                      collapseArtifacts={collapseArtifactsInChat}
-                      sweeps={sweeps}
-                      runs={runs}
-                      onEditSweep={onEditSweep}
-                      onLaunchSweep={onLaunchSweep}
-                      onRunClick={onRunClick}
-                    />
-                  ))
+                // Normal view
+                   messages.map((message) => (
+                     <ChatMessage
+                       key={message.id}
+                       message={message}
+                       collapseArtifacts={collapseArtifactsInChat}
+                       sweeps={sweeps}
+                       runs={runs}
+                       onEditSweep={onEditSweep}
+                       onLaunchSweep={onLaunchSweep}
+                       onRunClick={onRunClick}
+                       onNavigateToRun={onNavigateToRun}
+                       onUpdateEventStatus={onUpdateEventStatus}
+                       onDismissEvent={onDismissEvent}
+                     />
+                   ))
                 )}
               </div>
 

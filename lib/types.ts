@@ -115,7 +115,7 @@ export interface MessagePart {
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system'
   content: string
   thinking?: string  // Legacy: combined thinking (backward compat)
   parts?: MessagePart[]  // NEW: ordered array of parts
@@ -131,6 +131,8 @@ export interface ChatMessage {
   }
   sweepConfig?: SweepConfig
   sweepId?: string
+  alert?: RunEvent  // NEW: Alert/event attached to message
+  messageType?: 'normal' | 'alert' | 'notification'  // NEW: Message type
 }
 
 export interface LossDataPoint {

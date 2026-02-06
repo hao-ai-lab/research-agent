@@ -10,9 +10,10 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { LossChart } from './loss-chart'
-import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } from '@/lib/types'
+import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart, EventStatus } from '@/lib/types'
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
+import { AlertCard } from './alert-card'
 import type { ExperimentRun } from '@/lib/types'
 
 interface ChatMessageProps {
@@ -23,20 +24,27 @@ interface ChatMessageProps {
   onEditSweep?: (config: SweepConfig) => void
   onLaunchSweep?: (config: SweepConfig) => void
   onRunClick?: (run: ExperimentRun) => void
+  onNavigateToRun?: (runId: string) => void
+  onUpdateEventStatus?: (eventId: string, status: EventStatus) => void
+  onDismissEvent?: (eventId: string) => void
 }
 
-export function ChatMessage({ 
-  message, 
+export function ChatMessage({
+  message,
   collapseArtifacts = false,
   sweeps = [],
   runs = [],
   onEditSweep,
   onLaunchSweep,
   onRunClick,
+  onNavigateToRun,
+  onUpdateEventStatus,
+  onDismissEvent,
 }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
   const isUser = message.role === 'user'
+  const isSystem = message.role === 'system' || message.messageType === 'alert'
 
   const formatDateTime = (date: Date) => {
     const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
@@ -145,6 +153,20 @@ export function ChatMessage({
         <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
           <p className="text-sm leading-relaxed">{message.content}</p>
         </div>
+      </div>
+    )
+  }
+
+  // System/Alert messages
+  if (isSystem && message.alert) {
+    return (
+      <div className="px-0.5 py-2">
+        <AlertCard
+          event={message.alert}
+          onNavigateToRun={onNavigateToRun}
+          onUpdateStatus={onUpdateEventStatus}
+          onDismiss={onDismissEvent}
+        />
       </div>
     )
   }

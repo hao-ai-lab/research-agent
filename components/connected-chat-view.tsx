@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
@@ -13,6 +13,7 @@ import type {
     Sweep,
     SweepConfig,
     InsightChart,
+    EventStatus,
 } from '@/lib/types'
 
 interface ConnectedChatViewProps {
@@ -29,6 +30,10 @@ interface ConnectedChatViewProps {
     onSessionChange?: (sessionId: string | null) => void
     // Optional: pass chat session state from parent (for shared state)
     chatSession?: ReturnType<typeof useChatSession>
+    // Alert handling
+    onNavigateToRun?: (runId: string) => void
+    onUpdateEventStatus?: (eventId: string, status: EventStatus) => void
+    onDismissEvent?: (eventId: string) => void
 }
 
 /**
@@ -47,6 +52,9 @@ export function ConnectedChatView({
     collapseArtifactsInChat = false,
     onSessionChange,
     chatSession: externalChatSession,
+    onNavigateToRun,
+    onUpdateEventStatus,
+    onDismissEvent,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -78,16 +86,45 @@ export function ConnectedChatView({
         }
     }, [messages, streamingState.textContent, streamingState.thinkingContent])
 
+    // State for alert messages in chat
+    const [chatAlerts, setChatAlerts] = useState<ChatMessageType[]>([])
+
+    // Listen for chat alert events
+    useEffect(() => {
+        const handleChatAlert = (e: CustomEvent) => {
+            const event = e.detail
+            const alertMessage: ChatMessageType = {
+                id: `alert-${event.id}-${Date.now()}`,
+                role: 'system',
+                content: event.summary || event.title,
+                timestamp: new Date(),
+                messageType: 'alert',
+                alert: {
+                    ...event,
+                    timestamp: new Date(event.timestamp),
+                },
+            }
+            setChatAlerts((prev: ChatMessageType[]) => [...prev, alertMessage])
+        }
+
+        window.addEventListener('chat-alert', handleChatAlert as EventListener)
+        return () => window.removeEventListener('chat-alert', handleChatAlert as EventListener)
+    }, [])
+
     // Convert API messages to the ChatMessage type expected by components
     const displayMessages: ChatMessageType[] = useMemo(() => {
-        return messages.map((msg, idx) => ({
+        const apiMessages = messages.map((msg, idx) => ({
             id: `${currentSessionId}-${idx}`,
             role: msg.role,
             content: msg.content,
             thinking: msg.thinking || undefined,
             timestamp: new Date(msg.timestamp * 1000),
         }))
-    }, [messages, currentSessionId])
+        // Combine with alert messages
+        return [...apiMessages, ...chatAlerts].sort((a, b) => 
+            a.timestamp.getTime() - b.timestamp.getTime()
+        )
+    }, [messages, currentSessionId, chatAlerts])
 
     // Handle send - create session if needed
     const handleSend = async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
@@ -170,6 +207,9 @@ export function ConnectedChatView({
                                     onEditSweep={onEditSweep}
                                     onLaunchSweep={onLaunchSweep}
                                     onRunClick={onRunClick}
+                                    onNavigateToRun={onNavigateToRun}
+                                    onUpdateEventStatus={onUpdateEventStatus}
+                                    onDismissEvent={onDismissEvent}
                                 />
                             ))}
 
