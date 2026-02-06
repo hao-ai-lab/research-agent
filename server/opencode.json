@@ -1,0 +1,71 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+        "research-agent": {
+            "npm": "@ai-sdk/anthropic",
+            "name": "ResearchAgent",
+            "options": {
+                "baseURL": "https://hao-ai-lab--anthropic-gateway-api.modal.run/v1",
+                "apiKey": "{env:RESEARCH_AGENT_KEY}"
+            },
+            "models": {
+                "claude-3-5-haiku-latest": {
+                    "name": "Claude 3.5 Haiku",
+                    "limit": {
+                        "context": 200000,
+                        "output": 8192
+                    }
+                },
+                "claude-3-5-haiku-20241022": {
+                    "name": "Claude 3.5 Haiku (Oct 2024)",
+                    "limit": {
+                        "context": 200000,
+                        "output": 8192
+                    }
+                },
+                "claude-3-5-sonnet-latest": {
+                    "name": "Claude 3.5 Sonnet",
+                    "limit": {
+                        "context": 200000,
+                        "output": 8192
+                    }
+                },
+                "claude-3-5-sonnet-20241022": {
+                    "name": "Claude 3.5 Sonnet (Oct 2024)",
+                    "limit": {
+                        "context": 200000,
+                        "output": 8192
+                    }
+                },
+                "claude-3-7-sonnet-latest": {
+                    "name": "Claude 3.7 Sonnet",
+                    "limit": {
+                        "context": 200000,
+                        "output": 16384
+                    }
+                },
+                "claude-3-7-sonnet-20250219": {
+                    "name": "Claude 3.7 Sonnet (Feb 2025)",
+                    "limit": {
+                        "context": 200000,
+                        "output": 16384
+                    }
+                },
+                "claude-sonnet-4-20250514": {
+                    "name": "Claude Sonnet 4",
+                    "limit": {
+                        "context": 200000,
+                        "output": 16384
+                    }
+                },
+                "claude-opus-4-20250514": {
+                    "name": "Claude Opus 4",
+                    "limit": {
+                        "context": 200000,
+                        "output": 16384
+                    }
+                }
+            }
+        }
+    }
+}
