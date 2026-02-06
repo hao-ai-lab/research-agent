@@ -72,7 +72,7 @@ export function TmuxTerminalPanel({
             </div>
 
             {/* Terminal Placeholder */}
-            <div className="bg-black/50 p-4">
+            <div className="bg-black/50 p-1">
                 {/* Placeholder for future embedded terminal */}
                 <div className="rounded border border-dashed border-gray-700 bg-gray-900/50 p-6 text-center">
                     <Monitor className="h-10 w-10 mx-auto mb-3 text-gray-600" />
@@ -85,10 +85,10 @@ export function TmuxTerminalPanel({
                 </div>
 
                 {/* Manual attach instructions */}
-                <div className="mt-4 rounded bg-gray-800/50 p-3">
-                    <p className="text-[10px] text-gray-400 mb-2">To attach manually:</p>
-                    <div className="flex items-center gap-2">
-                        <code className="flex-1 text-[11px] font-mono text-green-400 bg-black/30 px-2 py-1 rounded">
+                <div className="mt-1 rounded bg-gray-800/50 p-2 min-w-0">
+                    <p className="text-[10px] text-gray-400 mb-1 min-w-0">To attach manually:</p>
+                    <div className="flex items-center gap-1 min-w-0">
+                        <code className="text-[11px] font-mono text-green-400 bg-black/30 rounded overflow-hidden text-ellipsis ">
                             {attachCommand}
                         </code>
                         <Button
@@ -108,14 +108,14 @@ export function TmuxTerminalPanel({
 
                 {/* Pane info */}
                 {tmuxPane && (
-                    <p className="mt-2 text-[10px] text-gray-500">
+                    <p className="ml-1 mt-2 text-[10px] text-gray-500">
                         Pane ID: {tmuxPane}
                     </p>
                 )}
             </div>
 
             {/* Actions */}
-            <div className="flex items-center gap-2 px-3 py-2 border-t border-border bg-secondary/20">
+            {/* <div className="flex items-center gap-2 px-3 py-2 border-t border-border bg-secondary/20">
                 <Button
                     variant="outline"
                     size="sm"
@@ -140,7 +140,7 @@ export function TmuxTerminalPanel({
                     <ExternalLink className="h-3 w-3 mr-1.5" />
                     Attach
                 </Button>
-            </div>
+            </div> */}
         </div>
     )
 }
