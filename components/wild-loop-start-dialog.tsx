@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useRef, useEffect } from 'react'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import type { TerminationCondition } from '@/lib/types'
@@ -64,7 +65,7 @@ export function WildLoopStartDialog({ open, onOpenChange, onStart }: WildLoopSta
             Configure Wild Mode
           </DialogTitle>
           <DialogDescription>
-            The agent will autonomously run experiments toward your goal.
+            The agent runs autonomously — no human interrupts unless it signals a critical decision.
           </DialogDescription>
         </DialogHeader>
 
@@ -75,7 +76,13 @@ export function WildLoopStartDialog({ open, onOpenChange, onStart }: WildLoopSta
             <Textarea
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
-              placeholder="e.g., Find the best learning rate for ResNet-50 on CIFAR-10"
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  handleStart()
+                }
+              }}
+              placeholder="e.g., Find the best config"
               className="text-sm min-h-[60px] resize-none"
             />
           </div>

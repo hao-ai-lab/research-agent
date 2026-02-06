@@ -1504,5 +1504,152 @@ def main():
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+
+# ---------------------------------------------------------------------------
+# Wild Mode Integration
+# ---------------------------------------------------------------------------
+from wild_loop import WildLoopManager, WildLoopConfig, WildLoopState, TerminationCondition
+
+wild_loop_manager = None # Deprecated
+
+import subprocess
+import signal
+
+wild_process: Optional[subprocess.Popen] = None
+WILD_STATE_FILE = os.path.join(WORKDIR, ".wild_state.json")
+
+class WildLoopConfig(BaseModel):
+    goal: str
+    conditions: dict # Flexible dict for conditions
+
+class ChatInjectionRequest(BaseModel):
+    role: str # user, assistant, system
+    content: str
+    hidden: bool = False
+
+@app.get("/api/state")
+async def get_global_state(request: Request):
+    """Expose internal state (runs, alerts) to the trusted subprocess."""
+    return {
+        "runs": runs,
+        "alerts": active_alerts
+    }
+
+@app.post("/api/chat/inject")
+async def inject_chat_message(req: ChatInjectionRequest):
+    """Allows the Wild Mode subprocess to inject messages into the chat."""
+    if not chat_sessions:
+        return {"error": "No active chat session"}
+    
+    # Sort by created_at (desc)
+    latest_sid = sorted(chat_sessions.keys(), key=lambda k: chat_sessions[k]["created_at"], reverse=True)[0]
+    session = chat_sessions[latest_sid]
+    
+    msg = {
+        "role": req.role,
+        "content": req.content,
+        "timestamp": time.time(),
+        "hidden": req.hidden 
+    }
+    session["messages"].append(msg)
+    save_chat_state()
+    
+    # If injecting a user message, we might want to trigger the model response?
+    # NO, the runner is responsible for triggering the model (via OpenCode) and injecting the response too.
+    # The runner manages the "Chat Loop".
+    # Wait, if the runner calculates the prompt, it needs to send it to the LLM.
+    # Does the runner use `server.py` to call the LLM? 
+    # Or does it call OpenCode directly?
+    # The runner should call OpenCode directly (it has the URL).
+    # Then it injects the response back here for visibility.
+    
+    return {"status": "injected", "session_id": latest_sid}
+
+@app.post("/wild/start")
+async def start_wild_loop(config: WildLoopConfig):
+    global wild_process
+    
+    if wild_process and wild_process.poll() is None:
+        raise HTTPException(status_code=400, detail="Wild loop is already active")
+    
+    # Prepare arguments
+    server_port = os.environ.get("PORT", "10000")
+    
+    # Use absolute path to runner script
+    server_dir = os.path.dirname(os.path.abspath(__file__))
+    runner_path = os.path.join(server_dir, "ralph_runner.py")
+    wild_log_path = os.path.join(DATA_DIR, "wild_loop.log")
+    
+    cmd = [
+        sys.executable, runner_path,
+        "--api-url", f"http://localhost:{server_port}", 
+        "--goal", config.goal,
+        "--log-file", wild_log_path
+    ]
+    
+    env = os.environ.copy()
+    if USER_AUTH_TOKEN:
+        env["RESEARCH_AGENT_USER_AUTH_TOKEN"] = USER_AUTH_TOKEN
+    
+    env["WILD_CONDITIONS"] = json.dumps(config.conditions)
+    env["OPENCODE_URL"] = OPENCODE_URL # Explicitly pass OpenCode URL from server config
+    env["MODEL_PROVIDER"] = MODEL_PROVIDER
+    env["MODEL_ID"] = MODEL_ID
+    
+    logger.info(f"Spawning Wild Mode subprocess: {' '.join(cmd)}")
+    wild_process = subprocess.Popen(cmd, env=env, cwd=os.getcwd())
+    
+    return {"message": "Wild Loop Started", "pid": wild_process.pid}
+
+@app.post("/wild/stop")
+async def stop_wild_loop():
+    global wild_process
+    if wild_process and wild_process.poll() is None:
+        logger.info(f"Stopping Wild Mode subprocess (PID {wild_process.pid})...")
+        wild_process.terminate()
+        try:
+            wild_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            wild_process.kill()
+        wild_process = None
+    
+    # Clean up state file
+    if os.path.exists(WILD_STATE_FILE):
+        try:
+            os.remove(WILD_STATE_FILE)
+        except:
+            pass
+            
+    return {"message": "Wild Loop Stopped"}
+
+@app.get("/wild/status")
+async def get_wild_status():
+    global wild_process
+    
+    # If process is dead, we are idle
+    if not wild_process or wild_process.poll() is not None:
+        return None
+    
+    default_state = {
+        "phase": "starting", 
+        "logs": [],
+        "conditions": {},
+        "goal": "loading...",
+        "iteration": 0,
+        "startedAt": int(time.time() * 1000),
+        "estimatedTokens": 0,
+        "isPaused": False
+    }
+
+    # Read status from shared file
+    if os.path.exists(WILD_STATE_FILE):
+        try:
+            with open(WILD_STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return default_state
+            
+    return default_state
+
 if __name__ == "__main__":
     main()

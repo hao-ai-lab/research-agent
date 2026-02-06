@@ -1,7 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Zap, Pause, Play, Square, Eye, Brain, RotateCw, Clock } from 'lucide-react'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Zap, Pause, Play, Square, Eye, Brain, RotateCw, Clock, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { WildLoopState } from '@/lib/types'
 
@@ -14,10 +20,12 @@ interface WildLoopBannerProps {
 
 const phaseConfig: Record<WildLoopState['phase'], { icon: typeof Zap; label: string }> = {
   idle: { icon: Zap, label: 'Idle' },
+  starting: { icon: Zap, label: 'Starting' },
   planning: { icon: Brain, label: 'Planning' },
   monitoring: { icon: Eye, label: 'Monitoring' },
   reacting: { icon: RotateCw, label: 'Reacting' },
   waiting: { icon: Clock, label: 'Waiting' },
+  waiting_for_human: { icon: Clock, label: 'Waiting for Human' },
 }
 
 export function WildLoopBanner({ state, onPause, onResume, onStop }: WildLoopBannerProps) {
@@ -52,6 +60,37 @@ export function WildLoopBanner({ state, onPause, onResume, onStop }: WildLoopBan
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-purple-400 hover:text-purple-300 hover:bg-purple-500/20"
+            >
+              <FileText className="h-3 w-3" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80 p-0" align="end">
+            <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
+              <span className="text-xs font-medium">Ralph Logs</span>
+              <span className="text-[10px] text-muted-foreground">{state.logs?.length || 0} entries</span>
+            </div>
+            <ScrollArea className="h-64">
+              <div className="p-3 text-xs font-mono space-y-1">
+                {state.logs && state.logs.length > 0 ? (
+                  state.logs.map((log, i) => (
+                    <div key={i} className="text-muted-foreground break-all">
+                      {log}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-muted-foreground italic">No logs yet...</div>
+                )}
+              </div>
+            </ScrollArea>
+          </PopoverContent>
+        </Popover>
+        
         <Button
           variant="ghost"
           size="icon"

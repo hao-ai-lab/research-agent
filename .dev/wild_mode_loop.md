@@ -1,8 +1,10 @@
-# Wild Mode - Autonomous Agent Loop
+# Wild Mode — Ralph Loop (Autonomous Agent Loop)
 
 ## Overview
 
-Wild Mode lets the AI agent run autonomously: the user states a goal, then the agent designs experiments (sweeps), monitors runs, handles failures/alerts, and iterates until termination conditions are met. The frontend drives the loop as an event-based state machine.
+Wild Mode (a.k.a. Ralph Loop) lets the AI agent run **fully autonomously**: the user states a goal, then the agent iteratively designs experiments, monitors runs, handles failures/alerts, and decides next steps — all without human interruption. The loop only pauses for the human when the agent emits a high-confidence `<signal>NEEDS_HUMAN</signal>` tag.
+
+Inspired by [open-ralph-wiggum](https://github.com/Th0rgal/open-ralph-wiggum).
 
 ## Architecture
 
@@ -17,20 +19,22 @@ User sets goal + conditions
             |
             v
  +--[useWildLoop hook]------+     +--[useChatSession]--+
- |  State machine:          |---->|  sendMessage()     |
- |  idle -> planning ->     |     |  streamingState    |
- |  monitoring -> reacting  |     +--------------------+
- |  -> waiting -> monitoring|
- |                          |     +--[useRuns]----------+
- |  Diff engine:            |<----|  runs[] polling     |
- |  snapshot {id, status}   |     +--------------------+
- |  on each render          |
- |                          |     +--[useAlerts]--------+
- |  Constraints:            |<----|  alerts[] polling   |
- |  - sequential (no send   |     +--------------------+
- |    while streaming)      |
- |  - 5s min interval       |
- |  - termination checks    |
+ |  Proactive iterative     |---->|  sendMessage()     |
+ |  loop (Ralph-style):     |     |  await streaming   |
+ |                          |     +--------------------+
+ |  startLoop():            |
+ |    1. Create session     |     +--[useRuns]----------+
+ |    2. Send initial       |<----|  runs[] polling     |
+ |       prompt             |     +--------------------+
+ |    3. Await response     |
+ |    4. Parse signal       |     +--[useAlerts]--------+
+ |                          |<----|  alerts[] polling   |
+ |  Auto-continuation:      |     +--------------------+
+ |    streaming ends →      |
+ |    check signal →        |
+ |    delay (5s/15s) →      |
+ |    send continuation     |
+ |    prompt → repeat       |
  +----------+--------------+
             |
             v
@@ -41,90 +45,134 @@ User sets goal + conditions
  +-------------------------+
 ```
 
+## Loop Flow (Ralph-style)
+
+1. **User configures goal + conditions** → dialog closes
+2. **startLoop()** creates a new chat session
+3. **Iteration 1**: Sends full Ralph system prompt with goal, instructions, current state. Awaits agent response.
+4. **Signal parsing**: Scans response for `<signal>COMPLETE|NEEDS_HUMAN|CONTINUE</signal>`
+   - `COMPLETE` → stop loop, notify human
+   - `NEEDS_HUMAN` → pause loop, notify human (browser notification)
+   - `CONTINUE` (or no signal) → schedule next iteration
+5. **Auto-continuation**: When streaming ends (`isStreaming` transitions `true→false`), the effect fires:
+   - Check termination conditions (iterations, time, tokens)
+   - Parse signal from last response
+   - If CONTINUE: wait 5s (no running) or 15s (runs active), then send continuation prompt
+6. **Continuation prompt** includes: current run state, new events (diff engine), pending alerts (with choices for agent to self-decide), instruction to keep going
+7. Repeat until COMPLETE, NEEDS_HUMAN, or termination condition
+
+## Key Design: No Human Interrupts
+
+The Ralph Loop **guarantees** the human is not interrupted unless:
+
+| Signal | When Used | What Happens |
+|--------|-----------|--------------|
+| `<signal>CONTINUE</signal>` | Default. More work to do. | Loop continues automatically |
+| `<signal>COMPLETE</signal>` | Goal genuinely achieved | Loop stops, browser notification |
+| `<signal>NEEDS_HUMAN</signal>` | Irreversible decision with major risk | Loop pauses, browser notification, human resumes |
+
+The prompts explicitly instruct the agent:
+- "Do NOT ask the human for help"
+- "Make your own decisions"
+- "If stuck, try a different approach"
+- "ONLY use NEEDS_HUMAN for irreversible decisions with major cost/risk"
+- Pending alerts with choices → agent decides itself
+
+## Signal Detection
+
+```typescript
+const SIGNAL_RE = /<signal>\s*(COMPLETE|NEEDS_HUMAN|CONTINUE)\s*<\/signal>/i
+```
+
+Scanned from the agent's response text. Case-insensitive, whitespace-tolerant. If no signal is found, defaults to `CONTINUE`.
+
+## Diff Engine
+
+Between iterations, the hook computes what changed:
+- New runs that appeared
+- Run status transitions (completed, failed, etc.)
+- New critical alerts (tracked by `processedAlertIds` Set to avoid duplicates)
+
+Changes are included in the continuation prompt so the agent sees what happened.
+
+## Timing
+
+| Scenario | Delay Between Iterations |
+|----------|-------------------------|
+| No running runs | 5 seconds (`MIN_INTERVAL_MS`) |
+| Running runs exist | 15 seconds (`IDLE_POLL_MS`) — gives runs time to progress |
+
 ## State Machine Phases
 
 | Phase | Description | Transitions |
 |-------|-------------|-------------|
 | `idle` | No loop running | -> `planning` on startLoop() |
-| `planning` | Initial prompt sent, agent analyzing | -> `monitoring` after first response |
-| `monitoring` | Watching runs/alerts for changes | -> `reacting` when diff detected |
-| `reacting` | Sending event update to agent | -> `monitoring` after response |
-| `waiting` | Debounce period between sends | -> `monitoring` after 5s |
+| `planning` | Initial prompt sent | -> `monitoring` after first response |
+| `monitoring` | Waiting between iterations | -> `reacting` when next iteration fires |
+| `reacting` | Continuation prompt being sent | -> `monitoring` after response |
+| `waiting` | Paused (NEEDS_HUMAN or user pause) | -> `monitoring` on resumeLoop() |
 
-## Key Design Decisions
+## ChatMode: `'agent' | 'wild'`
 
-### ChatMode: `'agent' | 'wild'` (was `'wild' | 'debug' | 'sweep'`)
+- `agent` = interactive assistant (replaces old `debug`/`sweep`)
+- `wild` = autonomous Ralph loop mode
+- Server only checks `wildMode: boolean` — modes that aren't `'wild'` all map to `wildMode=false`
 
-- `agent` = interactive assistant (replaces both `debug` and `sweep`)
-- `wild` = autonomous loop mode
-- Server only cares about `wildMode: boolean` — `debug` and `sweep` were never distinct server-side concepts. Both mapped to `wildMode=false`.
-- The resolve-event-by-chat flow passes `chatMode` directly to `sendMessage()`, which checks `mode === 'wild'`. So `'agent'` correctly produces `wildMode=false`, identical to old `'debug'` behavior.
-
-### Diff Engine
-
-Instead of polling the server for "what changed", the hook snapshots `{id, status}` of all runs on each render and diffs against the previous snapshot. This is zero-cost since `runs[]` is already polled by `useRuns`.
-
-### Sequential Sends
-
-The hook never sends while `streamingState.isStreaming` is true — it waits for the current response to finish before sending the next event update. This prevents message interleaving.
-
-### Token Estimation
-
-Simple `chars / 4` heuristic. Not precise but good enough for budget enforcement.
-
-## Files Changed
+## Files
 
 ### New Files
 | File | Purpose |
 |------|---------|
-| `hooks/use-wild-loop.ts` | Core state machine hook (~200 lines) |
-| `components/wild-loop-banner.tsx` | Sticky purple banner showing phase/iteration/elapsed |
-| `components/wild-loop-start-dialog.tsx` | Configuration dialog for goal + termination conditions |
-| `components/wild-system-event-card.tsx` | Inline event cards (run completed, failed, alert, etc.) |
+| `hooks/use-wild-loop.ts` | Core Ralph loop hook (~350 lines) |
+| `components/wild-loop-banner.tsx` | Sticky purple banner: phase, turn, elapsed, pause/stop |
+| `components/wild-loop-start-dialog.tsx` | Goal + termination conditions dialog |
+| `components/wild-system-event-card.tsx` | Inline event cards in chat timeline |
 
 ### Modified Files
 | File | Changes |
 |------|---------|
-| `lib/types.ts` | Added `WildLoopPhase`, `TerminationCondition`, `WildLoopState`, `WildSystemEvent` types. Added `source` to `ChatMessage`, `sweepId`/`sweepParams` to `ExperimentRun` |
-| `components/chat-input.tsx` | ChatMode `'agent'\|'wild'`, 2-mode selector (Bot/Zap icons), wild config button, override placeholder |
-| `components/chat-message.tsx` | Purple bg + "Wild" badge for `source === 'wild-loop'` messages |
-| `components/connected-chat-view.tsx` | Accepts `wildLoop` prop, renders banner + interleaved system events, wild mode empty state |
-| `app/page.tsx` | Instantiates `useWildLoop`, passes to `ConnectedChatView`, renders `WildLoopStartDialog` |
-| `app/globals.css` | `--wild` / `--wild-foreground` CSS vars, `.wild-pulse` animation |
-| `hooks/use-chat-session.ts` | Default mode ref `'agent'` |
-| `hooks/use-runs.ts` | Maps `sweep_id`, `sweep_params`, `git_commit` from API |
-| `components/runs-view.tsx` | Sweep badges (purple), action buttons (play/stop/rerun) on run items |
-| `components/run-detail-view.tsx` | Git commit hash display |
-| `server/server.py` | Captures `git rev-parse HEAD` on run creation |
-| `lib/api.ts` | Added `git_commit` field to `Run` interface |
+| `lib/types.ts` | `WildLoopPhase`, `TerminationCondition`, `WildLoopState`, `WildSystemEvent`, `source` on `ChatMessage`, `sweepId`/`sweepParams` on `ExperimentRun` |
+| `components/chat-input.tsx` | ChatMode `'agent'\|'wild'`, 2-mode selector, wild config button |
+| `components/chat-message.tsx` | Purple bg + "Wild" badge for `source === 'wild-loop'` |
+| `components/connected-chat-view.tsx` | `wildLoop` prop, banner, interleaved system events |
+| `app/page.tsx` | `useWildLoop` + `WildLoopStartDialog` |
+| `app/globals.css` | `--wild` CSS vars, `.wild-pulse` animation |
+| `hooks/use-chat-session.ts` | Default mode `'agent'` |
+| `hooks/use-runs.ts` | Maps `sweep_id`, `sweep_params`, `git_commit` |
+| `components/runs-view.tsx` | Sweep badges, action buttons |
+| `components/run-detail-view.tsx` | Git commit hash |
+| `server/server.py` | `git rev-parse HEAD` on run creation |
+| `lib/api.ts` | `git_commit` on `Run` |
 
 ## Implementation Progress
 
-- [x] Step 1: Types & ChatMode restructure (`agent`/`wild`)
-- [x] Step 2: CSS wild mode colors + animation
-- [x] Step 3: Core wild loop hook (state machine, diff engine, termination)
-- [x] Step 4: Wild loop banner component
-- [x] Step 5: Wild loop start dialog
-- [x] Step 6: System event cards
-- [x] Step 7: Purple styling for wild messages in chat
-- [x] Step 8: Connected chat view integration (banner, events, empty state)
-- [x] Step 9: Chat input wild mode behavior
-- [x] Step 10: Wire useWildLoop in page.tsx
-- [x] Step 11: Browser notifications (in use-wild-loop.ts)
-- [x] Step 12: Run improvements (sweep badges, action buttons)
-- [x] Step 13: Git commit tracking (server + frontend)
-- [x] Build passes (`npm run build` compiles successfully)
+- [x] Types & ChatMode restructure
+- [x] CSS wild mode colors + animation
+- [x] Core Ralph loop hook (proactive iterative, signal-based)
+- [x] Wild loop banner
+- [x] Wild loop start dialog
+- [x] System event cards
+- [x] Purple styling for wild messages
+- [x] Connected chat view integration
+- [x] Chat input wild mode behavior
+- [x] Wire useWildLoop in page.tsx
+- [x] Browser notifications
+- [x] Run improvements (sweep badges, action buttons)
+- [x] Git commit tracking
+- [x] **v2: Rewrite to proactive Ralph-style loop** (auto-continuation, signal detection, no human interrupts)
+- [x] Build passes
 
 ## Verification Checklist
 
-- [ ] Mode selector: switch between Agent and Wild, verify UI updates
-- [ ] Wild loop start: configure conditions, start loop, verify banner appears
-- [ ] Event detection: create a run, verify wild loop detects completion/failure
-- [ ] Auto-messaging: verify wild loop sends purple messages on events
-- [ ] Pause/Resume: pause loop, verify monitoring stops; resume, verify it continues
-- [ ] Termination: set iteration limit to 2, verify loop stops after 2 turns
-- [ ] System events: verify inline event cards appear in chat timeline
-- [ ] Notifications: verify browser notifications fire on critical events
-- [ ] Sweep tags: verify child runs show sweep badge in run list
-- [ ] Action buttons: verify play/stop/replay buttons work on run items
-- [ ] Mobile viewport: check at 300px width for overflow
+- [ ] Mode selector: switch between Agent and Wild
+- [ ] Wild loop start: configure conditions, start loop, banner appears
+- [ ] Auto-continuation: agent responds, loop automatically sends next iteration
+- [ ] Signal detection: agent outputs `<signal>COMPLETE</signal>`, loop stops
+- [ ] NEEDS_HUMAN: agent outputs signal, loop pauses + browser notification
+- [ ] Pause/Resume: user pauses, loop stops iterating; resume continues
+- [ ] Termination: max iterations hit, loop auto-stops
+- [ ] Alert self-resolution: pending alerts appear in prompt, agent decides
+- [ ] System events: inline event cards in chat timeline
+- [ ] Sweep tags: child runs show sweep badge
+- [ ] Action buttons: play/stop/replay on run items
+- [ ] Mobile: 300px width, no overflow

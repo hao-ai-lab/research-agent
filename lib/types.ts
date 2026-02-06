@@ -273,8 +273,7 @@ export interface SweepArtifact {
   timestamp: Date
 }
 
-// Wild Loop types
-export type WildLoopPhase = 'idle' | 'planning' | 'monitoring' | 'reacting' | 'waiting'
+export type WildLoopPhase = 'idle' | 'starting' | 'planning' | 'monitoring' | 'reacting' | 'waiting' | 'waiting_for_human'
 
 export interface TerminationCondition {
   maxIterations?: number
@@ -291,6 +290,7 @@ export interface WildLoopState {
   conditions: TerminationCondition
   estimatedTokens: number
   isPaused: boolean
+  logs?: string[]
 }
 
 export type WildSystemEventType = 'run-completed' | 'run-failed' | 'run-started' | 'alert' | 'sweep' | 'loop-start' | 'loop-stop' | 'loop-pause' | 'loop-resume'
