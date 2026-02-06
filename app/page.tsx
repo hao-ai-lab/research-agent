@@ -17,6 +17,7 @@ import type { ChatMode } from '@/components/chat-input'
 import { mockMemoryRules, mockInsightCharts, defaultTags, mockSweeps } from '@/lib/mock-data'
 import type { ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
+import { useApiConfig } from '@/lib/api-config'
 
 const defaultSettings: AppSettings = {
   appearance: {
@@ -73,8 +74,35 @@ export default function ResearchChat() {
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
 
-  // Chat session hook for New Chat functionality
-  const { createNewSession } = useChatSession()
+  // API configuration for auth/connection check
+  const { useMock, authToken, testConnection } = useApiConfig()
+  const [focusAuthToken, setFocusAuthToken] = useState(false)
+
+  // Auto-open settings if auth token is missing or connection fails (when not in mock mode)
+  useEffect(() => {
+    if (useMock) return // Skip check in demo mode
+
+    const checkConnection = async () => {
+      // Check if auth token is missing
+      if (!authToken) {
+        setFocusAuthToken(true)
+        setSettingsOpen(true)
+        return
+      }
+
+      // Check if connection works
+      const isConnected = await testConnection()
+      if (!isConnected) {
+        setSettingsOpen(true)
+      }
+    }
+
+    checkConnection()
+  }, [useMock, authToken, testConnection])
+
+  // Chat session hook - single instance shared with ConnectedChatView
+  const chatSession = useChatSession()
+  const { createNewSession, sessions, selectSession } = chatSession
 
   const events = useMemo<RunEvent[]>(() => {
     const toEvent = alerts.map((alert) => {
@@ -433,6 +461,7 @@ export default function ResearchChat() {
               mode={chatMode}
               onModeChange={setChatMode}
               collapseArtifactsInChat={collapseArtifactsInChat}
+              chatSession={chatSession}
             />
           )}
           {activeTab === 'chat' && showSweepForm && (
@@ -513,6 +542,11 @@ export default function ResearchChat() {
             await createNewSession()
             setActiveTab('chat')
           }}
+          sessions={sessions}
+          onSelectSession={async (sessionId) => {
+            await selectSession(sessionId)
+            setActiveTab('chat')
+          }}
         />
 
         {/* Hidden trigger for programmatic settings access */}
@@ -526,13 +560,18 @@ export default function ResearchChat() {
 
         <SettingsDialog
           open={settingsOpen}
-          onOpenChange={setSettingsOpen}
+          onOpenChange={(open) => {
+            setSettingsOpen(open)
+            if (!open) setFocusAuthToken(false)
+          }}
           settings={settings}
           onSettingsChange={setSettings}
           onNavigateToJourney={(subTab) => {
             setActiveTab('journey')
             setJourneySubTab(subTab)
           }}
+          focusAuthToken={focusAuthToken}
+          onRefresh={refetch}
         />
       </main>
     </div>

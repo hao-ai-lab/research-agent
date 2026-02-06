@@ -99,11 +99,28 @@ export interface RunEvent {
   relatedMetrics?: { name: string; value: string }[]
 }
 
+// Message parts for ordered rendering of thinking, tools, and text
+export type MessagePartType = 'thinking' | 'tool' | 'text'
+
+export type ToolState = 'pending' | 'running' | 'completed' | 'error'
+
+export interface MessagePart {
+  id: string
+  type: MessagePartType
+  content: string
+  // For tool parts
+  toolName?: string
+  toolState?: ToolState
+  toolInput?: string   // Tool arguments/input
+  toolOutput?: string  // Tool result/output
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  thinking?: string
+  thinking?: string  // Legacy: combined thinking (backward compat)
+  parts?: MessagePart[]  // NEW: ordered array of parts
   timestamp: Date
   attachments?: {
     name: string

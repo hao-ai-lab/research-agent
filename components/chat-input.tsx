@@ -21,6 +21,9 @@ import {
   BarChart3,
   MessageSquare,
   Archive,
+  ListPlus,
+  Trash2,
+  ChevronDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -52,6 +55,12 @@ interface ChatInputProps {
   artifacts?: Artifact[]
   charts?: InsightChart[]
   messages?: ChatMessage[]
+  // Queue support
+  isStreaming?: boolean
+  onQueue?: (message: string) => void
+  queueCount?: number
+  queue?: string[]
+  onRemoveFromQueue?: (index: number) => void
 }
 
 export function ChatInput({
@@ -63,6 +72,11 @@ export function ChatInput({
   artifacts = [],
   charts = [],
   messages = [],
+  isStreaming = false,
+  onQueue,
+  queueCount = 0,
+  queue = [],
+  onRemoveFromQueue,
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -75,6 +89,7 @@ export function ChatInput({
   const [mentionStartIndex, setMentionStartIndex] = useState<number | null>(null)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [mentionFilter, setMentionFilter] = useState<MentionType | 'all'>('all')
+  const [isQueueExpanded, setIsQueueExpanded] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const mentionPopoverRef = useRef<HTMLDivElement>(null)
@@ -188,7 +203,12 @@ export function ChatInput({
 
   const handleSubmit = () => {
     if (message.trim() || attachments.length > 0) {
-      onSend(message, attachments, mode)
+      // If streaming and onQueue is provided, queue the message instead of sending
+      if (isStreaming && onQueue && message.trim()) {
+        onQueue(message.trim())
+      } else {
+        onSend(message, attachments, mode)
+      }
       setMessage('')
       setAttachments([])
       if (textareaRef.current) {
@@ -350,6 +370,59 @@ export function ChatInput({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Message Queue Drawer */}
+      {queue.length > 0 && (
+        <div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+          {/* Queue header */}
+          <button
+            type="button"
+            onClick={() => setIsQueueExpanded(!isQueueExpanded)}
+            className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-amber-500/10 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <ListPlus className="h-3.5 w-3.5 text-amber-500" />
+              <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                {queue.length} message{queue.length > 1 ? 's' : ''} queued
+              </span>
+            </div>
+            <ChevronDown 
+              className={`h-3.5 w-3.5 text-amber-500 transition-transform ${
+                isQueueExpanded ? 'rotate-180' : ''
+              }`} 
+            />
+          </button>
+          
+          {/* Queue items */}
+          {isQueueExpanded && (
+            <div className="border-t border-amber-500/20 max-h-32 overflow-y-auto">
+              {queue.map((queuedMsg, index) => (
+                <div 
+                  key={index}
+                  className="flex items-start gap-2 px-3 py-2 hover:bg-amber-500/5 group"
+                >
+                  <span className="text-[10px] text-amber-500/70 font-medium mt-0.5 shrink-0">
+                    #{index + 1}
+                  </span>
+                  <p className="flex-1 text-xs text-foreground/80 line-clamp-2">
+                    {queuedMsg}
+                  </p>
+                  {onRemoveFromQueue && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveFromQueue(index)}
+                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0"
+                      title="Remove from queue"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -669,15 +742,30 @@ export function ChatInput({
           </Button>
         </div>
 
-        {/* Send button */}
+        {/* Send/Queue button */}
         <Button
           onClick={handleSubmit}
-          disabled={disabled || (!message.trim() && attachments.length === 0)}
+          disabled={!message.trim() && attachments.length === 0}
           size="icon"
-          className="h-7 w-7 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30"
+          className={`h-7 w-7 rounded-md disabled:opacity-30 relative ${
+            isStreaming && onQueue
+              ? 'bg-amber-500 text-white hover:bg-amber-600'
+              : 'bg-primary text-primary-foreground hover:bg-primary/90'
+          }`}
         >
-          <Send className="h-3.5 w-3.5" />
-          <span className="sr-only">Send message</span>
+          {isStreaming && onQueue ? (
+            <>
+              <ListPlus className="h-3.5 w-3.5" />
+              {queueCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-foreground text-[9px] font-medium text-background">
+                  {queueCount}
+                </span>
+              )}
+            </>
+          ) : (
+            <Send className="h-3.5 w-3.5" />
+          )}
+          <span className="sr-only">{isStreaming && onQueue ? 'Queue message' : 'Send message'}</span>
         </Button>
       </div>
 

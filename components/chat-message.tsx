@@ -3,14 +3,14 @@
 import React from "react"
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Brain } from 'lucide-react'
+import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2 } from 'lucide-react'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { LossChart } from './loss-chart'
-import type { ChatMessage as ChatMessageType, Sweep, SweepConfig } from '@/lib/types'
+import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } from '@/lib/types'
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
 import type { ExperimentRun } from '@/lib/types'
@@ -152,27 +152,40 @@ export function ChatMessage({
   return (
     <div className="px-0.5 py-2">
       <div className="space-y-2">
-          {message.thinking && (
-            <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
-              <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-                {isThinkingOpen ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-                <Brain className="h-3 w-3" />
-                <span>Thinking process</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2">
-                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
-                  {message.thinking.split('\n').map((line, i) => (
-                    <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
-                      {line}
-                    </p>
-                  ))}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+          {/* Parts-based rendering (new) vs legacy thinking field */}
+          {message.parts && message.parts.length > 0 ? (
+            // NEW: Render each part in order for correct interleaving
+            message.parts.map((part) => (
+              <SavedPartRenderer 
+                key={part.id} 
+                part={part} 
+                renderMarkdown={renderMarkdown}
+              />
+            ))
+          ) : (
+            // Legacy: single thinking block
+            message.thinking && (
+              <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
+                <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                  {isThinkingOpen ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
+                  <Brain className="h-3 w-3" />
+                  <span>Thinking process</span>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                    {message.thinking.split('\n').map((line, i) => (
+                      <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )
           )}
 
           {/* Embedded Chart - rendered before text content */}
@@ -236,4 +249,114 @@ export function ChatMessage({
       </div>
     </div>
   )
+}
+
+/**
+ * Renders a saved message part (thinking, tool, or text) with collapsible behavior
+ */
+function SavedPartRenderer({ 
+  part, 
+  renderMarkdown 
+}: { 
+  part: MessagePart
+  renderMarkdown: (content: string) => React.ReactNode 
+}) {
+  const [isOpen, setIsOpen] = useState(false) // Default collapsed per user preference
+
+  if (part.type === 'thinking') {
+    return (
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+          {isOpen ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronRight className="h-3 w-3" />
+          )}
+          <Brain className="h-3 w-3" />
+          <span>Thinking process</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2">
+          <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+            {part.content.split('\n').map((line, i) => (
+              <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                {line}
+              </p>
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
+
+  if (part.type === 'tool') {
+    const getStatusIcon = () => {
+      switch (part.toolState) {
+        case 'pending':
+        case 'running':
+          return <Loader2 className="h-3 w-3 animate-spin" />
+        case 'completed':
+          return <Check className="h-3 w-3 text-green-500" />
+        case 'error':
+          return <AlertCircle className="h-3 w-3 text-red-500" />
+        default:
+          return <Wrench className="h-3 w-3" />
+      }
+    }
+
+    const getStatusText = () => {
+      switch (part.toolState) {
+        case 'pending': return 'Pending'
+        case 'running': return 'Running'
+        case 'completed': return 'Done'
+        case 'error': return 'Error'
+        default: return part.toolState || ''
+      }
+    }
+
+    return (
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleTrigger className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground w-fit transition-colors hover:bg-secondary hover:text-foreground">
+          {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {getStatusIcon()}
+          <Wrench className="h-3 w-3" />
+          <span>{part.toolName || 'Tool'}</span>
+          <span className="text-muted-foreground/60">•</span>
+          <span className={part.toolState === 'completed' ? 'text-green-500' : part.toolState === 'error' ? 'text-red-500' : ''}>
+            {getStatusText()}
+          </span>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2">
+          {(part.toolInput || part.toolOutput || part.content) && (
+            <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl space-y-2">
+              {part.toolInput && (
+                <div>
+                  <span className="font-medium text-foreground/70">Input:</span>
+                  <pre className="mt-1 overflow-x-auto">{part.toolInput}</pre>
+                </div>
+              )}
+              {part.toolOutput && (
+                <div>
+                  <span className="font-medium text-foreground/70">Output:</span>
+                  <pre className="mt-1 overflow-x-auto">{part.toolOutput}</pre>
+                </div>
+              )}
+              {part.content && !part.toolInput && !part.toolOutput && (
+                <pre className="overflow-x-auto">{part.content}</pre>
+              )}
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
+
+  if (part.type === 'text') {
+    return (
+      <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+        {renderMarkdown(part.content)}
+      </div>
+    )
+  }
+
+  return null
 }

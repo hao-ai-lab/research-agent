@@ -22,13 +22,14 @@ from typing import Dict, Optional, AsyncIterator, List
 import httpx
 import uvicorn
 import libtmux
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("research-agent-server")
 
 # =============================================================================
@@ -46,6 +47,9 @@ OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 # This connects to the Anthropic gateway at Modal
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
 MODEL_ID = os.environ.get("MODEL_ID", "claude-3-5-haiku-latest")
+
+# User authentication token - if set, all API requests must include X-Auth-Token header
+USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
 
 # Will be set by CLI args
 WORKDIR = os.getcwd()
@@ -89,6 +93,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Validate X-Auth-Token header if USER_AUTH_TOKEN is configured."""
+    # Skip auth for health check and CORS preflight
+    if request.url.path == "/" or request.method == "OPTIONS":
+        return await call_next(request)
+    
+    # If no auth token configured, allow all requests
+    if not USER_AUTH_TOKEN:
+        return await call_next(request)
+    
+    # Validate token
+    provided_token = request.headers.get("X-Auth-Token")
+    if provided_token != USER_AUTH_TOKEN:
+        logger.warning(f"Unauthorized request to {request.url.path}")
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized - invalid or missing X-Auth-Token"}
+        )
+    
+    return await call_next(request)
 
 # =============================================================================
 # Models
@@ -530,22 +557,58 @@ async def chat_endpoint(req: ChatRequest):
                 
                 full_text = ""
                 full_thinking = ""
+                parts = []  # Track ordered parts by ID
                 
                 logger.debug("Start streaming events from OpenCode session")
                 async for event, text_delta, thinking_delta in stream_opencode_events(client, opencode_session_id):
                     full_text += text_delta
                     full_thinking += thinking_delta
                     
+                    # Track parts by ID
+                    part_id = event.get("id")
+                    ptype = event.get("ptype")
+                    
+                    if part_id and ptype:
+                        # Find existing part or create new one
+                        existing_part = next((p for p in parts if p["id"] == part_id), None)
+                        
+                        if ptype in ("text", "reasoning"):
+                            part_type = "thinking" if ptype == "reasoning" else "text"
+                            delta = event.get("delta", "")
+                            if existing_part:
+                                existing_part["content"] += delta
+                            else:
+                                parts.append({
+                                    "id": part_id,
+                                    "type": part_type,
+                                    "content": delta
+                                })
+                        elif ptype == "tool":
+                            if existing_part:
+                                # Update tool state
+                                existing_part["tool_state"] = event.get("state")
+                                if event.get("name"):
+                                    existing_part["tool_name"] = event.get("name")
+                            else:
+                                parts.append({
+                                    "id": part_id,
+                                    "type": "tool",
+                                    "content": "",
+                                    "tool_name": event.get("name"),
+                                    "tool_state": event.get("state")
+                                })
+                    
                     event_to_send = {k: v for k, v in event.items() if not k.startswith("_")}
                     logger.debug("Event: %s", event_to_send)
                     yield json.dumps(event_to_send) + "\n"
 
                 logger.debug("End streaming events from OpenCode session")
-                if full_text or full_thinking:
+                if full_text or full_thinking or parts:
                     assistant_msg = {
                         "role": "assistant",
                         "content": full_text.strip(),
                         "thinking": full_thinking.strip() if full_thinking else None,
+                        "parts": parts if parts else None,  # NEW: store ordered parts
                         "timestamp": time.time()
                     }
                     session["messages"].append(assistant_msg)
@@ -1140,6 +1203,13 @@ def main():
         logger.warning("⚠️  RESEARCH_AGENT_KEY environment variable is not set!")
         logger.warning("   The Anthropic gateway requires this for authentication.")
         logger.warning("   Set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+    
+    if not USER_AUTH_TOKEN:
+        logger.warning("⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!")
+        logger.warning("   Your server has NO authentication - anyone can access it.")
+        logger.warning("   For secure remote access, generate a token with:")
+        logger.warning("     ./generate_auth_token.sh")
+        logger.warning("   Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>")
     
     # Start OpenCode server subprocess
     # start_opencode_server_subprocess(args)

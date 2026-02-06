@@ -27,6 +27,8 @@ interface ConnectedChatViewProps {
     collapseArtifactsInChat?: boolean
     // Expose session state for sidebar integration
     onSessionChange?: (sessionId: string | null) => void
+    // Optional: pass chat session state from parent (for shared state)
+    chatSession?: ReturnType<typeof useChatSession>
 }
 
 /**
@@ -44,9 +46,12 @@ export function ConnectedChatView({
     onModeChange,
     collapseArtifactsInChat = false,
     onSessionChange,
+    chatSession: externalChatSession,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
 
+    // Use external chat session if provided (for shared state), otherwise use own hook
+    const internalChatSession = useChatSession()
     const {
         isConnected,
         isLoading,
@@ -56,7 +61,10 @@ export function ConnectedChatView({
         streamingState,
         sendMessage,
         createNewSession,
-    } = useChatSession()
+        queueMessage,
+        messageQueue,
+        removeFromQueue,
+    } = externalChatSession || internalChatSession
 
     // Notify parent of session changes
     useEffect(() => {
@@ -216,7 +224,11 @@ export function ConnectedChatView({
                     runs={runs}
                     charts={charts}
                     messages={displayMessages}
-                    disabled={streamingState.isStreaming}
+                    isStreaming={streamingState.isStreaming}
+                    onQueue={queueMessage}
+                    queueCount={messageQueue.length}
+                    queue={messageQueue}
+                    onRemoveFromQueue={removeFromQueue}
                 />
             </div>
         </div>
