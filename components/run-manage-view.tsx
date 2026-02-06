@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Archive, Undo2, CheckSquare, Square, MinusSquare, Palette } from 'lucide-react'
+import { Archive, Undo2, CheckSquare, Square, MinusSquare, Palette, AlertTriangle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -18,11 +18,12 @@ import { RunName } from './run-name'
 interface RunManageViewProps {
   runs: ExperimentRun[]
   onUpdateRun?: (run: ExperimentRun) => void
+  pendingAlertsByRun?: Record<string, number>
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
 }
 
-export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
+export function RunManageView({ runs, onUpdateRun, pendingAlertsByRun = {} }: RunManageViewProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const activeRuns = runs.filter((r) => !r.isArchived)
@@ -133,6 +134,8 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
 
   const RunManageItem = ({ run }: { run: ExperimentRun }) => {
     const isSelected = selectedIds.has(run.id)
+    const pendingAlertCount = pendingAlertsByRun[run.id] || 0
+    const hasPendingAlerts = pendingAlertCount > 0
 
     return (
       <div
@@ -192,9 +195,21 @@ export function RunManageView({ runs, onUpdateRun }: RunManageViewProps) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-sm text-foreground truncate">
-            <RunName run={run} />
-          </h4>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {hasPendingAlerts && (
+              <div className="relative shrink-0" title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}>
+                <AlertTriangle className="h-4 w-4 text-warning alert-triangle-shake" />
+                {pendingAlertCount > 1 && (
+                  <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                    {pendingAlertCount}
+                  </span>
+                )}
+              </div>
+            )}
+            <h4 className="font-medium text-sm text-foreground truncate">
+              <RunName run={run} />
+            </h4>
+          </div>
           <p className="text-xs text-muted-foreground truncate">
             {run.config?.model} - {getStatusText(run.status)}
           </p>

@@ -1,0 +1,10 @@
+{"_timestamp": 1770365342.971822, "step": 1, "epoch": 0.5, "loss": 2.05, "train/loss": 2.05, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365343.97314, "step": 2, "epoch": 1.0, "loss": 2.0, "train/loss": 2.0, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365344.978766, "step": 3, "epoch": 1.5, "loss": 1.95, "train/loss": 1.95, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365345.9839842, "step": 4, "epoch": 2.0, "loss": 9.8, "train/loss": 9.8, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365346.9869812, "step": 5, "epoch": 2.5, "loss": 1.85, "train/loss": 1.85, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365347.9901462, "step": 6, "epoch": 3.0, "loss": 1.8, "train/loss": 1.8, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365348.99453, "step": 7, "epoch": 3.5, "loss": 1.75, "train/loss": 1.75, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365350.0000231, "step": 8, "epoch": 4.0, "loss": 1.7, "train/loss": 1.7, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365351.0048409, "step": 9, "epoch": 4.5, "loss": 1.65, "train/loss": 1.65, "model": "gpt2", "run_kind": "mock_high_loss"}
+{"_timestamp": 1770365352.0094342, "step": 10, "epoch": 5.0, "loss": 1.6, "train/loss": 1.6, "model": "gpt2", "run_kind": "mock_high_loss"}

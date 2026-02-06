@@ -52,16 +52,18 @@ WORKDIR = os.getcwd()
 DATA_DIR = ""
 CHAT_DATA_FILE = ""
 JOBS_DATA_FILE = ""
+ALERTS_DATA_FILE = ""
 TMUX_SESSION_NAME = "research-agent"
 
 
 def init_paths(workdir: str):
     """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE
+    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE
     WORKDIR = os.path.abspath(workdir)
     DATA_DIR = os.path.join(WORKDIR, ".agents")
     CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
     JOBS_DATA_FILE = os.path.join(DATA_DIR, "jobs.json")
+    ALERTS_DATA_FILE = os.path.join(DATA_DIR, "alerts.json")
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
     logger.info(f"Initialized with workdir: {WORKDIR}")
@@ -143,6 +145,28 @@ class SweepCreate(BaseModel):
     auto_start: bool = False
 
 
+class AlertRecord(BaseModel):
+    id: str
+    run_id: str
+    timestamp: float
+    severity: str = "warning"
+    message: str
+    choices: List[str]
+    status: str = "pending"  # pending, resolved
+    response: Optional[str] = None
+    responded_at: Optional[float] = None
+
+
+class CreateAlertRequest(BaseModel):
+    message: str
+    choices: List[str]
+    severity: str = "warning"
+
+
+class RespondAlertRequest(BaseModel):
+    choice: str
+
+
 # =============================================================================
 # State
 # =============================================================================
@@ -150,6 +174,7 @@ class SweepCreate(BaseModel):
 chat_sessions: Dict[str, dict] = {}
 runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
+active_alerts: Dict[str, dict] = {}
 
 
 def save_chat_state():
@@ -193,6 +218,32 @@ def load_runs_state():
                 sweeps = data.get("sweeps", {})
         except Exception as e:
             logger.error(f"Error loading runs state: {e}")
+
+
+def save_alerts_state():
+    """Persist active alerts to disk."""
+    try:
+        with open(ALERTS_DATA_FILE, "w") as f:
+            json.dump({"alerts": list(active_alerts.values())}, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving alerts state: {e}")
+
+
+def load_alerts_state():
+    """Load active alerts from disk."""
+    global active_alerts
+    if os.path.exists(ALERTS_DATA_FILE):
+        try:
+            with open(ALERTS_DATA_FILE, "r") as f:
+                data = json.load(f)
+                loaded = data.get("alerts", [])
+                active_alerts = {
+                    alert["id"]: alert
+                    for alert in loaded
+                    if isinstance(alert, dict) and alert.get("id")
+                }
+        except Exception as e:
+            logger.error(f"Error loading alerts state: {e}")
 
 
 # =============================================================================
@@ -687,6 +738,82 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
     return {"message": "Status updated"}
 
 
+@app.post("/runs/{run_id}/alerts")
+async def create_alert(run_id: str, req: CreateAlertRequest):
+    """Create a new alert for a run (called by sidecar)."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if not req.choices:
+        raise HTTPException(status_code=400, detail="At least one choice is required")
+
+    severity = (req.severity or "warning").strip().lower()
+    if severity not in ["info", "warning", "critical"]:
+        severity = "warning"
+
+    alert_id = uuid.uuid4().hex
+    alert = AlertRecord(
+        id=alert_id,
+        run_id=run_id,
+        timestamp=time.time(),
+        severity=severity,
+        message=req.message,
+        choices=req.choices,
+        status="pending",
+    )
+
+    active_alerts[alert_id] = alert.model_dump()
+    save_alerts_state()
+    logger.info(f"Created alert {alert_id} for run {run_id}: {req.message}")
+    return {"alert_id": alert_id}
+
+
+@app.get("/alerts")
+async def list_alerts():
+    """List alerts ordered by newest first."""
+    alerts = list(active_alerts.values())
+    alerts.sort(key=lambda a: a.get("timestamp", 0), reverse=True)
+    return alerts
+
+
+@app.post("/alerts/{alert_id}/respond")
+async def respond_to_alert(alert_id: str, req: RespondAlertRequest):
+    """Resolve an alert and persist the response for sidecar consumption."""
+    if alert_id not in active_alerts:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert = active_alerts[alert_id]
+    if req.choice not in alert.get("choices", []):
+        raise HTTPException(status_code=400, detail="Invalid choice")
+
+    alert["status"] = "resolved"
+    alert["response"] = req.choice
+    alert["responded_at"] = time.time()
+
+    run_id = alert.get("run_id")
+    run = runs.get(run_id) if run_id else None
+
+    if not run:
+        save_alerts_state()
+        return {"message": "Response recorded, run not found"}
+
+    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    alerts_dir = os.path.join(run_dir, "alerts")
+    os.makedirs(alerts_dir, exist_ok=True)
+    response_file = os.path.join(alerts_dir, f"{alert_id}.response")
+
+    try:
+        with open(response_file, "w") as f:
+            f.write(req.choice)
+    except Exception as e:
+        logger.error(f"Failed writing alert response file for {alert_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to write response file: {e}")
+
+    save_alerts_state()
+    logger.info(f"Recorded alert response for {alert_id}: {req.choice}")
+    return {"message": "Response recorded"}
+
+
 # =============================================================================
 # Sweep Endpoints
 # =============================================================================
@@ -1020,6 +1147,7 @@ def main():
     # Load state
     load_chat_state()
     load_runs_state()
+    load_alerts_state()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
     logger.info(f"Working directory: {WORKDIR}")

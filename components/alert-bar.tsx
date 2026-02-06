@@ -80,7 +80,7 @@ export function AlertBar({
           <button
             type="button"
             onClick={onNavigateToEvents}
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            className="flex min-w-0 items-center gap-2 hover:opacity-80 transition-opacity"
           >
             <div className="relative">
               <Bell className="h-4 w-4 text-muted-foreground" />
@@ -90,15 +90,19 @@ export function AlertBar({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
               {errorCount > 0 && (
-                <Badge variant="outline" className="border-destructive/50 bg-destructive/10 text-destructive px-1.5 py-0 text-[10px] h-5">
-                  {errorCount} error{errorCount > 1 ? 's' : ''}
+                <Badge variant="outline" className="shrink-0 border-destructive/50 bg-destructive/10 text-destructive px-1.5 py-0 text-[10px] h-5">
+                  <span className="max-w-[84px] truncate">
+                    {errorCount} error{errorCount > 1 ? 's' : ''}
+                  </span>
                 </Badge>
               )}
               {warningCount > 0 && (
-                <Badge variant="outline" className="border-warning/50 bg-warning/10 text-warning px-1.5 py-0 text-[10px] h-5">
-                  {warningCount} warning{warningCount > 1 ? 's' : ''}
+                <Badge variant="outline" className="shrink-0 border-warning/50 bg-warning/10 text-warning px-1.5 py-0 text-[10px] h-5">
+                  <span className="max-w-[84px] truncate">
+                    {warningCount} warning{warningCount > 1 ? 's' : ''}
+                  </span>
                 </Badge>
               )}
             </div>

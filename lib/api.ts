@@ -206,6 +206,18 @@ export interface Run {
     color?: string
 }
 
+export interface Alert {
+    id: string
+    run_id: string
+    timestamp: number
+    severity: 'info' | 'warning' | 'critical'
+    message: string
+    choices: string[]
+    status: 'pending' | 'resolved'
+    response?: string | null
+    responded_at?: number | null
+}
+
 export interface CreateRunRequest {
     name: string
     command: string
@@ -317,6 +329,33 @@ export async function unarchiveRun(runId: string): Promise<void> {
     if (!response.ok) {
         throw new Error(`Failed to unarchive run: ${response.statusText}`)
     }
+}
+
+/**
+ * List all alerts
+ */
+export async function listAlerts(): Promise<Alert[]> {
+    const response = await fetch(`${API_URL()}/alerts`)
+    if (!response.ok) {
+        throw new Error(`Failed to list alerts: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Respond to an alert choice
+ */
+export async function respondToAlert(alertId: string, choice: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_URL()}/alerts/${alertId}/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice }),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to respond to alert: ${error}`)
+    }
+    return response.json()
 }
 
 /**
