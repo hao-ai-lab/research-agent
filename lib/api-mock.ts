@@ -12,12 +12,13 @@ import type {
     CreateRunRequest,
     LogResponse,
     Artifact,
+    Alert,
     Sweep,
     CreateSweepRequest,
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, LogResponse, Artifact, Sweep, CreateSweepRequest }
+export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -234,6 +235,31 @@ const mockSweeps: Map<string, Sweep> = new Map([
     }],
 ])
 
+const mockAlerts: Map<string, Alert> = new Map([
+    ['alert-qwen-1', {
+        id: 'alert-qwen-1',
+        run_id: 'run-qwen-006',
+        timestamp: Date.now() / 1000 - 180,
+        severity: 'warning',
+        message: 'Loss spike detected (loss=0.8500, rolling_avg=0.5200).',
+        choices: ['Ignore', 'Stop Job'],
+        status: 'pending',
+        response: null,
+        responded_at: null,
+    }],
+    ['alert-qwen-2', {
+        id: 'alert-qwen-2',
+        run_id: 'run-qwen-005',
+        timestamp: Date.now() / 1000 - 1200,
+        severity: 'critical',
+        message: 'High loss detected (loss=8.7000, threshold=8.0).',
+        choices: ['Ignore', 'Stop Job'],
+        status: 'resolved',
+        response: 'Ignore',
+        responded_at: Date.now() / 1000 - 1100,
+    }],
+])
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -425,6 +451,36 @@ export async function unarchiveRun(runId: string): Promise<void> {
     if (run) {
         run.is_archived = false
     }
+}
+
+export async function listAlerts(): Promise<Alert[]> {
+    await delay(120)
+    return Array.from(mockAlerts.values()).sort((a, b) => b.timestamp - a.timestamp)
+}
+
+export async function respondToAlert(alertId: string, choice: string): Promise<{ message: string }> {
+    await delay(120)
+    const alert = mockAlerts.get(alertId)
+    if (!alert) {
+        throw new Error('Alert not found')
+    }
+    if (!alert.choices.includes(choice)) {
+        throw new Error('Invalid alert choice')
+    }
+
+    alert.status = 'resolved'
+    alert.response = choice
+    alert.responded_at = Date.now() / 1000
+
+    if (choice.toLowerCase().includes('stop')) {
+        const run = mockRuns.get(alert.run_id)
+        if (run && (run.status === 'running' || run.status === 'launching')) {
+            run.status = 'stopped'
+            run.stopped_at = Date.now() / 1000
+        }
+    }
+
+    return { message: 'Response recorded (mock)' }
 }
 
 export async function getRunLogs(

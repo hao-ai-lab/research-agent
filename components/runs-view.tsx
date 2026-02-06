@@ -147,6 +147,7 @@ interface RunsViewProps {
   subTab: RunsSubTab
   onRunClick?: (run: ExperimentRun) => void
   onUpdateRun?: (run: ExperimentRun) => void
+  pendingAlertsByRun?: Record<string, number>
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
   onSelectedRunChange?: (run: ExperimentRun | null) => void
@@ -156,7 +157,7 @@ interface RunsViewProps {
   onStopRun?: (runId: string) => Promise<void>
 }
 
-export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
+export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsByRun = {}, allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [visibleRunIds, setVisibleRunIds] = useState<Set<string>>(
@@ -275,7 +276,10 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
     onShowVisibilityManageChange?.(show)
   }
 
-  const RunItem = ({ run, showChevron = true }: { run: ExperimentRun; showChevron?: boolean }) => (
+  const RunItem = ({ run, showChevron = true }: { run: ExperimentRun; showChevron?: boolean }) => {
+    const pendingAlertCount = pendingAlertsByRun[run.id] || 0
+    const hasPendingAlerts = pendingAlertCount > 0
+    return (
     <button
       type="button"
       onClick={() => handleRunClick(run)}
@@ -287,6 +291,16 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
             className="h-3 w-3 rounded-full shrink-0"
             style={{ backgroundColor: run.color || '#4ade80' }}
           />
+          {hasPendingAlerts && (
+            <div className="relative shrink-0" title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}>
+              <AlertTriangle className="h-4 w-4 text-warning alert-triangle-shake" />
+              {pendingAlertCount > 1 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                  {pendingAlertCount}
+                </span>
+              )}
+            </div>
+          )}
           <h4 className="font-medium text-sm text-foreground truncate">
             <RunName run={run} />
           </h4>
@@ -325,7 +339,8 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
         </div>
       )}
     </button>
-  )
+    )
+  }
 
   // Show visibility manage view
   if (showVisibilityManage) {
@@ -440,6 +455,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
       <RunManageView
         runs={runs}
         onUpdateRun={onUpdateRun}
+        pendingAlertsByRun={pendingAlertsByRun}
         allTags={allTags}
         onCreateTag={onCreateTag}
       />
@@ -449,9 +465,9 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, allTags, onCre
   // Details view
   if (subTab === 'details') {
     const favoriteRuns = activeRuns.filter(r => r.isFavorite)
-    const alertRuns = activeRuns.filter(r => r.alerts && r.alerts.length > 0 && !r.isFavorite)
-    const runningRuns = activeRuns.filter(r => r.status === 'running' && !r.isFavorite && !(r.alerts && r.alerts.length > 0))
-    const failedRuns = activeRuns.filter(r => r.status === 'failed' && !r.isFavorite && !(r.alerts && r.alerts.length > 0))
+    const alertRuns = activeRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
+    const runningRuns = activeRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+    const failedRuns = activeRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
     const completedRuns = activeRuns.filter(r => r.status === 'completed' && !r.isFavorite)
 
     return (

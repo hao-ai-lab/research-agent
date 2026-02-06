@@ -136,7 +136,7 @@ export function NavPage({
 
             {/* Navigation Grid - All pages flattened */}
             <ScrollArea className="flex-1">
-              <div className="grid grid-cols-2 gap-2 content-start pb-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2 content-start pb-2">
                 {/* Chat */}
                 <button
                   type="button"
@@ -147,7 +147,7 @@ export function NavPage({
                     }`}
                 >
                   <MessageSquare className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Chat</span>
+                  <span className="font-medium min-w-0 truncate">Chat</span>
                 </button>
 
                 {/* Runs - Overview */}
@@ -160,7 +160,7 @@ export function NavPage({
                     }`}
                 >
                   <LayoutDashboard className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Runs Overview</span>
+                  <span className="font-medium min-w-0 truncate">Runs Overview</span>
                 </button>
 
                 {/* Runs - Details */}
@@ -173,7 +173,7 @@ export function NavPage({
                     }`}
                 >
                   <List className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Runs Details</span>
+                  <span className="font-medium min-w-0 truncate">Runs Details</span>
                 </button>
 
                 {/* Runs - Manage */}
@@ -186,7 +186,7 @@ export function NavPage({
                     }`}
                 >
                   <Wrench className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Runs Manage</span>
+                  <span className="font-medium min-w-0 truncate">Runs Manage</span>
                 </button>
 
                 {/* Events */}
@@ -199,7 +199,7 @@ export function NavPage({
                     }`}
                 >
                   <Bell className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Events</span>
+                  <span className="font-medium min-w-0 truncate">Events</span>
                 </button>
 
                 {/* Charts */}
@@ -212,7 +212,7 @@ export function NavPage({
                     }`}
                 >
                   <BarChart3 className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Charts</span>
+                  <span className="font-medium min-w-0 truncate">Charts</span>
                 </button>
 
                 {/* Memory */}
@@ -225,7 +225,7 @@ export function NavPage({
                     }`}
                 >
                   <Lightbulb className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Memory</span>
+                  <span className="font-medium min-w-0 truncate">Memory</span>
                 </button>
 
                 {/* Report */}
@@ -238,7 +238,7 @@ export function NavPage({
                     }`}
                 >
                   <FileText className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Report</span>
+                  <span className="font-medium min-w-0 truncate">Report</span>
                 </button>
 
                 {/* Settings */}
@@ -251,7 +251,7 @@ export function NavPage({
                   className="flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left bg-secondary/50 text-foreground hover:bg-secondary"
                 >
                   <Settings className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Settings</span>
+                  <span className="font-medium min-w-0 truncate">Settings</span>
                 </button>
               </div>
             </ScrollArea>

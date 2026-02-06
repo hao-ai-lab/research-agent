@@ -362,29 +362,31 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
       {/* Section Tabs */}
       <div className="shrink-0 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 rounded-lg bg-secondary p-1">
-            <button
-              type="button"
-              onClick={() => setActiveSection('standard')}
-              className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeSection === 'standard'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-                }`}
-            >
-              <Layers className="h-4 w-4" />
-              Standard
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSection('custom')}
-              className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeSection === 'custom'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-                }`}
-            >
-              <BarChart3 className="h-4 w-4" />
-              Custom
-            </button>
+          <div className="flex-1 min-w-0 rounded-lg bg-secondary p-1 overflow-x-auto">
+            <div className="flex min-w-max items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveSection('standard')}
+                className={`shrink-0 inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeSection === 'standard'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+                  }`}
+              >
+                <Layers className="h-4 w-4" />
+                <span className="truncate">Standard</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSection('custom')}
+                className={`shrink-0 inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeSection === 'custom'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+                  }`}
+              >
+                <BarChart3 className="h-4 w-4" />
+                <span className="truncate">Custom</span>
+              </button>
+            </div>
           </div>
           <Popover>
             <PopoverTrigger asChild>
