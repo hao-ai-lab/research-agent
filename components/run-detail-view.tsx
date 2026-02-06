@@ -707,6 +707,7 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
               </Collapsible>
             )}
 
+
             {/* Logs Section */}
             <Collapsible open={logsOpen} onOpenChange={setLogsOpen}>
               <div className="rounded-lg border border-border bg-card overflow-hidden">
