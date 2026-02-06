@@ -40,6 +40,8 @@ interface SettingsDialogProps {
   settings: AppSettings
   onSettingsChange: (settings: AppSettings) => void
   onNavigateToJourney?: (subTab: 'story' | 'devnotes') => void
+  focusAuthToken?: boolean
+  onRefresh?: () => void
 }
 
 export function SettingsDialog({
@@ -48,6 +50,8 @@ export function SettingsDialog({
   settings,
   onSettingsChange,
   onNavigateToJourney,
+  focusAuthToken = false,
+  onRefresh,
 }: SettingsDialogProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
@@ -59,6 +63,7 @@ export function SettingsDialog({
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
   const [authTokenInput, setAuthTokenInput] = useState(authToken)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
+  const authTokenInputRef = React.useRef<HTMLInputElement>(null)
 
   // Sync apiUrlInput when apiUrl changes (e.g. on reset)
   React.useEffect(() => {
@@ -69,6 +74,17 @@ export function SettingsDialog({
   React.useEffect(() => {
     setAuthTokenInput(authToken)
   }, [authToken])
+
+  // Auto-focus auth token input when requested
+  React.useEffect(() => {
+    if (focusAuthToken && open) {
+      // Small delay to ensure dialog is mounted
+      const timer = setTimeout(() => {
+        authTokenInputRef.current?.focus()
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [focusAuthToken, open])
 
   const handleTestConnection = async () => {
     setConnectionStatus('testing')
@@ -85,6 +101,8 @@ export function SettingsDialog({
 
   const handleSaveAuthToken = () => {
     setAuthToken(authTokenInput)
+    // Trigger API refresh after saving auth token
+    onRefresh?.()
   }
 
   const settingsSections = useMemo(() => [
@@ -430,6 +448,7 @@ export function SettingsDialog({
                     <div className="flex gap-2">
                       <Input
                         id="auth-token"
+                        ref={authTokenInputRef}
                         type="password"
                         placeholder="Enter auth token..."
                         value={authTokenInput}

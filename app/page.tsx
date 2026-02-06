@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { FloatingNav } from '@/components/floating-nav'
 import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
@@ -16,6 +16,7 @@ import type { ChatMode } from '@/components/chat-input'
 import { mockMessages, generateLossData, mockMemoryRules, mockInsightCharts, defaultTags, getRunEvents, mockSweeps, createDefaultSweepConfig } from '@/lib/mock-data'
 import type { ChatMessage, ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
+import { useApiConfig } from '@/lib/api-config'
 
 const defaultSettings: AppSettings = {
   appearance: {
@@ -81,6 +82,32 @@ export default function ResearchChat() {
   const [showArtifacts, setShowArtifacts] = useState(false)
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+
+  // API configuration for auth/connection check
+  const { useMock, authToken, testConnection } = useApiConfig()
+  const [focusAuthToken, setFocusAuthToken] = useState(false)
+
+  // Auto-open settings if auth token is missing or connection fails (when not in mock mode)
+  useEffect(() => {
+    if (useMock) return // Skip check in demo mode
+
+    const checkConnection = async () => {
+      // Check if auth token is missing
+      if (!authToken) {
+        setFocusAuthToken(true)
+        setSettingsOpen(true)
+        return
+      }
+
+      // Check if connection works
+      const isConnected = await testConnection()
+      if (!isConnected) {
+        setSettingsOpen(true)
+      }
+    }
+
+    checkConnection()
+  }, [useMock, authToken, testConnection])
 
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
@@ -431,13 +458,18 @@ export default function ResearchChat() {
 
         <SettingsDialog
           open={settingsOpen}
-          onOpenChange={setSettingsOpen}
+          onOpenChange={(open) => {
+            setSettingsOpen(open)
+            if (!open) setFocusAuthToken(false)
+          }}
           settings={settings}
           onSettingsChange={setSettings}
           onNavigateToJourney={(subTab) => {
             setActiveTab('journey')
             setJourneySubTab(subTab)
           }}
+          focusAuthToken={focusAuthToken}
+          onRefresh={refetch}
         />
       </main>
     </div>
