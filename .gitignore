@@ -28,3 +28,4 @@ next-env.d.ts
 
 .agents
 __pycache__
+.DS_Store
