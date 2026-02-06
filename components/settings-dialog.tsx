@@ -40,6 +40,8 @@ interface SettingsDialogProps {
   settings: AppSettings
   onSettingsChange: (settings: AppSettings) => void
   onNavigateToJourney?: (subTab: 'story' | 'devnotes') => void
+  focusAuthToken?: boolean
+  onRefresh?: () => void
 }
 
 export function SettingsDialog({
@@ -48,6 +50,8 @@ export function SettingsDialog({
   settings,
   onSettingsChange,
   onNavigateToJourney,
+  focusAuthToken = false,
+  onRefresh,
 }: SettingsDialogProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
@@ -55,14 +59,32 @@ export function SettingsDialog({
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
 
   // API Configuration
-  const { apiUrl, useMock, setApiUrl, setUseMock, resetToDefaults, testConnection } = useApiConfig()
+  const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
+  const [authTokenInput, setAuthTokenInput] = useState(authToken)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
+  const authTokenInputRef = React.useRef<HTMLInputElement>(null)
 
   // Sync apiUrlInput when apiUrl changes (e.g. on reset)
   React.useEffect(() => {
     setApiUrlInput(apiUrl)
   }, [apiUrl])
+
+  // Sync authTokenInput when authToken changes (e.g. on reset)
+  React.useEffect(() => {
+    setAuthTokenInput(authToken)
+  }, [authToken])
+
+  // Auto-focus auth token input when requested
+  React.useEffect(() => {
+    if (focusAuthToken && open) {
+      // Small delay to ensure dialog is mounted
+      const timer = setTimeout(() => {
+        authTokenInputRef.current?.focus()
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [focusAuthToken, open])
 
   const handleTestConnection = async () => {
     setConnectionStatus('testing')
@@ -75,6 +97,12 @@ export function SettingsDialog({
   const handleSaveApiUrl = () => {
     setApiUrl(apiUrlInput)
     setConnectionStatus('idle')
+  }
+
+  const handleSaveAuthToken = () => {
+    setAuthToken(authTokenInput)
+    // Trigger API refresh after saving auth token
+    onRefresh?.()
   }
 
   const settingsSections = useMemo(() => [
@@ -407,6 +435,31 @@ export function SettingsDialog({
                         size="sm"
                         onClick={handleSaveApiUrl}
                         disabled={apiUrlInput === apiUrl}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Auth Token */}
+                  <div className="space-y-2">
+                    <Label htmlFor="auth-token" className="text-xs">Auth Token</Label>
+                    <p className="text-xs text-muted-foreground">Required for secure remote access</p>
+                    <div className="flex gap-2">
+                      <Input
+                        id="auth-token"
+                        ref={authTokenInputRef}
+                        type="password"
+                        placeholder="Enter auth token..."
+                        value={authTokenInput}
+                        onChange={(e) => setAuthTokenInput(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSaveAuthToken}
+                        disabled={authTokenInput === authToken}
                       >
                         Save
                       </Button>

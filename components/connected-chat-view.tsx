@@ -61,6 +61,9 @@ export function ConnectedChatView({
         streamingState,
         sendMessage,
         createNewSession,
+        queueMessage,
+        messageQueue,
+        removeFromQueue,
     } = externalChatSession || internalChatSession
 
     // Notify parent of session changes
@@ -221,7 +224,11 @@ export function ConnectedChatView({
                     runs={runs}
                     charts={charts}
                     messages={displayMessages}
-                    disabled={streamingState.isStreaming}
+                    isStreaming={streamingState.isStreaming}
+                    onQueue={queueMessage}
+                    queueCount={messageQueue.length}
+                    queue={messageQueue}
+                    onRemoveFromQueue={removeFromQueue}
                 />
             </div>
         </div>

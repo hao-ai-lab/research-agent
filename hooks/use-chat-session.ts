@@ -17,6 +17,7 @@ import type { ChatMode } from '@/components/chat-input'
 export interface ToolCallState {
     id: string
     name?: string
+    description?: string
     state: 'pending' | 'running' | 'completed' | 'error'
 }
 
@@ -26,6 +27,7 @@ export interface StreamingPart {
     type: 'thinking' | 'tool' | 'text'
     content: string
     toolName?: string
+    toolDescription?: string
     toolState?: 'pending' | 'running' | 'completed' | 'error'
 }
 
@@ -61,6 +63,12 @@ export interface UseChatSessionResult {
 
     // Send message - optional sessionId override for newly created sessions
     sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string) => Promise<void>
+
+    // Message queue - for queuing messages during streaming
+    messageQueue: string[]
+    queueMessage: (content: string) => void
+    removeFromQueue: (index: number) => void
+    clearQueue: () => void
 }
 
 const initialStreamingState: StreamingState = {
@@ -84,6 +92,10 @@ export function useChatSession(): UseChatSessionResult {
 
     // Streaming state
     const [streamingState, setStreamingState] = useState<StreamingState>(initialStreamingState)
+
+    // Message queue for queuing messages during streaming
+    const [messageQueue, setMessageQueue] = useState<string[]>([])
+    const currentModeRef = useRef<ChatMode>('wild')
 
     // Abort controller for cancelling streams
     const abortControllerRef = useRef<AbortController | null>(null)
@@ -193,6 +205,9 @@ export function useChatSession(): UseChatSessionResult {
             return // Already streaming
         }
 
+        // Track the current mode for queued messages
+        currentModeRef.current = mode
+
         try {
             setError(null)
 
@@ -279,6 +294,19 @@ export function useChatSession(): UseChatSessionResult {
                     })
                 } else if (event.type === 'part_update' && event.ptype === 'tool') {
                     const stateValue = parseToolState(event.state)
+                    
+                    // Extract description from event.state.input.description or event.state.title
+                    let toolDescription: string | undefined
+                    if (event.state && typeof event.state === 'object') {
+                        const state = event.state as Record<string, unknown>
+                        if (state.input && typeof state.input === 'object') {
+                            const input = state.input as Record<string, unknown>
+                            toolDescription = (input.description as string) || (input.title as string)
+                        }
+                        if (!toolDescription && state.title) {
+                            toolDescription = state.title as string
+                        }
+                    }
 
                     setStreamingState(prev => {
                         // Update legacy toolCalls
@@ -286,6 +314,7 @@ export function useChatSession(): UseChatSessionResult {
                         const toolState: ToolCallState = {
                             id: event.id || '',
                             name: event.name,
+                            description: toolDescription,
                             state: stateValue,
                         }
                         const newToolCalls = existingToolIndex >= 0
@@ -305,6 +334,7 @@ export function useChatSession(): UseChatSessionResult {
                                 ...updatedParts[existingPartIndex],
                                 toolState: stateValue,
                                 toolName: event.name || updatedParts[existingPartIndex].toolName,
+                                toolDescription: toolDescription || updatedParts[existingPartIndex].toolDescription,
                             }
                             return { ...prev, toolCalls: newToolCalls, parts: updatedParts }
                         } else {
@@ -317,6 +347,7 @@ export function useChatSession(): UseChatSessionResult {
                                     type: 'tool' as const,
                                     content: '',
                                     toolName: event.name,
+                                    toolDescription: toolDescription,
                                     toolState: stateValue,
                                 }],
                             }
@@ -354,6 +385,31 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [currentSessionId, streamingState.isStreaming, refreshSessions])
 
+    // Queue functions
+    const queueMessage = useCallback((content: string) => {
+        if (content.trim()) {
+            setMessageQueue(prev => [...prev, content.trim()])
+        }
+    }, [])
+
+    const clearQueue = useCallback(() => {
+        setMessageQueue([])
+    }, [])
+
+    const removeFromQueue = useCallback((index: number) => {
+        setMessageQueue(prev => prev.filter((_, i) => i !== index))
+    }, [])
+
+    // Process queue when streaming ends
+    useEffect(() => {
+        if (!streamingState.isStreaming && messageQueue.length > 0 && currentSessionId) {
+            const nextMessage = messageQueue[0]
+            setMessageQueue(prev => prev.slice(1))
+            // Send the next queued message with the current mode
+            sendMessage(nextMessage, currentModeRef.current, currentSessionId)
+        }
+    }, [streamingState.isStreaming, messageQueue, currentSessionId, sendMessage])
+
     return {
         isConnected,
         isLoading,
@@ -368,5 +424,9 @@ export function useChatSession(): UseChatSessionResult {
         messages,
         streamingState,
         sendMessage,
+        messageQueue,
+        queueMessage,
+        removeFromQueue,
+        clearQueue,
     }
 }

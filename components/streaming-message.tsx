@@ -110,6 +110,7 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
                 tool={{
                     id: part.id,
                     name: part.toolName,
+                    description: part.toolDescription,
                     state: part.toolState || 'pending',
                 }}
             />
@@ -159,14 +160,21 @@ function ToolCallIndicator({ tool }: { tool: ToolCallState }) {
     }
 
     return (
-        <div className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground w-fit">
-            {getStatusIcon()}
-            <Wrench className="h-3 w-3" />
-            <span>{tool.name || 'Tool'}</span>
-            <span className="text-muted-foreground/60">•</span>
-            <span className={tool.state === 'completed' ? 'text-green-500' : tool.state === 'error' ? 'text-red-500' : ''}>
-                {getStatusText()}
-            </span>
+        <div className="rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground w-fit max-w-md">
+            <div className="flex items-center gap-2">
+                {getStatusIcon()}
+                <Wrench className="h-3 w-3" />
+                <span>{tool.name || 'Tool'}</span>
+                <span className="text-muted-foreground/60">•</span>
+                <span className={tool.state === 'completed' ? 'text-green-500' : tool.state === 'error' ? 'text-red-500' : ''}>
+                    {getStatusText()}
+                </span>
+            </div>
+            {tool.description && (tool.state === 'running' || tool.state === 'pending') && (
+                <div className="mt-1 pl-5 text-muted-foreground/80 italic truncate">
+                    {tool.description}
+                </div>
+            )}
         </div>
     )
 }
