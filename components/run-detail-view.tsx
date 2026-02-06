@@ -790,9 +790,10 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
                 <CollapsibleContent>
                   <div className="border-t border-border px-3 pb-3">
                     <div className="mt-2 relative">
-                      <pre className="rounded bg-secondary p-2 text-[10px] text-foreground overflow-x-auto font-mono">
+                      <code className="text-[11px] font-mono text-green-400 bg-black/30 rounded overflow-hidden text-ellipsis ">
+                        {/* {run.command} */}
                         {run.command}
-                      </pre>
+                      </code>
                       <Button
                         variant="ghost"
                         size="icon"
