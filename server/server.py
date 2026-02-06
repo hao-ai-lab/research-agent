@@ -22,9 +22,9 @@ from typing import Dict, Optional, AsyncIterator, List
 import httpx
 import uvicorn
 import libtmux
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 # Configure logging
@@ -47,6 +47,9 @@ OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 # This connects to the Anthropic gateway at Modal
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
 MODEL_ID = os.environ.get("MODEL_ID", "claude-3-5-haiku-latest")
+
+# User authentication token - if set, all API requests must include X-Auth-Token header
+USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
 
 # Will be set by CLI args
 WORKDIR = os.getcwd()
@@ -88,6 +91,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Validate X-Auth-Token header if USER_AUTH_TOKEN is configured."""
+    # Skip auth for health check and CORS preflight
+    if request.url.path == "/" or request.method == "OPTIONS":
+        return await call_next(request)
+    
+    # If no auth token configured, allow all requests
+    if not USER_AUTH_TOKEN:
+        return await call_next(request)
+    
+    # Validate token
+    provided_token = request.headers.get("X-Auth-Token")
+    if provided_token != USER_AUTH_TOKEN:
+        logger.warning(f"Unauthorized request to {request.url.path}")
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized - invalid or missing X-Auth-Token"}
+        )
+    
+    return await call_next(request)
 
 # =============================================================================
 # Models
@@ -1050,6 +1076,13 @@ def main():
         logger.warning("⚠️  RESEARCH_AGENT_KEY environment variable is not set!")
         logger.warning("   The Anthropic gateway requires this for authentication.")
         logger.warning("   Set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+    
+    if not USER_AUTH_TOKEN:
+        logger.warning("⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!")
+        logger.warning("   Your server has NO authentication - anyone can access it.")
+        logger.warning("   For secure remote access, generate a token with:")
+        logger.warning("     ./generate_auth_token.sh")
+        logger.warning("   Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>")
     
     # Start OpenCode server subprocess
     # start_opencode_server_subprocess(args)

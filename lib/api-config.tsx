@@ -5,6 +5,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 // Storage keys
 const STORAGE_KEY_API_URL = 'research-agent-api-url'
 const STORAGE_KEY_USE_MOCK = 'research-agent-use-mock'
+const STORAGE_KEY_AUTH_TOKEN = 'research-agent-auth-token'
 
 // Default values
 const DEFAULT_API_URL = 'http://localhost:10000'
@@ -12,8 +13,10 @@ const DEFAULT_API_URL = 'http://localhost:10000'
 interface ApiConfig {
     apiUrl: string
     useMock: boolean
+    authToken: string
     setApiUrl: (url: string) => void
     setUseMock: (useMock: boolean) => void
+    setAuthToken: (token: string) => void
     resetToDefaults: () => void
     testConnection: () => Promise<boolean>
 }
@@ -52,15 +55,28 @@ export function isUsingMock(): boolean {
     return true
 }
 
+/**
+ * Get the auth token from localStorage
+ * This can be called outside of React components
+ */
+export function getAuthToken(): string {
+    if (typeof window === 'undefined') {
+        return ''
+    }
+    return localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) || ''
+}
+
 export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
     const [apiUrl, setApiUrlState] = useState<string>(DEFAULT_API_URL)
     const [useMock, setUseMockState] = useState<boolean>(true) // Default to demo mode
+    const [authToken, setAuthTokenState] = useState<string>('')
     const [isHydrated, setIsHydrated] = useState(false)
 
     // Load from localStorage on mount
     useEffect(() => {
         const storedUrl = localStorage.getItem(STORAGE_KEY_API_URL)
         const storedMock = localStorage.getItem(STORAGE_KEY_USE_MOCK)
+        const storedToken = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
 
         if (storedUrl) {
             setApiUrlState(storedUrl)
@@ -73,6 +89,10 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
             setUseMockState(storedMock === 'true')
         }
         // If no stored value, keep the default (true)
+
+        if (storedToken) {
+            setAuthTokenState(storedToken)
+        }
 
         setIsHydrated(true)
     }, [])
@@ -87,11 +107,22 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(STORAGE_KEY_USE_MOCK, String(mock))
     }, [])
 
+    const setAuthToken = useCallback((token: string) => {
+        setAuthTokenState(token)
+        if (token) {
+            localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, token)
+        } else {
+            localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN)
+        }
+    }, [])
+
     const resetToDefaults = useCallback(() => {
         localStorage.removeItem(STORAGE_KEY_API_URL)
         localStorage.removeItem(STORAGE_KEY_USE_MOCK)
+        localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN)
         setApiUrlState(process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL)
         setUseMockState(process.env.NEXT_PUBLIC_USE_MOCK === 'true')
+        setAuthTokenState('')
     }, [])
 
     const testConnection = useCallback(async (): Promise<boolean> => {
@@ -119,8 +150,10 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         <ApiConfigContext.Provider value={{
             apiUrl,
             useMock,
+            authToken,
             setApiUrl,
             setUseMock,
+            setAuthToken,
             resetToDefaults,
             testConnection,
         }}>

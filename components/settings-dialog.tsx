@@ -55,14 +55,20 @@ export function SettingsDialog({
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
 
   // API Configuration
-  const { apiUrl, useMock, setApiUrl, setUseMock, resetToDefaults, testConnection } = useApiConfig()
+  const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
+  const [authTokenInput, setAuthTokenInput] = useState(authToken)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
 
   // Sync apiUrlInput when apiUrl changes (e.g. on reset)
   React.useEffect(() => {
     setApiUrlInput(apiUrl)
   }, [apiUrl])
+
+  // Sync authTokenInput when authToken changes (e.g. on reset)
+  React.useEffect(() => {
+    setAuthTokenInput(authToken)
+  }, [authToken])
 
   const handleTestConnection = async () => {
     setConnectionStatus('testing')
@@ -75,6 +81,10 @@ export function SettingsDialog({
   const handleSaveApiUrl = () => {
     setApiUrl(apiUrlInput)
     setConnectionStatus('idle')
+  }
+
+  const handleSaveAuthToken = () => {
+    setAuthToken(authTokenInput)
   }
 
   const settingsSections = useMemo(() => [
@@ -407,6 +417,30 @@ export function SettingsDialog({
                         size="sm"
                         onClick={handleSaveApiUrl}
                         disabled={apiUrlInput === apiUrl}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Auth Token */}
+                  <div className="space-y-2">
+                    <Label htmlFor="auth-token" className="text-xs">Auth Token</Label>
+                    <p className="text-xs text-muted-foreground">Required for secure remote access</p>
+                    <div className="flex gap-2">
+                      <Input
+                        id="auth-token"
+                        type="password"
+                        placeholder="Enter auth token..."
+                        value={authTokenInput}
+                        onChange={(e) => setAuthTokenInput(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSaveAuthToken}
+                        disabled={authTokenInput === authToken}
                       >
                         Save
                       </Button>
