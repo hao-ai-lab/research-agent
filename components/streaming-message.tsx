@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { Brain, Loader2, Wrench, Check, AlertCircle } from 'lucide-react'
-import type { StreamingState, ToolCallState } from '@/hooks/use-chat-session'
+import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 
 interface StreamingMessageProps {
     streamingState: StreamingState
@@ -10,57 +10,65 @@ interface StreamingMessageProps {
 
 /**
  * Displays a message that is currently being streamed.
- * Shows thinking/reasoning, tool calls, and text content as they arrive.
+ * Renders parts in order (thinking→tool→thinking→text) to show correct interleaving.
  */
 export function StreamingMessage({ streamingState }: StreamingMessageProps) {
-    const { isStreaming, thinkingContent, textContent, toolCalls } = streamingState
+    const { isStreaming, parts, thinkingContent, textContent, toolCalls } = streamingState
 
     if (!isStreaming) {
         return null
     }
 
+    // Use parts-based rendering if available, otherwise fall back to legacy
+    const hasParts = parts && parts.length > 0
+
     return (
         <div className="px-0.5 py-2">
             <div className="space-y-2">
-                {/* Thinking/Reasoning - always shown expanded during streaming */}
-                {thinkingContent && (
-                    <div className="flex items-start gap-2">
-                        <div className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
-                            <Brain className="h-3 w-3 animate-pulse" />
-                            <span>Thinking...</span>
-                        </div>
-                    </div>
-                )}
-                {thinkingContent && (
-                    <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
-                        {thinkingContent.split('\n').map((line, i) => (
-                            <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
-                                {line}
-                            </p>
-                        ))}
-                        <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
-                    </div>
-                )}
-
-                {/* Tool Calls */}
-                {toolCalls.length > 0 && (
-                    <div className="space-y-1">
-                        {toolCalls.map((tool) => (
-                            <ToolCallIndicator key={tool.id} tool={tool} />
-                        ))}
-                    </div>
-                )}
-
-                {/* Text Content */}
-                {textContent && (
-                    <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
-                        {renderStreamingText(textContent)}
-                        <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
-                    </div>
+                {hasParts ? (
+                    // NEW: Render parts in order for correct interleaving
+                    parts.map((part) => (
+                        <StreamingPartRenderer key={part.id} part={part} />
+                    ))
+                ) : (
+                    // Legacy fallback: grouped thinking, tools, text
+                    <>
+                        {thinkingContent && (
+                            <>
+                                <div className="flex items-start gap-2">
+                                    <div className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                                        <Brain className="h-3 w-3 animate-pulse" />
+                                        <span>Thinking...</span>
+                                    </div>
+                                </div>
+                                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                                    {thinkingContent.split('\n').map((line, i) => (
+                                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                                            {line}
+                                        </p>
+                                    ))}
+                                    <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
+                                </div>
+                            </>
+                        )}
+                        {toolCalls.length > 0 && (
+                            <div className="space-y-1">
+                                {toolCalls.map((tool) => (
+                                    <ToolCallIndicator key={tool.id} tool={tool} />
+                                ))}
+                            </div>
+                        )}
+                        {textContent && (
+                            <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+                                {renderStreamingText(textContent)}
+                                <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
+                            </div>
+                        )}
+                    </>
                 )}
 
                 {/* Loading indicator when no content yet */}
-                {!thinkingContent && !textContent && toolCalls.length === 0 && (
+                {!hasParts && !thinkingContent && !textContent && toolCalls.length === 0 && (
                     <div className="flex items-center gap-2 px-4 py-3">
                         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                         <span className="text-sm text-muted-foreground">Thinking...</span>
@@ -69,6 +77,55 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
             </div>
         </div>
     )
+}
+
+/**
+ * Renders a single streaming part (thinking, tool, or text)
+ */
+function StreamingPartRenderer({ part }: { part: StreamingPart }) {
+    if (part.type === 'thinking') {
+        return (
+            <>
+                <div className="flex items-start gap-2">
+                    <div className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                        <Brain className="h-3 w-3 animate-pulse" />
+                        <span>Thinking...</span>
+                    </div>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                    {part.content.split('\n').map((line, i) => (
+                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                            {line}
+                        </p>
+                    ))}
+                    <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
+                </div>
+            </>
+        )
+    }
+
+    if (part.type === 'tool') {
+        return (
+            <ToolCallIndicator
+                tool={{
+                    id: part.id,
+                    name: part.toolName,
+                    state: part.toolState || 'pending',
+                }}
+            />
+        )
+    }
+
+    if (part.type === 'text') {
+        return (
+            <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+                {renderStreamingText(part.content)}
+                <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
+            </div>
+        )
+    }
+
+    return null
 }
 
 function ToolCallIndicator({ tool }: { tool: ToolCallState }) {

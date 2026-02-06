@@ -20,8 +20,19 @@ export interface ToolCallState {
     state: 'pending' | 'running' | 'completed' | 'error'
 }
 
+// Represents a single part during streaming (thinking, tool, or text)
+export interface StreamingPart {
+    id: string
+    type: 'thinking' | 'tool' | 'text'
+    content: string
+    toolName?: string
+    toolState?: 'pending' | 'running' | 'completed' | 'error'
+}
+
 export interface StreamingState {
     isStreaming: boolean
+    parts: StreamingPart[]  // NEW: ordered array of parts
+    // Legacy fields for backward compat
     thinkingContent: string
     textContent: string
     toolCalls: ToolCallState[]
@@ -54,6 +65,7 @@ export interface UseChatSessionResult {
 
 const initialStreamingState: StreamingState = {
     isStreaming: false,
+    parts: [],
     thinkingContent: '',
     textContent: '',
     toolCalls: [],
@@ -195,6 +207,7 @@ export function useChatSession(): UseChatSessionResult {
             // Start streaming state
             setStreamingState({
                 isStreaming: true,
+                parts: [],
                 thinkingContent: '',
                 textContent: '',
                 toolCalls: [],
@@ -208,42 +221,106 @@ export function useChatSession(): UseChatSessionResult {
             let finalText = ''
             let finalThinking = ''
 
+            // Helper to parse tool state from event
+            const parseToolState = (state: unknown): 'pending' | 'running' | 'completed' | 'error' => {
+                if (typeof state === 'string') {
+                    return state as 'pending' | 'running' | 'completed' | 'error'
+                }
+                if (state && typeof state === 'object' && 'status' in state) {
+                    return (state as { status: string }).status as 'pending' | 'running' | 'completed' | 'error'
+                }
+                return 'pending'
+            }
+
             for await (const event of streamChat(targetSessionId, content, wildMode)) {
+                const partId = event.id
+
                 if (event.type === 'part_delta') {
+                    const delta = event.delta || ''
+                    const partType = event.ptype === 'reasoning' ? 'thinking' : 'text'
+
+                    // Update legacy fields
                     if (event.ptype === 'text') {
-                        finalText += event.delta || ''
-                        setStreamingState(prev => ({
-                            ...prev,
-                            textContent: prev.textContent + (event.delta || ''),
-                        }))
+                        finalText += delta
                     } else if (event.ptype === 'reasoning') {
-                        finalThinking += event.delta || ''
-                        setStreamingState(prev => ({
-                            ...prev,
-                            thinkingContent: prev.thinkingContent + (event.delta || ''),
-                        }))
+                        finalThinking += delta
                     }
-                } else if (event.type === 'part_update' && event.ptype === 'tool') {
+
                     setStreamingState(prev => {
-                        const existingIndex = prev.toolCalls.findIndex(t => t.id === event.id)
-                        // Handle event.state being either a string or an object with a status property
-                        let stateValue: 'pending' | 'running' | 'completed' | 'error' = 'pending'
-                        if (typeof event.state === 'string') {
-                            stateValue = event.state as 'pending' | 'running' | 'completed' | 'error'
-                        } else if (event.state && typeof event.state === 'object' && 'status' in event.state) {
-                            stateValue = (event.state as { status: string }).status as 'pending' | 'running' | 'completed' | 'error'
+                        // Update legacy fields
+                        const legacyUpdate = event.ptype === 'text'
+                            ? { textContent: prev.textContent + delta }
+                            : event.ptype === 'reasoning'
+                            ? { thinkingContent: prev.thinkingContent + delta }
+                            : {}
+
+                        // Update parts array by ID
+                        if (!partId) {
+                            return { ...prev, ...legacyUpdate }
                         }
+
+                        const existingIndex = prev.parts.findIndex(p => p.id === partId)
+                        if (existingIndex >= 0) {
+                            // Append to existing part
+                            const updatedParts = [...prev.parts]
+                            updatedParts[existingIndex] = {
+                                ...updatedParts[existingIndex],
+                                content: updatedParts[existingIndex].content + delta,
+                            }
+                            return { ...prev, ...legacyUpdate, parts: updatedParts }
+                        } else {
+                            // Create new part
+                            return {
+                                ...prev,
+                                ...legacyUpdate,
+                                parts: [...prev.parts, { id: partId, type: partType, content: delta }],
+                            }
+                        }
+                    })
+                } else if (event.type === 'part_update' && event.ptype === 'tool') {
+                    const stateValue = parseToolState(event.state)
+
+                    setStreamingState(prev => {
+                        // Update legacy toolCalls
+                        const existingToolIndex = prev.toolCalls.findIndex(t => t.id === event.id)
                         const toolState: ToolCallState = {
                             id: event.id || '',
                             name: event.name,
                             state: stateValue,
                         }
-                        if (existingIndex >= 0) {
-                            const newCalls = [...prev.toolCalls]
-                            newCalls[existingIndex] = toolState
-                            return { ...prev, toolCalls: newCalls }
+                        const newToolCalls = existingToolIndex >= 0
+                            ? prev.toolCalls.map((t, i) => i === existingToolIndex ? toolState : t)
+                            : [...prev.toolCalls, toolState]
+
+                        // Update parts array
+                        if (!partId) {
+                            return { ...prev, toolCalls: newToolCalls }
                         }
-                        return { ...prev, toolCalls: [...prev.toolCalls, toolState] }
+
+                        const existingPartIndex = prev.parts.findIndex(p => p.id === partId)
+                        if (existingPartIndex >= 0) {
+                            // Update existing tool part
+                            const updatedParts = [...prev.parts]
+                            updatedParts[existingPartIndex] = {
+                                ...updatedParts[existingPartIndex],
+                                toolState: stateValue,
+                                toolName: event.name || updatedParts[existingPartIndex].toolName,
+                            }
+                            return { ...prev, toolCalls: newToolCalls, parts: updatedParts }
+                        } else {
+                            // Create new tool part
+                            return {
+                                ...prev,
+                                toolCalls: newToolCalls,
+                                parts: [...prev.parts, {
+                                    id: partId,
+                                    type: 'tool' as const,
+                                    content: '',
+                                    toolName: event.name,
+                                    toolState: stateValue,
+                                }],
+                            }
+                        }
                     })
                 } else if (event.type === 'session_status' && event.status === 'idle') {
                     // Stream complete

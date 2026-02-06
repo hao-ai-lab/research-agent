@@ -22,48 +22,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
+import type { ChatSession } from '@/lib/api'
 
 export type RunsSubTab = 'overview' | 'details' | 'manage'
 export type JourneySubTab = 'story' | 'devnotes'
-
-// Mock chat history data
-const mockChatHistory = [
-  {
-    id: 'chat-1',
-    title: 'GPT-4 Fine-tuning Analysis',
-    preview: 'Can you analyze the loss curve for my GPT-4 fine-tuning run?',
-    timestamp: new Date(Date.now() - 10 * 60 * 1000),
-    messageCount: 8,
-  },
-  {
-    id: 'chat-2',
-    title: 'Hyperparameter Optimization',
-    preview: 'What learning rate should I use for my transformer model?',
-    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    messageCount: 12,
-  },
-  {
-    id: 'chat-3',
-    title: 'Debugging OOM Errors',
-    preview: 'My training keeps running out of memory on the A100...',
-    timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    messageCount: 15,
-  },
-  {
-    id: 'chat-4',
-    title: 'Dataset Preprocessing',
-    preview: 'How should I tokenize my dataset for BERT fine-tuning?',
-    timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-    messageCount: 6,
-  },
-  {
-    id: 'chat-5',
-    title: 'Model Comparison',
-    preview: 'Compare the performance of GPT-3.5 vs GPT-4 on my task',
-    timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-    messageCount: 20,
-  },
-]
 
 interface NavPageProps {
   open: boolean
@@ -76,6 +38,9 @@ interface NavPageProps {
   onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
   onNewChat?: () => void
+  // Real sessions from backend
+  sessions?: ChatSession[]
+  onSelectSession?: (sessionId: string) => void
 }
 
 export function NavPage({
@@ -89,12 +54,14 @@ export function NavPage({
   onRunsSubTabChange,
   onJourneySubTabChange,
   onNewChat,
+  sessions = [],
+  onSelectSession,
 }: NavPageProps) {
   const [searchQuery, setSearchQuery] = useState('')
 
-  const filteredChats = mockChatHistory.filter(chat =>
-    chat.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    chat.preview.toLowerCase().includes(searchQuery.toLowerCase())
+  // Filter sessions based on search query
+  const filteredSessions = sessions.filter(session =>
+    session.title.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const handleNavClick = (
@@ -298,33 +265,35 @@ export function NavPage({
           </div>
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-2 space-y-1">
-              {filteredChats.length === 0 ? (
+              {filteredSessions.length === 0 ? (
                 <div className="text-center py-6 text-sm text-muted-foreground">
-                  No chats found
+                  {sessions.length === 0 ? 'No chat history' : 'No chats found'}
                 </div>
               ) : (
-                filteredChats.map((chat) => (
+                filteredSessions.map((session) => (
                   <button
-                    key={chat.id}
+                    key={session.id}
                     type="button"
-                    onClick={() => handleNavClick('chat')}
+                    onClick={() => {
+                      if (onSelectSession) {
+                        onSelectSession(session.id)
+                      }
+                      onOpenChange(false)
+                    }}
                     className="w-full text-left p-3 rounded-lg hover:bg-secondary/50 transition-colors group"
                   >
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <h3 className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">
-                        {chat.title}
+                        {session.title}
                       </h3>
                       <span className="text-[10px] text-muted-foreground shrink-0 flex items-center gap-1" suppressHydrationWarning>
                         <Clock className="h-3 w-3" />
-                        {formatRelativeTime(chat.timestamp)}
+                        {formatRelativeTime(new Date(session.created_at * 1000))}
                       </span>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate mb-1.5">
-                      {chat.preview}
-                    </p>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-muted-foreground/70">
-                        {chat.messageCount} messages
+                        {session.message_count} messages
                       </span>
                     </div>
                   </button>

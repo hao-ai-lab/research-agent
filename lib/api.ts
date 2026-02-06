@@ -17,7 +17,18 @@ export interface ChatMessageData {
     role: 'user' | 'assistant'
     content: string
     thinking?: string | null
+    parts?: MessagePartData[] | null  // NEW: ordered parts array
     timestamp: number
+}
+
+export interface MessagePartData {
+    id: string
+    type: 'thinking' | 'tool' | 'text'
+    content: string
+    tool_name?: string
+    tool_state?: 'pending' | 'running' | 'completed' | 'error'
+    tool_input?: string
+    tool_output?: string
 }
 
 export interface SessionWithMessages extends ChatSession {
