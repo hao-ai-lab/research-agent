@@ -65,6 +65,7 @@ export interface AppSettings {
       enabled: boolean
       botToken?: string   // From @BotFather
       chatId?: string     // Target chat/user ID for notifications
+      webhookUrl?: string // Public server URL for receiving commands
     }
   }
   notifications: {

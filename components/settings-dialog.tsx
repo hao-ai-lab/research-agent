@@ -63,7 +63,9 @@ export function SettingsDialog({
   const [telegramDialogOpen, setTelegramDialogOpen] = useState(false)
   const [telegramBotToken, setTelegramBotToken] = useState(settings.integrations.telegram?.botToken || '')
   const [telegramChatId, setTelegramChatId] = useState(settings.integrations.telegram?.chatId || '')
+  const [telegramWebhookUrl, setTelegramWebhookUrl] = useState(settings.integrations.telegram?.webhookUrl || '')
   const [telegramTestStatus, setTelegramTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle')
+  const [webhookStatus, setWebhookStatus] = useState<'idle' | 'setting' | 'success' | 'failed'>('idle')
 
   // API Configuration
   const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
@@ -324,10 +326,33 @@ export function SettingsDialog({
           enabled: true,
           botToken: telegramBotToken,
           chatId: telegramChatId,
+          webhookUrl: telegramWebhookUrl,
         },
       },
     })
     setTelegramDialogOpen(false)
+  }
+
+  const handleSetupWebhook = async () => {
+    if (!telegramBotToken.trim() || !telegramWebhookUrl.trim()) return
+    setWebhookStatus('setting')
+    try {
+      // Construct webhook URL: server_url + /api/telegram/webhook
+      const webhookEndpoint = telegramWebhookUrl.replace(/\/$/, '') + '/api/telegram/webhook'
+      const response = await fetch(
+        `https://api.telegram.org/bot${telegramBotToken}/setWebhook?url=${encodeURIComponent(webhookEndpoint)}`,
+        { method: 'GET' }
+      )
+      const data = await response.json()
+      if (data.ok) {
+        setWebhookStatus('success')
+      } else {
+        setWebhookStatus('failed')
+      }
+    } catch {
+      setWebhookStatus('failed')
+    }
+    setTimeout(() => setWebhookStatus('idle'), 3000)
   }
 
   const handleTelegramDisconnect = () => {
@@ -729,6 +754,41 @@ export function SettingsDialog({
                     Chat ID: {settings.integrations.telegram.chatId || 'Not set'}
                   </p>
                 </div>
+
+                {/* Webhook Setup Section */}
+                <div className="space-y-2 rounded-lg bg-secondary/50 p-3">
+                  <Label htmlFor="telegram-webhook" className="text-xs">
+                    Webhook URL (Optional)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Your public server URL to receive /commands
+                  </p>
+                  <Input
+                    id="telegram-webhook"
+                    placeholder="https://your-server.com"
+                    value={telegramWebhookUrl}
+                    onChange={(e) => setTelegramWebhookUrl(e.target.value)}
+                    className="mt-1"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={handleSetupWebhook}
+                    disabled={!telegramWebhookUrl.trim() || webhookStatus === 'setting'}
+                  >
+                    {webhookStatus === 'setting' ? (
+                      <><RotateCcw className="h-3 w-3 mr-2 animate-spin" />Setting up...</>
+                    ) : webhookStatus === 'success' ? (
+                      <><Check className="h-3 w-3 mr-2 text-green-500" />Webhook Set!</>
+                    ) : webhookStatus === 'failed' ? (
+                      <><X className="h-3 w-3 mr-2 text-red-500" />Failed</>
+                    ) : (
+                      <>Setup Webhook</>
+                    )}
+                  </Button>
+                </div>
+
                 <Button
                   variant="outline"
                   className="w-full bg-transparent"
