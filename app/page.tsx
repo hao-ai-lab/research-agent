@@ -321,18 +321,10 @@ export default function ResearchChat() {
     setShowVisibilityManage(false)
   }, [])
 
-  // Calculate scale for very small screens
-  const MOBILE_WIDTH = 300
-  const MOBILE_HEIGHT = 644
-
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main
-        className="mobile-viewport-wrapper flex flex-col bg-background overflow-hidden w-full h-full md:w-full md:h-full"
-        style={{
-          minWidth: `${MOBILE_WIDTH}px`,
-          minHeight: `${MOBILE_HEIGHT}px`,
-        }}
+        className="mobile-viewport-wrapper flex flex-col bg-background overflow-hidden w-full h-full"
       >
         <FloatingNav
           activeTab={activeTab}
@@ -375,7 +367,7 @@ export default function ResearchChat() {
               onLaunch={handleLaunchSweep}
             />
           )}
-          {activeTab === 'runs' && runsSubTab !== 'events' && (
+          {activeTab === 'runs' && (
             <RunsView
               runs={runs}
               subTab={runsSubTab}
