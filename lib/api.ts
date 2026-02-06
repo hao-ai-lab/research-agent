@@ -375,7 +375,9 @@ export async function unarchiveRun(runId: string): Promise<void> {
  * List all alerts
  */
 export async function listAlerts(): Promise<Alert[]> {
-    const response = await fetch(`${API_URL()}/alerts`)
+    const response = await fetch(`${API_URL()}/alerts`, {
+        headers: getHeaders()
+    })
     if (!response.ok) {
         throw new Error(`Failed to list alerts: ${response.statusText}`)
     }
@@ -388,7 +390,7 @@ export async function listAlerts(): Promise<Alert[]> {
 export async function respondToAlert(alertId: string, choice: string): Promise<{ message: string }> {
     const response = await fetch(`${API_URL()}/alerts/${alertId}/respond`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders(true),
         body: JSON.stringify({ choice }),
     })
     if (!response.ok) {

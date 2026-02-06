@@ -13,6 +13,7 @@ Run with: python server.py --workdir /path/to/project
 import argparse
 import json
 import os
+import shlex
 import sys
 import time
 import uuid
@@ -58,6 +59,7 @@ CHAT_DATA_FILE = ""
 JOBS_DATA_FILE = ""
 ALERTS_DATA_FILE = ""
 TMUX_SESSION_NAME = "research-agent"
+SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 
 
 def init_paths(workdir: str):
@@ -333,7 +335,7 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     sidecar_path = os.path.join(server_dir, "job_sidecar.py")
     
     # Build sidecar command
-    server_url = "http://localhost:10000"
+    server_url = SERVER_CALLBACK_URL
     run_workdir = run_data.get("workdir") or WORKDIR
     
     sidecar_cmd = (
@@ -344,6 +346,8 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
         f'--agent_run_dir "{run_dir}" '
         f'--workdir "{run_workdir}"'
     )
+    if USER_AUTH_TOKEN:
+        sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
     
     logger.info(f"Executing sidecar: {sidecar_cmd}")
     pane.send_keys(sidecar_cmd)
@@ -1189,6 +1193,7 @@ def start_opencode_server_subprocess(args):
     return
 
 def main():
+    global SERVER_CALLBACK_URL
     parser = argparse.ArgumentParser(description="Research Agent Server")
     parser.add_argument("--workdir", default=os.getcwd(), help="Working directory for runs and data")
     parser.add_argument("--port", type=int, default=10000, help="Server port")
@@ -1197,6 +1202,7 @@ def main():
     
     # Initialize paths
     init_paths(args.workdir)
+    SERVER_CALLBACK_URL = f"http://127.0.0.1:{args.port}"
     
     # Check required environment variables
     if not os.environ.get("RESEARCH_AGENT_KEY"):
