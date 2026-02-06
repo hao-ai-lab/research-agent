@@ -14,9 +14,11 @@ import type {
     SweepConfig,
     InsightChart,
 } from '@/lib/types'
+import type { Alert } from '@/lib/api-client'
 
 interface ConnectedChatViewProps {
     runs: ExperimentRun[]
+    alerts?: Alert[]
     sweeps?: Sweep[]
     charts?: InsightChart[]
     onRunClick: (run: ExperimentRun) => void
@@ -37,6 +39,7 @@ interface ConnectedChatViewProps {
  */
 export function ConnectedChatView({
     runs,
+    alerts = [],
     sweeps = [],
     charts = [],
     onRunClick,
@@ -61,6 +64,7 @@ export function ConnectedChatView({
         streamingState,
         sendMessage,
         createNewSession,
+        stopStreaming,
         queueMessage,
         messageQueue,
         removeFromQueue,
@@ -219,9 +223,11 @@ export function ConnectedChatView({
             <div className="shrink-0">
                 <ChatInput
                     onSend={handleSend}
+                    onStop={stopStreaming}
                     mode={mode}
                     onModeChange={onModeChange}
                     runs={runs}
+                    alerts={alerts}
                     charts={charts}
                     messages={displayMessages}
                     isStreaming={streamingState.isStreaming}

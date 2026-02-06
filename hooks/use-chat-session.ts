@@ -8,6 +8,7 @@ import {
     deleteSession,
     streamChat,
     checkApiHealth,
+    stopSession,
     type ChatSession,
     type ChatMessageData,
     type StreamEvent,
@@ -63,6 +64,7 @@ export interface UseChatSessionResult {
 
     // Send message - optional sessionId override for newly created sessions
     sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string) => Promise<void>
+    stopStreaming: () => Promise<void>
 
     // Message queue - for queuing messages during streaming
     messageQueue: string[]
@@ -247,7 +249,7 @@ export function useChatSession(): UseChatSessionResult {
                 return 'pending'
             }
 
-            for await (const event of streamChat(targetSessionId, content, wildMode)) {
+            for await (const event of streamChat(targetSessionId, content, wildMode, abortControllerRef.current.signal)) {
                 const partId = event.id
 
                 if (event.type === 'part_delta') {
@@ -377,13 +379,31 @@ export function useChatSession(): UseChatSessionResult {
             }
 
         } catch (err) {
-            console.error('Failed to send message:', err)
-            setError(err instanceof Error ? err.message : 'Failed to send message')
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                // User-initiated stop
+            } else {
+                console.error('Failed to send message:', err)
+                setError(err instanceof Error ? err.message : 'Failed to send message')
+            }
         } finally {
             setStreamingState(initialStreamingState)
             abortControllerRef.current = null
         }
     }, [currentSessionId, streamingState.isStreaming, refreshSessions])
+
+    const stopStreaming = useCallback(async () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+        }
+        if (currentSessionId) {
+            try {
+                await stopSession(currentSessionId)
+            } catch (err) {
+                console.error('Failed to stop session:', err)
+            }
+        }
+        setStreamingState(initialStreamingState)
+    }, [currentSessionId])
 
     // Queue functions
     const queueMessage = useCallback((content: string) => {
@@ -424,6 +444,7 @@ export function useChatSession(): UseChatSessionResult {
         messages,
         streamingState,
         sendMessage,
+        stopStreaming,
         messageQueue,
         queueMessage,
         removeFromQueue,

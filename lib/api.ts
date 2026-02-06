@@ -127,7 +127,8 @@ export async function deleteSession(sessionId: string): Promise<void> {
 export async function* streamChat(
     sessionId: string,
     message: string,
-    wildMode: boolean = false
+    wildMode: boolean = false,
+    signal?: AbortSignal
 ): AsyncGenerator<StreamEvent, void, unknown> {
     const response = await fetch(`${API_URL()}/chat`, {
         method: 'POST',
@@ -137,6 +138,7 @@ export async function* streamChat(
             message,
             wild_mode: wildMode,
         }),
+        signal,
     })
 
     if (!response.ok) {
@@ -216,6 +218,8 @@ export interface Run {
     workdir?: string
     status: RunStatus
     is_archived: boolean
+    parent_run_id?: string | null
+    origin_alert_id?: string | null
     created_at: number
     queued_at?: number
     launched_at?: number
@@ -248,6 +252,8 @@ export interface Alert {
     status: 'pending' | 'resolved'
     response?: string | null
     responded_at?: number | null
+    session_id?: string | null
+    auto_session?: boolean
 }
 
 export interface CreateRunRequest {
@@ -255,7 +261,19 @@ export interface CreateRunRequest {
     command: string
     workdir?: string
     sweep_id?: string
+    parent_run_id?: string
+    origin_alert_id?: string
     auto_start?: boolean
+}
+
+export interface RunRerunRequest {
+    command?: string
+    auto_start?: boolean
+    origin_alert_id?: string
+}
+
+export interface WildModeState {
+    enabled: boolean
 }
 
 export interface LogResponse {
@@ -346,6 +364,22 @@ export async function stopRun(runId: string): Promise<void> {
 }
 
 /**
+ * Rerun a run (creates a new run with parent linkage)
+ */
+export async function rerunRun(runId: string, request: RunRerunRequest = {}): Promise<Run> {
+    const response = await fetch(`${API_URL()}/runs/${runId}/rerun`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to rerun run: ${error}`)
+    }
+    return response.json()
+}
+
+/**
  * Archive a run
  */
 export async function archiveRun(runId: string): Promise<void> {
@@ -396,6 +430,48 @@ export async function respondToAlert(alertId: string, choice: string): Promise<{
     if (!response.ok) {
         const error = await response.text()
         throw new Error(`Failed to respond to alert: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stop a chat session stream (including auto-alert sessions)
+ */
+export async function stopSession(sessionId: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/stop`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to stop session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get wild mode state
+ */
+export async function getWildMode(): Promise<WildModeState> {
+    const response = await fetch(`${API_URL()}/wild-mode`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get wild mode: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Set wild mode state
+ */
+export async function setWildMode(enabled: boolean): Promise<WildModeState> {
+    const response = await fetch(`${API_URL()}/wild-mode`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ enabled }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to set wild mode: ${response.statusText}`)
     }
     return response.json()
 }

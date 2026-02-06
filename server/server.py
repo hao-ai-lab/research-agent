@@ -18,6 +18,7 @@ import sys
 import time
 import uuid
 import logging
+import asyncio
 from typing import Dict, Optional, AsyncIterator, List
 
 import httpx
@@ -58,18 +59,20 @@ DATA_DIR = ""
 CHAT_DATA_FILE = ""
 JOBS_DATA_FILE = ""
 ALERTS_DATA_FILE = ""
+SETTINGS_DATA_FILE = ""
 TMUX_SESSION_NAME = "research-agent"
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 
 
 def init_paths(workdir: str):
     """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE
+    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE
     WORKDIR = os.path.abspath(workdir)
     DATA_DIR = os.path.join(WORKDIR, ".agents")
     CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
     JOBS_DATA_FILE = os.path.join(DATA_DIR, "jobs.json")
     ALERTS_DATA_FILE = os.path.join(DATA_DIR, "alerts.json")
+    SETTINGS_DATA_FILE = os.path.join(DATA_DIR, "settings.json")
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
     logger.info(f"Initialized with workdir: {WORKDIR}")
@@ -154,6 +157,8 @@ class RunCreate(BaseModel):
     command: str
     workdir: Optional[str] = None
     sweep_id: Optional[str] = None  # If part of a sweep
+    parent_run_id: Optional[str] = None
+    origin_alert_id: Optional[str] = None
     auto_start: bool = False  # If True, skip ready and go straight to queued
 
 
@@ -184,6 +189,8 @@ class AlertRecord(BaseModel):
     status: str = "pending"  # pending, resolved
     response: Optional[str] = None
     responded_at: Optional[float] = None
+    session_id: Optional[str] = None
+    auto_session: bool = False
 
 
 class CreateAlertRequest(BaseModel):
@@ -196,6 +203,16 @@ class RespondAlertRequest(BaseModel):
     choice: str
 
 
+class RunRerunRequest(BaseModel):
+    command: Optional[str] = None
+    auto_start: bool = False
+    origin_alert_id: Optional[str] = None
+
+
+class WildModeRequest(BaseModel):
+    enabled: bool
+
+
 # =============================================================================
 # State
 # =============================================================================
@@ -204,6 +221,9 @@ chat_sessions: Dict[str, dict] = {}
 runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
+wild_mode_enabled: bool = False
+session_stop_flags: Dict[str, bool] = {}
+active_chat_tasks: Dict[str, asyncio.Task] = {}
 
 
 def save_chat_state():
@@ -273,6 +293,27 @@ def load_alerts_state():
                 }
         except Exception as e:
             logger.error(f"Error loading alerts state: {e}")
+
+
+def save_settings_state():
+    """Persist settings to disk."""
+    try:
+        with open(SETTINGS_DATA_FILE, "w") as f:
+            json.dump({"wild_mode": wild_mode_enabled}, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving settings state: {e}")
+
+
+def load_settings_state():
+    """Load settings from disk."""
+    global wild_mode_enabled
+    if os.path.exists(SETTINGS_DATA_FILE):
+        try:
+            with open(SETTINGS_DATA_FILE, "r") as f:
+                data = json.load(f)
+                wild_mode_enabled = bool(data.get("wild_mode", False))
+        except Exception as e:
+            logger.error(f"Error loading settings state: {e}")
 
 
 # =============================================================================
@@ -398,6 +439,57 @@ async def send_prompt_to_opencode(client: httpx.AsyncClient, session_id: str, co
     resp.raise_for_status()
 
 
+def should_stop_session(session_id: str) -> bool:
+    """Check if a session is flagged to stop streaming."""
+    return session_stop_flags.get(session_id, False)
+
+
+async def run_opencode_session(chat_session_id: str, opencode_session_id: str, content: str) -> tuple[str, str, list]:
+    """Run a prompt and return full text, thinking, and ordered parts."""
+    full_text = ""
+    full_thinking = ""
+    parts = []
+    async with httpx.AsyncClient(timeout=None) as client:
+        await send_prompt_to_opencode(client, opencode_session_id, content)
+        async for event, text_delta, thinking_delta in stream_opencode_events(client, opencode_session_id):
+            if should_stop_session(chat_session_id):
+                break
+            full_text += text_delta
+            full_thinking += thinking_delta
+
+            part_id = event.get("id")
+            ptype = event.get("ptype")
+
+            if part_id and ptype:
+                existing_part = next((p for p in parts if p["id"] == part_id), None)
+                if ptype in ("text", "reasoning"):
+                    part_type = "thinking" if ptype == "reasoning" else "text"
+                    delta = event.get("delta", "")
+                    if existing_part:
+                        existing_part["content"] += delta
+                    else:
+                        parts.append({
+                            "id": part_id,
+                            "type": part_type,
+                            "content": delta
+                        })
+                elif ptype == "tool":
+                    if existing_part:
+                        existing_part["tool_state"] = event.get("state")
+                        if event.get("name"):
+                            existing_part["tool_name"] = event.get("name")
+                    else:
+                        parts.append({
+                            "id": part_id,
+                            "type": "tool",
+                            "content": "",
+                            "tool_name": event.get("name"),
+                            "tool_state": event.get("state")
+                        })
+
+    return full_text, full_thinking, parts
+
+
 def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[dict]:
     """Parse an OpenCode SSE event and translate it to our protocol."""
     payload = event_data.get("payload", {})
@@ -439,6 +531,13 @@ async def stream_opencode_events(client: httpx.AsyncClient, session_id: str) -> 
             
             try:
                 event_data = json.loads(line[6:])
+                
+                # Check for error responses from OpenCode
+                if "error" in event_data:
+                    error_msg = event_data.get("error", "Unknown OpenCode error")
+                    logger.error(f"OpenCode returned error: {error_msg}")
+                    raise RuntimeError(f"OpenCode error: {error_msg}")
+                
                 translated = parse_opencode_event(event_data, session_id)
                 if translated is None:
                     continue
@@ -454,6 +553,9 @@ async def stream_opencode_events(client: httpx.AsyncClient, session_id: str) -> 
                 
                 if translated.get("_done"):
                     break
+            except RuntimeError:
+                # Re-raise OpenCode errors
+                raise
             except Exception as e:
                 logger.error(f"Error parsing event line: {e}")
                 continue
@@ -545,6 +647,8 @@ async def chat_endpoint(req: ChatRequest):
     save_chat_state()
 
     async def response_generator():
+        session_stop_flags.pop(session_id, None)
+        active_chat_tasks[session_id] = asyncio.current_task()
         try:
             opencode_session_id = await get_opencode_session_for_chat(session_id)
             
@@ -565,6 +669,8 @@ async def chat_endpoint(req: ChatRequest):
                 
                 logger.debug("Start streaming events from OpenCode session")
                 async for event, text_delta, thinking_delta in stream_opencode_events(client, opencode_session_id):
+                    if should_stop_session(session_id):
+                        break
                     full_text += text_delta
                     full_thinking += thinking_delta
                     
@@ -618,11 +724,29 @@ async def chat_endpoint(req: ChatRequest):
                     session["messages"].append(assistant_msg)
                     save_chat_state()
 
+        except asyncio.CancelledError:
+            logger.info("Chat stream cancelled for session %s", session_id)
         except Exception as e:
             logger.error(f"Chat error: {e}", exc_info=True)
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+        finally:
+            active_chat_tasks.pop(session_id, None)
+            session_stop_flags.pop(session_id, None)
 
     return StreamingResponse(response_generator(), media_type="application/x-ndjson")
+
+
+@app.post("/sessions/{session_id}/stop")
+async def stop_session(session_id: str):
+    """Stop streaming for a session (including auto-alert tasks)."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_stop_flags[session_id] = True
+    task = active_chat_tasks.get(session_id)
+    if task and not task.done():
+        task.cancel()
+    return {"message": "Stop signal sent"}
 
 
 # =============================================================================
@@ -661,6 +785,8 @@ async def create_run(req: RunCreate):
         "created_at": time.time(),
         "is_archived": False,
         "sweep_id": req.sweep_id,
+        "parent_run_id": req.parent_run_id,
+        "origin_alert_id": req.origin_alert_id,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -751,6 +877,50 @@ async def stop_run(run_id: str):
     return {"message": "Run stopped"}
 
 
+@app.post("/runs/{run_id}/rerun")
+async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
+    """Create a new run based on an existing run."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    source_run = runs[run_id]
+    new_command = req.command if req and req.command else source_run.get("command")
+    if not new_command:
+        raise HTTPException(status_code=400, detail="Command is required for rerun")
+
+    new_run_id = uuid.uuid4().hex[:12]
+    initial_status = "queued" if req and req.auto_start else "ready"
+
+    new_run = {
+        "name": f"{source_run.get('name', 'Run')} (Rerun)",
+        "command": new_command,
+        "workdir": source_run.get("workdir") or WORKDIR,
+        "status": initial_status,
+        "created_at": time.time(),
+        "is_archived": False,
+        "sweep_id": source_run.get("sweep_id"),
+        "parent_run_id": run_id,
+        "origin_alert_id": req.origin_alert_id if req else None,
+        "tmux_window": None,
+        "run_dir": None,
+        "exit_code": None,
+        "error": None,
+        "wandb_dir": None,
+    }
+
+    runs[new_run_id] = new_run
+    save_runs_state()
+
+    if initial_status == "queued":
+        try:
+            launch_run_in_tmux(new_run_id, new_run)
+        except Exception as e:
+            logger.error(f"Failed to launch rerun {new_run_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    return {"id": new_run_id, **new_run}
+
+
 @app.post("/runs/{run_id}/archive")
 async def archive_run(run_id: str):
     """Archive a run."""
@@ -829,7 +999,77 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
         status="pending",
     )
 
-    active_alerts[alert_id] = alert.model_dump()
+    alert_payload = alert.model_dump()
+
+    if wild_mode_enabled:
+        session_id = uuid.uuid4().hex[:12]
+        chat_sessions[session_id] = {
+            "title": f"Alert: {runs[run_id].get('name', run_id)}",
+            "created_at": time.time(),
+            "messages": [],
+            "opencode_session_id": None
+        }
+        alert_payload["session_id"] = session_id
+        alert_payload["auto_session"] = True
+        save_chat_state()
+
+        async def auto_alert_chat():
+            active_chat_tasks[session_id] = asyncio.current_task()
+            session_stop_flags.pop(session_id, None)
+            try:
+                run_data = runs.get(run_id, {})
+                user_visible_message = (
+                    f"Resolve alert {alert_id} for {run_data.get('name', run_id)}. "
+                    f"Severity: {severity}. Message: {req.message}"
+                )
+                prompt = (
+                    "[SYSTEM] Wild mode is ON. Be proactive and resolve the alert if safe.\n"
+                    "You are handling an experiment alert. Provide a concise diagnosis, "
+                    "suggest actions, and propose a response from the allowed choices.\n\n"
+                    f"[USER] Alert ID: {alert_id}\n"
+                    f"Run: {run_data.get('name', run_id)}\n"
+                    f"Command: {run_data.get('command', '')}\n"
+                    f"Severity: {severity}\n"
+                    f"Message: {req.message}\n"
+                    f"Choices: {', '.join(req.choices)}\n"
+                    "If a rerun is needed, explain why and what you would change."
+                )
+
+                user_msg = {"role": "user", "content": user_visible_message, "timestamp": time.time()}
+                chat_sessions[session_id]["messages"].append(user_msg)
+                save_chat_state()
+
+                opencode_session_id = await get_opencode_session_for_chat(session_id)
+                full_text, full_thinking, parts = await run_opencode_session(session_id, opencode_session_id, prompt)
+                if full_text or full_thinking or parts:
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": full_text.strip(),
+                        "thinking": full_thinking.strip() if full_thinking else None,
+                        "parts": parts if parts else None,
+                        "timestamp": time.time()
+                    }
+                    chat_sessions[session_id]["messages"].append(assistant_msg)
+                    save_chat_state()
+            except asyncio.CancelledError:
+                logger.info("Auto alert chat cancelled for session %s", session_id)
+            except Exception as e:
+                # Log error and store an error message in the session so users can see what went wrong
+                logger.error(f"Auto alert chat failed for session {session_id}: {e}", exc_info=True)
+                error_msg = {
+                    "role": "assistant",
+                    "content": f"[Error] Failed to process alert automatically: {str(e)}",
+                    "timestamp": time.time()
+                }
+                chat_sessions[session_id]["messages"].append(error_msg)
+                save_chat_state()
+            finally:
+                active_chat_tasks.pop(session_id, None)
+                session_stop_flags.pop(session_id, None)
+
+        asyncio.create_task(auto_alert_chat())
+
+    active_alerts[alert_id] = alert_payload
     save_alerts_state()
     logger.info(f"Created alert {alert_id} for run {run_id}: {req.message}")
     return {"alert_id": alert_id}
@@ -879,6 +1119,21 @@ async def respond_to_alert(alert_id: str, req: RespondAlertRequest):
     save_alerts_state()
     logger.info(f"Recorded alert response for {alert_id}: {req.choice}")
     return {"message": "Response recorded"}
+
+
+@app.get("/wild-mode")
+async def get_wild_mode():
+    """Get current wild mode state."""
+    return {"enabled": wild_mode_enabled}
+
+
+@app.post("/wild-mode")
+async def set_wild_mode(req: WildModeRequest):
+    """Enable or disable wild mode."""
+    global wild_mode_enabled
+    wild_mode_enabled = bool(req.enabled)
+    save_settings_state()
+    return {"enabled": wild_mode_enabled}
 
 
 # =============================================================================
@@ -1177,7 +1432,6 @@ async def list_artifacts(run_id: str):
 # Main
 # =============================================================================
 
-import asyncio
 import subprocess
 
 def start_opencode_server_subprocess(args):
@@ -1224,6 +1478,7 @@ def main():
     load_chat_state()
     load_runs_state()
     load_alerts_state()
+    load_settings_state()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
     logger.info(f"Working directory: {WORKDIR}")

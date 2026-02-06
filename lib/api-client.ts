@@ -22,11 +22,13 @@ export type {
     RunStatus,
     Run,
     CreateRunRequest,
+    RunRerunRequest,
     LogResponse,
     Artifact,
     Alert,
     Sweep,
     CreateSweepRequest,
+    WildModeState,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -80,6 +82,9 @@ export const startRun = (...args: Parameters<typeof realApi.startRun>) =>
 export const stopRun = (...args: Parameters<typeof realApi.stopRun>) =>
     getApi().stopRun(...args)
 
+export const rerunRun = (...args: Parameters<typeof realApi.rerunRun>) =>
+    getApi().rerunRun(...args)
+
 export const archiveRun = (...args: Parameters<typeof realApi.archiveRun>) =>
     getApi().archiveRun(...args)
 
@@ -91,6 +96,15 @@ export const listAlerts = (...args: Parameters<typeof realApi.listAlerts>) =>
 
 export const respondToAlert = (...args: Parameters<typeof realApi.respondToAlert>) =>
     getApi().respondToAlert(...args)
+
+export const stopSession = (...args: Parameters<typeof realApi.stopSession>) =>
+    getApi().stopSession(...args)
+
+export const getWildMode = (...args: Parameters<typeof realApi.getWildMode>) =>
+    getApi().getWildMode(...args)
+
+export const setWildMode = (...args: Parameters<typeof realApi.setWildMode>) =>
+    getApi().setWildMode(...args)
 
 export const getRunLogs = (...args: Parameters<typeof realApi.getRunLogs>) =>
     getApi().getRunLogs(...args)

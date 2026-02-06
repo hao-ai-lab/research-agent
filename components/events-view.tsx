@@ -282,7 +282,7 @@ export function EventsView({
                     className="h-8 w-full sm:w-auto text-xs gap-1.5 justify-start sm:justify-center"
                   >
                     <MessageSquare className="h-3.5 w-3.5" />
-                    <span className="truncate">Resolve by Chat</span>
+                    <span className="truncate">{event.alertSessionId ? 'Open Chat' : 'Resolve by Chat'}</span>
                   </Button>
                   {event.alertId && event.choices && event.choices.length > 0 && onRespondToAlert && (
                     <>

@@ -24,6 +24,7 @@ import {
   Play,
   Square,
   BarChart3,
+  AlertTriangle,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -60,9 +61,11 @@ import { LogViewer } from './log-viewer'
 import { TmuxTerminalPanel } from './tmux-terminal-panel'
 import type { ExperimentRun, TagDefinition, MetricVisualization } from '@/lib/types'
 import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
+import type { Alert } from '@/lib/api-client'
 
 interface RunDetailViewProps {
   run: ExperimentRun
+  alerts?: Alert[]
   runs?: ExperimentRun[]
   onRunSelect?: (run: ExperimentRun) => void
   onUpdateRun?: (run: ExperimentRun) => void
@@ -193,7 +196,7 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun }: RunDetailViewProps) {
+export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
@@ -217,6 +220,7 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
   const [logsOpen, setLogsOpen] = useState(false)
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [logsFullPage, setLogsFullPage] = useState(false)
+  const [alertsOpen, setAlertsOpen] = useState(true)
 
   const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
   const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
@@ -334,6 +338,13 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
 
   const allPrimaryExpanded = primaryMetrics.every(m => expandedCharts.has(m.id))
   const allSecondaryExpanded = secondaryMetrics.every(m => expandedCharts.has(m.id))
+
+  const runAlerts = alerts
+
+  const formatAlertTime = (timestamp: number) => {
+    const date = new Date(timestamp * 1000)
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
@@ -574,6 +585,73 @@ export function RunDetailView({ run, runs = [], onRunSelect, onUpdateRun, allTag
                     <p className="text-[10px] text-muted-foreground">No metrics collected yet</p>
                   </div>
                 )}
+              </div>
+            </Collapsible>
+
+            {/* Alerts */}
+            <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
+              <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-warning" />
+                      <span className={`text-xs font-medium ${runAlerts.length > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        Alerts {runAlerts.length > 0 && `(${runAlerts.length})`}
+                      </span>
+                    </div>
+                    {alertsOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border px-3 pb-3">
+                    {runAlerts.length > 0 ? (
+                      <div className="mt-2 space-y-2">
+                        {runAlerts.map((alert) => {
+                          const severity = alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info'
+                          const badgeClass =
+                            severity === 'error'
+                              ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                              : severity === 'warning'
+                              ? 'border-warning/50 bg-warning/10 text-warning'
+                              : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
+                          return (
+                            <div key={alert.id} className="rounded border border-border bg-secondary/40 p-2">
+                              <div className="flex items-start gap-2">
+                                <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 ${severity === 'error' ? 'text-destructive' : severity === 'warning' ? 'text-warning' : 'text-blue-400'}`} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className={`text-[9px] h-4 ${badgeClass}`}>
+                                      {alert.severity}
+                                    </Badge>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {formatAlertTime(alert.timestamp)}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-foreground mt-1 leading-relaxed">
+                                    {alert.message}
+                                  </p>
+                                  {alert.response && (
+                                    <p className="text-[10px] text-muted-foreground mt-1">
+                                      Response: {alert.response}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="mt-2 py-4 text-center">
+                        <p className="text-xs text-muted-foreground">No alerts for this run</p>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
               </div>
             </Collapsible>
 

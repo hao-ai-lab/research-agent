@@ -10,15 +10,17 @@ import type {
     Run,
     RunStatus,
     CreateRunRequest,
+    RunRerunRequest,
     LogResponse,
     Artifact,
     Alert,
     Sweep,
     CreateSweepRequest,
+    WildModeState,
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest }
+export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, WildModeState }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -246,6 +248,8 @@ const mockAlerts: Map<string, Alert> = new Map([
         status: 'pending',
         response: null,
         responded_at: null,
+        session_id: null,
+        auto_session: false,
     }],
     ['alert-qwen-2', {
         id: 'alert-qwen-2',
@@ -257,8 +261,12 @@ const mockAlerts: Map<string, Alert> = new Map([
         status: 'resolved',
         response: 'Ignore',
         responded_at: Date.now() / 1000 - 1100,
+        session_id: null,
+        auto_session: false,
     }],
 ])
+
+let wildModeEnabled = false
 
 // =============================================================================
 // Helper Functions
@@ -319,7 +327,9 @@ export async function* streamChat(
     sessionId: string,
     message: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _wildMode: boolean = false
+    _wildMode: boolean = false,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _signal?: AbortSignal
 ): AsyncGenerator<StreamEvent, void, unknown> {
     const session = mockSessions.get(sessionId)
     if (!session) {
@@ -399,6 +409,8 @@ export async function createRun(request: CreateRunRequest): Promise<Run> {
         workdir: request.workdir || '/workspace',
         status: request.auto_start ? 'queued' : 'ready',
         is_archived: false,
+        parent_run_id: request.parent_run_id || null,
+        origin_alert_id: request.origin_alert_id || null,
         created_at: Date.now() / 1000,
         sweep_id: request.sweep_id,
     }
@@ -435,6 +447,29 @@ export async function stopRun(runId: string): Promise<void> {
     }
     run.status = 'stopped'
     run.stopped_at = Date.now() / 1000
+}
+
+export async function rerunRun(runId: string, request: RunRerunRequest = {}): Promise<Run> {
+    await delay(200)
+    const run = mockRuns.get(runId)
+    if (!run) {
+        throw new Error('Run not found')
+    }
+    const id = `run-${generateId()}`
+    const newRun: Run = {
+        id,
+        name: `${run.name} (Rerun)`,
+        command: request.command || run.command,
+        workdir: run.workdir || '/workspace',
+        status: request.auto_start ? 'queued' : 'ready',
+        is_archived: false,
+        parent_run_id: runId,
+        origin_alert_id: request.origin_alert_id || null,
+        created_at: Date.now() / 1000,
+        sweep_id: run.sweep_id,
+    }
+    mockRuns.set(id, newRun)
+    return newRun
 }
 
 export async function archiveRun(runId: string): Promise<void> {
@@ -481,6 +516,25 @@ export async function respondToAlert(alertId: string, choice: string): Promise<{
     }
 
     return { message: 'Response recorded (mock)' }
+}
+
+export async function stopSession(sessionId: string): Promise<{ message: string }> {
+    await delay(50)
+    if (!mockSessions.has(sessionId)) {
+        throw new Error('Session not found')
+    }
+    return { message: 'Stop signal sent (mock)' }
+}
+
+export async function getWildMode(): Promise<WildModeState> {
+    await delay(50)
+    return { enabled: wildModeEnabled }
+}
+
+export async function setWildMode(enabled: boolean): Promise<WildModeState> {
+    await delay(50)
+    wildModeEnabled = enabled
+    return { enabled: wildModeEnabled }
 }
 
 export async function getRunLogs(

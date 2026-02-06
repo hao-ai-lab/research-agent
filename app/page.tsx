@@ -18,6 +18,7 @@ import { mockMemoryRules, mockInsightCharts, defaultTags, mockSweeps } from '@/l
 import type { ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
 import { useApiConfig } from '@/lib/api-config'
+import { getWildMode, setWildMode } from '@/lib/api-client'
 
 const defaultSettings: AppSettings = {
   appearance: {
@@ -103,6 +104,7 @@ export default function ResearchChat() {
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
   const { createNewSession, sessions, selectSession } = chatSession
+  const { sendMessage } = chatSession
 
   const events = useMemo<RunEvent[]>(() => {
     const toEvent = alerts.map((alert) => {
@@ -130,6 +132,7 @@ export default function ResearchChat() {
       return {
         id: eventId,
         alertId: alert.id,
+        alertSessionId: alert.session_id || undefined,
         runId: alert.run_id,
         runName: run?.name || `Run ${alert.run_id}`,
         runAlias: run?.alias,
@@ -163,6 +166,18 @@ export default function ResearchChat() {
       return b.timestamp.getTime() - a.timestamp.getTime()
     })
   }, [alerts, runs, eventStatusOverrides])
+
+  useEffect(() => {
+    const syncWildMode = async () => {
+      try {
+        const state = await getWildMode()
+        setChatMode(state.enabled ? 'wild' : 'debug')
+      } catch (e) {
+        console.error('Failed to sync wild mode:', e)
+      }
+    }
+    syncWildMode()
+  }, [])
 
   const pendingAlertsByRun = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -308,10 +323,33 @@ export default function ResearchChat() {
     }
   }, [respondAlert])
 
-  const handleResolveByChat = useCallback((event: RunEvent) => {
-    // Navigate to chat - user can type their own message about the event
+  const handleResolveByChat = useCallback(async (event: RunEvent) => {
+    const alert = alerts.find(a => a.id === event.alertId)
+    const run = runs.find(r => r.id === event.runId)
+    const existingSessionId = alert?.session_id
+
+    const sessionId = existingSessionId || await createNewSession()
+    if (!sessionId) return
+
+    await selectSession(sessionId)
     setActiveTab('chat')
-  }, [])
+
+    if (!existingSessionId) {
+      const prompt = [
+        `New alert detected. Please diagnose and suggest the safest next steps.`,
+        ``,
+        `Alert: @alert:${alert?.id || event.alertId}`,
+        `Severity: ${alert?.severity || event.type}`,
+        `Message: ${event.summary}`,
+        `Run: ${run?.name || event.runName} (${event.runId})`,
+        run?.command ? `Command: ${run.command}` : undefined,
+        alert?.choices?.length ? `Allowed responses: ${alert.choices.join(', ')}` : undefined,
+        ``,
+        `Provide a short analysis, then recommend the best response from the allowed list.`,
+      ].filter(Boolean).join('\n')
+      await sendMessage(prompt, chatMode, sessionId)
+    }
+  }, [alerts, runs, createNewSession, selectSession, sendMessage, chatMode])
 
   const handleUpdateRun = useCallback((updatedRun: ExperimentRun) => {
     apiUpdateRun(updatedRun)
@@ -421,6 +459,15 @@ export default function ResearchChat() {
     setShowVisibilityManage(false)
   }, [])
 
+  const handleChatModeChange = useCallback(async (mode: ChatMode) => {
+    setChatMode(mode)
+    try {
+      await setWildMode(mode === 'wild')
+    } catch (e) {
+      console.error('Failed to update wild mode:', e)
+    }
+  }, [])
+
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main
@@ -451,7 +498,8 @@ export default function ResearchChat() {
               onEditSweep={handleEditSweep}
               onLaunchSweep={handleLaunchSweep}
               mode={chatMode}
-              onModeChange={setChatMode}
+              onModeChange={handleChatModeChange}
+              alerts={alerts}
               collapseArtifactsInChat={collapseArtifactsInChat}
               chatSession={chatSession}
             />
@@ -474,6 +522,7 @@ export default function ResearchChat() {
               onRunClick={handleRunClick}
               onUpdateRun={handleUpdateRun}
               pendingAlertsByRun={pendingAlertsByRun}
+              alerts={alerts}
               allTags={allTags}
               onCreateTag={handleCreateTag}
               onSelectedRunChange={setSelectedRun}
