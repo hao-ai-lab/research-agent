@@ -35,11 +35,17 @@ logger = logging.getLogger("research-agent-server")
 # Configuration
 # =============================================================================
 
+# OpenCode configuration
+_SERVER_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+OPENCODE_CONFIG = os.environ.get("OPENCODE_CONFIG", os.path.join(_SERVER_FILE_DIR, "opencode.json"))
 OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://127.0.0.1:4096")
 OPENCODE_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
-MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
-MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
+
+# Model configuration - uses research-agent provider from opencode.json
+# This connects to the Anthropic gateway at Modal
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
+MODEL_ID = os.environ.get("MODEL_ID", "claude-3-5-haiku-latest")
 
 # Will be set by CLI args
 WORKDIR = os.getcwd()
@@ -466,18 +472,24 @@ async def chat_endpoint(req: ChatRequest):
             content = f"{wild_mode_note}[USER] {req.message}"
 
             async with httpx.AsyncClient(timeout=None) as client:
+                logger.debug("Sending prompt to OpenCode session %s", opencode_session_id)
+                logger.debug("Content: %s", content)
                 await send_prompt_to_opencode(client, opencode_session_id, content)
+                logger.debug("Sent prompt to OpenCode session")
                 
                 full_text = ""
                 full_thinking = ""
                 
+                logger.debug("Start streaming events from OpenCode session")
                 async for event, text_delta, thinking_delta in stream_opencode_events(client, opencode_session_id):
                     full_text += text_delta
                     full_thinking += thinking_delta
                     
                     event_to_send = {k: v for k, v in event.items() if not k.startswith("_")}
+                    logger.debug("Event: %s", event_to_send)
                     yield json.dumps(event_to_send) + "\n"
 
+                logger.debug("End streaming events from OpenCode session")
                 if full_text or full_thinking:
                     assistant_msg = {
                         "role": "assistant",
@@ -996,8 +1008,14 @@ def main():
     # Initialize paths
     init_paths(args.workdir)
     
+    # Check required environment variables
+    if not os.environ.get("RESEARCH_AGENT_KEY"):
+        logger.warning("⚠️  RESEARCH_AGENT_KEY environment variable is not set!")
+        logger.warning("   The Anthropic gateway requires this for authentication.")
+        logger.warning("   Set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+    
     # Start OpenCode server subprocess
-    start_opencode_server_subprocess(args)
+    # start_opencode_server_subprocess(args)
     
     # Load state
     load_chat_state()

@@ -163,7 +163,7 @@ export async function checkApiHealth(): Promise<boolean> {
     try {
         const response = await fetch(`${API_URL()}/`, {
             method: 'GET',
-            signal: AbortSignal.timeout(3000)
+            signal: AbortSignal.timeout(15000)
         })
         return response.ok
     } catch {
