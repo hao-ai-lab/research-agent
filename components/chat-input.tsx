@@ -32,6 +32,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import type { ExperimentRun, Artifact, InsightChart, ChatMessage } from '@/lib/types'
+import type { Alert as ApiAlert } from '@/lib/api-client'
 
 export type ChatMode = 'wild' | 'debug' | 'sweep'
 
@@ -48,10 +49,12 @@ export interface MentionItem {
 
 interface ChatInputProps {
   onSend: (message: string, attachments?: File[], mode?: ChatMode) => void
+  onStop?: () => void
   disabled?: boolean
   mode: ChatMode
   onModeChange: (mode: ChatMode) => void
   runs?: ExperimentRun[]
+  alerts?: ApiAlert[]
   artifacts?: Artifact[]
   charts?: InsightChart[]
   messages?: ChatMessage[]
@@ -65,10 +68,12 @@ interface ChatInputProps {
 
 export function ChatInput({
   onSend,
+  onStop,
   disabled,
   mode,
   onModeChange,
   runs = [],
+  alerts = [],
   artifacts = [],
   charts = [],
   messages = [],
@@ -97,6 +102,8 @@ export function ChatInput({
   // Build mention items from data
   const mentionItems = useMemo<MentionItem[]>(() => {
     const items: MentionItem[] = []
+    const runById = new Map(runs.map(run => [run.id, run]))
+    const alertIds = new Set<string>()
 
     // Runs
     runs.forEach(run => {
@@ -110,10 +117,13 @@ export function ChatInput({
         icon: <Play className="h-3 w-3" />,
       })
 
-      // Alerts from runs
+      // Alerts from runs (legacy/mock)
       alerts.forEach((alert, idx) => {
+        const alertId = `alert:${run.id}:${idx}`
+        if (alertIds.has(alertId)) return
+        alertIds.add(alertId)
         items.push({
-          id: `alert:${run.id}:${idx}`,
+          id: alertId,
           type: 'alert',
           label: alert.message.slice(0, 40) + (alert.message.length > 40 ? '...' : ''),
           sublabel: `${run.alias || run.name} - ${alert.type}`,
@@ -172,8 +182,25 @@ export function ChatInput({
         })
       })
 
+    // Alerts from API
+    alerts.forEach((alert) => {
+      const alertId = `alert:${alert.id}`
+      if (alertIds.has(alertId)) return
+      alertIds.add(alertId)
+      const run = runById.get(alert.run_id)
+      const severity = alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info'
+      items.push({
+        id: alertId,
+        type: 'alert',
+        label: alert.message.slice(0, 40) + (alert.message.length > 40 ? '...' : ''),
+        sublabel: `${run?.alias || run?.name || alert.run_id} - ${severity}`,
+        color: severity === 'error' ? '#f87171' : severity === 'warning' ? '#facc15' : '#60a5fa',
+        icon: <AlertTriangle className="h-3 w-3" />,
+      })
+    })
+
     return items
-  }, [runs, artifacts, charts, messages])
+  }, [runs, artifacts, charts, messages, alerts])
 
   // Filter mention items based on query and type filter
   const filteredMentionItems = useMemo(() => {
@@ -742,31 +769,43 @@ export function ChatInput({
           </Button>
         </div>
 
-        {/* Send/Queue button */}
-        <Button
-          onClick={handleSubmit}
-          disabled={!message.trim() && attachments.length === 0}
-          size="icon"
-          className={`h-7 w-7 rounded-md disabled:opacity-30 relative ${
-            isStreaming && onQueue
-              ? 'bg-amber-500 text-white hover:bg-amber-600'
-              : 'bg-primary text-primary-foreground hover:bg-primary/90'
-          }`}
-        >
-          {isStreaming && onQueue ? (
-            <>
-              <ListPlus className="h-3.5 w-3.5" />
-              {queueCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-foreground text-[9px] font-medium text-background">
-                  {queueCount}
-                </span>
-              )}
-            </>
-          ) : (
-            <Send className="h-3.5 w-3.5" />
+        {/* Stop + Send/Queue buttons */}
+        <div className="flex items-center gap-1">
+          {isStreaming && onStop && (
+            <Button
+              onClick={onStop}
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[10px] border-destructive/40 text-destructive hover:bg-destructive/10"
+            >
+              Stop
+            </Button>
           )}
-          <span className="sr-only">{isStreaming && onQueue ? 'Queue message' : 'Send message'}</span>
-        </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!message.trim() && attachments.length === 0}
+            size="icon"
+            className={`h-7 w-7 rounded-md disabled:opacity-30 relative ${
+              isStreaming && onQueue
+                ? 'bg-amber-500 text-white hover:bg-amber-600'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            }`}
+          >
+            {isStreaming && onQueue ? (
+              <>
+                <ListPlus className="h-3.5 w-3.5" />
+                {queueCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-foreground text-[9px] font-medium text-background">
+                    {queueCount}
+                  </span>
+                )}
+              </>
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            <span className="sr-only">{isStreaming && onQueue ? 'Queue message' : 'Send message'}</span>
+          </Button>
+        </div>
       </div>
 
       <input

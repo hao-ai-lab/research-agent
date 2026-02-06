@@ -44,6 +44,7 @@ import { VisibilityManageView } from './visibility-manage-view'
 import { CreateSweepDialog } from './create-sweep-dialog'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
+import type { Alert } from '@/lib/api-client'
 import { getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 import { createSweep } from '@/lib/api-client'
@@ -148,6 +149,7 @@ interface RunsViewProps {
   onRunClick?: (run: ExperimentRun) => void
   onUpdateRun?: (run: ExperimentRun) => void
   pendingAlertsByRun?: Record<string, number>
+  alerts?: Alert[]
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
   onSelectedRunChange?: (run: ExperimentRun | null) => void
@@ -157,7 +159,7 @@ interface RunsViewProps {
   onStopRun?: (runId: string) => Promise<void>
 }
 
-export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsByRun = {}, allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
+export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsByRun = {}, alerts = [], allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [visibleRunIds, setVisibleRunIds] = useState<Set<string>>(
@@ -174,6 +176,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
   const archivedRuns = runs.filter((r) => r.isArchived)
   const overview = getRunsOverview(activeRuns)
   const selectedRun = selectedRunId ? runs.find(r => r.id === selectedRunId) : null
+  const selectedRunAlerts = selectedRun ? alerts.filter(alert => alert.run_id === selectedRun.id) : []
 
   // Sort runs for quick access - favorites first
   const quickAccessRuns = useMemo(() => {
@@ -424,6 +427,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
         <div className="flex-1 min-h-0 overflow-hidden">
           <RunDetailView
             run={selectedRun}
+            alerts={selectedRunAlerts}
             runs={runs}
             onRunSelect={(r) => handleRunClick(r)}
             onUpdateRun={onUpdateRun}

@@ -35,6 +35,8 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         startTime: new Date(run.created_at * 1000),
         endTime: run.ended_at ? new Date(run.ended_at * 1000) : undefined,
         isArchived: run.is_archived,
+        parentRunId: run.parent_run_id || undefined,
+        originAlertId: run.origin_alert_id || undefined,
         isFavorite: false,
         tags: [],
         notes: '',

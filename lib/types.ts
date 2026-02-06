@@ -18,6 +18,8 @@ export interface ExperimentRun {
   startTime: Date
   endTime?: Date
   command: string
+  parentRunId?: string
+  originAlertId?: string
   metrics?: {
     loss: number
     accuracy: number
@@ -83,6 +85,7 @@ export type EventStatus = 'new' | 'acknowledged' | 'resolved' | 'dismissed'
 export interface RunEvent {
   id: string
   alertId?: string
+  alertSessionId?: string
   runId: string
   runName: string
   runAlias?: string
