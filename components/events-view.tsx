@@ -41,6 +41,7 @@ interface EventsViewProps {
   onNavigateToRun: (runId: string) => void
   onResolveByChat: (event: RunEvent) => void
   onUpdateEventStatus: (eventId: string, status: EventStatus) => void
+  onRespondToAlert?: (event: RunEvent, choice: string) => void
 }
 
 export function EventsView({ 
@@ -48,6 +49,7 @@ export function EventsView({
   onNavigateToRun, 
   onResolveByChat,
   onUpdateEventStatus,
+  onRespondToAlert,
 }: EventsViewProps) {
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [filterTypes, setFilterTypes] = useState<Set<'error' | 'warning' | 'info'>>(
@@ -271,46 +273,69 @@ export function EventsView({
               )}
 
               {/* Actions */}
-              <div className="flex items-center gap-2 pt-2 border-t border-border/50">
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => onResolveByChat(event)}
-                  className="h-8 text-xs gap-1.5"
-                >
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  Resolve by Chat
-                </Button>
-                {event.status === 'new' && (
+              <div className="pt-2 border-t border-border/50 space-y-2">
+                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <Button
-                    variant="outline"
+                    variant="default"
                     size="sm"
-                    onClick={() => onUpdateEventStatus(event.id, 'acknowledged')}
-                    className="h-8 text-xs"
+                    onClick={() => onResolveByChat(event)}
+                    className="h-8 w-full sm:w-auto text-xs gap-1.5 justify-start sm:justify-center"
                   >
-                    Acknowledge
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    <span className="truncate">Resolve by Chat</span>
                   </Button>
-                )}
-                {event.status !== 'resolved' && (
+                  {event.alertId && event.choices && event.choices.length > 0 && onRespondToAlert && (
+                    <>
+                      {event.choices.map((choice) => {
+                        const normalized = choice.toLowerCase()
+                        const isStopAction = normalized.includes('stop') || normalized.includes('kill') || normalized.includes('terminate')
+                        return (
+                          <Button
+                            key={`${event.id}-${choice}`}
+                            variant={isStopAction ? 'destructive' : 'outline'}
+                            size="sm"
+                            onClick={() => onRespondToAlert(event, choice)}
+                            className="h-8 w-full sm:w-auto text-xs justify-start sm:justify-center"
+                          >
+                            <span className="max-w-full truncate">{choice}</span>
+                          </Button>
+                        )
+                      })}
+                    </>
+                  )}
+                  {event.status === 'new' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onUpdateEventStatus(event.id, 'acknowledged')}
+                      className="h-8 w-full sm:w-auto text-xs justify-start sm:justify-center"
+                    >
+                      <span className="truncate">Acknowledge</span>
+                    </Button>
+                  )}
+                  {event.status !== 'resolved' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onUpdateEventStatus(event.id, 'resolved')}
+                      className="h-8 w-full sm:w-auto text-xs gap-1.5 justify-start sm:justify-center"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span className="truncate">Mark Resolved</span>
+                    </Button>
+                  )}
+                </div>
+                <div className="flex">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    onClick={() => onUpdateEventStatus(event.id, 'resolved')}
-                    className="h-8 text-xs gap-1.5"
+                    onClick={() => onNavigateToRun(event.runId)}
+                    className="h-8 w-full sm:w-auto sm:ml-auto text-xs gap-1.5 justify-center"
                   >
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    Mark Resolved
+                    <span className="truncate">View Run</span>
+                    <ExternalLink className="h-3 w-3" />
                   </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onNavigateToRun(event.runId)}
-                  className="h-8 text-xs gap-1.5 ml-auto"
-                >
-                  View Run
-                  <ExternalLink className="h-3 w-3" />
-                </Button>
+                </div>
               </div>
             </div>
           </CollapsibleContent>
@@ -405,6 +430,33 @@ export function EventsView({
               </DropdownMenuCheckboxItem>
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
+
+        <div className="mt-3 overflow-x-auto">
+          <div className="flex min-w-max items-center gap-1">
+            {([
+              { type: 'error' as const, label: 'Errors' },
+              { type: 'warning' as const, label: 'Warnings' },
+              { type: 'info' as const, label: 'Info' },
+            ]).map((item) => {
+              const isActive = filterTypes.has(item.type)
+              return (
+                <button
+                  key={item.type}
+                  type="button"
+                  onClick={() => toggleFilterType(item.type)}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                    isActive
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border bg-secondary/40 text-muted-foreground hover:bg-secondary'
+                  }`}
+                >
+                  {getEventIcon(item.type, 'h-3.5 w-3.5')}
+                  <span className="max-w-[88px] truncate">{item.label}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 

@@ -24,6 +24,7 @@ export type {
     CreateRunRequest,
     LogResponse,
     Artifact,
+    Alert,
     Sweep,
     CreateSweepRequest,
 } from './api'
@@ -84,6 +85,12 @@ export const archiveRun = (...args: Parameters<typeof realApi.archiveRun>) =>
 
 export const unarchiveRun = (...args: Parameters<typeof realApi.unarchiveRun>) =>
     getApi().unarchiveRun(...args)
+
+export const listAlerts = (...args: Parameters<typeof realApi.listAlerts>) =>
+    getApi().listAlerts(...args)
+
+export const respondToAlert = (...args: Parameters<typeof realApi.respondToAlert>) =>
+    getApi().respondToAlert(...args)
 
 export const getRunLogs = (...args: Parameters<typeof realApi.getRunLogs>) =>
     getApi().getRunLogs(...args)

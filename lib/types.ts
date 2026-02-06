@@ -82,6 +82,7 @@ export type EventStatus = 'new' | 'acknowledged' | 'resolved' | 'dismissed'
 
 export interface RunEvent {
   id: string
+  alertId?: string
   runId: string
   runName: string
   runAlias?: string
@@ -92,6 +93,7 @@ export interface RunEvent {
   summary: string
   description: string
   timestamp: Date
+  choices?: string[]
   logs?: string[]
   suggestedActions?: string[]
   relatedMetrics?: { name: string; value: string }[]

@@ -12,9 +12,10 @@ import { JourneyView } from '@/components/journey-view'
 import { ReportView } from '@/components/report-view'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { useRuns } from '@/hooks/use-runs'
+import { useAlerts } from '@/hooks/use-alerts'
 import type { ChatMode } from '@/components/chat-input'
-import { mockMessages, generateLossData, mockMemoryRules, mockInsightCharts, defaultTags, getRunEvents, mockSweeps, createDefaultSweepConfig } from '@/lib/mock-data'
-import type { ChatMessage, ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
+import { mockMemoryRules, mockInsightCharts, defaultTags, mockSweeps } from '@/lib/mock-data'
+import type { ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
 import { useApiConfig } from '@/lib/api-config'
 
@@ -33,16 +34,6 @@ const defaultSettings: AppSettings = {
 
 type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
 
-const tabLabels: Record<ActiveTab, string> = {
-  chat: 'Chat',
-  runs: 'Runs',
-  charts: 'Charts',
-  memory: 'Memory',
-  events: 'Events',
-  journey: 'Journey',
-  report: 'Report',
-}
-
 const runsSubTabLabels: Record<RunsSubTab, string> = {
   overview: 'Overview',
   details: 'Details',
@@ -57,9 +48,9 @@ export default function ResearchChat() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Use real API data via useRuns hook
-  const { runs, updateRun: apiUpdateRun, isLoading: runsLoading, error: runsError, refetch, startExistingRun, stopExistingRun } = useRuns()
+  const { runs, updateRun: apiUpdateRun, refetch, startExistingRun, stopExistingRun } = useRuns()
+  const { alerts, respond: respondAlert } = useAlerts()
 
-  const [lossData] = useState(() => generateLossData())
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
   const [insightCharts, setInsightCharts] = useState<InsightChart[]>(mockInsightCharts)
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
@@ -70,8 +61,8 @@ export default function ResearchChat() {
   const [selectedRun, setSelectedRun] = useState<ExperimentRun | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
 
-  // Events state (will be updated when runs change)
-  const [events, setEvents] = useState<RunEvent[]>([])
+  // Event status is tracked locally for acknowledgement/dismissal UX.
+  const [eventStatusOverrides, setEventStatusOverrides] = useState<Record<string, EventStatus>>({})
 
   // Sweeps state
   const [sweeps, setSweeps] = useState<Sweep[]>(mockSweeps)
@@ -112,6 +103,92 @@ export default function ResearchChat() {
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
   const { createNewSession, sessions, selectSession } = chatSession
+
+  const events = useMemo<RunEvent[]>(() => {
+    const toEvent = alerts.map((alert) => {
+      const run = runs.find(r => r.id === alert.run_id)
+      const eventId = `alert-${alert.id}`
+      const baseStatus: EventStatus = alert.status === 'resolved' ? 'resolved' : 'new'
+      const override = eventStatusOverrides[eventId]
+
+      const status: EventStatus = alert.status === 'resolved'
+        ? (override === 'dismissed' ? 'dismissed' : 'resolved')
+        : (override || 'new')
+
+      const severityType: RunEvent['type'] =
+        alert.severity === 'critical' ? 'error' :
+        alert.severity === 'warning' ? 'warning' : 'info'
+
+      const priority: RunEvent['priority'] =
+        alert.severity === 'critical' ? 'critical' :
+        alert.severity === 'warning' ? 'high' : 'low'
+
+      const title =
+        alert.severity === 'critical' ? 'Critical Alert' :
+        alert.severity === 'warning' ? 'Warning' : 'Info'
+
+      return {
+        id: eventId,
+        alertId: alert.id,
+        runId: alert.run_id,
+        runName: run?.name || `Run ${alert.run_id}`,
+        runAlias: run?.alias,
+        type: severityType,
+        priority,
+        status,
+        title,
+        summary: alert.message,
+        description: alert.status === 'resolved' && alert.response
+          ? `${alert.message}\n\nResponse: ${alert.response}`
+          : alert.message,
+        timestamp: new Date(alert.timestamp * 1000),
+        choices: alert.status === 'pending' ? alert.choices : undefined,
+        suggestedActions: alert.status === 'pending'
+          ? alert.choices.map(choice => `Respond with: ${choice}`)
+          : undefined,
+      }
+    })
+
+    const priorityRank: Record<RunEvent['priority'], number> = {
+      critical: 0,
+      high: 1,
+      medium: 2,
+      low: 3,
+    }
+
+    return toEvent.sort((a, b) => {
+      if (priorityRank[a.priority] !== priorityRank[b.priority]) {
+        return priorityRank[a.priority] - priorityRank[b.priority]
+      }
+      return b.timestamp.getTime() - a.timestamp.getTime()
+    })
+  }, [alerts, runs, eventStatusOverrides])
+
+  const pendingAlertsByRun = useMemo(() => {
+    const counts: Record<string, number> = {}
+    alerts.forEach((alert) => {
+      if (alert.status === 'pending') {
+        counts[alert.run_id] = (counts[alert.run_id] || 0) + 1
+      }
+    })
+    return counts
+  }, [alerts])
+
+  useEffect(() => {
+    const validIds = new Set(alerts.map(alert => `alert-${alert.id}`))
+    setEventStatusOverrides(prev => {
+      let changed = false
+      const next: Record<string, EventStatus> = {}
+      Object.entries(prev).forEach(([id, status]) => {
+        if (validIds.has(id)) {
+          next[id] = status
+        } else {
+          changed = true
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [alerts])
 
   // Build breadcrumbs based on current state
   const breadcrumbs = useMemo(() => {
@@ -194,17 +271,42 @@ export default function ResearchChat() {
     setActiveTab('events')
   }, [])
 
-  const handleDismissEvent = useCallback((eventId: string) => {
-    setEvents(prev =>
-      prev.map(e => e.id === eventId ? { ...e, status: 'dismissed' as EventStatus } : e)
-    )
-  }, [])
+  const handleUpdateEventStatus = useCallback(async (eventId: string, status: EventStatus) => {
+    setEventStatusOverrides(prev => ({ ...prev, [eventId]: status }))
 
-  const handleUpdateEventStatus = useCallback((eventId: string, status: EventStatus) => {
-    setEvents(prev =>
-      prev.map(e => e.id === eventId ? { ...e, status } : e)
-    )
-  }, [])
+    if (status !== 'resolved') {
+      return
+    }
+
+    const event = events.find(e => e.id === eventId)
+    if (!event?.alertId || !event.choices || event.choices.length === 0) {
+      return
+    }
+
+    const defaultChoice = event.choices.includes('Ignore')
+      ? 'Ignore'
+      : (event.choices.find(choice => {
+          const normalized = choice.toLowerCase()
+          return !normalized.includes('stop') && !normalized.includes('kill') && !normalized.includes('terminate')
+        }) || event.choices[0])
+    try {
+      await respondAlert(event.alertId, defaultChoice)
+    } catch (e) {
+      console.error('Failed to resolve alert:', e)
+    }
+  }, [events, respondAlert])
+
+  const handleRespondToAlert = useCallback(async (event: RunEvent, choice: string) => {
+    if (!event.alertId) {
+      return
+    }
+    try {
+      await respondAlert(event.alertId, choice)
+      setEventStatusOverrides(prev => ({ ...prev, [event.id]: 'resolved' }))
+    } catch (e) {
+      console.error('Failed to respond to alert:', e)
+    }
+  }, [respondAlert])
 
   const handleResolveByChat = useCallback((event: RunEvent) => {
     // Navigate to chat and propagate the alert
@@ -233,9 +335,7 @@ export default function ResearchChat() {
     if (selectedRun?.id === updatedRun.id) {
       setSelectedRun(updatedRun)
     }
-    // Regenerate events when runs change
-    setEvents(getRunEvents(runs.map(r => r.id === updatedRun.id ? updatedRun : r)))
-  }, [selectedRun, runs, apiUpdateRun])
+  }, [selectedRun, apiUpdateRun])
 
   const handleToggleRule = useCallback((ruleId: string) => {
     setMemoryRules(prev =>
@@ -337,18 +437,10 @@ export default function ResearchChat() {
     setShowVisibilityManage(false)
   }, [])
 
-  // Calculate scale for very small screens
-  const MOBILE_WIDTH = 300
-  const MOBILE_HEIGHT = 644
-
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main
-        className="mobile-viewport-wrapper flex flex-col bg-background overflow-hidden w-full h-full md:w-full md:h-full"
-        style={{
-          minWidth: `${MOBILE_WIDTH}px`,
-          minHeight: `${MOBILE_HEIGHT}px`,
-        }}
+        className="mobile-viewport-wrapper flex flex-col bg-background overflow-hidden w-full h-full"
       >
         <FloatingNav
           activeTab={activeTab}
@@ -400,6 +492,7 @@ export default function ResearchChat() {
               subTab={runsSubTab}
               onRunClick={handleRunClick}
               onUpdateRun={handleUpdateRun}
+              pendingAlertsByRun={pendingAlertsByRun}
               allTags={allTags}
               onCreateTag={handleCreateTag}
               onSelectedRunChange={setSelectedRun}
@@ -415,6 +508,7 @@ export default function ResearchChat() {
               onNavigateToRun={handleNavigateToRun}
               onResolveByChat={handleResolveByChat}
               onUpdateEventStatus={handleUpdateEventStatus}
+              onRespondToAlert={handleRespondToAlert}
             />
           )}
           {activeTab === 'charts' && (

@@ -9,11 +9,15 @@ This script is spawned by the server in a tmux window to:
 """
 
 import argparse
+import json
 import logging
 import os
 import re
 import sys
 import time
+import math
+import hashlib
+import subprocess
 import requests
 import libtmux
 
@@ -25,8 +29,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger("job-sidecar")
 
+LOSS_ALERT_THRESHOLD = 8.0
+LOSS_SPIKE_MULTIPLIER = 3.0
+RULE_MIN_PREV_POINTS = 3
+AGENT_JUDGE_INTERVAL = 30
+AGENT_JUDGE_MAX_LINES = 5
+AGENT_JUDGE_MAX_BYTES = 8000
+ALERT_SIGNATURE_TTL_SECONDS = 180
+_last_metrics_pos: dict[str, int] = {}
+_last_judge_check: dict[str, float] = {}
 
-def report_status(server_url: str, job_id: str, status: str, extra_data: dict = None):
+
+def _auth_headers(auth_token: str | None) -> dict:
+    if not auth_token:
+        return {}
+    return {"X-Auth-Token": auth_token}
+
+
+def report_status(
+    server_url: str,
+    job_id: str,
+    status: str,
+    extra_data: dict = None,
+    auth_token: str | None = None,
+):
     """Report status update to server."""
     data = {"status": status}
     if extra_data:
@@ -34,9 +60,368 @@ def report_status(server_url: str, job_id: str, status: str, extra_data: dict = 
     
     try:
         logger.info(f"Reporting status: {status} with data: {extra_data}")
-        requests.post(f"{server_url}/runs/{job_id}/status", json=data, timeout=10)
+        requests.post(
+            f"{server_url}/runs/{job_id}/status",
+            json=data,
+            headers=_auth_headers(auth_token),
+            timeout=10,
+        )
     except Exception as e:
         logger.warning(f"Failed to report status: {e}")
+
+
+def trigger_alert(
+    server_url: str,
+    job_id: str,
+    message: str,
+    choices: list[str],
+    severity: str = "warning",
+    auth_token: str | None = None,
+) -> str | None:
+    """Create alert via server and return alert_id."""
+    payload = {
+        "message": message,
+        "choices": choices,
+        "severity": severity,
+    }
+    try:
+        logger.info("Triggering alert: %s", message)
+        res = requests.post(
+            f"{server_url}/runs/{job_id}/alerts",
+            json=payload,
+            headers=_auth_headers(auth_token),
+            timeout=5,
+        )
+        if res.status_code == 200:
+            data = res.json()
+            return data.get("alert_id")
+        logger.warning("Alert creation failed (%s): %s", res.status_code, res.text)
+    except Exception as e:
+        logger.warning("Alert creation error: %s", e)
+    return None
+
+
+def wait_for_response(run_dir: str, alert_id: str, timeout_seconds: int = 600) -> str | None:
+    """Wait for alert response file from server."""
+    response_file = os.path.join(run_dir, "alerts", f"{alert_id}.response")
+    deadline = time.time() + timeout_seconds
+    logger.info("Waiting for response file: %s", response_file)
+
+    while time.time() < deadline:
+        if os.path.exists(response_file):
+            try:
+                with open(response_file, "r") as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        time.sleep(2)
+
+    logger.info("Timed out waiting for alert response (%s)", alert_id)
+    return None
+
+
+def should_stop_from_choice(choice: str | None) -> bool:
+    if not choice:
+        return False
+    lowered = choice.lower()
+    return "stop" in lowered or "kill" in lowered or "terminate" in lowered
+
+
+def read_recent_metrics(metrics_path: str, max_lines: int = 25, max_bytes: int = 24000) -> list[dict]:
+    """Read recent metrics.jsonl lines, tolerating partial writes."""
+    if not os.path.exists(metrics_path):
+        return []
+
+    try:
+        size = os.path.getsize(metrics_path)
+        start = max(0, size - max_bytes)
+        with open(metrics_path, "r") as f:
+            f.seek(start)
+            chunk = f.read()
+    except Exception as e:
+        logger.warning("Failed to read metrics file %s: %s", metrics_path, e)
+        return []
+
+    lines = [ln for ln in chunk.splitlines() if ln.strip()]
+    parsed: list[dict] = []
+    for line in lines[-max_lines:]:
+        try:
+            data = json.loads(line)
+            if isinstance(data, dict):
+                parsed.append(data)
+        except json.JSONDecodeError:
+            continue
+    return parsed
+
+
+def extract_loss(metrics: dict) -> float | None:
+    """Extract common training loss keys from a metrics row."""
+    for key in ("loss", "train/loss", "train_loss", "training_loss"):
+        value = metrics.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+def seen_recent_signature(state: dict, namespace: str, signature: str, ttl_seconds: int = ALERT_SIGNATURE_TTL_SECONDS) -> bool:
+    """Dedupe alerts by signature in-memory for a short window."""
+    now = time.time()
+    recent = state.setdefault("recent_signatures", {})
+    key = f"{namespace}:{signature}"
+    previous = recent.get(key)
+    if previous and now - previous < ttl_seconds:
+        return True
+    recent[key] = now
+    return False
+
+def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
+    """Deterministic alerts for hard metric anomalies."""
+    metrics_path = os.path.join(wandb_dir, "metrics.jsonl")
+    rows = read_recent_metrics(metrics_path, max_lines=25, max_bytes=24000)
+    entries: list[tuple[object, float]] = []
+    for row in rows:
+        loss = extract_loss(row)
+        if loss is None:
+            continue
+        entries.append((row.get("step"), float(loss)))
+
+    if not entries:
+        return None
+
+    finite_entries = [(step, loss) for step, loss in entries if math.isfinite(loss)]
+    has_non_finite = len(finite_entries) != len(entries)
+    if has_non_finite:
+        signature = "nan-inf"
+        if seen_recent_signature(state, "rulebased", signature):
+            return None
+        return {
+            "action": "alert",
+            "message": "Training loss became NaN/Inf. This run is unstable.",
+            "severity": "critical",
+            "choices": ["Ignore", "Stop Job"],
+            "source": "rulebased",
+            "signature": signature,
+        }
+
+    current_step, current = finite_entries[-1]
+    previous = [loss for _, loss in finite_entries[:-1]]
+    mean_prev = (sum(previous) / len(previous)) if previous else 0.0
+
+    high_entry: tuple[object, float] | None = None
+    if finite_entries:
+        max_entry = max(finite_entries, key=lambda item: item[1])
+        if max_entry[1] >= LOSS_ALERT_THRESHOLD:
+            high_entry = max_entry
+
+    is_high = high_entry is not None
+    is_spike = (
+        len(previous) >= RULE_MIN_PREV_POINTS
+        and mean_prev > 0
+        and current >= mean_prev * LOSS_SPIKE_MULTIPLIER
+    )
+    if not (is_high or is_spike):
+        return None
+
+    if is_high:
+        high_step, high_loss = high_entry
+        signature = f"high:{round(high_loss, 4)}"
+        step_prefix = f"step={high_step}, " if isinstance(high_step, (int, float)) else ""
+        message = (
+            f"High loss detected ({step_prefix}loss={high_loss:.4f}, "
+            f"threshold={LOSS_ALERT_THRESHOLD:.1f})."
+        )
+    else:
+        signature = f"spike:{round(current, 4)}:{round(mean_prev, 4)}"
+        message = f"Loss spike detected (loss={current:.4f}, rolling_avg={mean_prev:.4f})."
+
+    if seen_recent_signature(state, "rulebased", signature):
+        return None
+
+    return {
+        "action": "alert",
+        "message": message,
+        "severity": "warning",
+        "choices": ["Ignore", "Stop Job"],
+        "source": "rulebased",
+        "signature": signature,
+    }
+
+def should_run_alert_judge(job_id: str, metrics_file: str) -> bool:
+    file_size = os.path.getsize(metrics_file)
+    last_size = _last_metrics_pos.get(job_id, 0)
+    if file_size < last_size:
+        last_size = 0
+    if file_size == last_size:
+        return False
+    _last_metrics_pos[job_id] = file_size
+
+    now = time.time()
+    last_check = _last_judge_check.get(job_id, 0.0)
+    if now - last_check < AGENT_JUDGE_INTERVAL:
+        return False
+    _last_judge_check[job_id] = now
+    return True
+
+def parse_alert_judge_decision(output: str) -> dict | None:
+    if not output or "NOTHING" in output:
+        return {"action": "ignore"}
+    match = re.search(r"\{.*\}", output, re.S)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+    action = data.get("action")
+    if action not in {"alert", "ignore"}:
+        return None
+    message = (data.get("message") or "").strip()
+    severity = (data.get("severity") or "warning").strip().lower()
+    if severity not in {"info", "warning", "critical"}:
+        severity = "warning"
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        choices = ["Ignore", "Stop Job"]
+    return {
+        "action": action,
+        "message": message,
+        "severity": severity,
+        "choices": choices,
+    }
+
+def run_alert_judge(context: str, workdir: str | None = None) -> dict | None:
+    prompt = (
+        "[SYSTEM] You are an ML training alert judge. "
+        "Decide if this update warrants interrupting a human. "
+        "Return ONLY JSON with keys: action ('alert'|'ignore'), "
+        "message (string), severity (info|warning|critical), choices (list of strings). "
+        "If action is ignore, keep message empty.\n"
+        f"Context:\n{context}"
+    )
+    cmd = ["opencode", "run", "--model", "opencode/kimi-k2.5-free", prompt]
+    try:
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=workdir or None,
+        )
+    except FileNotFoundError:
+        logger.warning("opencode CLI not found; skipping alert_judge.")
+        return None
+    except Exception as e:
+        logger.warning("alert_judge execution failed: %s", e)
+        return None
+
+    output = (res.stdout or "").strip()
+    logger.info("alert_judge output: %s", output)
+    return parse_alert_judge_decision(output)
+
+def alert_judge(job_id: str, wandb_dir: str, workdir: str, state: dict) -> dict:
+    """LLM-based alert gate for softer anomalies."""
+    metrics_file = os.path.join(wandb_dir, "metrics.jsonl")
+    if not os.path.exists(metrics_file):
+        return {"action": "ignore"}
+    if not should_run_alert_judge(job_id, metrics_file):
+        return {"action": "ignore"}
+
+    recent_metrics = read_recent_metrics(
+        metrics_file,
+        max_lines=AGENT_JUDGE_MAX_LINES,
+        max_bytes=AGENT_JUDGE_MAX_BYTES,
+    )
+    if not recent_metrics:
+        return {"action": "ignore"}
+
+    context_blob = {
+        "event": "metrics_update",
+        "metrics_file": metrics_file,
+        "recent_metrics": recent_metrics,
+    }
+    decision = run_alert_judge(json.dumps(context_blob, ensure_ascii=True), workdir)
+    if not decision or decision.get("action") != "alert":
+        return {"action": "ignore"}
+
+    message = (decision.get("message") or "Metric anomaly detected.").strip()
+    if len(message) > 600:
+        message = f"{message[:597]}..."
+    signature = hashlib.sha1(message.encode("utf-8")).hexdigest()
+    if seen_recent_signature(state, "alert_judge", signature):
+        return {"action": "ignore"}
+
+    return {
+        "action": "alert",
+        "message": message,
+        "severity": decision.get("severity") or "warning",
+        "choices": decision.get("choices") or ["Ignore", "Stop Job"],
+        "source": "alert_judge",
+        "signature": signature,
+    }
+
+
+def maybe_trigger_manual_alert(
+    server_url: str,
+    job_id: str,
+    workdir: str,
+    run_dir: str,
+    auth_token: str | None = None,
+) -> bool:
+    """Manual trigger path for testing alert flow."""
+    trigger_file = os.path.join(workdir, "tests", "story", "trigger_alert")
+    # Only treat a regular file as a manual trigger sentinel.
+    if not os.path.isfile(trigger_file):
+        return False
+
+    try:
+        os.remove(trigger_file)
+    except Exception:
+        return False
+
+    alert_id = trigger_alert(
+        server_url=server_url,
+        job_id=job_id,
+        message="Manual Trigger Detected",
+        choices=["Ignore", "Stop Job"],
+        severity="warning",
+        auth_token=auth_token,
+    )
+    if not alert_id:
+        return False
+
+    response = wait_for_response(run_dir, alert_id)
+    logger.info("Manual alert response: %s", response)
+    return should_stop_from_choice(response)
+
+
+def apply_alert_decision(
+    server_url: str,
+    job_id: str,
+    run_dir: str,
+    decision: dict | None,
+    auth_token: str | None = None,
+) -> bool:
+    if not decision or decision.get("action") != "alert":
+        return False
+
+    message = decision.get("message") or "Metric anomaly detected."
+    source = decision.get("source") or "alerts"
+    logger.warning("%s produced alert: %s", source, message)
+
+    alert_id = trigger_alert(
+        server_url=server_url,
+        job_id=job_id,
+        message=message,
+        choices=decision.get("choices") or ["Ignore", "Stop Job"],
+        severity=decision.get("severity") or "warning",
+        auth_token=auth_token,
+    )
+    if not alert_id:
+        return False
+
+    response = wait_for_response(run_dir, alert_id)
+    logger.info("Alert response (%s): %s", source, response)
+    return should_stop_from_choice(response)
 
 
 def get_current_pane():
@@ -86,7 +471,8 @@ def monitor_job(
     job_id: str,
     command: str,
     workdir: str,
-    run_dir: str
+    run_dir: str,
+    auth_token: str | None = None,
 ):
     """Main job monitoring loop."""
     logger.info(f"Starting job monitor for {job_id}")
@@ -98,7 +484,7 @@ def monitor_job(
     current_pane = get_current_pane()
     if not current_pane:
         logger.error("Could not identify current tmux pane")
-        report_status(server_url, job_id, "failed", {"error": "No tmux pane found"})
+        report_status(server_url, job_id, "failed", {"error": "No tmux pane found"}, auth_token=auth_token)
         return
     
     window = current_pane.window
@@ -134,12 +520,13 @@ def monitor_job(
     job_pane.send_keys(wrapped_command)
     
     # Report running status
-    report_status(server_url, job_id, "running", {"tmux_pane": job_pane.pane_id})
+    report_status(server_url, job_id, "running", {"tmux_pane": job_pane.pane_id}, auth_token=auth_token)
     
     # Monitoring loop
     found_wandb_dir = None
     check_interval = 2
-    
+    alert_state: dict = {}
+
     while not os.path.exists(completion_file):
         try:
             # Check if pane still exists
@@ -148,7 +535,7 @@ def monitor_job(
             
             if not pane_exists:
                 logger.error("Job pane disappeared")
-                report_status(server_url, job_id, "failed", {"error": "Pane disappeared"})
+                report_status(server_url, job_id, "failed", {"error": "Pane disappeared"}, auth_token=auth_token)
                 return
             
             # Detect WandB
@@ -156,8 +543,31 @@ def monitor_job(
                 found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
                 if found_wandb_dir:
                     logger.info(f"Detected WandB dir: {found_wandb_dir}")
-                    report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir})
-            
+                    report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
+
+            # Manual alert trigger path (for testing and operations)
+            if maybe_trigger_manual_alert(server_url, job_id, workdir, run_dir, auth_token=auth_token):
+                logger.info("Stopping job due to manual alert response")
+                job_pane.cmd("kill-pane")
+                report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                return
+
+            # Rule-based alerts first, then LLM alert judge.
+            if found_wandb_dir:
+                rule_decision = rulebased_alerts(job_id, found_wandb_dir, alert_state)
+                if apply_alert_decision(server_url, job_id, run_dir, rule_decision, auth_token=auth_token):
+                    logger.info("Stopping job due to rulebased alert response")
+                    job_pane.cmd("kill-pane")
+                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                    return
+
+                judge_decision = alert_judge(job_id, found_wandb_dir, workdir, alert_state)
+                if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
+                    logger.info("Stopping job due to alert_judge response")
+                    job_pane.cmd("kill-pane")
+                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                    return
+
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
         
@@ -174,10 +584,10 @@ def monitor_job(
     # Final status
     if exit_code == "0":
         logger.info("Job completed successfully")
-        report_status(server_url, job_id, "finished", {"exit_code": 0})
+        report_status(server_url, job_id, "finished", {"exit_code": 0}, auth_token=auth_token)
     else:
         logger.error(f"Job failed with exit code: {exit_code}")
-        report_status(server_url, job_id, "failed", {"exit_code": exit_code})
+        report_status(server_url, job_id, "failed", {"exit_code": exit_code}, auth_token=auth_token)
     
     logger.info("Sidecar exiting")
 
@@ -189,6 +599,11 @@ def main():
     parser.add_argument("--command_file", required=True, help="Path to command file")
     parser.add_argument("--workdir", default=None, help="Working directory")
     parser.add_argument("--agent_run_dir", default=None, help="Run directory for logs")
+    parser.add_argument(
+        "--auth_token",
+        default=os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", ""),
+        help="Optional X-Auth-Token for server callbacks",
+    )
     args = parser.parse_args()
     
     # Read command from file
@@ -197,7 +612,13 @@ def main():
             command = f.read().strip()
     except Exception as e:
         logger.error(f"Failed to read command file: {e}")
-        report_status(args.server_url, args.job_id, "failed", {"error": f"Failed to read command: {e}"})
+        report_status(
+            args.server_url,
+            args.job_id,
+            "failed",
+            {"error": f"Failed to read command: {e}"},
+            auth_token=args.auth_token or None,
+        )
         return
     
     # Run monitor
@@ -206,7 +627,8 @@ def main():
         job_id=args.job_id,
         command=command,
         workdir=args.workdir or os.getcwd(),
-        run_dir=args.agent_run_dir or "/tmp"
+        run_dir=args.agent_run_dir or "/tmp",
+        auth_token=args.auth_token or None,
     )
 
 

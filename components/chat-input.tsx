@@ -437,20 +437,26 @@ export function ChatInput({
             {/* Type filter tabs */}
             <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-secondary/30">
               <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
-              {(['all', 'run', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => setMentionFilter(type)}
-                  className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-                    mentionFilter === type
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-secondary'
-                  }`}
-                >
-                  {type === 'all' ? 'All' : type.charAt(0).toUpperCase() + type.slice(1)}
-                </button>
-              ))}
+              <div className="flex-1 min-w-0 overflow-x-auto">
+                <div className="flex min-w-max items-center gap-1 pr-1">
+                  {(['all', 'run', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setMentionFilter(type)}
+                      className={`shrink-0 max-w-[88px] px-2 py-0.5 text-[10px] rounded transition-colors ${
+                        mentionFilter === type
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:bg-secondary'
+                      }`}
+                    >
+                      <span className="block truncate">
+                        {type === 'all' ? 'All' : type.charAt(0).toUpperCase() + type.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             
             {/* Mention items */}

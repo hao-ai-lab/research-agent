@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import {
   LineChart,
   Line,
@@ -84,6 +85,31 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
   const [selectedLayer, setSelectedLayer] = useState<Record<string, number>>({})
   const [showVisibilityManage, setShowVisibilityManageInternal] = useState(false)
   const [showVisibilitySection, setShowVisibilitySection] = useState(false)
+
+  // Chart axis settings (applied settings)
+  const [chartSettings, setChartSettings] = useState({
+    xAxisFontSize: 10,
+    yAxisFontSize: 10,
+    xAxisTickCount: 5,
+    yAxisTickCount: 5,
+    yAxisWidth: 25,
+  })
+  // Draft settings (edited in popover, applied on save)
+  const [draftSettings, setDraftSettings] = useState({ ...chartSettings })
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const handleSaveSettings = () => {
+    setChartSettings({ ...draftSettings })
+    setSettingsOpen(false)
+  }
+
+  const handleOpenSettings = (open: boolean) => {
+    if (open) {
+      // Reset draft to current settings when opening
+      setDraftSettings({ ...chartSettings })
+    }
+    setSettingsOpen(open)
+  }
 
   const setShowVisibilityManage = (show: boolean) => {
     setShowVisibilityManageInternal(show)
@@ -160,9 +186,10 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     const DataComponent = metric.type === 'area' ? Area : Line
 
     return (
-      <div key={metric.id} className="rounded-xl border border-border bg-card p-4">
+      // Hack: max-w-[calc(100vw-20px)]
+      <div key={metric.id} className="rounded-m border border-border bg-card p-2 max-w-[calc(100vw-20px)] overflow-hidden">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-0 min-w-0">
             <h4 className="font-medium text-sm text-foreground truncate">{metric.name}</h4>
             <Badge variant="outline" className="text-[10px] shrink-0">
               {metric.path}
@@ -204,20 +231,22 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
             </Button>
           </div>
         </div>
-        <div className="h-36">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-36 overflow-x-auto max-w-full">
+          <ResponsiveContainer width="100%" height="100%" minWidth={150}>
             <ChartComponent data={data}>
               <XAxis
                 dataKey="step"
-                tick={{ fontSize: 10, fill: '#888' }}
+                tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#888' }}
                 axisLine={{ stroke: '#333' }}
                 tickLine={false}
+                tickCount={chartSettings.xAxisTickCount}
               />
               <YAxis
-                tick={{ fontSize: 10, fill: '#888' }}
+                tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#888' }}
                 axisLine={{ stroke: '#333' }}
                 tickLine={false}
-                width={35}
+                width={chartSettings.yAxisWidth}
+                tickCount={chartSettings.yAxisTickCount}
               />
               <Tooltip
                 contentStyle={{
@@ -259,8 +288,8 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
         chartElement = (
           <ResponsiveContainer width="100%" height={120}>
             <LineChart data={data}>
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={30} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
               <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }} />
               <Line type="monotone" dataKey="value" stroke="#4ade80" strokeWidth={2} dot={{ fill: '#4ade80', r: 3 }} />
             </LineChart>
@@ -271,8 +300,8 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
         chartElement = (
           <ResponsiveContainer width="100%" height={120}>
             <BarChart data={data}>
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={30} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
               <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }} />
               <Bar dataKey="value" fill="#4ade80" radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -283,8 +312,8 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
         chartElement = (
           <ResponsiveContainer width="100%" height={120}>
             <AreaChart data={data}>
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={30} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
               <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }} />
               <Area type="monotone" dataKey="value" stroke="#4ade80" fill="#4ade8033" strokeWidth={2} />
             </AreaChart>
@@ -295,8 +324,8 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
         chartElement = (
           <ResponsiveContainer width="100%" height={120}>
             <ScatterChart>
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} type="category" allowDuplicatedCategory={false} />
-              <YAxis dataKey="value" tick={{ fontSize: 10, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={30} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} type="category" allowDuplicatedCategory={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis dataKey="value" tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
               <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', fontSize: '12px' }} />
               <Scatter data={data} fill="#4ade80" />
             </ScatterChart>
@@ -306,7 +335,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     }
 
     return (
-      <div key={chart.id} className="rounded-xl border border-border bg-card p-4">
+      <div key={chart.id} className="rounded-xl border border-border bg-card p-4 max-w-[100vw] overflow-hidden">
         <div className="flex items-center justify-between mb-3">
           <div className="flex-1 min-w-0">
             <h4 className="font-medium text-sm text-foreground truncate">{chart.title}</h4>
@@ -333,7 +362,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
             </Button>
           </div>
         </div>
-        <div className="rounded-lg bg-secondary/50 p-2">
+        <div className="rounded-lg bg-secondary/50 p-2 overflow-x-auto max-w-full">
           {chartElement}
         </div>
       </div>
@@ -362,41 +391,45 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
       {/* Section Tabs */}
       <div className="shrink-0 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 rounded-lg bg-secondary p-1">
-            <button
-              type="button"
-              onClick={() => setActiveSection('standard')}
-              className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeSection === 'standard'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-                }`}
-            >
-              <Layers className="h-4 w-4" />
-              Standard
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSection('custom')}
-              className={`flex-1 flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${activeSection === 'custom'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-                }`}
-            >
-              <BarChart3 className="h-4 w-4" />
-              Custom
-            </button>
+          <div className="flex-1 min-w-0 rounded-lg bg-secondary p-1 overflow-x-auto">
+            <div className="flex min-w-max items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveSection('standard')}
+                className={`shrink-0 inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeSection === 'standard'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+                  }`}
+              >
+                <Layers className="h-4 w-4" />
+                <span className="truncate">Standard</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSection('custom')}
+                className={`shrink-0 inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeSection === 'custom'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+                  }`}
+              >
+                <BarChart3 className="h-4 w-4" />
+                <span className="truncate">Custom</span>
+              </button>
+            </div>
           </div>
-          <Popover>
+          <Popover open={settingsOpen} onOpenChange={handleOpenSettings}>
             <PopoverTrigger asChild>
               <Button variant="ghost" size="icon" className="h-9 w-9">
                 <Settings className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-56">
+            <PopoverContent align="end" className="w-64">
               <div className="space-y-4">
                 <h4 className="font-medium text-sm">Chart Settings</h4>
+
+                {/* Visibility Toggle */}
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="show-visibility" className="text-sm">
+                  <Label htmlFor="show-visibility" className="text-xs">
                     Show visibility toggle
                   </Label>
                   <Switch
@@ -405,6 +438,80 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
                     onCheckedChange={setShowVisibilitySection}
                   />
                 </div>
+
+                <div className="border-t border-border pt-3 space-y-3">
+                  <p className="text-xs font-medium text-muted-foreground">Axis Settings</p>
+
+                  {/* X-Axis Font Size */}
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">X-Axis Font</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.xAxisFontSize}
+                      onChange={(e) => setDraftSettings(prev => ({ ...prev, xAxisFontSize: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+
+                    />
+                  </div>
+
+                  {/* Y-Axis Font Size */}
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Y-Axis Font</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.yAxisFontSize}
+                      onChange={(e) => setDraftSettings(prev => ({ ...prev, yAxisFontSize: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+
+                  {/* X-Axis Tick Count */}
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">X-Axis Ticks</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.xAxisTickCount}
+                      onChange={(e) => setDraftSettings(prev => ({ ...prev, xAxisTickCount: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+
+                  {/* Y-Axis Tick Count */}
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Y-Axis Ticks</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.yAxisTickCount}
+                      onChange={(e) => setDraftSettings(prev => ({ ...prev, yAxisTickCount: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+
+                  {/* Y-Axis Width */}
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Y-Axis Width</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.yAxisWidth}
+                      onChange={(e) => setDraftSettings(prev => ({ ...prev, yAxisWidth: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+                </div>
+
+                {/* Save Button */}
+                <Button
+                  size="sm"
+                  className="w-full h-8 text-xs"
+                  onClick={handleSaveSettings}
+                >
+                  Save Settings
+                </Button>
               </div>
             </PopoverContent>
           </Popover>
