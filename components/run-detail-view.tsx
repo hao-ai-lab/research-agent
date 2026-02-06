@@ -887,6 +887,16 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
               </div>
             </Collapsible>
 
+            {/* Git Commit */}
+            {(run as any).git_commit && (
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+                <span className="text-[10px] text-muted-foreground">Git:</span>
+                <code className="text-[11px] font-mono text-foreground/80">
+                  {(run as any).git_commit.slice(0, 8)}
+                </code>
+              </div>
+            )}
+
             {/* Hyperparameters */}
             <Collapsible open={configOpen} onOpenChange={setConfigOpen}>
               <div className={`rounded-lg border bg-card overflow-hidden ${run.config ? 'border-border' : 'border-border border-dashed'}`}>

@@ -37,6 +37,8 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         isArchived: run.is_archived,
         parentRunId: run.parent_run_id || undefined,
         originAlertId: run.origin_alert_id || undefined,
+        sweepId: run.sweep_id || undefined,
+        sweepParams: run.sweep_params || undefined,
         isFavorite: false,
         tags: [],
         notes: '',
@@ -52,6 +54,7 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         exit_code: run.exit_code,
         error: run.error,
         wandb_dir: run.wandb_dir,
+        git_commit: run.git_commit,
     } as ExperimentRun & {
         tmux_window?: string
         tmux_pane?: string
@@ -59,6 +62,7 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         exit_code?: number | null
         error?: string | null
         wandb_dir?: string | null
+        git_commit?: string | null
     }
 }
 

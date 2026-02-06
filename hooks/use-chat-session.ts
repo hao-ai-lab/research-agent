@@ -97,7 +97,7 @@ export function useChatSession(): UseChatSessionResult {
 
     // Message queue for queuing messages during streaming
     const [messageQueue, setMessageQueue] = useState<string[]>([])
-    const currentModeRef = useRef<ChatMode>('wild')
+    const currentModeRef = useRef<ChatMode>('agent')
 
     // Abort controller for cancelling streams
     const abortControllerRef = useRef<AbortController | null>(null)

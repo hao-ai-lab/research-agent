@@ -10,12 +10,11 @@ import {
   ImageIcon,
   FileText,
   Zap,
-  Bug,
+  Bot,
   AtSign,
   Command,
   Mic,
   MicOff,
-  Sparkles,
   Play,
   AlertTriangle,
   BarChart3,
@@ -34,7 +33,7 @@ import {
 import type { ExperimentRun, Artifact, InsightChart, ChatMessage } from '@/lib/types'
 import type { Alert as ApiAlert } from '@/lib/api-client'
 
-export type ChatMode = 'wild' | 'debug' | 'sweep'
+export type ChatMode = 'agent' | 'wild'
 
 export type MentionType = 'run' | 'artifact' | 'alert' | 'chart' | 'chat'
 
@@ -64,6 +63,9 @@ interface ChatInputProps {
   queueCount?: number
   queue?: string[]
   onRemoveFromQueue?: (index: number) => void
+  // Wild loop
+  isWildLoopActive?: boolean
+  onOpenWildConfig?: () => void
 }
 
 export function ChatInput({
@@ -82,6 +84,8 @@ export function ChatInput({
   queueCount = 0,
   queue = [],
   onRemoveFromQueue,
+  isWildLoopActive = false,
+  onOpenWildConfig,
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -540,12 +544,24 @@ export function ChatInput({
           </div>
         )}
 
+        {/* Wild mode: show configure button when not active */}
+        {mode === 'wild' && !isWildLoopActive && onOpenWildConfig && (
+          <button
+            type="button"
+            onClick={onOpenWildConfig}
+            className="w-full mb-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-sm text-purple-400 hover:bg-purple-500/20 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            Configure Wild Mode
+          </button>
+        )}
+
         <textarea
           ref={textareaRef}
           value={message}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
-          placeholder="Message Research Assistant... (type @ to mention)"
+          placeholder={isWildLoopActive ? "Send override to agent..." : "Message Research Assistant... (type @ to mention)"}
           disabled={disabled}
           rows={1}
           className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
@@ -563,24 +579,40 @@ export function ChatInput({
                 type="button"
                 className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
                   mode === 'wild'
-                    ? 'bg-accent/20 text-accent'
-                    : mode === 'debug'
-                    ? 'bg-blue-500/20 text-blue-400'
-                    : 'bg-purple-500/20 text-purple-400'
+                    ? 'bg-purple-500/20 text-purple-400'
+                    : 'bg-blue-500/20 text-blue-400'
                 }`}
               >
                 {mode === 'wild' ? (
                   <Zap className="h-3 w-3" />
-                ) : mode === 'debug' ? (
-                  <Bug className="h-3 w-3" />
                 ) : (
-                  <Sparkles className="h-3 w-3" />
+                  <Bot className="h-3 w-3" />
                 )}
-                {mode === 'wild' ? 'Wild' : mode === 'debug' ? 'Debug' : 'Sweep'}
+                {mode === 'wild' ? 'Wild' : 'Agent'}
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-56 p-1.5">
               <div className="flex flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onModeChange('agent')
+                    setIsModeOpen(false)
+                  }}
+                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                    mode === 'agent'
+                      ? 'bg-blue-400/10 border border-blue-400/30'
+                      : 'hover:bg-secondary'
+                  }`}
+                >
+                  <Bot
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-blue-400' : 'text-muted-foreground'}`}
+                  />
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Agent Mode</p>
+                    <p className="text-[10px] text-muted-foreground">Interactive assistant</p>
+                  </div>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -589,56 +621,16 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'wild'
-                      ? 'bg-accent/10 border border-accent/30'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <Zap
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-accent' : 'text-muted-foreground'}`}
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Wild Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Auto-launch experiments</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onModeChange('debug')
-                    setIsModeOpen(false)
-                  }}
-                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                    mode === 'debug'
-                      ? 'bg-blue-400/10 border border-blue-400/30'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <Bug
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'debug' ? 'text-blue-400' : 'text-muted-foreground'}`}
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Debug Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Careful, detailed</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onModeChange('sweep')
-                    setIsModeOpen(false)
-                  }}
-                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                    mode === 'sweep'
                       ? 'bg-purple-400/10 border border-purple-400/30'
                       : 'hover:bg-secondary'
                   }`}
                 >
-                  <Sparkles
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'sweep' ? 'text-purple-400' : 'text-muted-foreground'}`}
+                  <Zap
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-purple-400' : 'text-muted-foreground'}`}
                   />
                   <div>
-                    <p className="text-xs font-medium text-foreground">Sweep Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Create experiment sweeps</p>
+                    <p className="text-xs font-medium text-foreground">Wild Mode</p>
+                    <p className="text-[10px] text-muted-foreground">Autonomous experiment loop</p>
                   </div>
                 </button>
               </div>

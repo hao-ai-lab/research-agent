@@ -39,6 +39,8 @@
   --sidebar-ring: oklch(0.70 0.15 145);
   --success: oklch(0.70 0.15 145);
   --warning: oklch(0.75 0.15 60);
+  --wild: oklch(0.65 0.20 300);
+  --wild-foreground: oklch(0.95 0 0);
 }
 
 .dark {
@@ -76,6 +78,8 @@
   --sidebar-ring: oklch(0.70 0.15 145);
   --success: oklch(0.70 0.15 145);
   --warning: oklch(0.75 0.15 60);
+  --wild: oklch(0.65 0.20 300);
+  --wild-foreground: oklch(0.95 0 0);
 }
 
 @theme inline {
@@ -107,6 +111,8 @@
   --color-chart-5: var(--chart-5);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-wild: var(--wild);
+  --color-wild-foreground: var(--wild-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -187,4 +193,13 @@
   60% { transform: translateX(-1px) rotate(-5deg); }
   80% { transform: translateX(1px) rotate(5deg); }
   100% { transform: translateX(0) rotate(0deg); }
+}
+
+.wild-pulse {
+  animation: wild-pulse 2s ease-in-out infinite;
+}
+
+@keyframes wild-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }

@@ -5,7 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
 import { StreamingMessage } from './streaming-message'
-import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
+import { AlertCircle, Loader2, WifiOff, Zap } from 'lucide-react'
 import { useChatSession } from '@/hooks/use-chat-session'
 import type {
     ChatMessage as ChatMessageType,
@@ -13,8 +13,12 @@ import type {
     Sweep,
     SweepConfig,
     InsightChart,
+    WildSystemEvent,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
+import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
+import { WildLoopBanner } from './wild-loop-banner'
+import { WildSystemEventCard } from './wild-system-event-card'
 
 interface ConnectedChatViewProps {
     runs: ExperimentRun[]
@@ -31,6 +35,9 @@ interface ConnectedChatViewProps {
     onSessionChange?: (sessionId: string | null) => void
     // Optional: pass chat session state from parent (for shared state)
     chatSession?: ReturnType<typeof useChatSession>
+    // Wild loop
+    wildLoop?: UseWildLoopResult
+    onOpenWildConfig?: () => void
 }
 
 /**
@@ -50,6 +57,8 @@ export function ConnectedChatView({
     collapseArtifactsInChat = false,
     onSessionChange,
     chatSession: externalChatSession,
+    wildLoop,
+    onOpenWildConfig,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -89,9 +98,33 @@ export function ConnectedChatView({
             role: msg.role,
             content: msg.content,
             thinking: msg.thinking || undefined,
+            source: (msg as unknown as { source?: 'user' | 'wild-loop' }).source,
             timestamp: new Date(msg.timestamp * 1000),
         }))
     }, [messages, currentSessionId])
+
+    // Interleave system events with messages by timestamp
+    const timelineItems = useMemo(() => {
+        if (!wildLoop?.systemEvents.length) return null
+        const items: Array<{ type: 'message'; message: ChatMessageType } | { type: 'event'; event: WildSystemEvent }> = []
+        const events = [...wildLoop.systemEvents]
+        let eventIdx = 0
+
+        for (const msg of displayMessages) {
+            // Insert any events that occurred before this message
+            while (eventIdx < events.length && events[eventIdx].timestamp <= msg.timestamp) {
+                items.push({ type: 'event', event: events[eventIdx] })
+                eventIdx++
+            }
+            items.push({ type: 'message', message: msg })
+        }
+        // Append remaining events
+        while (eventIdx < events.length) {
+            items.push({ type: 'event', event: events[eventIdx] })
+            eventIdx++
+        }
+        return items
+    }, [displayMessages, wildLoop?.systemEvents])
 
     // Handle send - create session if needed
     const handleSend = async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
@@ -159,23 +192,55 @@ export function ConnectedChatView({
                 </div>
             )}
 
+            {/* Wild Loop Banner */}
+            {wildLoop?.isActive && wildLoop.state && (
+                <WildLoopBanner
+                    state={wildLoop.state}
+                    onPause={wildLoop.pauseLoop}
+                    onResume={wildLoop.resumeLoop}
+                    onStop={wildLoop.stopLoop}
+                />
+            )}
+
             {/* Scrollable Chat Area */}
             <div className="flex-1 min-h-0 overflow-hidden">
                 <ScrollArea className="h-full" ref={scrollRef}>
                     <div className="pb-4">
                         <div className="mt-4 space-y-1">
-                            {displayMessages.map((message) => (
-                                <ChatMessage
-                                    key={message.id}
-                                    message={message}
-                                    collapseArtifacts={collapseArtifactsInChat}
-                                    sweeps={sweeps}
-                                    runs={runs}
-                                    onEditSweep={onEditSweep}
-                                    onLaunchSweep={onLaunchSweep}
-                                    onRunClick={onRunClick}
-                                />
-                            ))}
+                            {timelineItems ? (
+                                // Interleaved messages + system events
+                                timelineItems.map((item, idx) => {
+                                    if (item.type === 'event') {
+                                        return <WildSystemEventCard key={`event-${item.event.id}`} event={item.event} />
+                                    }
+                                    return (
+                                        <ChatMessage
+                                            key={item.message.id}
+                                            message={item.message}
+                                            collapseArtifacts={collapseArtifactsInChat}
+                                            sweeps={sweeps}
+                                            runs={runs}
+                                            onEditSweep={onEditSweep}
+                                            onLaunchSweep={onLaunchSweep}
+                                            onRunClick={onRunClick}
+                                        />
+                                    )
+                                })
+                            ) : (
+                                // Standard message rendering
+                                displayMessages.map((message) => (
+                                    <ChatMessage
+                                        key={message.id}
+                                        message={message}
+                                        collapseArtifacts={collapseArtifactsInChat}
+                                        sweeps={sweeps}
+                                        runs={runs}
+                                        onEditSweep={onEditSweep}
+                                        onLaunchSweep={onLaunchSweep}
+                                        onRunClick={onRunClick}
+                                    />
+                                ))
+                            )}
 
                             {/* Streaming message */}
                             {streamingState.isStreaming && (
@@ -198,20 +263,33 @@ export function ConnectedChatView({
                                     suggest improvements.
                                 </p>
                                 <div className="mt-6 flex flex-wrap justify-center gap-2">
-                                    {[
-                                        'Analyze my latest run',
-                                        'Why did training fail?',
-                                        'Compare model configs',
-                                    ].map((suggestion) => (
+                                    {mode === 'wild' && onOpenWildConfig ? (
                                         <button
-                                            key={suggestion}
                                             type="button"
-                                            onClick={() => handleSend(suggestion)}
-                                            className="rounded-full border border-border bg-secondary px-4 py-2 text-sm text-foreground transition-colors hover:bg-secondary/80 active:scale-95"
+                                            onClick={onOpenWildConfig}
+                                            className="rounded-full border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-sm text-purple-400 transition-colors hover:bg-purple-500/20 active:scale-95"
                                         >
-                                            {suggestion}
+                                            <span className="flex items-center gap-1.5">
+                                                <Zap className="h-3.5 w-3.5" />
+                                                Configure & Start Wild Mode
+                                            </span>
                                         </button>
-                                    ))}
+                                    ) : (
+                                        [
+                                            'Analyze my latest run',
+                                            'Why did training fail?',
+                                            'Compare model configs',
+                                        ].map((suggestion) => (
+                                            <button
+                                                key={suggestion}
+                                                type="button"
+                                                onClick={() => handleSend(suggestion)}
+                                                className="rounded-full border border-border bg-secondary px-4 py-2 text-sm text-foreground transition-colors hover:bg-secondary/80 active:scale-95"
+                                            >
+                                                {suggestion}
+                                            </button>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -235,6 +313,8 @@ export function ConnectedChatView({
                     queueCount={messageQueue.length}
                     queue={messageQueue}
                     onRemoveFromQueue={removeFromQueue}
+                    isWildLoopActive={wildLoop?.isActive}
+                    onOpenWildConfig={onOpenWildConfig}
                 />
             </div>
         </div>

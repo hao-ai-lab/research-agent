@@ -20,6 +20,8 @@ export interface ExperimentRun {
   command: string
   parentRunId?: string
   originAlertId?: string
+  sweepId?: string
+  sweepParams?: Record<string, unknown>
   metrics?: {
     loss: number
     accuracy: number
@@ -124,6 +126,7 @@ export interface ChatMessage {
   content: string
   thinking?: string  // Legacy: combined thinking (backward compat)
   parts?: MessagePart[]  // NEW: ordered array of parts
+  source?: 'user' | 'wild-loop'
   timestamp: Date
   attachments?: {
     name: string
@@ -268,4 +271,35 @@ export interface SweepArtifact {
   sweepId: string
   config: SweepConfig
   timestamp: Date
+}
+
+// Wild Loop types
+export type WildLoopPhase = 'idle' | 'planning' | 'monitoring' | 'reacting' | 'waiting'
+
+export interface TerminationCondition {
+  maxIterations?: number
+  timeLimitMs?: number
+  tokenBudget?: number
+  customCondition?: string
+}
+
+export interface WildLoopState {
+  phase: WildLoopPhase
+  goal: string
+  iteration: number
+  startedAt: number
+  conditions: TerminationCondition
+  estimatedTokens: number
+  isPaused: boolean
+}
+
+export type WildSystemEventType = 'run-completed' | 'run-failed' | 'run-started' | 'alert' | 'sweep' | 'loop-start' | 'loop-stop' | 'loop-pause' | 'loop-resume'
+
+export interface WildSystemEvent {
+  id: string
+  type: WildSystemEventType
+  summary: string
+  timestamp: Date
+  runId?: string
+  alertId?: string
 }

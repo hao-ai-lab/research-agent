@@ -21,6 +21,8 @@ import logging
 import asyncio
 from typing import Dict, Optional, AsyncIterator, List
 
+import subprocess
+
 import httpx
 import uvicorn
 import libtmux
@@ -32,6 +34,7 @@ from pydantic import BaseModel
 # Configure logging
 # logging.basicConfig(level=logging.INFO)
 logging.basicConfig(level=logging.DEBUG)
+print(f"server logger starting with DEBUG mode: {logging.getLogger().level = }")
 logger = logging.getLogger("research-agent-server")
 
 # =============================================================================
@@ -526,6 +529,7 @@ async def stream_opencode_events(client: httpx.AsyncClient, session_id: str) -> 
     
     async with client.stream("GET", url, headers=headers, auth=get_auth()) as response:
         async for line in response.aiter_lines():
+            logger.debug("> [opencode] %s", line)
             if not line.startswith("data: "):
                 continue
             
@@ -777,6 +781,19 @@ async def create_run(req: RunCreate):
     
     initial_status = "queued" if req.auto_start else "ready"
     
+    # Capture git commit hash
+    git_commit = None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=req.workdir or WORKDIR,
+        )
+        if result.returncode == 0:
+            git_commit = result.stdout.strip()
+    except Exception:
+        pass
+
     run_data = {
         "name": req.name,
         "command": req.command,
@@ -792,6 +809,7 @@ async def create_run(req: RunCreate):
         "exit_code": None,
         "error": None,
         "wandb_dir": None,
+        "git_commit": git_commit,
     }
     
     runs[run_id] = run_data

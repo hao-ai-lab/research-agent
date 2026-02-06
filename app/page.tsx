@@ -19,6 +19,8 @@ import type { ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinitio
 import { SweepForm } from '@/components/sweep-form'
 import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
+import { useWildLoop } from '@/hooks/use-wild-loop'
+import { WildLoopStartDialog } from '@/components/wild-loop-start-dialog'
 
 const defaultSettings: AppSettings = {
   appearance: {
@@ -55,7 +57,7 @@ export default function ResearchChat() {
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
   const [insightCharts, setInsightCharts] = useState<InsightChart[]>(mockInsightCharts)
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
-  const [chatMode, setChatMode] = useState<ChatMode>('wild')
+  const [chatMode, setChatMode] = useState<ChatMode>('agent')
   const [allTags, setAllTags] = useState<TagDefinition[]>(defaultTags)
 
   // State for breadcrumb navigation
@@ -105,6 +107,10 @@ export default function ResearchChat() {
   const chatSession = useChatSession()
   const { createNewSession, sessions, selectSession } = chatSession
   const { sendMessage } = chatSession
+
+  // Wild loop
+  const wildLoop = useWildLoop({ chatSession, runs, alerts, mode: chatMode })
+  const [wildConfigOpen, setWildConfigOpen] = useState(false)
 
   const events = useMemo<RunEvent[]>(() => {
     const toEvent = alerts.map((alert) => {
@@ -171,7 +177,7 @@ export default function ResearchChat() {
     const syncWildMode = async () => {
       try {
         const state = await getWildMode()
-        setChatMode(state.enabled ? 'wild' : 'debug')
+        setChatMode(state.enabled ? 'wild' : 'agent')
       } catch (e) {
         console.error('Failed to sync wild mode:', e)
       }
@@ -502,6 +508,8 @@ export default function ResearchChat() {
               alerts={alerts}
               collapseArtifactsInChat={collapseArtifactsInChat}
               chatSession={chatSession}
+              wildLoop={wildLoop}
+              onOpenWildConfig={() => setWildConfigOpen(true)}
             />
           )}
           {activeTab === 'chat' && showSweepForm && (
@@ -613,6 +621,14 @@ export default function ResearchChat() {
           }}
           focusAuthToken={focusAuthToken}
           onRefresh={refetch}
+        />
+
+        <WildLoopStartDialog
+          open={wildConfigOpen}
+          onOpenChange={setWildConfigOpen}
+          onStart={(goal, conditions) => {
+            wildLoop.startLoop(goal, conditions)
+          }}
         />
       </main>
     </div>

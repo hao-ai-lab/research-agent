@@ -18,6 +18,9 @@ import {
   AlertTriangle,
   Repeat,
   PlugZap,
+  Square,
+  RotateCcw,
+  Zap,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -279,6 +282,13 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
     onShowVisibilityManageChange?.(show)
   }
 
+  const handleActionButton = (e: React.MouseEvent, runId: string, action: 'start' | 'stop' | 'rerun') => {
+    e.stopPropagation()
+    if (action === 'start' && onStartRun) onStartRun(runId)
+    else if (action === 'stop' && onStopRun) onStopRun(runId)
+    else if (action === 'rerun' && onStartRun) onStartRun(runId)
+  }
+
   const RunItem = ({ run, showChevron = true }: { run: ExperimentRun; showChevron?: boolean }) => {
     const pendingAlertCount = pendingAlertsByRun[run.id] || 0
     const hasPendingAlerts = pendingAlertCount > 0
@@ -309,7 +319,38 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
           </h4>
           {run.isFavorite && <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0" />}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Action button based on status */}
+          {run.status === 'ready' && onStartRun && (
+            <button
+              type="button"
+              onClick={(e) => handleActionButton(e, run.id, 'start')}
+              className="h-6 w-6 flex items-center justify-center rounded-md bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors"
+              title="Start run"
+            >
+              <Play className="h-3 w-3" />
+            </button>
+          )}
+          {run.status === 'running' && onStopRun && (
+            <button
+              type="button"
+              onClick={(e) => handleActionButton(e, run.id, 'stop')}
+              className="h-6 w-6 flex items-center justify-center rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+              title="Stop run"
+            >
+              <Square className="h-3 w-3" />
+            </button>
+          )}
+          {(run.status === 'failed' || run.status === 'canceled') && onStartRun && (
+            <button
+              type="button"
+              onClick={(e) => handleActionButton(e, run.id, 'rerun')}
+              className="h-6 w-6 flex items-center justify-center rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors"
+              title="Rerun"
+            >
+              <RotateCcw className="h-3 w-3" />
+            </button>
+          )}
           <Badge variant="outline" className={`${getStatusBadgeClass(run.status)}`}>
             {getStatusIcon(run.status)}
             <span className="ml-1 text-[10px]">{getStatusText(run.status)}</span>
@@ -317,9 +358,16 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
           {showChevron && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
         </div>
       </div>
-      {run.tags && run.tags.length > 0 && (
+      {/* Sweep badge + tags row */}
+      {(run.sweepId || (run.tags && run.tags.length > 0)) && (
         <div className="flex gap-1 mt-2 flex-wrap">
-          {run.tags.slice(0, 3).map((tagName) => {
+          {run.sweepId && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/20 text-purple-400">
+              <Zap className="h-2.5 w-2.5" />
+              Sweep #{run.sweepId.slice(-4)}
+            </span>
+          )}
+          {run.tags?.slice(0, 3).map((tagName) => {
             const tag = allTags.find(t => t.name === tagName)
             return (
               <span
@@ -334,7 +382,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
               </span>
             )
           })}
-          {run.tags.length > 3 && (
+          {run.tags && run.tags.length > 3 && (
             <span className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground">
               +{run.tags.length - 3}
             </span>

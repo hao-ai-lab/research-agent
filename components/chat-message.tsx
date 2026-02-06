@@ -3,7 +3,7 @@
 import React from "react"
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2, Zap } from 'lucide-react'
 import {
   Collapsible,
   CollapsibleContent,
@@ -139,10 +139,18 @@ export function ChatMessage({
     })
   }
 
+  const isWildLoop = message.source === 'wild-loop'
+
   if (isUser) {
     return (
       <div className="px-0.5 py-2">
-        <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
+        <div className={`rounded-2xl px-4 py-2.5 text-white ${isWildLoop ? 'bg-purple-600' : 'bg-emerald-600'}`}>
+          {isWildLoop && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-purple-200 mb-1">
+              <Zap className="h-2.5 w-2.5" />
+              Wild
+            </span>
+          )}
           <p className="text-sm leading-relaxed">{message.content}</p>
         </div>
       </div>
