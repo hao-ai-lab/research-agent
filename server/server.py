@@ -28,7 +28,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("research-agent-server")
 
 # =============================================================================
@@ -479,22 +480,58 @@ async def chat_endpoint(req: ChatRequest):
                 
                 full_text = ""
                 full_thinking = ""
+                parts = []  # Track ordered parts by ID
                 
                 logger.debug("Start streaming events from OpenCode session")
                 async for event, text_delta, thinking_delta in stream_opencode_events(client, opencode_session_id):
                     full_text += text_delta
                     full_thinking += thinking_delta
                     
+                    # Track parts by ID
+                    part_id = event.get("id")
+                    ptype = event.get("ptype")
+                    
+                    if part_id and ptype:
+                        # Find existing part or create new one
+                        existing_part = next((p for p in parts if p["id"] == part_id), None)
+                        
+                        if ptype in ("text", "reasoning"):
+                            part_type = "thinking" if ptype == "reasoning" else "text"
+                            delta = event.get("delta", "")
+                            if existing_part:
+                                existing_part["content"] += delta
+                            else:
+                                parts.append({
+                                    "id": part_id,
+                                    "type": part_type,
+                                    "content": delta
+                                })
+                        elif ptype == "tool":
+                            if existing_part:
+                                # Update tool state
+                                existing_part["tool_state"] = event.get("state")
+                                if event.get("name"):
+                                    existing_part["tool_name"] = event.get("name")
+                            else:
+                                parts.append({
+                                    "id": part_id,
+                                    "type": "tool",
+                                    "content": "",
+                                    "tool_name": event.get("name"),
+                                    "tool_state": event.get("state")
+                                })
+                    
                     event_to_send = {k: v for k, v in event.items() if not k.startswith("_")}
                     logger.debug("Event: %s", event_to_send)
                     yield json.dumps(event_to_send) + "\n"
 
                 logger.debug("End streaming events from OpenCode session")
-                if full_text or full_thinking:
+                if full_text or full_thinking or parts:
                     assistant_msg = {
                         "role": "assistant",
                         "content": full_text.strip(),
                         "thinking": full_thinking.strip() if full_thinking else None,
+                        "parts": parts if parts else None,  # NEW: store ordered parts
                         "timestamp": time.time()
                     }
                     session["messages"].append(assistant_msg)

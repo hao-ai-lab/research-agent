@@ -82,8 +82,9 @@ export default function ResearchChat() {
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
 
-  // Chat session hook for New Chat functionality
-  const { createNewSession } = useChatSession()
+  // Chat session hook - single instance shared with ConnectedChatView
+  const chatSession = useChatSession()
+  const { createNewSession, sessions, selectSession } = chatSession
 
   // Build breadcrumbs based on current state
   const breadcrumbs = useMemo(() => {
@@ -333,6 +334,7 @@ export default function ResearchChat() {
               mode={chatMode}
               onModeChange={setChatMode}
               collapseArtifactsInChat={collapseArtifactsInChat}
+              chatSession={chatSession}
             />
           )}
           {activeTab === 'chat' && showSweepForm && (
@@ -409,6 +411,11 @@ export default function ResearchChat() {
           onJourneySubTabChange={setJourneySubTab}
           onNewChat={async () => {
             await createNewSession()
+            setActiveTab('chat')
+          }}
+          sessions={sessions}
+          onSelectSession={async (sessionId) => {
+            await selectSession(sessionId)
             setActiveTab('chat')
           }}
         />
