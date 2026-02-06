@@ -3,12 +3,13 @@
 ## Current Status: In Progress
 
 ## Completed ✅
+- [x] Mobile view overflow fix (CRITICAL) - FIXED
 - [x] Chat queue system
 - [x] Queue items movable
 - [x] Toggle visibility expandable with manage popup
 
 ## In Progress 🔄
-- [ ] Mobile view overflow fix (CRITICAL)
+None
 
 ## Pending ⏳
 - [ ] Chat data format refactor
@@ -19,10 +20,9 @@
 - [ ] Run/stop buttons
 - [ ] OAuth integration
 
-## Branches
-- `ralph/8-mobile-overflow-fix` - CRITICAL fix needed
+## Branches Created
+- `ralph/8-mobile-overflow-fix` ✅ Merged locally
 
 ## Next Steps
-1. Fix mobile overflow issue (blocking other work)
-2. Implement chat data format refactor
-3. Add code highlighting
+1. Move to Issue #11 features (Alert System)
+2. Implement chat data format refactor later
