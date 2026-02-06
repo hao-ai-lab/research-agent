@@ -131,10 +131,16 @@
 }
 
 /* Mobile viewport scaling - ensures app doesn't crop on very small screens */
+.mobile-viewport-wrapper {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
 @media (max-width: 299px) {
   .mobile-viewport-wrapper {
     transform-origin: top left;
     transform: scale(calc(100vw / 300));
+    max-width: 300px;
   }
 }
 
@@ -142,6 +148,7 @@
   .mobile-viewport-wrapper {
     transform-origin: top left;
     transform: scale(calc(100dvh / 644));
+    max-height: 644px;
   }
 }
 
@@ -149,6 +156,22 @@
   .mobile-viewport-wrapper {
     transform-origin: top left;
     transform: scale(min(calc(100vw / 300), calc(100dvh / 644)));
+    max-width: 300px;
+    max-height: 644px;
+  }
+}
+
+/* Prevent overflow on mobile devices */
+@media (max-width: 767px) {
+  .mobile-viewport-wrapper {
+    width: 100% !important;
+    min-width: unset !important;
+    max-width: 100vw;
+  }
+  
+  /* Ensure all children respect container width */
+  .mobile-viewport-wrapper > * {
+    max-width: 100%;
   }
 }
 

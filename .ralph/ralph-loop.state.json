@@ -1,0 +1,13 @@
+{
+  "active": true,
+  "iteration": 1,
+  "minIterations": 1000,
+  "maxIterations": 0,
+  "completionPromise": "COMPLETE",
+  "tasksMode": false,
+  "taskPromise": "READY_FOR_NEXT_TASK",
+  "prompt": "Use gh (the github commandline) to try to read the github issues, particularly focusing on issue 14, 11, 8, 15. Try to understand the issues, empathize with the user, clarify the goal, write the design doc, and implement the feature. some issues are very dense: it basically layout a list of todo items. Your design docs, impl plan, and progress should be written under the .dev/ralph/{issue_n}/. Your base branch is dev-try-ralph-loop. Your features should be branch off from this branch, and treat this branch as master. If you branch off, also write down the branch tree for me. You just loop through everything until all are addressed. Do not push anything to upstream.",
+  "startedAt": "2026-02-06T10:40:59.489Z",
+  "model": "opencode/kimi-k2.5-free",
+  "agent": "opencode"
+}
