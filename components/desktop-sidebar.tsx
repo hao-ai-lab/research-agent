@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   BarChart3,
   Bell,
@@ -10,6 +10,8 @@ import {
   Lightbulb,
   List,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Settings,
   Sparkles,
@@ -25,6 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useApiConfig } from '@/lib/api-config'
 import type { ChatSession } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
 import { getStatusText } from '@/lib/status-utils'
@@ -35,6 +38,9 @@ type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 
 interface DesktopSidebarProps {
   activeTab: ActiveTab
   collapsed?: boolean
+  width?: number
+  minWidth?: number
+  maxWidth?: number
   runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
   sessions: ChatSession[]
@@ -48,6 +54,8 @@ interface DesktopSidebarProps {
   onNavigateToRun: (runId: string) => void
   onInsertReference: (text: string) => void
   onSettingsClick: () => void
+  onToggleCollapse?: () => void
+  onWidthChange?: (width: number) => void
 }
 
 function formatRelativeTime(date: Date) {
@@ -84,6 +92,9 @@ function getSweepStatusClass(status: Sweep['status']) {
 export function DesktopSidebar({
   activeTab,
   collapsed = false,
+  width = 300,
+  minWidth = 240,
+  maxWidth = 520,
   runsSubTab,
   journeySubTab,
   sessions,
@@ -97,6 +108,8 @@ export function DesktopSidebar({
   onNavigateToRun,
   onInsertReference,
   onSettingsClick,
+  onToggleCollapse,
+  onWidthChange,
 }: DesktopSidebarProps) {
   const recentRuns = useMemo(
     () =>
@@ -118,14 +131,82 @@ export function DesktopSidebar({
         .slice(0, 6),
     [sweeps]
   )
+  const { useMock: isDemoMode } = useApiConfig()
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeStartXRef = useRef(0)
+  const resizeStartWidthRef = useRef(width)
+
+  const handleResizeStart = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    if (collapsed) return
+    e.preventDefault()
+    resizeStartXRef.current = e.clientX
+    resizeStartWidthRef.current = width
+    setIsResizing(true)
+  }, [collapsed, width])
+
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - resizeStartXRef.current
+      const nextWidth = Math.min(maxWidth, Math.max(minWidth, resizeStartWidthRef.current + deltaX))
+      onWidthChange?.(nextWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizing, maxWidth, minWidth, onWidthChange])
 
   return (
     <aside
-      className={`hidden h-full shrink-0 border-r border-border bg-background transition-[width] duration-200 lg:flex ${
-        collapsed ? 'w-[72px]' : 'w-[300px]'
+      className={`relative hidden h-full shrink-0 border-r border-border bg-background transition-[width] duration-200 lg:flex ${
+        collapsed ? 'w-[72px]' : ''
       }`}
+      style={collapsed ? undefined : { width: `${width}px` }}
     >
       <div className="flex h-full w-full flex-col">
+        <div className={`shrink-0 border-b border-border ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
+          <div className={`relative inline-flex ${collapsed ? 'mx-auto' : ''}`}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleCollapse}
+              className={`h-8 w-8 ${isDemoMode ? 'ring-2 ring-red-500/50 ring-offset-1 ring-offset-background' : ''}`}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? (
+                <PanelLeftOpen className={`h-4 w-4 ${isDemoMode ? 'text-red-500' : ''}`} />
+              ) : (
+                <PanelLeftClose className={`h-4 w-4 ${isDemoMode ? 'text-red-500' : ''}`} />
+              )}
+              <span className="sr-only">
+                {collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              </span>
+            </Button>
+            {isDemoMode && (
+              <Badge
+                variant="destructive"
+                className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold"
+              >
+                demo
+              </Badge>
+            )}
+          </div>
+        </div>
+
         <ScrollArea className="min-h-0 flex-1">
           <div className={`space-y-5 py-3 ${collapsed ? 'px-2' : 'px-3'}`}>
             <section>
@@ -167,7 +248,7 @@ export function DesktopSidebar({
 
                 <button
                   type="button"
-                  title="Runs Overview"
+                  title="Overview"
                   onClick={() => {
                     onTabChange('runs')
                     onRunsSubTabChange('overview')
@@ -179,12 +260,12 @@ export function DesktopSidebar({
                   }`}
                 >
                   <FlaskConical className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Runs Overview'}
+                  {!collapsed && 'Overview'}
                 </button>
 
                 <button
                   type="button"
-                  title="Runs Details"
+                  title="Runs"
                   onClick={() => {
                     onTabChange('runs')
                     onRunsSubTabChange('details')
@@ -196,7 +277,7 @@ export function DesktopSidebar({
                   }`}
                 >
                   <List className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Runs Details'}
+                  {!collapsed && 'Runs'}
                 </button>
 
                 <button
@@ -253,23 +334,6 @@ export function DesktopSidebar({
                 >
                   <FileText className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
                   {!collapsed && 'Report'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Journey"
-                  onClick={() => {
-                    onTabChange('journey')
-                    onJourneySubTabChange(journeySubTab)
-                  }}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'journey'
-                      ? 'bg-secondary text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <Sparkles className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Journey'}
                 </button>
               </div>
             </section>
@@ -406,6 +470,16 @@ export function DesktopSidebar({
               <DropdownMenuItem
                 onSelect={(event) => {
                   event.preventDefault()
+                  onTabChange('journey')
+                  onJourneySubTabChange(journeySubTab)
+                }}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                Journey
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault()
                   onSettingsClick()
                 }}
               >
@@ -416,6 +490,17 @@ export function DesktopSidebar({
           </DropdownMenu>
         </div>
       </div>
+      {!collapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          onMouseDown={handleResizeStart}
+          className={`absolute right-0 top-0 h-full w-1 cursor-col-resize transition-colors ${
+            isResizing ? 'bg-primary/40' : 'bg-transparent hover:bg-border'
+          }`}
+        />
+      )}
     </aside>
   )
 }

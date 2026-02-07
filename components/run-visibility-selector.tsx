@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
 import { Eye, EyeOff, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ExperimentRun, VisibilityGroup } from '@/lib/types'
 
 interface RunVisibilitySelectorProps {
@@ -47,15 +47,20 @@ export function RunVisibilitySelector({
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs text-muted-foreground">Toggle visibility:</p>
         {onOpenManage && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onOpenManage}
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <Settings2 className="h-3.5 w-3.5 mr-1" />
-            Manage
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onOpenManage}
+                aria-label="Manage"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Manage</TooltipContent>
+          </Tooltip>
         )}
       </div>
 

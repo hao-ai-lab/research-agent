@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Popover,
   PopoverContent,
@@ -625,47 +626,9 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <div className="shrink-0 border-b border-border px-4 py-3 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium text-foreground">Runs</h3>
-            <div className="flex items-center gap-2">
-              <Button
-                variant={manageMode ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setManageMode((prev) => {
-                    const next = !prev
-                    if (!next) {
-                      clearManageSelection()
-                    }
-                    return next
-                  })
-                }}
-                className="h-8 gap-1.5"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-                {manageMode ? 'Exit Manage' : 'Manage'}
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  title="Create Sweep"
-                >
-                  <PlugZap className="h-4 w-4" />
-                  Sweep
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80" align="end">
-                <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
-              </PopoverContent>
-            </Popover>
-
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <h3 className="shrink-0 text-sm font-medium text-foreground">Runs</h3>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
             <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
               <SelectTrigger className="w-28 h-8 text-xs">
                 <SelectValue />
@@ -736,6 +699,49 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
                 </div>
               </PopoverContent>
             </Popover>
+            </div>
+
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    title="Create Sweep"
+                  >
+                    <PlugZap className="h-4 w-4" />
+                    Sweep
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80" align="end">
+                  <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
+                </PopoverContent>
+              </Popover>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={manageMode ? 'default' : 'outline'}
+                    size="icon"
+                    onClick={() => {
+                      setManageMode((prev) => {
+                        const next = !prev
+                        if (!next) {
+                          clearManageSelection()
+                        }
+                        return next
+                      })
+                    }}
+                    aria-label={manageMode ? 'Exit Manage' : 'Manage'}
+                    className="h-8 w-8"
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage'}</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
 
           {manageMode && (

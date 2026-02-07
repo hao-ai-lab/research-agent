@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   Play,
   Plus,
@@ -8,8 +8,6 @@ import {
   Copy,
   ChevronUp,
   ChevronDown,
-  Edit3,
-  Eye,
   MessageSquare,
   AtSign,
   X,
@@ -39,19 +37,26 @@ import {
 import type { ExperimentRun } from '@/lib/types'
 
 // Cell types
-type CellType = 'markdown' | 'code' | 'chart' | 'insight'
+export type ReportCellType = 'markdown' | 'code' | 'chart' | 'insight'
 
 interface ReportCell {
   id: string
-  type: CellType
+  type: ReportCellType
   content: string
   output?: string
   isExecuting?: boolean
   executionCount?: number
 }
 
+export interface ReportToolbarState {
+  isPreviewMode: boolean
+  setPreviewMode: (isPreviewMode: boolean) => void
+  addCell: (type: ReportCellType) => void
+}
+
 interface ReportViewProps {
   runs: ExperimentRun[]
+  onToolbarChange?: (toolbar: ReportToolbarState | null) => void
 }
 
 // Mock initial cells
@@ -96,7 +101,7 @@ interface ChatMessage {
   timestamp: Date
 }
 
-export function ReportView({ runs }: ReportViewProps) {
+export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
   const [cells, setCells] = useState<ReportCell[]>(initialCells)
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
   const [editingCellId, setEditingCellId] = useState<string | null>(null)
@@ -112,7 +117,7 @@ export function ReportView({ runs }: ReportViewProps) {
   const generateId = () => `cell-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
   // Cell operations
-  const addCell = useCallback((type: CellType, afterId?: string) => {
+  const addCell = useCallback((type: ReportCellType, afterId?: string) => {
     const newCell: ReportCell = {
       id: generateId(),
       type,
@@ -163,7 +168,7 @@ export function ReportView({ runs }: ReportViewProps) {
     setCells(prev => prev.map(c => c.id === id ? { ...c, content } : c))
   }, [])
 
-  const changeCellType = useCallback((id: string, newType: CellType) => {
+  const changeCellType = useCallback((id: string, newType: ReportCellType) => {
     setCells(prev => prev.map(c => c.id === id ? { ...c, type: newType, output: undefined, executionCount: undefined } : c))
   }, [])
 
@@ -247,7 +252,7 @@ export function ReportView({ runs }: ReportViewProps) {
   const getCellById = (id: string) => cells.find(c => c.id === id)
 
   // Render cell type icon
-  const getCellTypeIcon = (type: CellType) => {
+  const getCellTypeIcon = (type: ReportCellType) => {
     switch (type) {
       case 'markdown': return <Type className="h-3.5 w-3.5" />
       case 'code': return <Code className="h-3.5 w-3.5" />
@@ -256,6 +261,20 @@ export function ReportView({ runs }: ReportViewProps) {
       default: return <Type className="h-3.5 w-3.5" />
     }
   }
+
+  useEffect(() => {
+    onToolbarChange?.({
+      isPreviewMode,
+      setPreviewMode: setIsPreviewMode,
+      addCell: (type) => addCell(type),
+    })
+  }, [onToolbarChange, isPreviewMode, addCell])
+
+  useEffect(() => {
+    return () => {
+      onToolbarChange?.(null)
+    }
+  }, [onToolbarChange])
 
   // Render cell content
   const renderCellContent = (cell: ReportCell) => {
@@ -349,75 +368,6 @@ export function ReportView({ runs }: ReportViewProps) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
-      {/* Top Toolbar */}
-      <div className="shrink-0 border-b border-border px-3 py-2 flex items-center justify-between bg-background">
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5">
-                {isPreviewMode ? (
-                  <>
-                    <Eye className="h-3.5 w-3.5" />
-                    Preview
-                  </>
-                ) : (
-                  <>
-                    <Edit3 className="h-3.5 w-3.5" />
-                    Edit
-                  </>
-                )}
-                <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem 
-                onClick={() => setIsPreviewMode(true)}
-                className={isPreviewMode ? 'bg-secondary' : ''}
-              >
-                <Eye className="h-4 w-4 mr-2" />
-                Preview
-              </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => setIsPreviewMode(false)}
-                className={!isPreviewMode ? 'bg-secondary' : ''}
-              >
-                <Edit3 className="h-4 w-4 mr-2" />
-                Edit
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5">
-                <Plus className="h-3.5 w-3.5" />
-                Add Cell
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => addCell('markdown')}>
-                <Type className="h-4 w-4 mr-2" />
-                Markdown
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => addCell('code')}>
-                <Code className="h-4 w-4 mr-2" />
-                Code
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => addCell('chart')}>
-                <BarChart3 className="h-4 w-4 mr-2" />
-                Chart
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => addCell('insight')}>
-                <Sparkles className="h-4 w-4 mr-2" />
-                Insight
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
       {/* Main Content Area */}
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Cells */}

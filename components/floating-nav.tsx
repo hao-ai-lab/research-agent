@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, ChevronRight, Bell, Settings, PlugZap, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Menu, ChevronRight, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { useApiConfig } from '@/lib/api-config'
 import type { RunsSubTab } from './nav-page'
+import type { ReportCellType } from './report-view'
 
 interface BreadcrumbItem {
   label: string
@@ -25,8 +26,6 @@ interface FloatingNavProps {
   activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
   runsSubTab: RunsSubTab
   onMenuClick: () => void
-  onDesktopMenuClick?: () => void
-  desktopSidebarCollapsed?: boolean
   breadcrumbs?: BreadcrumbItem[]
   // Chat-specific props
   eventCount?: number
@@ -38,6 +37,10 @@ interface FloatingNavProps {
   onToggleCollapseChats?: () => void
   collapseArtifactsInChat?: boolean
   onToggleCollapseArtifactsInChat?: () => void
+  // Report-specific props
+  reportIsPreviewMode?: boolean
+  onReportPreviewModeChange?: (isPreviewMode: boolean) => void
+  onReportAddCell?: (type: ReportCellType) => void
 }
 
 const tabLabels: Record<string, string> = {
@@ -57,8 +60,6 @@ export function FloatingNav({
   activeTab,
   runsSubTab,
   onMenuClick,
-  onDesktopMenuClick,
-  desktopSidebarCollapsed = false,
   breadcrumbs,
   eventCount = 0,
   onAlertClick,
@@ -69,6 +70,9 @@ export function FloatingNav({
   onToggleCollapseChats,
   collapseArtifactsInChat = false,
   onToggleCollapseArtifactsInChat,
+  reportIsPreviewMode = true,
+  onReportPreviewModeChange,
+  onReportAddCell,
 }: FloatingNavProps) {
   // Build default breadcrumbs if not provided
   const defaultBreadcrumbs: BreadcrumbItem[] = [
@@ -81,6 +85,7 @@ export function FloatingNav({
 
   const items = breadcrumbs || defaultBreadcrumbs
   const isChat = activeTab === 'chat'
+  const isReport = activeTab === 'report'
   const { useMock: isDemoMode } = useApiConfig()
 
   return (
@@ -95,25 +100,10 @@ export function FloatingNav({
           <Menu className={`h-5 w-5 ${isDemoMode ? 'text-red-500' : ''}`} />
           <span className="sr-only">Open menu</span>
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onDesktopMenuClick}
-          className="hidden h-9 w-9 shrink-0 lg:inline-flex"
-        >
-          {desktopSidebarCollapsed ? (
-            <PanelLeftOpen className="h-5 w-5" />
-          ) : (
-            <PanelLeftClose className="h-5 w-5" />
-          )}
-          <span className="sr-only">
-            {desktopSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          </span>
-        </Button>
         {isDemoMode && (
           <Badge
             variant="destructive"
-            className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold"
+            className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold lg:hidden"
           >
             demo
           </Badge>
@@ -240,6 +230,72 @@ export function FloatingNav({
                   onCheckedChange={onToggleCollapseArtifactsInChat}
                   onClick={(e) => e.stopPropagation()}
                 />
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+
+      {isReport && onReportPreviewModeChange && onReportAddCell && (
+        <div className="flex items-center gap-2 shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                {reportIsPreviewMode ? (
+                  <>
+                    <Eye className="h-3.5 w-3.5" />
+                    Preview
+                  </>
+                ) : (
+                  <>
+                    <Edit3 className="h-3.5 w-3.5" />
+                    Edit
+                  </>
+                )}
+                <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => onReportPreviewModeChange(true)}
+                className={reportIsPreviewMode ? 'bg-secondary' : ''}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                Preview
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onReportPreviewModeChange(false)}
+                className={!reportIsPreviewMode ? 'bg-secondary' : ''}
+              >
+                <Edit3 className="h-4 w-4 mr-2" />
+                Edit
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                <Plus className="h-3.5 w-3.5" />
+                Add Cell
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onReportAddCell('markdown')}>
+                <Type className="h-4 w-4 mr-2" />
+                Markdown
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onReportAddCell('code')}>
+                <Code className="h-4 w-4 mr-2" />
+                Code
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onReportAddCell('chart')}>
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Chart
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onReportAddCell('insight')}>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Insight
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
