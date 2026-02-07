@@ -64,7 +64,7 @@ CHAT_DATA_FILE = ""
 JOBS_DATA_FILE = ""
 ALERTS_DATA_FILE = ""
 SETTINGS_DATA_FILE = ""
-TMUX_SESSION_NAME = "research-agent"
+TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 
 
@@ -360,8 +360,10 @@ def get_tmux_server():
         return None
 
 
-def get_or_create_session(session_name: str = TMUX_SESSION_NAME):
+def get_or_create_session(session_name: Optional[str] = None):
     """Get or create the research-agent tmux session."""
+    if session_name is None:
+        session_name = TMUX_SESSION_NAME
     server = get_tmux_server()
     if not server:
         return None
@@ -1691,15 +1693,22 @@ def start_opencode_server_subprocess(args):
 
 def main():
     global SERVER_CALLBACK_URL
+    global TMUX_SESSION_NAME
     parser = argparse.ArgumentParser(description="Research Agent Server")
     parser.add_argument("--workdir", default=os.getcwd(), help="Working directory for runs and data")
     parser.add_argument("--port", type=int, default=10000, help="Server port")
     parser.add_argument("--host", default="0.0.0.0", help="Server host")
+    parser.add_argument(
+        "--tmux-session",
+        default=TMUX_SESSION_NAME,
+        help="Tmux session name for background jobs"
+    )
     args = parser.parse_args()
     
     # Initialize paths
     init_paths(args.workdir)
     SERVER_CALLBACK_URL = f"http://127.0.0.1:{args.port}"
+    TMUX_SESSION_NAME = args.tmux_session
     
     # Check required environment variables
     if not os.environ.get("RESEARCH_AGENT_KEY"):

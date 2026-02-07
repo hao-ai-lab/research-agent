@@ -31,3 +31,24 @@ Continue building your app on:
 2. Deploy your chats from the v0 interface
 3. Changes are automatically pushed to this repository
 4. Vercel deploys the latest version from this repository
+
+## Local Dev (Worktree-Safe)
+
+Run frontend + backend together with per-worktree isolated ports:
+
+```bash
+npm run dev:worktree
+```
+
+Notes:
+- Frontend and backend ports are derived from the worktree path.
+- `NEXT_PUBLIC_API_URL` is set automatically to the matching backend port.
+- tmux session name is unique per worktree.
+
+Optional overrides:
+
+```bash
+FRONTEND_PORT=3101 BACKEND_PORT=10101 npm run dev:worktree
+START_BACKEND=0 npm run dev:worktree
+START_FRONTEND=0 npm run dev:worktree
+```

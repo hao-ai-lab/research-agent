@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Popover,
   PopoverContent,
@@ -628,23 +629,28 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-medium text-foreground">Runs</h3>
             <div className="flex items-center gap-2">
-              <Button
-                variant={manageMode ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setManageMode((prev) => {
-                    const next = !prev
-                    if (!next) {
-                      clearManageSelection()
-                    }
-                    return next
-                  })
-                }}
-                className="h-8 gap-1.5"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-                {manageMode ? 'Exit Manage' : 'Manage'}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={manageMode ? 'default' : 'outline'}
+                    size="icon"
+                    onClick={() => {
+                      setManageMode((prev) => {
+                        const next = !prev
+                        if (!next) {
+                          clearManageSelection()
+                        }
+                        return next
+                      })
+                    }}
+                    aria-label={manageMode ? 'Exit Manage' : 'Manage'}
+                    className="h-8 w-8"
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage'}</TooltipContent>
+              </Tooltip>
             </div>
           </div>
 

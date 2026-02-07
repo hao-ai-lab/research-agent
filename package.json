@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "dev:worktree": "bash scripts/dev-worktree.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
