@@ -177,6 +177,14 @@ export function SettingsDialog({
           type: 'toggle' as const,
           value: settings.notifications.alertsEnabled,
         },
+        {
+          id: 'webNotifications',
+          label: 'Browser Notifications',
+          description: 'Show OS notification banner when bot responds',
+          icon: Bell,
+          type: 'toggle' as const,
+          value: settings.notifications.webNotificationsEnabled,
+        },
       ],
     },
     {
@@ -243,6 +251,13 @@ export function SettingsDialog({
     onSettingsChange({
       ...settings,
       notifications: { ...settings.notifications, alertsEnabled: enabled },
+    })
+  }
+
+  const handleWebNotificationsToggle = (enabled: boolean) => {
+    onSettingsChange({
+      ...settings,
+      notifications: { ...settings.notifications, webNotificationsEnabled: enabled },
     })
   }
 
@@ -381,6 +396,7 @@ export function SettingsDialog({
               checked={item.value as boolean}
               onCheckedChange={(checked) => {
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
+                if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
               }}
             />
           </div>
