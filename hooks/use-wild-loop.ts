@@ -5,7 +5,7 @@ import { WildLoopPhase, TerminationConditions } from '@/lib/types'
 import {
   updateWildLoopStatus, configureWildLoop, setWildMode,
   getSweep, listSweeps, listAlerts, listRuns, startSweep, getRunLogs,
-  createSweep,
+  createSweep, respondToAlert,
 } from '@/lib/api'
 import type { Alert, Run, Sweep, CreateSweepRequest } from '@/lib/api'
 
@@ -82,6 +82,22 @@ function parseSweepSpec(text: string): CreateSweepRequest | null {
     }
   } catch (err) {
     console.warn('[wild-loop] Failed to parse sweep spec:', err)
+    return null
+  }
+}
+
+/**
+ * Parse a <resolve_alert> tag from the agent's response.
+ * Format: <resolve_alert>{"alert_id": "...", "choice": "..."}</resolve_alert>
+ */
+function parseAlertResolution(text: string): { alertId: string; choice: string } | null {
+  const match = text.match(/<resolve_alert>([\s\S]*?)<\/resolve_alert>/)
+  if (!match) return null
+  try {
+    const spec = JSON.parse(match[1].trim())
+    if (!spec.alert_id || !spec.choice) return null
+    return { alertId: spec.alert_id, choice: spec.choice }
+  } catch {
     return null
   }
 }
@@ -169,14 +185,25 @@ function buildAlertPrompt(goal: string, alert: Alert, runName: string): string {
     goal,
     '',
     `## ⚠️ Alert from Run "${runName}"`,
+    `- **Alert ID**: ${alert.id}`,
     `- **Severity**: ${alert.severity}`,
     `- **Message**: ${alert.message}`,
-    `- **Choices**: ${alert.choices.join(', ')}`,
+    `- **Available Choices**: ${alert.choices.map(c => `\`${c}\``).join(', ')}`,
+    '',
+    `## How to Resolve This Alert`,
+    `You MUST resolve this alert by outputting a \`<resolve_alert>\` tag with your chosen action:`,
+    '',
+    '```',
+    `<resolve_alert>`,
+    `{"alert_id": "${alert.id}", "choice": "ONE_OF_THE_CHOICES_ABOVE"}`,
+    `</resolve_alert>`,
+    '```',
     '',
     `## Instructions`,
-    `- Diagnose what caused this alert`,
-    `- Take appropriate action (respond to alert, modify code, restart run)`,
-    `- End with \`<promise>CONTINUE</promise>\``,
+    `1. Analyze the alert and decide the best course of action`,
+    `2. Output the \`<resolve_alert>\` tag with your chosen response`,
+    `3. If the issue needs a code fix, explain what you'd change`,
+    `4. End with \`<promise>CONTINUE</promise>\``,
   ].join('\n')
 }
 
@@ -344,12 +371,15 @@ export function useWildLoop(): UseWildLoopResult {
           seenRunStatusesRef.current.set(run.id, run.status)
         }
 
-        // Check if ALL runs are terminal → transition to ANALYZING
+        // Check if ALL runs are terminal AND no unprocessed alerts → ANALYZING
         const allTerminal = sweepRuns.length > 0 && sweepRuns.every(r =>
           ['finished', 'failed', 'stopped'].includes(r.status)
         )
-        if (allTerminal) {
-          console.log('[wild-loop] All runs terminal, transitioning to ANALYZING')
+        const hasUnprocessedAlerts = pendingAlerts.some(
+          a => !processedAlertIdsRef.current.has(a.id)
+        )
+        if (allTerminal && !hasUnprocessedAlerts && pendingAlerts.length === 0) {
+          console.log('[wild-loop] All runs terminal, no pending alerts → ANALYZING')
           setStage('analyzing')
           setPhase('analyzing')
           const prompt = buildAnalysisPrompt(
@@ -503,7 +533,7 @@ export function useWildLoop(): UseWildLoopResult {
           setPhase('monitoring')
           // Auto-start the sweep
           try {
-            await startSweep(sweep.id)
+            await startSweep(sweep.id, 100) // Start all runs in parallel
             console.log('[wild-loop] Auto-started sweep:', sweep.id)
           } catch (err) {
             console.warn('[wild-loop] Failed to auto-start sweep:', err)
@@ -532,6 +562,16 @@ export function useWildLoop(): UseWildLoopResult {
         }
       }, delay)
     } else if (currentStage === 'running') {
+      // Parse <resolve_alert> from agent response and call API
+      const resolution = parseAlertResolution(responseText)
+      if (resolution) {
+        console.log('[wild-loop] Resolving alert:', resolution.alertId, '→', resolution.choice)
+        respondToAlert(resolution.alertId, resolution.choice).then(() => {
+          console.log('[wild-loop] Alert resolved:', resolution.alertId)
+        }).catch(err => {
+          console.warn('[wild-loop] Failed to resolve alert:', err)
+        })
+      }
       // Event-driven: don't auto-queue. Polling will trigger next prompt.
       // isBusyRef is already false, so next poll can queue events.
     } else if (currentStage === 'analyzing') {
