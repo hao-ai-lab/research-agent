@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import {
-  Brain,
   Lightbulb,
   ToggleLeft,
   ToggleRight,
@@ -37,21 +36,6 @@ export function InsightsView({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="shrink-0 border-b border-border px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 border border-accent/30">
-            <Brain className="h-5 w-5 text-accent" />
-          </div>
-          <div>
-            <h3 className="text-sm font-medium text-foreground">Memory Bank</h3>
-            <p className="text-xs text-muted-foreground">
-              Heuristics and rules for experiment guidance
-            </p>
-          </div>
-        </div>
-      </div>
-
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="p-4 space-y-4">

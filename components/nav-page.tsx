@@ -155,7 +155,7 @@ export function NavPage({
                     }`}
                 >
                   <LayoutDashboard className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Runs Overview</span>
+                  <span className="font-medium min-w-0 truncate">Overview</span>
                 </button>
                 <button
                   type="button"
@@ -166,7 +166,7 @@ export function NavPage({
                     }`}
                 >
                   <List className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Runs Details</span>
+                  <span className="font-medium min-w-0 truncate">Runs</span>
                 </button>
                 <button
                   type="button"

@@ -10,6 +10,8 @@ import {
   Lightbulb,
   List,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Settings,
   Sparkles,
@@ -48,6 +50,7 @@ interface DesktopSidebarProps {
   onNavigateToRun: (runId: string) => void
   onInsertReference: (text: string) => void
   onSettingsClick: () => void
+  onToggleCollapse?: () => void
 }
 
 function formatRelativeTime(date: Date) {
@@ -97,6 +100,7 @@ export function DesktopSidebar({
   onNavigateToRun,
   onInsertReference,
   onSettingsClick,
+  onToggleCollapse,
 }: DesktopSidebarProps) {
   const recentRuns = useMemo(
     () =>
@@ -126,6 +130,25 @@ export function DesktopSidebar({
       }`}
     >
       <div className="flex h-full w-full flex-col">
+        <div className={`shrink-0 border-b border-border ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleCollapse}
+            className={`h-8 w-8 ${collapsed ? 'mx-auto' : ''}`}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+            <span className="sr-only">
+              {collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            </span>
+          </Button>
+        </div>
+
         <ScrollArea className="min-h-0 flex-1">
           <div className={`space-y-5 py-3 ${collapsed ? 'px-2' : 'px-3'}`}>
             <section>
@@ -167,7 +190,7 @@ export function DesktopSidebar({
 
                 <button
                   type="button"
-                  title="Runs Overview"
+                  title="Overview"
                   onClick={() => {
                     onTabChange('runs')
                     onRunsSubTabChange('overview')
@@ -179,12 +202,12 @@ export function DesktopSidebar({
                   }`}
                 >
                   <FlaskConical className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Runs Overview'}
+                  {!collapsed && 'Overview'}
                 </button>
 
                 <button
                   type="button"
-                  title="Runs Details"
+                  title="Runs"
                   onClick={() => {
                     onTabChange('runs')
                     onRunsSubTabChange('details')
@@ -196,7 +219,7 @@ export function DesktopSidebar({
                   }`}
                 >
                   <List className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Runs Details'}
+                  {!collapsed && 'Runs'}
                 </button>
 
                 <button
@@ -253,23 +276,6 @@ export function DesktopSidebar({
                 >
                   <FileText className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
                   {!collapsed && 'Report'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Journey"
-                  onClick={() => {
-                    onTabChange('journey')
-                    onJourneySubTabChange(journeySubTab)
-                  }}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'journey'
-                      ? 'bg-secondary text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <Sparkles className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Journey'}
                 </button>
               </div>
             </section>
@@ -403,6 +409,16 @@ export function DesktopSidebar({
               <DropdownMenuLabel>Workspace</DropdownMenuLabel>
               <DropdownMenuItem disabled>Research Lab</DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault()
+                  onTabChange('journey')
+                  onJourneySubTabChange(journeySubTab)
+                }}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                Journey
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={(event) => {
                   event.preventDefault()
