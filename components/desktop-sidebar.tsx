@@ -56,6 +56,8 @@ interface DesktopSidebarProps {
   onSettingsClick: () => void
   onToggleCollapse?: () => void
   onWidthChange?: (width: number) => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
 }
 
 function formatRelativeTime(date: Date) {
@@ -110,6 +112,8 @@ export function DesktopSidebar({
   onSettingsClick,
   onToggleCollapse,
   onWidthChange,
+  onResizeStart,
+  onResizeEnd,
 }: DesktopSidebarProps) {
   const recentRuns = useMemo(
     () =>
@@ -142,7 +146,8 @@ export function DesktopSidebar({
     resizeStartXRef.current = e.clientX
     resizeStartWidthRef.current = width
     setIsResizing(true)
-  }, [collapsed, width])
+    onResizeStart?.()
+  }, [collapsed, onResizeStart, width])
 
   useEffect(() => {
     if (!isResizing) return
@@ -155,6 +160,7 @@ export function DesktopSidebar({
 
     const handleMouseUp = () => {
       setIsResizing(false)
+      onResizeEnd?.()
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -168,11 +174,13 @@ export function DesktopSidebar({
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-  }, [isResizing, maxWidth, minWidth, onWidthChange])
+  }, [isResizing, maxWidth, minWidth, onResizeEnd, onWidthChange])
 
   return (
     <aside
-      className={`relative hidden h-full shrink-0 border-r border-border bg-background transition-[width] duration-200 lg:flex ${
+      className={`relative hidden h-full shrink-0 border-r border-border bg-background transition-[width] ${
+        isResizing ? 'duration-0' : 'duration-200'
+      } lg:flex ${
         collapsed ? 'w-[72px]' : ''
       }`}
       style={collapsed ? undefined : { width: `${width}px` }}

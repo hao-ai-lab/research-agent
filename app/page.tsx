@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { FloatingNav } from '@/components/floating-nav'
 import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
@@ -39,6 +39,9 @@ export default function ResearchChat() {
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
   const [reportToolbar, setReportToolbar] = useState<ReportToolbarState | null>(null)
+  const sidebarWidthRef = useRef(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
+  const pendingSidebarWidthRef = useRef<number | null>(null)
+  const sidebarRafRef = useRef<number | null>(null)
 
   // Use real API data via useRuns hook
   const { runs, updateRun: apiUpdateRun, refetch, startExistingRun, stopExistingRun } = useRuns()
@@ -82,8 +85,16 @@ export default function ResearchChat() {
   }, [])
 
   useEffect(() => {
-    window.localStorage.setItem('desktopSidebarWidth', String(desktopSidebarWidth))
+    sidebarWidthRef.current = desktopSidebarWidth
   }, [desktopSidebarWidth])
+
+  useEffect(() => {
+    return () => {
+      if (sidebarRafRef.current != null) {
+        cancelAnimationFrame(sidebarRafRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const tab = searchParams.get('tab')
@@ -501,6 +512,32 @@ export default function ResearchChat() {
     })
   }, [])
 
+  const handleSidebarWidthChange = useCallback((nextWidth: number) => {
+    pendingSidebarWidthRef.current = nextWidth
+    if (sidebarRafRef.current != null) return
+
+    sidebarRafRef.current = requestAnimationFrame(() => {
+      sidebarRafRef.current = null
+      if (pendingSidebarWidthRef.current == null) return
+      setDesktopSidebarWidth(pendingSidebarWidthRef.current)
+      pendingSidebarWidthRef.current = null
+    })
+  }, [])
+
+  const handleSidebarResizeEnd = useCallback(() => {
+    if (sidebarRafRef.current != null) {
+      cancelAnimationFrame(sidebarRafRef.current)
+      sidebarRafRef.current = null
+    }
+    if (pendingSidebarWidthRef.current != null) {
+      setDesktopSidebarWidth(pendingSidebarWidthRef.current)
+      sidebarWidthRef.current = pendingSidebarWidthRef.current
+      pendingSidebarWidthRef.current = null
+    }
+
+    window.localStorage.setItem('desktopSidebarWidth', String(sidebarWidthRef.current))
+  }, [])
+
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main className="flex h-full w-full overflow-hidden bg-background">
@@ -530,7 +567,8 @@ export default function ResearchChat() {
           onInsertReference={handleInsertChatReference}
           onSettingsClick={() => setActiveTab('settings')}
           onToggleCollapse={() => setDesktopSidebarCollapsed((prev) => !prev)}
-          onWidthChange={setDesktopSidebarWidth}
+          onWidthChange={handleSidebarWidthChange}
+          onResizeEnd={handleSidebarResizeEnd}
         />
 
         <section className="mobile-viewport-wrapper flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
