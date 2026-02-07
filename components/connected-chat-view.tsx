@@ -37,6 +37,8 @@ interface ConnectedChatViewProps {
     chatSession?: ReturnType<typeof useChatSession>
     // Wild loop integration
     wildLoop?: UseWildLoopResult
+    webNotificationsEnabled?: boolean
+    onOpenSettings?: () => void
 }
 
 /**
@@ -57,6 +59,8 @@ export function ConnectedChatView({
     onSessionChange,
     chatSession: externalChatSession,
     wildLoop,
+    webNotificationsEnabled = true,
+    onOpenSettings,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
@@ -66,7 +70,7 @@ export function ConnectedChatView({
     const prevStreamingRef = useRef(false)
 
     // Web notification hook
-    const { notify } = useWebNotification()
+    const { notify } = useWebNotification(webNotificationsEnabled)
 
     // Use external chat session if provided (for shared state), otherwise use own hook
     const internalChatSession = useChatSession()
@@ -211,9 +215,7 @@ export function ConnectedChatView({
                     <button
                         type="button"
                         onClick={() => {
-                            // Open settings dialog - uses the global settings trigger
-                            const settingsBtn = document.querySelector('[data-settings-trigger]') as HTMLButtonElement
-                            settingsBtn?.click()
+                            onOpenSettings?.()
                         }}
                         className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
                     >
