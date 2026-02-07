@@ -622,6 +622,34 @@ export function ChatInput({
     textareaRef.current?.focus()
   }
 
+  const openMentionFromToolbar = (type: MentionType | 'all') => {
+    const textarea = textareaRef.current
+    const cursorPos = textarea?.selectionStart ?? message.length
+    const before = message.slice(0, cursorPos)
+    const after = message.slice(cursorPos)
+    const nextMessage = `${before}@${after}`
+
+    setMessage(nextMessage)
+    setIsAttachOpen(false)
+    setMentionStartIndex(cursorPos)
+    setMentionQuery('')
+    setMentionFilter(type)
+    setIsMentionOpen(true)
+    setIsSlashOpen(false)
+    setSlashStartIndex(null)
+    setSlashQuery('')
+
+    setTimeout(() => {
+      const input = textareaRef.current
+      if (!input) return
+      const newCursorPos = cursorPos + 1
+      input.focus()
+      input.setSelectionRange(newCursorPos, newCursorPos)
+      input.style.height = 'auto'
+      input.style.height = `${Math.min(input.scrollHeight, 120)}px`
+    }, 0)
+  }
+
   // Removed format/emoji popovers for compact design - using insertText for @ mentions and commands
 
   return (
@@ -995,6 +1023,31 @@ export function ChatInput({
                   <ImageIcon className="h-3.5 w-3.5" />
                   <span>Upload image</span>
                 </button>
+                <div className="my-1 border-t border-border" />
+                <button
+                  type="button"
+                  onClick={() => openMentionFromToolbar('run')}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  <span>Add run</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openMentionFromToolbar('artifact')}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                  <span>Add artifact</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openMentionFromToolbar('chat')}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span>Add chat</span>
+                </button>
               </div>
             </PopoverContent>
           </Popover>
@@ -1004,16 +1057,7 @@ export function ChatInput({
             variant="ghost" 
             size="icon" 
             className="chat-toolbar-icon h-7 w-7"
-            onClick={() => {
-              insertText('@')
-              // Manually trigger mention mode
-              setMentionStartIndex(message.length)
-              setMentionQuery('')
-              setIsMentionOpen(true)
-              setIsSlashOpen(false)
-              setSlashStartIndex(null)
-              setSlashQuery('')
-            }}
+            onClick={() => openMentionFromToolbar('all')}
           >
             <AtSign className="h-4 w-4" />
           </Button>

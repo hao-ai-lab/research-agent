@@ -659,29 +659,52 @@ export function SettingsPageContent({
 
   return (
     <>
-      <div className="mx-auto flex h-full w-full max-w-4xl flex-col overflow-hidden">
-        <div className="border-b border-border/60 px-4 py-3">
-          <div className="-mx-1 overflow-x-auto">
-            <div className="flex min-w-max items-center gap-2 px-1">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden lg:flex-row">
+        <aside className="shrink-0 border-b border-border/60 px-4 py-3 lg:w-64 lg:border-b-0 lg:border-r lg:px-3 lg:py-4">
+          <h2 className="mb-3 hidden px-2 text-sm font-medium text-foreground lg:block">Settings</h2>
+
+          <div className="lg:hidden">
+            <div className="-mx-1 overflow-x-auto">
+              <div className="flex min-w-max items-center gap-2 px-1">
+                {settingsSections.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
+                    className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${
+                      activeSection.id === section.id
+                        ? 'bg-accent text-accent-foreground'
+                        : 'bg-secondary text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {section.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <nav className="hidden lg:block">
+            <div className="space-y-1">
               {settingsSections.map((section) => (
                 <button
                   key={section.id}
                   type="button"
                   onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
-                  className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${
+                  className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                     activeSection.id === section.id
-                      ? 'bg-accent text-accent-foreground'
-                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
                   }`}
                 >
                   {section.title}
                 </button>
               ))}
             </div>
-          </div>
-        </div>
+          </nav>
+        </aside>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4">
+        <section className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-4 lg:px-6">
           <div className="space-y-3">
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {activeSection.title}
@@ -692,7 +715,7 @@ export function SettingsPageContent({
               ))}
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
       <Dialog open={slackDialogOpen} onOpenChange={setSlackDialogOpen}>

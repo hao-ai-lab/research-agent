@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, ChevronRight, Bell, Settings, PlugZap } from 'lucide-react'
+import { Menu, ChevronRight, Bell, Settings, PlugZap, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -22,9 +22,11 @@ interface BreadcrumbItem {
 }
 
 interface FloatingNavProps {
-  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
+  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
   runsSubTab: RunsSubTab
   onMenuClick: () => void
+  onDesktopMenuClick?: () => void
+  desktopSidebarCollapsed?: boolean
   breadcrumbs?: BreadcrumbItem[]
   // Chat-specific props
   eventCount?: number
@@ -43,6 +45,7 @@ const tabLabels: Record<string, string> = {
   runs: 'Runs',
   charts: 'Charts',
   memory: 'Memory',
+  settings: 'Settings',
 }
 
 const runsSubTabLabels: Record<RunsSubTab, string> = {
@@ -54,6 +57,8 @@ export function FloatingNav({
   activeTab,
   runsSubTab,
   onMenuClick,
+  onDesktopMenuClick,
+  desktopSidebarCollapsed = false,
   breadcrumbs,
   eventCount = 0,
   onAlertClick,
@@ -89,6 +94,21 @@ export function FloatingNav({
         >
           <Menu className={`h-5 w-5 ${isDemoMode ? 'text-red-500' : ''}`} />
           <span className="sr-only">Open menu</span>
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onDesktopMenuClick}
+          className="hidden h-9 w-9 shrink-0 lg:inline-flex"
+        >
+          {desktopSidebarCollapsed ? (
+            <PanelLeftOpen className="h-5 w-5" />
+          ) : (
+            <PanelLeftClose className="h-5 w-5" />
+          )}
+          <span className="sr-only">
+            {desktopSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          </span>
         </Button>
         {isDemoMode && (
           <Badge

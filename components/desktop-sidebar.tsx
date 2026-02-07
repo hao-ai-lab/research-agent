@@ -30,10 +30,11 @@ import type { ExperimentRun, Sweep } from '@/lib/types'
 import { getStatusText } from '@/lib/status-utils'
 import type { JourneySubTab, RunsSubTab } from './nav-page'
 
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
+type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
 
 interface DesktopSidebarProps {
   activeTab: ActiveTab
+  collapsed?: boolean
   runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
   sessions: ChatSession[]
@@ -82,6 +83,7 @@ function getSweepStatusClass(status: Sweep['status']) {
 
 export function DesktopSidebar({
   activeTab,
+  collapsed = false,
   runsSubTab,
   journeySubTab,
   sessions,
@@ -118,143 +120,162 @@ export function DesktopSidebar({
   )
 
   return (
-    <aside className="hidden h-full w-[300px] shrink-0 border-r border-border bg-background lg:flex">
+    <aside
+      className={`hidden h-full shrink-0 border-r border-border bg-background transition-[width] duration-200 lg:flex ${
+        collapsed ? 'w-[72px]' : 'w-[300px]'
+      }`}
+    >
       <div className="flex h-full w-full flex-col">
-        <div className="shrink-0 border-b border-border px-3 py-3">
-          <Button
-            className="w-full justify-start gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
-            onClick={() => {
-              void onNewChat()
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            New Chat
-          </Button>
-        </div>
-
         <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-5 px-3 py-3">
+          <div className={`space-y-5 py-3 ${collapsed ? 'px-2' : 'px-3'}`}>
             <section>
-              <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Sections
-              </p>
+              {!collapsed && (
+                <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Sections
+                </p>
+              )}
               <div className="space-y-1">
                 <button
                   type="button"
+                  title="New Chat"
+                  onClick={() => {
+                    void onNewChat()
+                  }}
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
+                    collapsed
+                      ? 'justify-center px-2 text-foreground hover:bg-secondary/50'
+                      : 'gap-2 px-2 text-foreground hover:bg-secondary/50'
+                  }`}
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  {!collapsed && 'New Chat'}
+                </button>
+
+                <button
+                  type="button"
+                  title="Chat"
                   onClick={() => onTabChange('chat')}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'chat'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <MessageSquare className="h-4 w-4" />
-                  Chat
+                  <MessageSquare className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Chat'}
                 </button>
 
                 <button
                   type="button"
+                  title="Runs Overview"
                   onClick={() => {
                     onTabChange('runs')
                     onRunsSubTabChange('overview')
                   }}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'runs' && runsSubTab === 'overview'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <FlaskConical className="h-4 w-4" />
-                  Runs Overview
+                  <FlaskConical className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Runs Overview'}
                 </button>
 
                 <button
                   type="button"
+                  title="Runs Details"
                   onClick={() => {
                     onTabChange('runs')
                     onRunsSubTabChange('details')
                   }}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'runs' && runsSubTab === 'details'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <List className="h-4 w-4" />
-                  Runs Details
+                  <List className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Runs Details'}
                 </button>
 
                 <button
                   type="button"
+                  title="Events"
                   onClick={() => onTabChange('events')}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'events'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <Bell className="h-4 w-4" />
-                  Events
+                  <Bell className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Events'}
                 </button>
 
                 <button
                   type="button"
+                  title="Charts"
                   onClick={() => onTabChange('charts')}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'charts'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <BarChart3 className="h-4 w-4" />
-                  Charts
+                  <BarChart3 className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Charts'}
                 </button>
 
                 <button
                   type="button"
+                  title="Memory"
                   onClick={() => onTabChange('memory')}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'memory'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <Lightbulb className="h-4 w-4" />
-                  Memory
+                  <Lightbulb className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Memory'}
                 </button>
 
                 <button
                   type="button"
+                  title="Report"
                   onClick={() => onTabChange('report')}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'report'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <FileText className="h-4 w-4" />
-                  Report
+                  <FileText className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Report'}
                 </button>
 
                 <button
                   type="button"
+                  title="Journey"
                   onClick={() => {
                     onTabChange('journey')
                     onJourneySubTabChange(journeySubTab)
                   }}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'journey'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <Sparkles className="h-4 w-4" />
-                  Journey
+                  <Sparkles className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
+                  {!collapsed && 'Journey'}
                 </button>
               </div>
             </section>
 
-            <section>
+            {!collapsed && (
+              <section>
               <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Recent Chats
               </p>
@@ -279,9 +300,11 @@ export function DesktopSidebar({
                   <p className="px-2 py-1 text-xs text-muted-foreground">No recent chats yet.</p>
                 )}
               </div>
-            </section>
+              </section>
+            )}
 
-            <section>
+            {!collapsed && (
+              <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Recent Runs
@@ -316,9 +339,11 @@ export function DesktopSidebar({
                   <p className="px-2 py-1 text-xs text-muted-foreground">No recent runs yet.</p>
                 )}
               </div>
-            </section>
+              </section>
+            )}
 
-            <section>
+            {!collapsed && (
+              <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Recent Sweeps
@@ -346,25 +371,35 @@ export function DesktopSidebar({
                   <p className="px-2 py-1 text-xs text-muted-foreground">No sweeps yet.</p>
                 )}
               </div>
-            </section>
+              </section>
+            )}
           </div>
         </ScrollArea>
 
-        <div className="shrink-0 border-t border-border p-3">
+        <div className={`shrink-0 border-t border-border ${collapsed ? 'p-2' : 'p-3'}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-secondary/40"
+                title={collapsed ? 'Workspace / Settings' : undefined}
+                className={`flex w-full items-center rounded-md border border-border bg-card text-left transition-colors hover:bg-secondary/40 ${
+                  collapsed ? 'justify-center px-2 py-2' : 'justify-between px-3 py-2'
+                }`}
               >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">Research Lab</p>
-                  <p className="truncate text-[10px] text-muted-foreground">Current project</p>
-                </div>
-              <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                {collapsed ? (
+                  <Settings className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">Research Lab</p>
+                      <p className="truncate text-[10px] text-muted-foreground">Current project</p>
+                    </div>
+                    <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                  </>
+                )}
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-64">
+            <DropdownMenuContent side="top" align={collapsed ? 'center' : 'start'} className="w-64">
               <DropdownMenuLabel>Workspace</DropdownMenuLabel>
               <DropdownMenuItem disabled>Research Lab</DropdownMenuItem>
               <DropdownMenuSeparator />
