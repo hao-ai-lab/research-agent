@@ -9,6 +9,7 @@ import { WildLoopBanner } from './wild-loop-banner'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
 import { useChatSession } from '@/hooks/use-chat-session'
+import { useWebNotification } from '@/hooks/use-web-notification'
 import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
 import type {
     ChatMessage as ChatMessageType,
@@ -64,6 +65,9 @@ export function ConnectedChatView({
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
 
+    // Web notification hook
+    const { notify } = useWebNotification()
+
     // Use external chat session if provided (for shared state), otherwise use own hook
     const internalChatSession = useChatSession()
     const {
@@ -116,6 +120,10 @@ export function ConnectedChatView({
                 if (lastMsg?.role === 'assistant') {
                     console.log('[wild-loop] Stream finished, calling onResponseComplete, msg length:', lastMsg.content.length)
                     wildLoop.onResponseComplete(lastMsg.content)
+
+                    // Send web notification for wild loop response
+                    const preview = lastMsg.content.slice(0, 120).replace(/\n/g, ' ')
+                    notify('🚀 Wild Mode Response', preview || 'Bot finished responding')
                 } else {
                     // No assistant message — OpenCode timed out or never responded
                     // Treat as CONTINUE (retry with same goal)
@@ -126,8 +134,18 @@ export function ConnectedChatView({
             prevStreamingRef.current = streamingState.isStreaming
             return () => clearTimeout(timer)
         }
+
+        // Non-wild-loop: send notification when streaming ends with a response
+        if (prevStreamingRef.current && !streamingState.isStreaming && !wildLoop?.isActive) {
+            const lastMsg = messages[messages.length - 1]
+            if (lastMsg?.role === 'assistant') {
+                const preview = lastMsg.content.slice(0, 120).replace(/\n/g, ' ')
+                notify('🔬 Bot Response', preview || 'Bot finished responding')
+            }
+        }
+
         prevStreamingRef.current = streamingState.isStreaming
-    }, [streamingState.isStreaming, messages, wildLoop])
+    }, [streamingState.isStreaming, messages, wildLoop, notify])
 
     // When wild loop has a pending prompt, auto-send it
     useEffect(() => {

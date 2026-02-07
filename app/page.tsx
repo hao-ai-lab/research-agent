@@ -31,6 +31,7 @@ const defaultSettings: AppSettings = {
   notifications: {
     alertsEnabled: true,
     alertTypes: ['error', 'warning', 'info'],
+    webNotificationsEnabled: true,
   },
 }
 

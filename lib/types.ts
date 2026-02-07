@@ -67,6 +67,7 @@ export interface AppSettings {
   notifications: {
     alertsEnabled: boolean
     alertTypes: ('error' | 'warning' | 'info')[]
+    webNotificationsEnabled: boolean
   }
 }
 

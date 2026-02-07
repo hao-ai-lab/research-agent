@@ -49,9 +49,10 @@ OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 # This connects to the Anthropic gateway at Modal
 # MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
 # MODEL_ID = os.environ.get("MODEL_ID", "claude-3-5-haiku-latest")
-# MODEL_ID = os.environ.get("MODEL_ID", "claude-sonnet-4-20250514")
-MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
-MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
+MODEL_ID = os.environ.get("MODEL_ID", "claude-sonnet-4-20250514")
+# MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
+# MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
 
 # User authentication token - if set, all API requests must include X-Auth-Token header
 USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
@@ -827,6 +828,20 @@ async def stop_session(session_id: str):
     task = active_chat_tasks.get(session_id)
     if task and not task.done():
         task.cancel()
+
+    # Also abort the OpenCode session so the model actually stops generating
+    opencode_session_id = chat_sessions[session_id].get("opencode_session_id")
+    if opencode_session_id:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.post(
+                    f"{OPENCODE_URL}/session/{opencode_session_id}/abort",
+                    auth=get_auth()
+                )
+                logger.info(f"Aborted OpenCode session {opencode_session_id}: {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Failed to abort OpenCode session {opencode_session_id}: {e}")
+
     return {"message": "Stop signal sent"}
 
 
