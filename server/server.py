@@ -680,21 +680,45 @@ async def chat_endpoint(req: ChatRequest):
             
             wild_mode_note = ""
             if req.wild_mode:
-                # Build experiment context for the agent
+                # Build Ralph-style loop prompt
+                iteration = wild_loop_state.get("iteration", 0) + 1
+                goal = wild_loop_state.get("goal") or "No specific goal set"
+                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+                custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
+                
+                # Build experiment state summary
                 experiment_context = _build_experiment_context()
-                signal_instructions = (
-                    "\n\nIMPORTANT: At the END of your response, include exactly one signal tag:\n"
-                    "- <signal>CONTINUE</signal> if there is more work to do\n"
-                    "- <signal>COMPLETE</signal> if the goal is achieved\n"
-                    "- <signal>NEEDS_HUMAN</signal> if human intervention is needed\n"
-                )
+                
+                iter_display = f"{iteration}"
+                if max_iter:
+                    iter_display += f" / {max_iter}"
+                else:
+                    iter_display += " (unlimited)"
+                
                 wild_mode_note = (
-                    "[SYSTEM] Wild mode is ON. You are an autonomous research agent. "
-                    "Be proactive: design experiments, create sweeps via tool calls, monitor runs, fix failures. "
-                    "Use create_sweep and create_run tool actions when needed.\n"
-                    f"{experiment_context}"
-                    f"{signal_instructions}\n\n"
+                    f"# Wild Loop — Iteration {iter_display}\n\n"
+                    f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
+                    f"## Your Goal\n{goal}\n\n"
+                    f"{experiment_context}\n"
+                    f"## Instructions\n"
+                    f"1. Read the current state of runs, sweeps, and alerts above\n"
+                    f"2. Plan what work remains to achieve the goal\n"
+                    f"3. Take action: create runs, create sweeps, analyze results, fix failures\n"
+                    f"4. Run verification if applicable (check logs, metrics)\n"
+                    f"5. At the END of your response, output exactly ONE promise tag:\n"
+                    f"   - `<promise>CONTINUE</promise>` if there is more work to do\n"
+                    f"   - `<promise>COMPLETE</promise>` if the goal is genuinely achieved\n"
+                    f"   - `<promise>NEEDS_HUMAN</promise>` if you need human intervention\n\n"
+                    f"## Critical Rules\n"
+                    f"- ONLY output `<promise>COMPLETE</promise>` when the goal is truly done\n"
+                    f"- Do NOT lie or output false promises to exit the loop\n"
+                    f"- If stuck, try a different approach\n"
+                    f"- Check your work before claiming completion\n"
+                    f"- The loop will continue until you succeed or are stopped\n"
                 )
+                if custom_cond:
+                    wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
+                wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
             content = f"{wild_mode_note}[USER] {req.message}"
 
             async with httpx.AsyncClient(timeout=None) as client:

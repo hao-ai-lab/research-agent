@@ -110,11 +110,21 @@ export function ConnectedChatView({
     // When streaming finishes, notify the wild loop to decide next action
     useEffect(() => {
         if (prevStreamingRef.current && !streamingState.isStreaming && wildLoop?.isActive) {
-            // Streaming just finished — find the last assistant message
-            const lastMsg = messages[messages.length - 1]
-            if (lastMsg?.role === 'assistant') {
-                wildLoop.onResponseComplete(lastMsg.content)
-            }
+            // Small delay to ensure messages state has settled (assistant message added)
+            const timer = setTimeout(() => {
+                const lastMsg = messages[messages.length - 1]
+                if (lastMsg?.role === 'assistant') {
+                    console.log('[wild-loop] Stream finished, calling onResponseComplete, msg length:', lastMsg.content.length)
+                    wildLoop.onResponseComplete(lastMsg.content)
+                } else {
+                    // No assistant message — OpenCode timed out or never responded
+                    // Treat as CONTINUE (retry with same goal)
+                    console.warn('[wild-loop] Stream ended with no assistant response, retrying...')
+                    wildLoop.onResponseComplete('')
+                }
+            }, 200)
+            prevStreamingRef.current = streamingState.isStreaming
+            return () => clearTimeout(timer)
         }
         prevStreamingRef.current = streamingState.isStreaming
     }, [streamingState.isStreaming, messages, wildLoop])
