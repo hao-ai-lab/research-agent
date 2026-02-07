@@ -2,10 +2,19 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { WildLoopPhase, TerminationConditions } from '@/lib/types'
-import { updateWildLoopStatus, configureWildLoop, setWildMode } from '@/lib/api'
+import { updateWildLoopStatus, configureWildLoop, setWildMode, createWildSweep, getSweep, listAlerts } from '@/lib/api'
+import type { Alert } from '@/lib/api'
 
 export interface WildLoopSignal {
   type: 'CONTINUE' | 'COMPLETE' | 'NEEDS_HUMAN'
+}
+
+export interface RunStats {
+  total: number
+  running: number
+  completed: number
+  failed: number
+  queued: number
 }
 
 export interface UseWildLoopResult {
@@ -16,6 +25,10 @@ export interface UseWildLoopResult {
   goal: string | null
   startedAt: number | null
   terminationConditions: TerminationConditions
+  // Job monitoring
+  sweepId: string | null
+  runStats: RunStats
+  activeAlerts: Alert[]
   // Actions
   start: (goal: string, sessionId: string) => void
   pause: () => void
@@ -61,6 +74,8 @@ function inferPhase(iteration: number, signal: WildLoopSignal | null): WildLoopP
   }
 }
 
+const emptyRunStats: RunStats = { total: 0, running: 0, completed: 0, failed: 0, queued: 0 }
+
 export function useWildLoop(): UseWildLoopResult {
   const [isActive, setIsActive] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
@@ -72,6 +87,11 @@ export function useWildLoop(): UseWildLoopResult {
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
   const [terminationConditions, setTerminationConditionsState] = useState<TerminationConditions>({})
 
+  // Job monitoring state
+  const [sweepId, setSweepId] = useState<string | null>(null)
+  const [runStats, setRunStats] = useState<RunStats>(emptyRunStats)
+  const [activeAlerts, setActiveAlerts] = useState<Alert[]>([])
+
   // Use refs for values accessed in callbacks to avoid stale closures
   const isActiveRef = useRef(isActive)
   const isPausedRef = useRef(isPaused)
@@ -79,6 +99,7 @@ export function useWildLoop(): UseWildLoopResult {
   const goalRef = useRef(goal)
   const terminationRef = useRef(terminationConditions)
   const startedAtRef = useRef(startedAt)
+  const sweepIdRef = useRef(sweepId)
 
   useEffect(() => { isActiveRef.current = isActive }, [isActive])
   useEffect(() => { isPausedRef.current = isPaused }, [isPaused])
@@ -86,8 +107,48 @@ export function useWildLoop(): UseWildLoopResult {
   useEffect(() => { goalRef.current = goal }, [goal])
   useEffect(() => { terminationRef.current = terminationConditions }, [terminationConditions])
   useEffect(() => { startedAtRef.current = startedAt }, [startedAt])
+  useEffect(() => { sweepIdRef.current = sweepId }, [sweepId])
 
-  const start = useCallback((newGoal: string, newSessionId: string) => {
+  // ========== Job Monitoring: Poll sweep progress + alerts ==========
+  useEffect(() => {
+    if (!isActive || !sweepId) return
+
+    const pollStatus = async () => {
+      try {
+        // Fetch sweep progress
+        const sweep = await getSweep(sweepId)
+        const progress = sweep.progress
+        setRunStats({
+          total: progress.total ?? 0,
+          running: progress.running ?? 0,
+          completed: progress.completed ?? 0,
+          failed: progress.failed ?? 0,
+          queued: (progress.queued ?? 0) + (progress.ready ?? 0),
+        })
+
+        // Fetch alerts filtered to runs in this sweep
+        const runIds = new Set(sweep.run_ids || [])
+        if (runIds.size > 0) {
+          const allAlerts = await listAlerts()
+          const relevant = allAlerts.filter(
+            a => runIds.has(a.run_id) && a.status === 'pending'
+          )
+          setActiveAlerts(relevant)
+        } else {
+          setActiveAlerts([])
+        }
+      } catch (err) {
+        console.warn('[wild-loop] Failed to poll sweep status:', err)
+      }
+    }
+
+    // Poll immediately, then every 5s
+    pollStatus()
+    const intervalId = setInterval(pollStatus, 5000)
+    return () => clearInterval(intervalId)
+  }, [isActive, sweepId])
+
+  const start = useCallback(async (newGoal: string, newSessionId: string) => {
     const now = Date.now() / 1000
     setIsActive(true)
     setIsPaused(false)
@@ -97,6 +158,16 @@ export function useWildLoop(): UseWildLoopResult {
     setStartedAt(now)
     setSessionId(newSessionId)
     setPendingPrompt(null)
+
+    // Create wild sweep for job tracking
+    try {
+      const sweep = await createWildSweep(`Wild: ${newGoal.slice(0, 50)}`, newGoal)
+      setSweepId(sweep.id)
+      console.log('[wild-loop] Created wild sweep:', sweep.id)
+    } catch (err) {
+      console.error('[wild-loop] Failed to create wild sweep:', err)
+      // Continue without sweep — loop still works, just no job monitoring
+    }
 
     // Sync to backend — set goal + session + wild mode on
     setWildMode(true).catch(console.error)
@@ -138,6 +209,10 @@ export function useWildLoop(): UseWildLoopResult {
     setStartedAt(null)
     setSessionId(null)
     setPendingPrompt(null)
+    // Clear job monitoring
+    setSweepId(null)
+    setRunStats(emptyRunStats)
+    setActiveAlerts([])
 
     setWildMode(false).catch(console.error)
     updateWildLoopStatus({ phase: 'idle', iteration: 0, is_paused: false }).catch(console.error)
@@ -221,7 +296,18 @@ export function useWildLoop(): UseWildLoopResult {
         }
       }, delay)
     } else if (signal.type === 'COMPLETE') {
-      stop()
+      // Demo/prototype mode: treat COMPLETE as CONTINUE.
+      // The agent often declares completion prematurely (e.g. after creating a sweep
+      // but before actually running experiments). Keep the loop going — user can
+      // stop manually via the Stop button or termination conditions.
+      console.log('[wild-loop] Agent signaled COMPLETE, treating as CONTINUE (demo mode)')
+      const currentGoal = goalRef.current || 'Continue working'
+      const delay = 3000
+      setTimeout(() => {
+        if (isActiveRef.current && !isPausedRef.current) {
+          setPendingPrompt(currentGoal)
+        }
+      }, delay)
     } else if (signal.type === 'NEEDS_HUMAN') {
       pause()
       // Browser notification
@@ -246,6 +332,11 @@ export function useWildLoop(): UseWildLoopResult {
     goal,
     startedAt,
     terminationConditions,
+    // Job monitoring
+    sweepId,
+    runStats,
+    activeAlerts,
+    // Actions
     start,
     pause,
     resume,

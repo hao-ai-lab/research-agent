@@ -232,6 +232,8 @@ export function ConnectedChatView({
                     onResume={wildLoop.resume}
                     onStop={wildLoop.stop}
                     onConfigureTermination={() => setShowTerminationDialog(true)}
+                    runStats={wildLoop.runStats}
+                    activeAlerts={wildLoop.activeAlerts}
                 />
             )}
 

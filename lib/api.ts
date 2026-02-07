@@ -681,6 +681,8 @@ export interface Sweep {
     run_ids: string[]
     status: 'ready' | 'running' | 'completed' | 'failed'
     created_at: number
+    goal?: string
+    is_wild?: boolean
     progress: {
         total: number
         completed: number
@@ -755,6 +757,21 @@ export async function startSweep(sweepId: string, parallel: number = 1): Promise
     })
     if (!response.ok) {
         throw new Error(`Failed to start sweep: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Create an empty sweep container for wild loop job tracking
+ */
+export async function createWildSweep(name: string, goal: string): Promise<Sweep> {
+    const response = await fetch(`${API_URL()}/sweeps/wild`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ name, goal }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create wild sweep: ${response.statusText}`)
     }
     return response.json()
 }

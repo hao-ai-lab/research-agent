@@ -2,6 +2,8 @@
 
 import { WildLoopPhase, TerminationConditions } from '@/lib/types'
 import { useState, useEffect, useCallback } from 'react'
+import type { RunStats } from '@/hooks/use-wild-loop'
+import type { Alert } from '@/lib/api'
 
 const phaseConfig: Record<WildLoopPhase, { icon: string; label: string; color: string }> = {
   idle: { icon: '⏸', label: 'Idle', color: '#888' },
@@ -27,6 +29,9 @@ interface WildLoopBannerProps {
   onResume: () => void
   onStop: () => void
   onConfigureTermination: () => void
+  // Job monitoring
+  runStats?: RunStats
+  activeAlerts?: Alert[]
 }
 
 export function WildLoopBanner({
@@ -40,6 +45,8 @@ export function WildLoopBanner({
   onResume,
   onStop,
   onConfigureTermination,
+  runStats,
+  activeAlerts = [],
 }: WildLoopBannerProps) {
   const [elapsed, setElapsed] = useState('0:00')
 
@@ -74,6 +81,9 @@ export function WildLoopBanner({
     }
     return parts.length ? parts.join(' · ') : null
   }, [terminationConditions, iteration])
+
+  const hasJobs = runStats && runStats.total > 0
+  const alertCount = activeAlerts.length
 
   return (
     <div style={{
@@ -137,6 +147,88 @@ export function WildLoopBanner({
             title="Click to configure termination"
           >
             {termDisplay()}
+          </span>
+        )}
+
+        {/* Job monitoring badges */}
+        {hasJobs && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            marginLeft: '4px',
+            borderLeft: '1px solid rgba(148, 163, 184, 0.2)',
+            paddingLeft: '8px',
+          }}>
+            {runStats.running > 0 && (
+              <span style={{
+                background: 'rgba(59, 130, 246, 0.2)',
+                color: '#93c5fd',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+                fontSize: '11px',
+              }} title={`${runStats.running} running`}>
+                🏃 {runStats.running}
+              </span>
+            )}
+            {runStats.completed > 0 && (
+              <span style={{
+                background: 'rgba(34, 197, 94, 0.2)',
+                color: '#86efac',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+                fontSize: '11px',
+              }} title={`${runStats.completed} completed`}>
+                ✅ {runStats.completed}
+              </span>
+            )}
+            {runStats.failed > 0 && (
+              <span style={{
+                background: 'rgba(239, 68, 68, 0.2)',
+                color: '#fca5a5',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+                fontSize: '11px',
+              }} title={`${runStats.failed} failed`}>
+                ❌ {runStats.failed}
+              </span>
+            )}
+            {runStats.queued > 0 && (
+              <span style={{
+                background: 'rgba(148, 163, 184, 0.15)',
+                color: '#94a3b8',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+                fontSize: '11px',
+              }} title={`${runStats.queued} queued`}>
+                ⏳ {runStats.queued}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Alert badge */}
+        {alertCount > 0 && (
+          <span style={{
+            background: 'rgba(239, 68, 68, 0.25)',
+            color: '#fca5a5',
+            padding: '2px 8px',
+            borderRadius: '10px',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            fontSize: '11px',
+            animation: 'pulse 2s ease-in-out infinite',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+          }} title={`${alertCount} pending alert${alertCount > 1 ? 's' : ''}`}>
+            ⚠️ {alertCount} alert{alertCount > 1 ? 's' : ''}
           </span>
         )}
       </div>
@@ -209,6 +301,14 @@ export function WildLoopBanner({
           🎯 {goal}
         </div>
       )}
+
+      {/* Inline CSS animation for alert pulse */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+      `}</style>
     </div>
   )
 }

@@ -241,6 +241,7 @@ wild_loop_state: dict = {
     "session_id": None,
     "started_at": None,
     "is_paused": False,
+    "sweep_id": None,
     "termination": {
         "max_iterations": None,
         "max_time_seconds": None,
@@ -698,25 +699,38 @@ async def chat_endpoint(req: ChatRequest):
                 else:
                     iter_display += " (unlimited)"
                 
+                # Include sweep_id so the agent associates runs with this wild loop
+                sweep_id = wild_loop_state.get("sweep_id")
+                sweep_note = ""
+                if sweep_id:
+                    sweep_note = (
+                        f"\n## Active Wild Sweep\n"
+                        f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
+                        f"so they are tracked as part of this wild loop session.\n"
+                    )
+
                 wild_mode_note = (
                     f"# Wild Loop — Iteration {iter_display}\n\n"
                     f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
                     f"## Your Goal\n{goal}\n\n"
                     f"{experiment_context}\n"
+                    f"{sweep_note}"
                     f"## Instructions\n"
                     f"1. Read the current state of runs, sweeps, and alerts above\n"
                     f"2. Plan what work remains to achieve the goal\n"
-                    f"3. Take action: create runs, create sweeps, analyze results, fix failures\n"
-                    f"4. Run verification if applicable (check logs, metrics)\n"
-                    f"5. At the END of your response, output exactly ONE promise tag:\n"
-                    f"   - `<promise>CONTINUE</promise>` if there is more work to do\n"
-                    f"   - `<promise>COMPLETE</promise>` if the goal is genuinely achieved\n"
-                    f"   - `<promise>NEEDS_HUMAN</promise>` if you need human intervention\n\n"
+                    f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
+                    f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
+                    f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
+                    f"6. At the END of your response, output exactly ONE promise tag:\n"
+                    f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
+                    f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
+                    f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
                     f"## Critical Rules\n"
-                    f"- ONLY output `<promise>COMPLETE</promise>` when the goal is truly done\n"
-                    f"- Do NOT lie or output false promises to exit the loop\n"
+                    f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
+                    f"- Creating or launching runs is NOT completion — you must check their results\n"
+                    f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
+                    f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
                     f"- If stuck, try a different approach\n"
-                    f"- Check your work before claiming completion\n"
                     f"- The loop will continue until you succeed or are stopped\n"
                 )
                 if custom_cond:
@@ -1329,6 +1343,46 @@ async def list_sweeps(
     
     result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return result[:limit]
+
+
+class WildSweepCreate(BaseModel):
+    name: str = "Wild Loop Sweep"
+    goal: str = ""
+
+
+@app.post("/sweeps/wild")
+async def create_wild_sweep(req: WildSweepCreate):
+    """Create an empty sweep container for wild loop tracking.
+    
+    Unlike the regular /sweeps endpoint, this doesn't require parameter grids.
+    Runs are added to this sweep via sweep_id when the agent creates them.
+    """
+    sweep_id = uuid.uuid4().hex[:12]
+    
+    sweep_data = {
+        "name": req.name,
+        "base_command": "",
+        "workdir": WORKDIR,
+        "parameters": {},
+        "run_ids": [],
+        "status": "running",
+        "created_at": time.time(),
+        "goal": req.goal,
+        "is_wild": True,
+        "progress": {
+            "total": 0,
+            "completed": 0,
+            "failed": 0,
+            "running": 0,
+        },
+    }
+    
+    sweeps[sweep_id] = sweep_data
+    wild_loop_state["sweep_id"] = sweep_id
+    save_runs_state()
+    
+    logger.info(f"Created wild sweep {sweep_id}: {req.name} (goal: {req.goal[:80]})")
+    return {"id": sweep_id, **sweep_data}
 
 
 @app.post("/sweeps")
