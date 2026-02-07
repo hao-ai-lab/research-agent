@@ -276,6 +276,21 @@ export interface WildModeState {
     enabled: boolean
 }
 
+export interface WildLoopStatus {
+    phase: string
+    iteration: number
+    goal: string | null
+    session_id: string | null
+    started_at: number | null
+    is_paused: boolean
+    termination: {
+        max_iterations: number | null
+        max_time_seconds: number | null
+        max_tokens: number | null
+        custom_condition: string | null
+    }
+}
+
 export interface LogResponse {
     content: string
     offset: number
@@ -472,6 +487,82 @@ export async function setWildMode(enabled: boolean): Promise<WildModeState> {
     })
     if (!response.ok) {
         throw new Error(`Failed to set wild mode: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get wild loop status
+ */
+export async function getWildLoopStatus(): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/status`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get wild loop status: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update wild loop status from frontend
+ */
+export async function updateWildLoopStatus(update: {
+    phase?: string
+    iteration?: number
+    goal?: string
+    session_id?: string
+    is_paused?: boolean
+}): Promise<WildLoopStatus> {
+    const params = new URLSearchParams()
+    if (update.phase !== undefined) params.set('phase', update.phase)
+    if (update.iteration !== undefined) params.set('iteration', String(update.iteration))
+    if (update.goal !== undefined) params.set('goal', update.goal)
+    if (update.session_id !== undefined) params.set('session_id', update.session_id)
+    if (update.is_paused !== undefined) params.set('is_paused', String(update.is_paused))
+    
+    const response = await fetch(`${API_URL()}/wild/status?${params}`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to update wild loop status: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Configure wild loop termination conditions
+ */
+export async function configureWildLoop(config: {
+    goal?: string
+    session_id?: string
+    max_iterations?: number
+    max_time_seconds?: number
+    max_tokens?: number
+    custom_condition?: string
+}): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/configure`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(config),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to configure wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Add a standalone run to an existing sweep
+ */
+export async function addRunToSweep(runId: string, sweepId: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_URL()}/runs/${runId}/add-to-sweep?sweep_id=${sweepId}`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to add run to sweep: ${response.statusText}`)
     }
     return response.json()
 }

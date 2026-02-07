@@ -213,6 +213,15 @@ class WildModeRequest(BaseModel):
     enabled: bool
 
 
+class WildLoopConfigRequest(BaseModel):
+    goal: Optional[str] = None
+    session_id: Optional[str] = None
+    max_iterations: Optional[int] = None
+    max_time_seconds: Optional[int] = None
+    max_tokens: Optional[int] = None
+    custom_condition: Optional[str] = None
+
+
 # =============================================================================
 # State
 # =============================================================================
@@ -222,6 +231,20 @@ runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
 wild_mode_enabled: bool = False
+wild_loop_state: dict = {
+    "phase": "idle",
+    "iteration": 0,
+    "goal": None,
+    "session_id": None,
+    "started_at": None,
+    "is_paused": False,
+    "termination": {
+        "max_iterations": None,
+        "max_time_seconds": None,
+        "max_tokens": None,
+        "custom_condition": None,
+    }
+}
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
 
@@ -299,19 +322,22 @@ def save_settings_state():
     """Persist settings to disk."""
     try:
         with open(SETTINGS_DATA_FILE, "w") as f:
-            json.dump({"wild_mode": wild_mode_enabled}, f, indent=2, default=str)
+            json.dump({"wild_mode": wild_mode_enabled, "wild_loop": wild_loop_state}, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving settings state: {e}")
 
 
 def load_settings_state():
     """Load settings from disk."""
-    global wild_mode_enabled
+    global wild_mode_enabled, wild_loop_state
     if os.path.exists(SETTINGS_DATA_FILE):
         try:
             with open(SETTINGS_DATA_FILE, "r") as f:
                 data = json.load(f)
                 wild_mode_enabled = bool(data.get("wild_mode", False))
+                saved_loop = data.get("wild_loop")
+                if saved_loop and isinstance(saved_loop, dict):
+                    wild_loop_state.update(saved_loop)
         except Exception as e:
             logger.error(f"Error loading settings state: {e}")
 
@@ -654,7 +680,21 @@ async def chat_endpoint(req: ChatRequest):
             
             wild_mode_note = ""
             if req.wild_mode:
-                wild_mode_note = "[SYSTEM] Wild mode is ON. Be proactive but confirm before launching actions.\n\n"
+                # Build experiment context for the agent
+                experiment_context = _build_experiment_context()
+                signal_instructions = (
+                    "\n\nIMPORTANT: At the END of your response, include exactly one signal tag:\n"
+                    "- <signal>CONTINUE</signal> if there is more work to do\n"
+                    "- <signal>COMPLETE</signal> if the goal is achieved\n"
+                    "- <signal>NEEDS_HUMAN</signal> if human intervention is needed\n"
+                )
+                wild_mode_note = (
+                    "[SYSTEM] Wild mode is ON. You are an autonomous research agent. "
+                    "Be proactive: design experiments, create sweeps via tool calls, monitor runs, fix failures. "
+                    "Use create_sweep and create_run tool actions when needed.\n"
+                    f"{experiment_context}"
+                    f"{signal_instructions}\n\n"
+                )
             content = f"{wild_mode_note}[USER] {req.message}"
 
             async with httpx.AsyncClient(timeout=None) as client:
@@ -1136,6 +1176,98 @@ async def set_wild_mode(req: WildModeRequest):
     return {"enabled": wild_mode_enabled}
 
 
+@app.get("/wild/status")
+async def get_wild_status():
+    """Get the current wild loop state."""
+    return wild_loop_state
+
+
+@app.post("/wild/status")
+async def update_wild_status(phase: str = None, iteration: int = None,
+                             goal: str = None, session_id: str = None,
+                             is_paused: bool = None):
+    """Update wild loop state from frontend."""
+    if phase is not None:
+        wild_loop_state["phase"] = phase
+    if iteration is not None:
+        wild_loop_state["iteration"] = iteration
+    if goal is not None:
+        wild_loop_state["goal"] = goal
+    if session_id is not None:
+        wild_loop_state["session_id"] = session_id
+    if is_paused is not None:
+        wild_loop_state["is_paused"] = is_paused
+    if phase == "idle":
+        wild_loop_state["started_at"] = None
+    elif wild_loop_state["started_at"] is None and phase not in ["idle", "complete"]:
+        wild_loop_state["started_at"] = time.time()
+    save_settings_state()
+    return wild_loop_state
+
+
+@app.post("/wild/configure")
+async def configure_wild_loop(req: WildLoopConfigRequest):
+    """Configure wild loop termination conditions and goal."""
+    if req.goal is not None:
+        wild_loop_state["goal"] = req.goal
+    if req.session_id is not None:
+        wild_loop_state["session_id"] = req.session_id
+    termination = wild_loop_state["termination"]
+    if req.max_iterations is not None:
+        termination["max_iterations"] = req.max_iterations
+    if req.max_time_seconds is not None:
+        termination["max_time_seconds"] = req.max_time_seconds
+    if req.max_tokens is not None:
+        termination["max_tokens"] = req.max_tokens
+    if req.custom_condition is not None:
+        termination["custom_condition"] = req.custom_condition
+    save_settings_state()
+    return wild_loop_state
+
+
+def _build_experiment_context() -> str:
+    """Build a summary of current experiment state for the wild mode prompt."""
+    lines = ["\n--- Current Experiment State ---"]
+
+    # Active runs
+    active_runs = [{"id": rid, **r} for rid, r in runs.items()
+                   if r.get("status") in ["running", "queued", "launching"]]
+    finished_runs = [{"id": rid, **r} for rid, r in runs.items()
+                     if r.get("status") == "finished"]
+    failed_runs = [{"id": rid, **r} for rid, r in runs.items()
+                   if r.get("status") == "failed"]
+
+    lines.append(f"Active runs: {len(active_runs)}")
+    for r in active_runs[:5]:
+        lines.append(f"  - {r['id']}: {r.get('name', '?')} [{r.get('status')}] cmd={r.get('command', '')[:80]}")
+    lines.append(f"Finished runs: {len(finished_runs)} | Failed runs: {len(failed_runs)}")
+    for r in failed_runs[:3]:
+        lines.append(f"  - FAILED {r['id']}: {r.get('name', '?')} error={r.get('error', 'unknown')[:100]}")
+
+    # Sweeps
+    active_sweeps = [{"id": sid, **s} for sid, s in sweeps.items()]
+    if active_sweeps:
+        lines.append(f"Sweeps: {len(active_sweeps)}")
+        for s in active_sweeps[:3]:
+            p = s.get("progress", {})
+            lines.append(f"  - {s['id']}: {s.get('name', '?')} "
+                         f"[{p.get('completed', 0)}/{p.get('total', 0)} done, {p.get('failed', 0)} failed]")
+
+    # Pending alerts
+    pending_alerts = [a for a in active_alerts.values() if a.get("status") == "pending"]
+    if pending_alerts:
+        lines.append(f"Pending alerts: {len(pending_alerts)}")
+        for a in pending_alerts[:3]:
+            lines.append(f"  - {a['id']}: [{a.get('severity')}] {a.get('message', '')[:80]}")
+
+    # Goal
+    if wild_loop_state.get("goal"):
+        lines.append(f"Goal: {wild_loop_state['goal']}")
+
+    lines.append("--- End State ---\n")
+    return "\n".join(lines)
+
+
 # =============================================================================
 # Sweep Endpoints
 # =============================================================================
@@ -1279,6 +1411,21 @@ async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max p
     save_runs_state()
     
     return {"message": f"Started {started} runs", "sweep_id": sweep_id}
+
+
+@app.post("/runs/{run_id}/add-to-sweep")
+async def add_run_to_sweep(run_id: str, sweep_id: str = Query(..., description="Sweep ID to add the run to")):
+    """Add an existing standalone run to a sweep."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+
+    runs[run_id]["sweep_id"] = sweep_id
+    if run_id not in sweeps[sweep_id].get("run_ids", []):
+        sweeps[sweep_id].setdefault("run_ids", []).append(run_id)
+    save_runs_state()
+    return {"message": f"Run {run_id} added to sweep {sweep_id}"}
 
 
 # =============================================================================

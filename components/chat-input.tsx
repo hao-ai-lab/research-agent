@@ -34,7 +34,7 @@ import {
 import type { ExperimentRun, Artifact, InsightChart, ChatMessage } from '@/lib/types'
 import type { Alert as ApiAlert } from '@/lib/api-client'
 
-export type ChatMode = 'wild' | 'debug' | 'sweep'
+export type ChatMode = 'agent' | 'wild' | 'sweep'
 
 export type MentionType = 'run' | 'artifact' | 'alert' | 'chart' | 'chat'
 
@@ -562,25 +562,45 @@ export function ChatInput({
               <button
                 type="button"
                 className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
-                  mode === 'wild'
+                  mode === 'agent'
                     ? 'bg-accent/20 text-accent'
-                    : mode === 'debug'
-                    ? 'bg-blue-500/20 text-blue-400'
-                    : 'bg-purple-500/20 text-purple-400'
+                    : mode === 'wild'
+                    ? 'bg-purple-500/20 text-purple-400'
+                    : 'bg-blue-500/20 text-blue-400'
                 }`}
               >
-                {mode === 'wild' ? (
+                {mode === 'agent' ? (
+                  <MessageSquare className="h-3 w-3" />
+                ) : mode === 'wild' ? (
                   <Zap className="h-3 w-3" />
-                ) : mode === 'debug' ? (
-                  <Bug className="h-3 w-3" />
                 ) : (
                   <Sparkles className="h-3 w-3" />
                 )}
-                {mode === 'wild' ? 'Wild' : mode === 'debug' ? 'Debug' : 'Sweep'}
+                {mode === 'agent' ? 'Agent' : mode === 'wild' ? 'Wild' : 'Sweep'}
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-56 p-1.5">
               <div className="flex flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onModeChange('agent')
+                    setIsModeOpen(false)
+                  }}
+                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                    mode === 'agent'
+                      ? 'bg-accent/10 border border-accent/30'
+                      : 'hover:bg-secondary'
+                  }`}
+                >
+                  <MessageSquare
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-accent' : 'text-muted-foreground'}`}
+                  />
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Agent Mode</p>
+                    <p className="text-[10px] text-muted-foreground">Normal chat — ask and discuss</p>
+                  </div>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -589,36 +609,16 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'wild'
-                      ? 'bg-accent/10 border border-accent/30'
+                      ? 'bg-purple-400/10 border border-purple-400/30'
                       : 'hover:bg-secondary'
                   }`}
                 >
                   <Zap
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-accent' : 'text-muted-foreground'}`}
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-purple-400' : 'text-muted-foreground'}`}
                   />
                   <div>
                     <p className="text-xs font-medium text-foreground">Wild Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Auto-launch experiments</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onModeChange('debug')
-                    setIsModeOpen(false)
-                  }}
-                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                    mode === 'debug'
-                      ? 'bg-blue-400/10 border border-blue-400/30'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <Bug
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'debug' ? 'text-blue-400' : 'text-muted-foreground'}`}
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Debug Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Careful, detailed</p>
+                    <p className="text-[10px] text-muted-foreground">Autonomous loop — agent runs experiments</p>
                   </div>
                 </button>
                 <button
