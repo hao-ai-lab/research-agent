@@ -27,6 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useApiConfig } from '@/lib/api-config'
 import type { ChatSession } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
 import { getStatusText } from '@/lib/status-utils'
@@ -122,6 +123,7 @@ export function DesktopSidebar({
         .slice(0, 6),
     [sweeps]
   )
+  const { useMock: isDemoMode } = useApiConfig()
 
   return (
     <aside
@@ -131,22 +133,32 @@ export function DesktopSidebar({
     >
       <div className="flex h-full w-full flex-col">
         <div className={`shrink-0 border-b border-border ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleCollapse}
-            className={`h-8 w-8 ${collapsed ? 'mx-auto' : ''}`}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
+          <div className={`relative inline-flex ${collapsed ? 'mx-auto' : ''}`}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleCollapse}
+              className={`h-8 w-8 ${isDemoMode ? 'ring-2 ring-red-500/50 ring-offset-1 ring-offset-background' : ''}`}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? (
+                <PanelLeftOpen className={`h-4 w-4 ${isDemoMode ? 'text-red-500' : ''}`} />
+              ) : (
+                <PanelLeftClose className={`h-4 w-4 ${isDemoMode ? 'text-red-500' : ''}`} />
+              )}
+              <span className="sr-only">
+                {collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              </span>
+            </Button>
+            {isDemoMode && (
+              <Badge
+                variant="destructive"
+                className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold"
+              >
+                demo
+              </Badge>
             )}
-            <span className="sr-only">
-              {collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            </span>
-          </Button>
+          </div>
         </div>
 
         <ScrollArea className="min-h-0 flex-1">

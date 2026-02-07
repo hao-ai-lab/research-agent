@@ -103,7 +103,7 @@ export function FloatingNav({
         {isDemoMode && (
           <Badge
             variant="destructive"
-            className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold"
+            className="absolute -top-1.5 -right-2 h-4 px-1 text-[9px] font-bold lg:hidden"
           >
             demo
           </Badge>
