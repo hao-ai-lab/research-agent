@@ -25,6 +25,9 @@ import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
 
 type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
+const DESKTOP_SIDEBAR_MIN_WIDTH = 240
+const DESKTOP_SIDEBAR_MAX_WIDTH = 520
+const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
 
 export default function ResearchChat() {
   const searchParams = useSearchParams()
@@ -34,6 +37,7 @@ export default function ResearchChat() {
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
+  const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
   const [reportToolbar, setReportToolbar] = useState<ReportToolbarState | null>(null)
 
   // Use real API data via useRuns hook
@@ -66,6 +70,20 @@ export default function ResearchChat() {
 
   // API configuration for auth/connection check
   const { useMock, authToken, testConnection } = useApiConfig()
+
+  useEffect(() => {
+    const storedWidth = window.localStorage.getItem('desktopSidebarWidth')
+    if (!storedWidth) return
+    const parsed = Number(storedWidth)
+    if (!Number.isFinite(parsed)) return
+    setDesktopSidebarWidth(
+      Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, parsed))
+    )
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem('desktopSidebarWidth', String(desktopSidebarWidth))
+  }, [desktopSidebarWidth])
 
   useEffect(() => {
     const tab = searchParams.get('tab')
@@ -489,6 +507,9 @@ export default function ResearchChat() {
         <DesktopSidebar
           activeTab={activeTab}
           collapsed={desktopSidebarCollapsed}
+          width={desktopSidebarWidth}
+          minWidth={DESKTOP_SIDEBAR_MIN_WIDTH}
+          maxWidth={DESKTOP_SIDEBAR_MAX_WIDTH}
           runsSubTab={runsSubTab}
           journeySubTab={journeySubTab}
           sessions={sessions}
@@ -509,6 +530,7 @@ export default function ResearchChat() {
           onInsertReference={handleInsertChatReference}
           onSettingsClick={() => setActiveTab('settings')}
           onToggleCollapse={() => setDesktopSidebarCollapsed((prev) => !prev)}
+          onWidthChange={setDesktopSidebarWidth}
         />
 
         <section className="mobile-viewport-wrapper flex min-w-0 flex-1 flex-col overflow-hidden bg-background">

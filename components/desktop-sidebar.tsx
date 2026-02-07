@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   BarChart3,
   Bell,
@@ -38,6 +38,9 @@ type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 
 interface DesktopSidebarProps {
   activeTab: ActiveTab
   collapsed?: boolean
+  width?: number
+  minWidth?: number
+  maxWidth?: number
   runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
   sessions: ChatSession[]
@@ -52,6 +55,7 @@ interface DesktopSidebarProps {
   onInsertReference: (text: string) => void
   onSettingsClick: () => void
   onToggleCollapse?: () => void
+  onWidthChange?: (width: number) => void
 }
 
 function formatRelativeTime(date: Date) {
@@ -88,6 +92,9 @@ function getSweepStatusClass(status: Sweep['status']) {
 export function DesktopSidebar({
   activeTab,
   collapsed = false,
+  width = 300,
+  minWidth = 240,
+  maxWidth = 520,
   runsSubTab,
   journeySubTab,
   sessions,
@@ -102,6 +109,7 @@ export function DesktopSidebar({
   onInsertReference,
   onSettingsClick,
   onToggleCollapse,
+  onWidthChange,
 }: DesktopSidebarProps) {
   const recentRuns = useMemo(
     () =>
@@ -124,12 +132,50 @@ export function DesktopSidebar({
     [sweeps]
   )
   const { useMock: isDemoMode } = useApiConfig()
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeStartXRef = useRef(0)
+  const resizeStartWidthRef = useRef(width)
+
+  const handleResizeStart = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    if (collapsed) return
+    e.preventDefault()
+    resizeStartXRef.current = e.clientX
+    resizeStartWidthRef.current = width
+    setIsResizing(true)
+  }, [collapsed, width])
+
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - resizeStartXRef.current
+      const nextWidth = Math.min(maxWidth, Math.max(minWidth, resizeStartWidthRef.current + deltaX))
+      onWidthChange?.(nextWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizing, maxWidth, minWidth, onWidthChange])
 
   return (
     <aside
-      className={`hidden h-full shrink-0 border-r border-border bg-background transition-[width] duration-200 lg:flex ${
-        collapsed ? 'w-[72px]' : 'w-[300px]'
+      className={`relative hidden h-full shrink-0 border-r border-border bg-background transition-[width] duration-200 lg:flex ${
+        collapsed ? 'w-[72px]' : ''
       }`}
+      style={collapsed ? undefined : { width: `${width}px` }}
     >
       <div className="flex h-full w-full flex-col">
         <div className={`shrink-0 border-b border-border ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
@@ -444,6 +490,17 @@ export function DesktopSidebar({
           </DropdownMenu>
         </div>
       </div>
+      {!collapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          onMouseDown={handleResizeStart}
+          className={`absolute right-0 top-0 h-full w-1 cursor-col-resize transition-colors ${
+            isResizing ? 'bg-primary/40' : 'bg-transparent hover:bg-border'
+          }`}
+        />
+      )}
     </aside>
   )
 }
