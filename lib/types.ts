@@ -118,12 +118,35 @@ export interface MessagePart {
   toolOutput?: string  // Tool result/output
 }
 
+// Wild Loop types
+export type WildLoopPhase = 'idle' | 'starting' | 'exploring' | 'onboarding' | 'designing' | 'monitoring' | 'analyzing' | 'fixing' | 'complete' | 'paused' | 'waiting_for_human'
+
+export type ChatMessageSource = 'user' | 'agent_wild'
+
+export interface TerminationConditions {
+  maxIterations?: number | null
+  maxTimeSeconds?: number | null
+  maxTokens?: number | null
+  customCondition?: string | null
+}
+
+export interface WildLoopState {
+  phase: WildLoopPhase
+  iteration: number
+  goal: string | null
+  sessionId: string | null
+  startedAt: number | null
+  isPaused: boolean
+  termination: TerminationConditions
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   thinking?: string  // Legacy: combined thinking (backward compat)
   parts?: MessagePart[]  // NEW: ordered array of parts
+  source?: ChatMessageSource  // 'agent_wild' = auto-sent by wild loop
   timestamp: Date
   attachments?: {
     name: string

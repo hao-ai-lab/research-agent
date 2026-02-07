@@ -47,8 +47,11 @@ OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 
 # Model configuration - uses research-agent provider from opencode.json
 # This connects to the Anthropic gateway at Modal
-MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
-MODEL_ID = os.environ.get("MODEL_ID", "claude-3-5-haiku-latest")
+# MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
+# MODEL_ID = os.environ.get("MODEL_ID", "claude-3-5-haiku-latest")
+# MODEL_ID = os.environ.get("MODEL_ID", "claude-sonnet-4-20250514")
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
+MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
 
 # User authentication token - if set, all API requests must include X-Auth-Token header
 USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
@@ -213,6 +216,15 @@ class WildModeRequest(BaseModel):
     enabled: bool
 
 
+class WildLoopConfigRequest(BaseModel):
+    goal: Optional[str] = None
+    session_id: Optional[str] = None
+    max_iterations: Optional[int] = None
+    max_time_seconds: Optional[int] = None
+    max_tokens: Optional[int] = None
+    custom_condition: Optional[str] = None
+
+
 # =============================================================================
 # State
 # =============================================================================
@@ -222,6 +234,21 @@ runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
 wild_mode_enabled: bool = False
+wild_loop_state: dict = {
+    "phase": "idle",
+    "iteration": 0,
+    "goal": None,
+    "session_id": None,
+    "started_at": None,
+    "is_paused": False,
+    "sweep_id": None,
+    "termination": {
+        "max_iterations": None,
+        "max_time_seconds": None,
+        "max_tokens": None,
+        "custom_condition": None,
+    }
+}
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
 
@@ -299,19 +326,22 @@ def save_settings_state():
     """Persist settings to disk."""
     try:
         with open(SETTINGS_DATA_FILE, "w") as f:
-            json.dump({"wild_mode": wild_mode_enabled}, f, indent=2, default=str)
+            json.dump({"wild_mode": wild_mode_enabled, "wild_loop": wild_loop_state}, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving settings state: {e}")
 
 
 def load_settings_state():
     """Load settings from disk."""
-    global wild_mode_enabled
+    global wild_mode_enabled, wild_loop_state
     if os.path.exists(SETTINGS_DATA_FILE):
         try:
             with open(SETTINGS_DATA_FILE, "r") as f:
                 data = json.load(f)
                 wild_mode_enabled = bool(data.get("wild_mode", False))
+                saved_loop = data.get("wild_loop")
+                if saved_loop and isinstance(saved_loop, dict):
+                    wild_loop_state.update(saved_loop)
         except Exception as e:
             logger.error(f"Error loading settings state: {e}")
 
@@ -654,7 +684,58 @@ async def chat_endpoint(req: ChatRequest):
             
             wild_mode_note = ""
             if req.wild_mode:
-                wild_mode_note = "[SYSTEM] Wild mode is ON. Be proactive but confirm before launching actions.\n\n"
+                # Build Ralph-style loop prompt
+                iteration = wild_loop_state.get("iteration", 0) + 1
+                goal = wild_loop_state.get("goal") or "No specific goal set"
+                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+                custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
+                
+                # Build experiment state summary
+                experiment_context = _build_experiment_context()
+                
+                iter_display = f"{iteration}"
+                if max_iter:
+                    iter_display += f" / {max_iter}"
+                else:
+                    iter_display += " (unlimited)"
+                
+                # Include sweep_id so the agent associates runs with this wild loop
+                sweep_id = wild_loop_state.get("sweep_id")
+                sweep_note = ""
+                if sweep_id:
+                    sweep_note = (
+                        f"\n## Active Wild Sweep\n"
+                        f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
+                        f"so they are tracked as part of this wild loop session.\n"
+                    )
+
+                wild_mode_note = (
+                    f"# Wild Loop — Iteration {iter_display}\n\n"
+                    f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
+                    f"## Your Goal\n{goal}\n\n"
+                    f"{experiment_context}\n"
+                    f"{sweep_note}"
+                    f"## Instructions\n"
+                    f"1. Read the current state of runs, sweeps, and alerts above\n"
+                    f"2. Plan what work remains to achieve the goal\n"
+                    f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
+                    f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
+                    f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
+                    f"6. At the END of your response, output exactly ONE promise tag:\n"
+                    f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
+                    f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
+                    f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
+                    f"## Critical Rules\n"
+                    f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
+                    f"- Creating or launching runs is NOT completion — you must check their results\n"
+                    f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
+                    f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
+                    f"- If stuck, try a different approach\n"
+                    f"- The loop will continue until you succeed or are stopped\n"
+                )
+                if custom_cond:
+                    wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
+                wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
             content = f"{wild_mode_note}[USER] {req.message}"
 
             async with httpx.AsyncClient(timeout=None) as client:
@@ -1136,6 +1217,98 @@ async def set_wild_mode(req: WildModeRequest):
     return {"enabled": wild_mode_enabled}
 
 
+@app.get("/wild/status")
+async def get_wild_status():
+    """Get the current wild loop state."""
+    return wild_loop_state
+
+
+@app.post("/wild/status")
+async def update_wild_status(phase: str = None, iteration: int = None,
+                             goal: str = None, session_id: str = None,
+                             is_paused: bool = None):
+    """Update wild loop state from frontend."""
+    if phase is not None:
+        wild_loop_state["phase"] = phase
+    if iteration is not None:
+        wild_loop_state["iteration"] = iteration
+    if goal is not None:
+        wild_loop_state["goal"] = goal
+    if session_id is not None:
+        wild_loop_state["session_id"] = session_id
+    if is_paused is not None:
+        wild_loop_state["is_paused"] = is_paused
+    if phase == "idle":
+        wild_loop_state["started_at"] = None
+    elif wild_loop_state["started_at"] is None and phase not in ["idle", "complete"]:
+        wild_loop_state["started_at"] = time.time()
+    save_settings_state()
+    return wild_loop_state
+
+
+@app.post("/wild/configure")
+async def configure_wild_loop(req: WildLoopConfigRequest):
+    """Configure wild loop termination conditions and goal."""
+    if req.goal is not None:
+        wild_loop_state["goal"] = req.goal
+    if req.session_id is not None:
+        wild_loop_state["session_id"] = req.session_id
+    termination = wild_loop_state["termination"]
+    if req.max_iterations is not None:
+        termination["max_iterations"] = req.max_iterations
+    if req.max_time_seconds is not None:
+        termination["max_time_seconds"] = req.max_time_seconds
+    if req.max_tokens is not None:
+        termination["max_tokens"] = req.max_tokens
+    if req.custom_condition is not None:
+        termination["custom_condition"] = req.custom_condition
+    save_settings_state()
+    return wild_loop_state
+
+
+def _build_experiment_context() -> str:
+    """Build a summary of current experiment state for the wild mode prompt."""
+    lines = ["\n--- Current Experiment State ---"]
+
+    # Active runs
+    active_runs = [{"id": rid, **r} for rid, r in runs.items()
+                   if r.get("status") in ["running", "queued", "launching"]]
+    finished_runs = [{"id": rid, **r} for rid, r in runs.items()
+                     if r.get("status") == "finished"]
+    failed_runs = [{"id": rid, **r} for rid, r in runs.items()
+                   if r.get("status") == "failed"]
+
+    lines.append(f"Active runs: {len(active_runs)}")
+    for r in active_runs[:5]:
+        lines.append(f"  - {r['id']}: {r.get('name', '?')} [{r.get('status')}] cmd={r.get('command', '')[:80]}")
+    lines.append(f"Finished runs: {len(finished_runs)} | Failed runs: {len(failed_runs)}")
+    for r in failed_runs[:3]:
+        lines.append(f"  - FAILED {r['id']}: {r.get('name', '?')} error={r.get('error', 'unknown')[:100]}")
+
+    # Sweeps
+    active_sweeps = [{"id": sid, **s} for sid, s in sweeps.items()]
+    if active_sweeps:
+        lines.append(f"Sweeps: {len(active_sweeps)}")
+        for s in active_sweeps[:3]:
+            p = s.get("progress", {})
+            lines.append(f"  - {s['id']}: {s.get('name', '?')} "
+                         f"[{p.get('completed', 0)}/{p.get('total', 0)} done, {p.get('failed', 0)} failed]")
+
+    # Pending alerts
+    pending_alerts = [a for a in active_alerts.values() if a.get("status") == "pending"]
+    if pending_alerts:
+        lines.append(f"Pending alerts: {len(pending_alerts)}")
+        for a in pending_alerts[:3]:
+            lines.append(f"  - {a['id']}: [{a.get('severity')}] {a.get('message', '')[:80]}")
+
+    # Goal
+    if wild_loop_state.get("goal"):
+        lines.append(f"Goal: {wild_loop_state['goal']}")
+
+    lines.append("--- End State ---\n")
+    return "\n".join(lines)
+
+
 # =============================================================================
 # Sweep Endpoints
 # =============================================================================
@@ -1170,6 +1343,46 @@ async def list_sweeps(
     
     result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return result[:limit]
+
+
+class WildSweepCreate(BaseModel):
+    name: str = "Wild Loop Sweep"
+    goal: str = ""
+
+
+@app.post("/sweeps/wild")
+async def create_wild_sweep(req: WildSweepCreate):
+    """Create an empty sweep container for wild loop tracking.
+    
+    Unlike the regular /sweeps endpoint, this doesn't require parameter grids.
+    Runs are added to this sweep via sweep_id when the agent creates them.
+    """
+    sweep_id = uuid.uuid4().hex[:12]
+    
+    sweep_data = {
+        "name": req.name,
+        "base_command": "",
+        "workdir": WORKDIR,
+        "parameters": {},
+        "run_ids": [],
+        "status": "running",
+        "created_at": time.time(),
+        "goal": req.goal,
+        "is_wild": True,
+        "progress": {
+            "total": 0,
+            "completed": 0,
+            "failed": 0,
+            "running": 0,
+        },
+    }
+    
+    sweeps[sweep_id] = sweep_data
+    wild_loop_state["sweep_id"] = sweep_id
+    save_runs_state()
+    
+    logger.info(f"Created wild sweep {sweep_id}: {req.name} (goal: {req.goal[:80]})")
+    return {"id": sweep_id, **sweep_data}
 
 
 @app.post("/sweeps")
@@ -1279,6 +1492,21 @@ async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max p
     save_runs_state()
     
     return {"message": f"Started {started} runs", "sweep_id": sweep_id}
+
+
+@app.post("/runs/{run_id}/add-to-sweep")
+async def add_run_to_sweep(run_id: str, sweep_id: str = Query(..., description="Sweep ID to add the run to")):
+    """Add an existing standalone run to a sweep."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+
+    runs[run_id]["sweep_id"] = sweep_id
+    if run_id not in sweeps[sweep_id].get("run_ids", []):
+        sweeps[sweep_id].setdefault("run_ids", []).append(run_id)
+    save_runs_state()
+    return {"message": f"Run {run_id} added to sweep {sweep_id}"}
 
 
 # =============================================================================

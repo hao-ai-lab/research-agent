@@ -97,7 +97,7 @@ export function useChatSession(): UseChatSessionResult {
 
     // Message queue for queuing messages during streaming
     const [messageQueue, setMessageQueue] = useState<string[]>([])
-    const currentModeRef = useRef<ChatMode>('wild')
+    const currentModeRef = useRef<ChatMode>('agent')
 
     // Abort controller for cancelling streams
     const abortControllerRef = useRef<AbortController | null>(null)
@@ -210,6 +210,10 @@ export function useChatSession(): UseChatSessionResult {
         // Track the current mode for queued messages
         currentModeRef.current = mode
 
+        // Track accumulated text/thinking outside try so catch can access them
+        let finalText = ''
+        let finalThinking = ''
+
         try {
             setError(null)
 
@@ -235,8 +239,6 @@ export function useChatSession(): UseChatSessionResult {
 
             // Stream the response
             const wildMode = mode === 'wild'
-            let finalText = ''
-            let finalThinking = ''
 
             // Helper to parse tool state from event
             const parseToolState = (state: unknown): 'pending' | 'running' | 'completed' | 'error' => {
@@ -249,8 +251,26 @@ export function useChatSession(): UseChatSessionResult {
                 return 'pending'
             }
 
+            // Stream inactivity timeout: abort if no events for 60s (prevents stuck streams)
+            // Note: OpenCode can take 30-40s to start responding, so 60s is the minimum safe value
+            let lastEventTime = Date.now()
+            const streamTimeoutId = setInterval(() => {
+                const elapsed = Date.now() - lastEventTime
+                if (elapsed > 60_000) {
+                    console.warn(`[chat-session] Stream inactivity timeout (${Math.round(elapsed/1000)}s), aborting`)
+                    abortControllerRef.current?.abort()
+                }
+            }, 5_000)
+
+            try {
             for await (const event of streamChat(targetSessionId, content, wildMode, abortControllerRef.current.signal)) {
+                lastEventTime = Date.now()
                 const partId = event.id
+                
+                // Debug logging for stream events
+                if (event.type === 'session_status' || event.type === 'error') {
+                    console.log(`[chat-session] Stream event: ${event.type}`, event)
+                }
 
                 if (event.type === 'part_delta') {
                     const delta = event.delta || ''
@@ -363,6 +383,9 @@ export function useChatSession(): UseChatSessionResult {
                     break
                 }
             }
+            } finally {
+                clearInterval(streamTimeoutId)
+            }
 
             // Add assistant message to history
             if (finalText || finalThinking) {
@@ -380,7 +403,16 @@ export function useChatSession(): UseChatSessionResult {
 
         } catch (err) {
             if (err instanceof DOMException && err.name === 'AbortError') {
-                // User-initiated stop
+                // User-initiated stop — still save any text we got
+                if (finalText || finalThinking) {
+                    const assistantMessage: ChatMessageData = {
+                        role: 'assistant',
+                        content: finalText.trim(),
+                        thinking: finalThinking.trim() || null,
+                        timestamp: Date.now() / 1000,
+                    }
+                    setMessages(prev => [...prev, assistantMessage])
+                }
             } else {
                 console.error('Failed to send message:', err)
                 setError(err instanceof Error ? err.message : 'Failed to send message')
