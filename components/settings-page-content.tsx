@@ -1,0 +1,611 @@
+'use client'
+
+import React, { useMemo, useState } from 'react'
+import {
+  Bell,
+  Check,
+  ChevronRight,
+  Code,
+  Monitor,
+  Moon,
+  RotateCcw,
+  Search,
+  Server,
+  Slack,
+  Sparkles,
+  Square,
+  Sun,
+  Type,
+  Wifi,
+  WifiOff,
+  X,
+} from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Separator } from '@/components/ui/separator'
+import { useApiConfig } from '@/lib/api-config'
+import type { AppSettings } from '@/lib/types'
+
+interface SettingsPageContentProps {
+  settings: AppSettings
+  onSettingsChange: (settings: AppSettings) => void
+  onNavigateToJourney?: (subTab: 'story' | 'devnotes') => void
+  focusAuthToken?: boolean
+}
+
+export function SettingsPageContent({
+  settings,
+  onSettingsChange,
+  onNavigateToJourney,
+  focusAuthToken = false,
+}: SettingsPageContentProps) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [slackDialogOpen, setSlackDialogOpen] = useState(false)
+  const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
+  const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
+
+  const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
+  const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
+  const [authTokenInput, setAuthTokenInput] = useState(authToken)
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
+  const authTokenInputRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => {
+    setApiUrlInput(apiUrl)
+  }, [apiUrl])
+
+  React.useEffect(() => {
+    setAuthTokenInput(authToken)
+  }, [authToken])
+
+  React.useEffect(() => {
+    if (!focusAuthToken) return
+    const timer = setTimeout(() => {
+      authTokenInputRef.current?.focus()
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [focusAuthToken])
+
+  const handleTestConnection = async () => {
+    setConnectionStatus('testing')
+    const isConnected = await testConnection()
+    setConnectionStatus(isConnected ? 'connected' : 'failed')
+    setTimeout(() => setConnectionStatus('idle'), 3000)
+  }
+
+  const handleSaveApiUrl = () => {
+    setApiUrl(apiUrlInput)
+    setConnectionStatus('idle')
+  }
+
+  const handleSaveAuthToken = () => {
+    setAuthToken(authTokenInput)
+  }
+
+  const settingsSections = useMemo(() => [
+    {
+      id: 'api',
+      title: 'API Configuration',
+      items: [
+        {
+          id: 'apiConfig',
+          label: 'Server Connection',
+          description: 'Configure API server URL and connection mode',
+          icon: Server,
+          type: 'custom' as const,
+        },
+      ],
+    },
+    {
+      id: 'integrations',
+      title: 'Integrations',
+      items: [
+        {
+          id: 'slack',
+          label: 'Slack',
+          description: 'Connect to Slack for notifications',
+          icon: Slack,
+          type: 'action' as const,
+        },
+      ],
+    },
+    {
+      id: 'appearance',
+      title: 'Appearance',
+      items: [
+        {
+          id: 'theme',
+          label: 'Theme',
+          description: 'Choose your preferred color scheme',
+          icon: settings.appearance.theme === 'dark' ? Moon : settings.appearance.theme === 'light' ? Sun : Monitor,
+          type: 'select' as const,
+          options: ['dark', 'light', 'system'],
+          value: settings.appearance.theme,
+        },
+        {
+          id: 'fontSize',
+          label: 'Font Size',
+          description: 'Adjust the text size',
+          icon: Type,
+          type: 'select' as const,
+          options: ['small', 'medium', 'large'],
+          value: settings.appearance.fontSize,
+        },
+        {
+          id: 'buttonSize',
+          label: 'Button Size',
+          description: 'Adjust button and control sizes',
+          icon: Square,
+          type: 'select' as const,
+          options: ['compact', 'default', 'large'],
+          value: settings.appearance.buttonSize,
+        },
+      ],
+    },
+    {
+      id: 'notifications',
+      title: 'Notifications',
+      items: [
+        {
+          id: 'alertsEnabled',
+          label: 'Enable Alerts',
+          description: 'Show experiment alerts and warnings',
+          icon: Bell,
+          type: 'toggle' as const,
+          value: settings.notifications.alertsEnabled,
+        },
+        {
+          id: 'webNotifications',
+          label: 'Browser Notifications',
+          description: 'Show OS notification banner when bot responds',
+          icon: Bell,
+          type: 'toggle' as const,
+          value: settings.notifications.webNotificationsEnabled,
+        },
+      ],
+    },
+    {
+      id: 'about',
+      title: 'About',
+      items: [
+        {
+          id: 'journeyStory',
+          label: 'Journey Story',
+          description: 'Learn about our development journey',
+          icon: Sparkles,
+          type: 'nav' as const,
+        },
+        {
+          id: 'devNotes',
+          label: 'Dev Notes',
+          description: 'Technical notes and documentation',
+          icon: Code,
+          type: 'nav' as const,
+        },
+      ],
+    },
+  ], [settings])
+
+  const filteredSections = useMemo(() => {
+    if (!searchQuery.trim()) return settingsSections
+
+    const query = searchQuery.toLowerCase()
+    return settingsSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter(
+          (item) =>
+            item.label.toLowerCase().includes(query) ||
+            item.description.toLowerCase().includes(query) ||
+            section.title.toLowerCase().includes(query),
+        ),
+      }))
+      .filter((section) => section.items.length > 0)
+  }, [searchQuery, settingsSections])
+
+  const handleThemeChange = (theme: 'dark' | 'light' | 'system') => {
+    onSettingsChange({
+      ...settings,
+      appearance: { ...settings.appearance, theme },
+    })
+  }
+
+  const handleFontSizeChange = (fontSize: 'small' | 'medium' | 'large') => {
+    onSettingsChange({
+      ...settings,
+      appearance: { ...settings.appearance, fontSize },
+    })
+  }
+
+  const handleButtonSizeChange = (buttonSize: 'compact' | 'default' | 'large') => {
+    onSettingsChange({
+      ...settings,
+      appearance: { ...settings.appearance, buttonSize },
+    })
+  }
+
+  const handleAlertsToggle = (enabled: boolean) => {
+    onSettingsChange({
+      ...settings,
+      notifications: { ...settings.notifications, alertsEnabled: enabled },
+    })
+  }
+
+  const handleWebNotificationsToggle = (enabled: boolean) => {
+    onSettingsChange({
+      ...settings,
+      notifications: { ...settings.notifications, webNotificationsEnabled: enabled },
+    })
+  }
+
+  const handleSlackSave = () => {
+    onSettingsChange({
+      ...settings,
+      integrations: {
+        ...settings.integrations,
+        slack: {
+          enabled: true,
+          apiKey: slackApiKey,
+          channel: slackChannel,
+        },
+      },
+    })
+    setSlackDialogOpen(false)
+  }
+
+  const handleSlackDisconnect = () => {
+    onSettingsChange({
+      ...settings,
+      integrations: {
+        ...settings.integrations,
+        slack: undefined,
+      },
+    })
+    setSlackApiKey('')
+    setSlackChannel('')
+  }
+
+  const renderSettingItem = (item: typeof settingsSections[0]['items'][0]) => {
+    const Icon = item.icon
+
+    switch (item.type) {
+      case 'nav':
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (item.id === 'journeyStory') onNavigateToJourney?.('story')
+              if (item.id === 'devNotes') onNavigateToJourney?.('devnotes')
+            }}
+            className="flex w-full items-center justify-between rounded-lg bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                <Icon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        )
+      case 'action':
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (item.id === 'slack') setSlackDialogOpen(true)
+            }}
+            className="flex w-full items-center justify-between rounded-lg bg-secondary/50 p-4 text-left transition-colors hover:bg-secondary"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                <Icon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {settings.integrations.slack?.enabled && item.id === 'slack' && (
+                <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs text-accent">
+                  Connected
+                </span>
+              )}
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </button>
+        )
+      case 'select':
+        return (
+          <div className="rounded-lg bg-secondary/50 p-4">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                <Icon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+            <div className="ml-13 flex gap-2">
+              {item.options?.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => {
+                    if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
+                    if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
+                    if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
+                  }}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize transition-colors ${item.value === option
+                    ? 'bg-accent text-accent-foreground'
+                    : 'bg-background text-muted-foreground hover:text-foreground'}`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      case 'toggle':
+        return (
+          <div className="flex items-center justify-between rounded-lg bg-secondary/50 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                <Icon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+            <Switch
+              checked={item.value as boolean}
+              onCheckedChange={(checked) => {
+                if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
+                if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
+              }}
+            />
+          </div>
+        )
+      case 'custom':
+        if (item.id !== 'apiConfig') return null
+
+        return (
+          <div className="space-y-4 rounded-lg bg-secondary/50 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                <Server className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-foreground">Server Connection</p>
+                <p className="text-xs text-muted-foreground">Configure API server URL and mode</p>
+              </div>
+              {useMock && (
+                <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-500">
+                  Demo Mode
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <div>
+                <p className="text-sm text-foreground">Use Demo Mode</p>
+                <p className="text-xs text-muted-foreground">Use mock data instead of real server</p>
+              </div>
+              <Switch checked={useMock} onCheckedChange={setUseMock} />
+            </div>
+
+            {!useMock && (
+              <>
+                <Separator />
+                <div className="space-y-2">
+                  <Label htmlFor="api-url" className="text-xs">Server URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="api-url"
+                      placeholder="http://localhost:10000"
+                      value={apiUrlInput}
+                      onChange={(e) => setApiUrlInput(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSaveApiUrl}
+                      disabled={apiUrlInput === apiUrl}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="auth-token" className="text-xs">Auth Token</Label>
+                  <p className="text-xs text-muted-foreground">Required for secure remote access</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="auth-token"
+                      ref={authTokenInputRef}
+                      type="password"
+                      placeholder="Enter auth token..."
+                      value={authTokenInput}
+                      onChange={(e) => setAuthTokenInput(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSaveAuthToken}
+                      disabled={authTokenInput === authToken}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTestConnection}
+                    disabled={connectionStatus === 'testing'}
+                    className="flex-1"
+                  >
+                    {connectionStatus === 'testing' ? (
+                      <><RotateCcw className="mr-2 h-3 w-3 animate-spin" />Testing...</>
+                    ) : connectionStatus === 'connected' ? (
+                      <><Wifi className="mr-2 h-3 w-3 text-green-500" />Connected</>
+                    ) : connectionStatus === 'failed' ? (
+                      <><WifiOff className="mr-2 h-3 w-3 text-red-500" />Failed</>
+                    ) : (
+                      <>Test Connection</>
+                    )}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      resetToDefaults()
+                      setConnectionStatus('idle')
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </div>
+
+                {connectionStatus === 'failed' && (
+                  <p className="text-xs text-amber-500">
+                    Tip: Enable Demo Mode above to use the app without a server.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )
+      default:
+        return null
+    }
+  }
+
+  return (
+    <>
+      <div className="mx-auto flex h-full w-full max-w-4xl flex-col overflow-hidden">
+        <div className="px-4 py-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search settings..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="border-0 bg-secondary pl-9"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 pb-6">
+          {filteredSections.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Search className="mb-3 h-10 w-10 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">No settings found</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {filteredSections.map((section) => (
+                <div key={section.id}>
+                  <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    {section.title}
+                  </h3>
+                  <div className="space-y-2">
+                    {section.items.map((item) => (
+                      <div key={item.id}>{renderSettingItem(item)}</div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Dialog open={slackDialogOpen} onOpenChange={setSlackDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Slack className="h-5 w-5" />
+              Slack Integration
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {settings.integrations.slack?.enabled ? (
+              <>
+                <div className="rounded-lg border border-accent/30 bg-accent/10 p-3">
+                  <div className="flex items-center gap-2 text-accent">
+                    <Check className="h-4 w-4" />
+                    <span className="text-sm font-medium">Connected</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Channel: {settings.integrations.slack.channel || 'Not set'}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full bg-transparent"
+                  onClick={handleSlackDisconnect}
+                >
+                  <X className="mr-2 h-4 w-4" />
+                  Disconnect
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="slack-api" className="text-xs">
+                      Slack API Token
+                    </Label>
+                    <Input
+                      id="slack-api"
+                      type="password"
+                      placeholder="xoxb-..."
+                      value={slackApiKey}
+                      onChange={(e) => setSlackApiKey(e.target.value)}
+                      className="mt-1.5"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="slack-channel" className="text-xs">
+                      Default Channel
+                    </Label>
+                    <Input
+                      id="slack-channel"
+                      placeholder="#ml-experiments"
+                      value={slackChannel}
+                      onChange={(e) => setSlackChannel(e.target.value)}
+                      className="mt-1.5"
+                    />
+                  </div>
+                </div>
+                <Button
+                  className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
+                  onClick={handleSlackSave}
+                  disabled={!slackApiKey.trim()}
+                >
+                  Connect to Slack
+                </Button>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { FloatingNav } from '@/components/floating-nav'
 import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
@@ -10,30 +11,16 @@ import { InsightsView } from '@/components/insights-view'
 import { EventsView } from '@/components/events-view'
 import { JourneyView } from '@/components/journey-view'
 import { ReportView } from '@/components/report-view'
-import { SettingsDialog } from '@/components/settings-dialog'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
 import type { ChatMode } from '@/components/chat-input'
 import { mockMemoryRules, mockInsightCharts, defaultTags, mockSweeps } from '@/lib/mock-data'
-import type { ExperimentRun, MemoryRule, InsightChart, AppSettings, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
+import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
 import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
 import { useWildLoop } from '@/hooks/use-wild-loop'
-
-const defaultSettings: AppSettings = {
-  appearance: {
-    theme: 'dark',
-    fontSize: 'medium',
-    buttonSize: 'default',
-  },
-  integrations: {},
-  notifications: {
-    alertsEnabled: true,
-    alertTypes: ['error', 'warning', 'info'],
-    webNotificationsEnabled: true,
-  },
-}
+import { useAppSettings } from '@/lib/app-settings'
 
 type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
 
@@ -44,11 +31,13 @@ const runsSubTabLabels: Record<RunsSubTab, string> = {
 }
 
 export default function ResearchChat() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { settings } = useAppSettings()
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
   const [runsSubTab, setRunsSubTab] = useState<RunsSubTab>('overview')
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Use real API data via useRuns hook
   const { runs, updateRun: apiUpdateRun, refetch, startExistingRun, stopExistingRun } = useRuns()
@@ -56,7 +45,6 @@ export default function ResearchChat() {
 
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
   const [insightCharts, setInsightCharts] = useState<InsightChart[]>(mockInsightCharts)
-  const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [chatMode, setChatMode] = useState<ChatMode>('agent')
   const [allTags, setAllTags] = useState<TagDefinition[]>(defaultTags)
 
@@ -79,7 +67,18 @@ export default function ResearchChat() {
 
   // API configuration for auth/connection check
   const { useMock, authToken, testConnection } = useApiConfig()
-  const [focusAuthToken, setFocusAuthToken] = useState(false)
+
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    const journeySubTabParam = searchParams.get('journeySubTab')
+
+    if (tab === 'journey') {
+      setActiveTab('journey')
+    }
+    if (journeySubTabParam === 'story' || journeySubTabParam === 'devnotes') {
+      setJourneySubTab(journeySubTabParam)
+    }
+  }, [searchParams])
 
   // Auto-open settings if auth token is missing or connection fails (when not in mock mode)
   useEffect(() => {
@@ -88,20 +87,19 @@ export default function ResearchChat() {
     const checkConnection = async () => {
       // Check if auth token is missing
       if (!authToken) {
-        setFocusAuthToken(true)
-        setSettingsOpen(true)
+        router.push('/settings?focusAuthToken=1')
         return
       }
 
       // Check if connection works
       const isConnected = await testConnection()
       if (!isConnected) {
-        setSettingsOpen(true)
+        router.push('/settings')
       }
     }
 
     checkConnection()
-  }, [useMock, authToken, testConnection])
+  }, [useMock, authToken, testConnection, router])
 
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
@@ -263,10 +261,7 @@ export default function ResearchChat() {
     } else if (activeTab === 'report') {
       items.push({ label: 'Report' })
     } else if (activeTab === 'journey') {
-      items.push({
-        label: 'Settings',
-        onClick: () => setSettingsOpen(true)
-      })
+      items.push({ label: 'Journey' })
       items.push({ label: journeySubTab === 'story' ? 'Journey Story' : 'Dev Notes' })
     }
 
@@ -508,6 +503,8 @@ export default function ResearchChat() {
               collapseArtifactsInChat={collapseArtifactsInChat}
               chatSession={chatSession}
               wildLoop={wildLoop}
+              webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
+              onOpenSettings={() => router.push('/settings')}
             />
           )}
           {activeTab === 'chat' && showSweepForm && (
@@ -578,7 +575,7 @@ export default function ResearchChat() {
         <NavPage
           open={leftPanelOpen}
           onOpenChange={setLeftPanelOpen}
-          onSettingsClick={() => setSettingsOpen(true)}
+          onSettingsClick={() => router.push('/settings')}
           activeTab={activeTab}
           runsSubTab={runsSubTab}
           journeySubTab={journeySubTab}
@@ -596,30 +593,6 @@ export default function ResearchChat() {
           }}
         />
 
-        {/* Hidden trigger for programmatic settings access */}
-        <button
-          type="button"
-          data-settings-trigger
-          onClick={() => setSettingsOpen(true)}
-          className="hidden"
-          aria-hidden="true"
-        />
-
-        <SettingsDialog
-          open={settingsOpen}
-          onOpenChange={(open) => {
-            setSettingsOpen(open)
-            if (!open) setFocusAuthToken(false)
-          }}
-          settings={settings}
-          onSettingsChange={setSettings}
-          onNavigateToJourney={(subTab) => {
-            setActiveTab('journey')
-            setJourneySubTab(subTab)
-          }}
-          focusAuthToken={focusAuthToken}
-          onRefresh={refetch}
-        />
       </main>
     </div>
   )

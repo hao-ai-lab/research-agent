@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ApiConfigProvider } from '@/lib/api-config'
+import { AppSettingsProvider } from '@/lib/app-settings'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -44,14 +45,15 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="dark bg-background" suppressHydrationWarning>
+    <html lang="en" className="bg-background" suppressHydrationWarning>
       <body className={`font-sans antialiased`} suppressHydrationWarning>
         <ApiConfigProvider>
-          {children}
+          <AppSettingsProvider>
+            {children}
+          </AppSettingsProvider>
         </ApiConfigProvider>
         <Analytics />
       </body>
     </html>
   )
 }
-
