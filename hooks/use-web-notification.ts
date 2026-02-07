@@ -10,11 +10,15 @@ import { useEffect, useCallback, useRef } from 'react'
  *
  * Works on macOS (Notification Center), Android Chrome, and iOS Safari 16.4+ PWAs.
  */
-export function useWebNotification() {
+export function useWebNotification(enabled = true) {
     const permissionRef = useRef<NotificationPermission>('default')
 
     // Request permission on mount
     useEffect(() => {
+        if (!enabled) {
+            return
+        }
+
         if (typeof window === 'undefined' || !('Notification' in window)) {
             console.log('[notification] Notification API not available')
             return
@@ -30,12 +34,16 @@ export function useWebNotification() {
                 permissionRef.current = perm
             })
         }
-    }, [])
+    }, [enabled])
 
     const notify = useCallback((title: string, body?: string) => {
         console.log('[notification] notify() called:', { title, body: body?.slice(0, 80), permission: permissionRef.current, hidden: document.hidden })
 
         // Skip if API not available, permission denied, or page is focused
+        if (!enabled) {
+            return
+        }
+
         if (typeof window === 'undefined' || !('Notification' in window)) {
             console.log('[notification] SKIP: Notification API not available')
             return
@@ -69,7 +77,7 @@ export function useWebNotification() {
         } catch (err) {
             console.warn('[notification] Failed to create notification:', err)
         }
-    }, [])
+    }, [enabled])
 
     return { notify }
 }
