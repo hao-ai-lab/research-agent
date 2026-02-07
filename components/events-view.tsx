@@ -16,7 +16,10 @@ import {
   Lightbulb,
   ExternalLink,
   Filter,
+  Ban,
+  Square,
 } from 'lucide-react'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -167,45 +170,124 @@ export function EventsView({
   const renderEventCard = (event: RunEvent) => {
     const isExpanded = expandedEvents.has(event.id)
     
+    // Determine alert choice icons
+    const getChoiceIcon = (choice: string) => {
+      const normalized = choice.toLowerCase()
+      if (normalized.includes('stop') || normalized.includes('kill') || normalized.includes('terminate')) {
+        return <Square className="h-3.5 w-3.5" />
+      }
+      if (normalized.includes('ignore') || normalized.includes('dismiss') || normalized.includes('skip')) {
+        return <Ban className="h-3.5 w-3.5" />
+      }
+      return <CheckCircle2 className="h-3.5 w-3.5" />
+    }
+
+    const getChoiceVariant = (choice: string): 'destructive' | 'outline' | 'ghost' => {
+      const normalized = choice.toLowerCase()
+      if (normalized.includes('stop') || normalized.includes('kill') || normalized.includes('terminate')) {
+        return 'destructive'
+      }
+      return 'ghost'
+    }
+
     return (
       <Collapsible key={event.id} open={isExpanded} onOpenChange={() => toggleExpanded(event.id)}>
         <div className={`rounded-lg border ${getPriorityStyle(event.priority)} overflow-hidden`}>
-          {/* Event Header */}
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="w-full flex items-start gap-3 p-3 text-left hover:bg-secondary/30 transition-colors"
-            >
-              <div className="mt-0.5">{getEventIcon(event.type)}</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-sm text-foreground">{event.title}</span>
-                  {getPriorityBadge(event.priority)}
-                  {getStatusBadge(event.status)}
+          {/* Event Header — includes action icons */}
+          <div className="flex items-start gap-3 p-3">
+            {/* Clickable left side (expand/collapse) */}
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex-1 flex items-start gap-3 text-left hover:opacity-80 transition-opacity min-w-0"
+              >
+                <div className="mt-0.5">{getEventIcon(event.type)}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-sm text-foreground">{event.title}</span>
+                    {getPriorityBadge(event.priority)}
+                    {getStatusBadge(event.status)}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                    {event.summary}
+                  </p>
+                  <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {formatTimestamp(event.timestamp)}
+                    </span>
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onNavigateToRun(event.runId)
+                      }}
+                      className="flex items-center gap-1 hover:text-foreground cursor-pointer"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      {event.runAlias || event.runName}
+                    </span>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                  {event.summary}
-                </p>
-                <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {formatTimestamp(event.timestamp)}
-                  </span>
-                  <span
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onNavigateToRun(event.runId)
-                    }}
-                    className="flex items-center gap-1 hover:text-foreground cursor-pointer"
+                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+              </button>
+            </CollapsibleTrigger>
+
+            {/* Action icons (always visible) */}
+            <div className="flex items-center gap-1 shrink-0 mt-0.5" onClick={(e) => e.stopPropagation()}>
+              {/* Open Chat */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onResolveByChat(event)}
+                    className="h-7 w-7"
                   >
-                    <ExternalLink className="h-3 w-3" />
-                    {event.runAlias || event.runName}
-                  </span>
-                </div>
-              </div>
-              <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-            </button>
-          </CollapsibleTrigger>
+                    <MessageSquare className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{event.alertSessionId ? 'Open Chat' : 'Resolve by Chat'}</TooltipContent>
+              </Tooltip>
+
+              {/* Alert choice buttons */}
+              {event.alertId && event.choices && event.choices.length > 0 && onRespondToAlert && (
+                <>
+                  {event.choices.map((choice) => (
+                    <Tooltip key={`${event.id}-${choice}`}>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={getChoiceVariant(choice)}
+                          size="icon"
+                          onClick={() => onRespondToAlert(event, choice)}
+                          className="h-7 w-7"
+                        >
+                          {getChoiceIcon(choice)}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{choice}</TooltipContent>
+                    </Tooltip>
+                  ))}
+                </>
+              )}
+
+              {/* Mark Resolved (green) */}
+              {event.status !== 'resolved' && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => onUpdateEventStatus(event.id, 'resolved')}
+                      className="h-7 w-7 text-green-500 hover:text-green-400 hover:bg-green-500/10"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Mark Resolved</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
 
           {/* Expanded Content */}
           <CollapsibleContent>
@@ -271,72 +353,6 @@ export function EventsView({
                   </div>
                 </div>
               )}
-
-              {/* Actions */}
-              <div className="pt-2 border-t border-border/50 space-y-2">
-                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => onResolveByChat(event)}
-                    className="h-8 w-full sm:w-auto text-xs gap-1.5 justify-start sm:justify-center"
-                  >
-                    <MessageSquare className="h-3.5 w-3.5" />
-                    <span className="truncate">{event.alertSessionId ? 'Open Chat' : 'Resolve by Chat'}</span>
-                  </Button>
-                  {event.alertId && event.choices && event.choices.length > 0 && onRespondToAlert && (
-                    <>
-                      {event.choices.map((choice) => {
-                        const normalized = choice.toLowerCase()
-                        const isStopAction = normalized.includes('stop') || normalized.includes('kill') || normalized.includes('terminate')
-                        return (
-                          <Button
-                            key={`${event.id}-${choice}`}
-                            variant={isStopAction ? 'destructive' : 'outline'}
-                            size="sm"
-                            onClick={() => onRespondToAlert(event, choice)}
-                            className="h-8 w-full sm:w-auto text-xs justify-start sm:justify-center"
-                          >
-                            <span className="max-w-full truncate">{choice}</span>
-                          </Button>
-                        )
-                      })}
-                    </>
-                  )}
-                  {event.status === 'new' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onUpdateEventStatus(event.id, 'acknowledged')}
-                      className="h-8 w-full sm:w-auto text-xs justify-start sm:justify-center"
-                    >
-                      <span className="truncate">Acknowledge</span>
-                    </Button>
-                  )}
-                  {event.status !== 'resolved' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onUpdateEventStatus(event.id, 'resolved')}
-                      className="h-8 w-full sm:w-auto text-xs gap-1.5 justify-start sm:justify-center"
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      <span className="truncate">Mark Resolved</span>
-                    </Button>
-                  )}
-                </div>
-                <div className="flex">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onNavigateToRun(event.runId)}
-                    className="h-8 w-full sm:w-auto sm:ml-auto text-xs gap-1.5 justify-center"
-                  >
-                    <span className="truncate">View Run</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
             </div>
           </CollapsibleContent>
         </div>
