@@ -10,7 +10,6 @@ import {
   ImageIcon,
   FileText,
   Zap,
-  Bug,
   AtSign,
   Command,
   Mic,
@@ -47,6 +46,20 @@ export interface MentionItem {
   icon?: React.ReactNode
 }
 
+interface SlashCommandItem {
+  command: '/launch' | '/analyze' | '/compare' | '/sweep' | '/develop'
+  description: string
+  color: string
+}
+
+const SLASH_COMMANDS: SlashCommandItem[] = [
+  { command: '/launch', description: 'New run', color: '#22c55e' },
+  { command: '/analyze', description: 'Analyze results', color: '#60a5fa' },
+  { command: '/compare', description: 'Compare runs', color: '#f59e0b' },
+  { command: '/sweep', description: 'Create sweep', color: '#a855f7' },
+  { command: '/develop', description: 'Echo locally (dev)', color: '#14b8a6' },
+]
+
 interface ChatInputProps {
   onSend: (message: string, attachments?: File[], mode?: ChatMode) => void
   onStop?: () => void
@@ -64,6 +77,7 @@ interface ChatInputProps {
   queueCount?: number
   queue?: string[]
   onRemoveFromQueue?: (index: number) => void
+  insertDraft?: { id: number; text: string } | null
 }
 
 export function ChatInput({
@@ -82,6 +96,7 @@ export function ChatInput({
   queueCount = 0,
   queue = [],
   onRemoveFromQueue,
+  insertDraft = null,
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -90,14 +105,21 @@ export function ChatInput({
   const [isRecording, setIsRecording] = useState(false)
   const [isMentionOpen, setIsMentionOpen] = useState(false)
   const [isCommandOpen, setIsCommandOpen] = useState(false)
+  const [isSlashOpen, setIsSlashOpen] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionStartIndex, setMentionStartIndex] = useState<number | null>(null)
+  const [slashQuery, setSlashQuery] = useState('')
+  const [slashStartIndex, setSlashStartIndex] = useState<number | null>(null)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
+  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [mentionFilter, setMentionFilter] = useState<MentionType | 'all'>('all')
   const [isQueueExpanded, setIsQueueExpanded] = useState(true)
+  const [dictationSupported, setDictationSupported] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
   const mentionPopoverRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<any>(null)
 
   // Build mention items from data
   const mentionItems = useMemo<MentionItem[]>(() => {
@@ -223,10 +245,146 @@ export function ChatInput({
     return items.slice(0, 8) // Limit to 8 results
   }, [mentionItems, mentionQuery, mentionFilter])
 
+  const filteredSlashCommands = useMemo(() => {
+    const query = slashQuery.trim().toLowerCase()
+    if (!query) return SLASH_COMMANDS
+    return SLASH_COMMANDS.filter((item) => {
+      const commandName = item.command.slice(1).toLowerCase()
+      return commandName.includes(query) || item.description.toLowerCase().includes(query)
+    })
+  }, [slashQuery])
+
+  const commandColorMap = useMemo(() => {
+    const map = new Map<string, string>()
+    SLASH_COMMANDS.forEach((item) => {
+      map.set(item.command.toLowerCase(), item.color)
+    })
+    return map
+  }, [])
+
+  const highlightedMessage = useMemo(() => {
+    if (!message) return null
+    const parts: React.ReactNode[] = []
+    const commandRegex = /\/[a-zA-Z][\w-]*/g
+    let cursor = 0
+    let match: RegExpExecArray | null
+    let keyIndex = 0
+
+    while ((match = commandRegex.exec(message)) !== null) {
+      const token = match[0]
+      const matchStart = match.index
+      const matchEnd = matchStart + token.length
+
+      if (matchStart > cursor) {
+        parts.push(
+          <span key={`plain-${keyIndex++}`}>
+            {message.slice(cursor, matchStart)}
+          </span>
+        )
+      }
+
+      const color = commandColorMap.get(token.toLowerCase())
+      parts.push(
+        <span key={`command-${keyIndex++}`} style={color ? { color } : undefined}>
+          {token}
+        </span>
+      )
+
+      cursor = matchEnd
+    }
+
+    if (cursor < message.length) {
+      parts.push(
+        <span key={`plain-${keyIndex++}`}>
+          {message.slice(cursor)}
+        </span>
+      )
+    }
+
+    return parts
+  }, [message, commandColorMap])
+
   // Reset selected index when filtered items change
   useEffect(() => {
     setSelectedMentionIndex(0)
   }, [filteredMentionItems])
+
+  useEffect(() => {
+    setSelectedSlashIndex(0)
+  }, [filteredSlashCommands])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+
+    if (!SpeechRecognition) {
+      setDictationSupported(false)
+      recognitionRef.current = null
+      return
+    }
+
+    setDictationSupported(true)
+    const recognition = new SpeechRecognition()
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.lang = 'en-US'
+
+    recognition.onresult = (event: any) => {
+      let transcript = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i]
+        if (result.isFinal) {
+          transcript += result[0]?.transcript || ''
+        }
+      }
+      const normalized = transcript.trim()
+      if (!normalized) return
+      setMessage((prev) => (prev.trim().length > 0 ? `${prev} ${normalized}` : normalized))
+    }
+
+    recognition.onend = () => {
+      setIsRecording(false)
+    }
+
+    recognition.onerror = (error: any) => {
+      console.error('Dictation error:', error)
+      setIsRecording(false)
+    }
+
+    recognitionRef.current = recognition
+
+    return () => {
+      try {
+        recognition.stop()
+      } catch {
+        // Ignore stop errors during teardown.
+      }
+      recognitionRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!textareaRef.current) return
+    textareaRef.current.style.height = 'auto'
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+  }, [message])
+
+  useEffect(() => {
+    if (!insertDraft?.text) return
+    setMessage((prev) => {
+      if (!prev) return insertDraft.text
+      const separator = prev.endsWith(' ') ? '' : ' '
+      return `${prev}${separator}${insertDraft.text}`
+    })
+    setTimeout(() => {
+      textareaRef.current?.focus()
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+      }
+    }, 0)
+  }, [insertDraft?.id, insertDraft?.text])
 
   const handleSubmit = () => {
     if (message.trim() || attachments.length > 0) {
@@ -238,6 +396,12 @@ export function ChatInput({
       }
       setMessage('')
       setAttachments([])
+      setIsMentionOpen(false)
+      setMentionStartIndex(null)
+      setMentionQuery('')
+      setIsSlashOpen(false)
+      setSlashStartIndex(null)
+      setSlashQuery('')
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
       }
@@ -275,6 +439,36 @@ export function ChatInput({
       }
     }
 
+    // Handle slash command navigation
+    if (isSlashOpen && filteredSlashCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSelectedSlashIndex((prev) =>
+          prev < filteredSlashCommands.length - 1 ? prev + 1 : 0
+        )
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSelectedSlashIndex((prev) =>
+          prev > 0 ? prev - 1 : filteredSlashCommands.length - 1
+        )
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        insertSlashCommand(filteredSlashCommands[selectedSlashIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setIsSlashOpen(false)
+        setSlashStartIndex(null)
+        setSlashQuery('')
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
@@ -287,6 +481,9 @@ export function ChatInput({
     setMessage(value)
     e.target.style.height = 'auto'
     e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
+    if (highlightRef.current) {
+      highlightRef.current.scrollTop = e.target.scrollTop
+    }
 
     // Detect @ mention trigger
     const textBeforeCursor = value.slice(0, cursorPos)
@@ -319,15 +516,33 @@ export function ChatInput({
         } else {
           setMentionFilter('all')
         }
+        setIsSlashOpen(false)
+        setSlashStartIndex(null)
+        setSlashQuery('')
         return
       }
     }
-    
+
     // Close mention popover if no active mention
     setIsMentionOpen(false)
     setMentionStartIndex(null)
     setMentionQuery('')
     setMentionFilter('all')
+
+    // Detect / command trigger (at token start)
+    const slashMatch = textBeforeCursor.match(/(^|\s)(\/[a-zA-Z-]*)$/)
+    if (slashMatch) {
+      const slashToken = slashMatch[2] || ''
+      const slashTokenStart = cursorPos - slashToken.length
+      setSlashStartIndex(slashTokenStart)
+      setSlashQuery(slashToken.slice(1))
+      setIsSlashOpen(true)
+      return
+    }
+
+    setIsSlashOpen(false)
+    setSlashStartIndex(null)
+    setSlashQuery('')
   }
 
   const insertMention = useCallback((item: MentionItem) => {
@@ -353,6 +568,28 @@ export function ChatInput({
     }, 0)
   }, [mentionStartIndex, message])
 
+  const insertSlashCommand = useCallback((item: SlashCommandItem) => {
+    if (slashStartIndex === null) return
+
+    const currentCursor = textareaRef.current?.selectionStart ?? message.length
+    const beforeSlash = message.slice(0, slashStartIndex)
+    const afterSlash = message.slice(currentCursor)
+    const commandText = `${item.command} `
+
+    setMessage(beforeSlash + commandText + afterSlash)
+    setIsSlashOpen(false)
+    setSlashStartIndex(null)
+    setSlashQuery('')
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newCursorPos = beforeSlash.length + commandText.length
+        textareaRef.current.focus()
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    }, 0)
+  }, [message, slashStartIndex])
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setAttachments((prev) => [...prev, ...Array.from(e.target.files!)])
@@ -365,8 +602,19 @@ export function ChatInput({
   }
 
   const toggleRecording = () => {
-    setIsRecording(!isRecording)
-    // In a real app, this would start/stop audio recording
+    if (!dictationSupported || !recognitionRef.current) return
+    if (isRecording) {
+      recognitionRef.current.stop()
+      setIsRecording(false)
+      return
+    }
+    try {
+      recognitionRef.current.start()
+      setIsRecording(true)
+    } catch (error) {
+      console.error('Failed to start dictation:', error)
+      setIsRecording(false)
+    }
   }
 
   const insertText = (text: string) => {
@@ -453,15 +701,13 @@ export function ChatInput({
         </div>
       )}
 
-      {/* Text input with inline mention autocomplete */}
+      {/* Text input with inline mention/slash autocomplete */}
       <div className="relative mb-1.5">
-        {/* Mention autocomplete dropdown */}
-        {isMentionOpen && filteredMentionItems.length > 0 && (
-          <div 
+        {isMentionOpen && (
+          <div
             ref={mentionPopoverRef}
             className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-card border border-border rounded-lg shadow-lg overflow-hidden"
           >
-            {/* Type filter tabs */}
             <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-secondary/30">
               <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
               <div className="flex-1 min-w-0 overflow-x-auto">
@@ -485,44 +731,50 @@ export function ChatInput({
                 </div>
               </div>
             </div>
-            
-            {/* Mention items */}
+
             <div className="max-h-[200px] overflow-y-auto py-1">
-              {filteredMentionItems.map((item, index) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => insertMention(item)}
-                  onMouseEnter={() => setSelectedMentionIndex(index)}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
-                    index === selectedMentionIndex
-                      ? 'bg-secondary'
-                      : 'hover:bg-secondary/50'
-                  }`}
-                >
-                  <span 
-                    className="flex items-center justify-center h-5 w-5 rounded shrink-0"
-                    style={{ 
-                      backgroundColor: item.color ? `${item.color}20` : 'var(--secondary)',
-                      color: item.color || 'var(--muted-foreground)'
-                    }}
+              {filteredMentionItems.length > 0 ? (
+                filteredMentionItems.map((item, index) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => insertMention(item)}
+                    onMouseEnter={() => setSelectedMentionIndex(index)}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
+                      index === selectedMentionIndex ? 'bg-secondary' : 'hover:bg-secondary/50'
+                    }`}
                   >
-                    {item.icon}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground truncate">{item.label}</p>
-                    {item.sublabel && (
-                      <p className="text-[10px] text-muted-foreground truncate">{item.sublabel}</p>
-                    )}
-                  </div>
-                  <span className="text-[9px] text-muted-foreground/60 uppercase shrink-0">
-                    {item.type}
-                  </span>
-                </button>
-              ))}
+                    <span
+                      className="flex items-center justify-center h-5 w-5 rounded shrink-0"
+                      style={{
+                        backgroundColor: item.color ? `${item.color}20` : 'var(--secondary)',
+                        color: item.color || 'var(--muted-foreground)'
+                      }}
+                    >
+                      {item.icon}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{item.label}</p>
+                      {item.sublabel && (
+                        <p className="text-[10px] text-muted-foreground truncate">{item.sublabel}</p>
+                      )}
+                    </div>
+                    <span className="text-[9px] text-muted-foreground/60 uppercase shrink-0">
+                      {item.type}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-3 text-xs text-muted-foreground">
+                  {mentionQuery
+                    ? `No results for "${mentionQuery}"`
+                    : mentionFilter === 'all'
+                      ? 'No items available.'
+                      : `No ${mentionFilter} items available.`}
+                </div>
+              )}
             </div>
-            
-            {/* Hint */}
+
             <div className="px-2 py-1 border-t border-border bg-secondary/20">
               <p className="text-[10px] text-muted-foreground">
                 <kbd className="px-1 py-0.5 bg-secondary rounded text-[9px]">↑↓</kbd> navigate
@@ -533,24 +785,97 @@ export function ChatInput({
           </div>
         )}
 
-        {/* No results state */}
-        {isMentionOpen && filteredMentionItems.length === 0 && mentionQuery && (
-          <div className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-card border border-border rounded-lg shadow-lg px-3 py-2">
-            <p className="text-xs text-muted-foreground">No results for "{mentionQuery}"</p>
+        {isSlashOpen && !isMentionOpen && (
+          <div className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+            <div className="px-3 py-1.5 border-b border-border bg-secondary/30">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Commands</p>
+            </div>
+            <div className="max-h-[220px] overflow-y-auto py-1">
+              {filteredSlashCommands.length > 0 ? (
+                filteredSlashCommands.map((item, index) => (
+                  <button
+                    key={item.command}
+                    type="button"
+                    onClick={() => insertSlashCommand(item)}
+                    onMouseEnter={() => setSelectedSlashIndex(index)}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors ${
+                      index === selectedSlashIndex ? 'bg-secondary' : 'hover:bg-secondary/50'
+                    }`}
+                  >
+                    <span className="text-xs font-medium" style={{ color: item.color }}>
+                      {item.command}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{item.description}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-3 text-xs text-muted-foreground">
+                  No commands match "{slashQuery}".
+                </div>
+              )}
+            </div>
+            <div className="px-2 py-1 border-t border-border bg-secondary/20">
+              <p className="text-[10px] text-muted-foreground">
+                <kbd className="px-1 py-0.5 bg-secondary rounded text-[9px]">↑↓</kbd> navigate
+                <kbd className="ml-2 px-1 py-0.5 bg-secondary rounded text-[9px]">Tab/Enter</kbd> insert
+              </p>
+            </div>
           </div>
         )}
 
-        <textarea
-          ref={textareaRef}
-          value={message}
-          onChange={handleTextareaChange}
-          onKeyDown={handleKeyDown}
-          placeholder="Message Research Assistant... (type @ to mention)"
-          disabled={disabled}
-          rows={1}
-          className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-          style={{ minHeight: '40px', maxHeight: '100px' }}
-        />
+        <div className="relative rounded-lg border border-border bg-card focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+          <div
+            ref={highlightRef}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 text-sm leading-5 text-foreground"
+          >
+            {message ? highlightedMessage : (
+              <span className="text-muted-foreground">Message Research Assistant... (type @ or /)</span>
+            )}
+          </div>
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={handleTextareaChange}
+            onKeyDown={handleKeyDown}
+            onScroll={(e) => {
+              if (highlightRef.current) {
+                highlightRef.current.scrollTop = e.currentTarget.scrollTop
+              }
+            }}
+            placeholder="Message Research Assistant... (type @ or /)"
+            disabled={disabled}
+            rows={1}
+            className="relative z-10 w-full resize-none bg-transparent px-3 py-2 pr-11 text-sm leading-5 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
+            style={{
+              minHeight: '40px',
+              maxHeight: '100px',
+              caretColor: 'hsl(var(--foreground))',
+              color: 'transparent',
+              WebkitTextFillColor: 'transparent',
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`chat-toolbar-icon absolute bottom-1.5 right-1.5 z-20 h-7 w-7 ${isRecording ? 'text-destructive bg-destructive/10' : ''}`}
+            onClick={toggleRecording}
+            disabled={!dictationSupported}
+            title={dictationSupported ? (isRecording ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported'}
+          >
+            {isRecording ? (
+              <MicOff className="h-4 w-4" />
+            ) : (
+              <Mic className="h-4 w-4" />
+            )}
+          </Button>
+          {isRecording && (
+            <span className="absolute bottom-3.5 right-10 z-20 flex items-center gap-1 text-[10px] text-destructive animate-pulse">
+              <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+              Rec
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Action buttons - bottom row */}
@@ -561,7 +886,7 @@ export function ChatInput({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
+                className={`chat-toolbar-pill flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
                   mode === 'agent'
                     ? 'bg-accent/20 text-accent'
                     : mode === 'wild'
@@ -645,16 +970,10 @@ export function ChatInput({
             </PopoverContent>
           </Popover>
 
-          {isRecording && (
-            <span className="flex items-center gap-1 text-[10px] text-destructive animate-pulse ml-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-              Rec
-            </span>
-          )}
           {/* Add attachment */}
           <Popover open={isAttachOpen} onOpenChange={setIsAttachOpen}>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
+              <Button variant="ghost" size="icon" className="chat-toolbar-icon h-7 w-7">
                 <Plus className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
@@ -684,13 +1003,16 @@ export function ChatInput({
           <Button 
             variant="ghost" 
             size="icon" 
-            className="h-7 w-7"
+            className="chat-toolbar-icon h-7 w-7"
             onClick={() => {
               insertText('@')
               // Manually trigger mention mode
               setMentionStartIndex(message.length)
               setMentionQuery('')
               setIsMentionOpen(true)
+              setIsSlashOpen(false)
+              setSlashStartIndex(null)
+              setSlashQuery('')
             }}
           >
             <AtSign className="h-4 w-4" />
@@ -699,74 +1021,30 @@ export function ChatInput({
           {/* Commands */}
           <Popover open={isCommandOpen} onOpenChange={setIsCommandOpen}>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
+              <Button variant="ghost" size="icon" className="chat-toolbar-icon h-7 w-7">
                 <Command className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-48 p-1.5">
               <p className="text-[10px] text-muted-foreground mb-1.5 px-2">Quick commands</p>
               <div className="flex flex-col gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    insertText('/launch ')
-                    setIsCommandOpen(false)
-                  }}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <span className="text-accent">/launch</span>
-                  <span className="text-muted-foreground text-[10px]">New run</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    insertText('/analyze ')
-                    setIsCommandOpen(false)
-                  }}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <span className="text-accent">/analyze</span>
-                  <span className="text-muted-foreground text-[10px]">Analyze</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    insertText('/compare ')
-                    setIsCommandOpen(false)
-                  }}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <span className="text-accent">/compare</span>
-                  <span className="text-muted-foreground text-[10px]">Compare</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    insertText('/sweep ')
-                    setIsCommandOpen(false)
-                  }}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <span className="text-purple-400">/sweep</span>
-                  <span className="text-muted-foreground text-[10px]">Create sweep</span>
-                </button>
+                {SLASH_COMMANDS.map((item) => (
+                  <button
+                    key={item.command}
+                    type="button"
+                    onClick={() => {
+                      insertText(`${item.command} `)
+                      setIsCommandOpen(false)
+                    }}
+                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
+                  >
+                    <span style={{ color: item.color }}>{item.command}</span>
+                    <span className="text-muted-foreground text-[10px]">{item.description}</span>
+                  </button>
+                ))}
               </div>
             </PopoverContent>
           </Popover>
-
-          {/* Microphone */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-7 w-7 ${isRecording ? 'text-destructive bg-destructive/10' : ''}`}
-            onClick={toggleRecording}
-          >
-            {isRecording ? (
-              <MicOff className="h-4 w-4" />
-            ) : (
-              <Mic className="h-4 w-4" />
-            )}
-          </Button>
         </div>
 
         {/* Stop + Send/Queue buttons */}

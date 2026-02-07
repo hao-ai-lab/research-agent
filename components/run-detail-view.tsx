@@ -198,6 +198,8 @@ function MetricChart({
 
 export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
+  const [copiedRunId, setCopiedRunId] = useState(false)
+  const [copiedSweepId, setCopiedSweepId] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
@@ -229,6 +231,16 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     navigator.clipboard.writeText(run.command)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const copyValue = async (value: string, setCopiedState: (copied: boolean) => void) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedState(true)
+      setTimeout(() => setCopiedState(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy value:', error)
+    }
   }
 
   const formatDuration = (start: Date, end?: Date) => {
@@ -391,6 +403,43 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                   </Button>
                 </div>
               )}
+            </div>
+
+            {/* IDs */}
+            <div className="rounded-lg border border-border bg-card p-2 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Run ID</p>
+                  <p className="text-xs font-mono text-foreground truncate">{run.id}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0"
+                  onClick={() => copyValue(run.id, setCopiedRunId)}
+                >
+                  {copiedRunId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
+                  <p className="text-xs font-mono text-foreground truncate">
+                    {run.sweepId || 'No sweep'}
+                  </p>
+                </div>
+                {run.sweepId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0"
+                    onClick={() => copyValue(run.sweepId!, setCopiedSweepId)}
+                  >
+                    {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                )}
+              </div>
             </div>
 
             {/* Tags + Quick Actions Row */}

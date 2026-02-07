@@ -15,7 +15,6 @@ import {
   Code,
   LayoutDashboard,
   List,
-  Wrench,
   Search,
   FileText,
 } from 'lucide-react'
@@ -24,7 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import type { ChatSession } from '@/lib/api'
 
-export type RunsSubTab = 'overview' | 'details' | 'manage'
+export type RunsSubTab = 'overview' | 'details'
 export type JourneySubTab = 'story' | 'devnotes'
 
 interface NavPageProps {
@@ -174,19 +173,6 @@ export function NavPage({
                 >
                   <List className="h-5 w-5 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Runs Details</span>
-                </button>
-
-                {/* Runs - Manage */}
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('runs', 'manage')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'manage'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <Wrench className="h-5 w-5 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Runs Manage</span>
                 </button>
 
                 {/* Events */}

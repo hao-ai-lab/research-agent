@@ -11,8 +11,6 @@ import {
   ChevronRight,
   LayoutDashboard,
   List,
-  Wrench,
-  Bell,
   Sparkles,
 } from 'lucide-react'
 import {
@@ -30,7 +28,7 @@ import {
 } from '@/components/ui/collapsible'
 import { useState } from 'react'
 
-export type RunsSubTab = 'overview' | 'details' | 'manage' | 'events'
+export type RunsSubTab = 'overview' | 'details'
 
 interface LeftPanelProps {
   open: boolean
@@ -153,30 +151,6 @@ export function LeftPanel({
                     >
                       <List className="h-3.5 w-3.5" />
                       Details
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'manage')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'manage'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
-                    >
-                      <Wrench className="h-3.5 w-3.5" />
-                      Manage
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'events')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'events'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
-                    >
-                      <Bell className="h-3.5 w-3.5" />
-                      Events
                     </button>
                   </div>
                 </CollapsibleContent>
