@@ -144,7 +144,9 @@ export function ConnectedChatView({
             const nextIdx = messages.length
             setWildMessageIndices(prev => new Set(prev).add(nextIdx))
 
-            await sendMessage(wildLoop.pendingPrompt!, mode, sessionId)
+            // Send as 'agent' mode — frontend now constructs the full prompt,
+            // so we skip backend's wild_mode prompt injection
+            await sendMessage(wildLoop.pendingPrompt!, 'agent', sessionId)
             wildLoop.consumePrompt()
         }
 

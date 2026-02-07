@@ -8,9 +8,10 @@ import type { Alert } from '@/lib/api'
 const phaseConfig: Record<WildLoopPhase, { icon: string; label: string; color: string }> = {
   idle: { icon: '⏸', label: 'Idle', color: '#888' },
   starting: { icon: '🚀', label: 'Starting', color: '#a855f7' },
+  exploring: { icon: '🔭', label: 'Exploring', color: '#a855f7' },
   onboarding: { icon: '🎯', label: 'Understanding Goal', color: '#a855f7' },
   designing: { icon: '🧪', label: 'Designing Experiment', color: '#8b5cf6' },
-  monitoring: { icon: '📡', label: 'Monitoring', color: '#7c3aed' },
+  monitoring: { icon: '📡', label: 'Monitoring Runs', color: '#7c3aed' },
   analyzing: { icon: '🔍', label: 'Analyzing Results', color: '#6d28d9' },
   fixing: { icon: '🔧', label: 'Fixing Issues', color: '#f59e0b' },
   complete: { icon: '✅', label: 'Complete', color: '#22c55e' },

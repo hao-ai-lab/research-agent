@@ -119,7 +119,7 @@ export interface MessagePart {
 }
 
 // Wild Loop types
-export type WildLoopPhase = 'idle' | 'starting' | 'onboarding' | 'designing' | 'monitoring' | 'analyzing' | 'fixing' | 'complete' | 'paused' | 'waiting_for_human'
+export type WildLoopPhase = 'idle' | 'starting' | 'exploring' | 'onboarding' | 'designing' | 'monitoring' | 'analyzing' | 'fixing' | 'complete' | 'paused' | 'waiting_for_human'
 
 export type ChatMessageSource = 'user' | 'agent_wild'
 
