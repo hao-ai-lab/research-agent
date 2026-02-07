@@ -183,7 +183,6 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     const data = generateMetricData(metric.id, runs, visibleRunIds)
 
     const ChartComponent = metric.type === 'area' ? AreaChart : LineChart
-    const DataComponent = metric.type === 'area' ? Area : Line
 
     return (
       // Hack: max-w-[calc(100vw-20px)]
@@ -256,17 +255,27 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
                   fontSize: '11px'
                 }}
               />
-              {visibleRuns.map((run) => (
-                <DataComponent
-                  key={run.id}
-                  type="monotone"
-                  dataKey={run.name}
-                  stroke={run.color || '#4ade80'}
-                  fill={metric.type === 'area' ? `${run.color || '#4ade80'}33` : undefined}
-                  strokeWidth={2}
-                  dot={false}
-                />
-              ))}
+              {visibleRuns.map((run) =>
+                metric.type === 'area' ? (
+                  <Area
+                    key={run.id}
+                    type="monotone"
+                    dataKey={run.name}
+                    stroke={run.color || '#4ade80'}
+                    fill={`${run.color || '#4ade80'}33`}
+                    strokeWidth={2}
+                  />
+                ) : (
+                  <Line
+                    key={run.id}
+                    type="monotone"
+                    dataKey={run.name}
+                    stroke={run.color || '#4ade80'}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                )
+              )}
             </ChartComponent>
           </ResponsiveContainer>
         </div>

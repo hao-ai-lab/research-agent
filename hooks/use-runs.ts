@@ -13,8 +13,49 @@ import {
 } from '@/lib/api-client'
 import type { ExperimentRun } from '@/lib/types'
 
+const RUN_METADATA_STORAGE_KEY = 'research-agent-run-metadata-v1'
+
+interface RunMetadata {
+    isFavorite?: boolean
+    tags?: string[]
+    notes?: string
+    color?: string
+    alias?: string
+}
+
+type RunMetadataMap = Record<string, RunMetadata>
+
+function loadRunMetadata(): RunMetadataMap {
+    if (typeof window === 'undefined') return {}
+    try {
+        const raw = window.localStorage.getItem(RUN_METADATA_STORAGE_KEY)
+        if (!raw) return {}
+        const parsed = JSON.parse(raw) as RunMetadataMap
+        return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+        return {}
+    }
+}
+
+function saveRunMetadataMap(metadata: RunMetadataMap) {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(RUN_METADATA_STORAGE_KEY, JSON.stringify(metadata))
+}
+
+function persistRunMetadata(run: ExperimentRun) {
+    const metadata = loadRunMetadata()
+    metadata[run.id] = {
+        isFavorite: !!run.isFavorite,
+        tags: run.tags || [],
+        notes: run.notes || '',
+        color: run.color || '#4ade80',
+        alias: run.alias,
+    }
+    saveRunMetadataMap(metadata)
+}
+
 // Convert API Run to ExperimentRun for UI compatibility
-function apiRunToExperimentRun(run: Run): ExperimentRun {
+function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun {
     // Map API status to UI status
     const statusMap: Record<Run['status'], ExperimentRun['status']> = {
         'ready': 'ready',
@@ -29,6 +70,9 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
     return {
         id: run.id,
         name: run.name,
+        sweepId: run.sweep_id ?? undefined,
+        sweepParams: run.sweep_params ?? null,
+        alias: metadata?.alias,
         command: run.command,
         status: statusMap[run.status],
         progress: run.progress ?? (run.status === 'running' ? 50 : run.status === 'finished' ? 100 : 0),
@@ -37,10 +81,10 @@ function apiRunToExperimentRun(run: Run): ExperimentRun {
         isArchived: run.is_archived,
         parentRunId: run.parent_run_id || undefined,
         originAlertId: run.origin_alert_id || undefined,
-        isFavorite: false,
-        tags: [],
-        notes: '',
-        color: run.color || '#4ade80',
+        isFavorite: metadata?.isFavorite ?? false,
+        tags: metadata?.tags || [],
+        notes: metadata?.notes || '',
+        color: metadata?.color || run.color || '#4ade80',
         // Pass through metrics/charts from API (mock or real)
         lossHistory: run.lossHistory,
         metrics: run.metrics,
@@ -85,7 +129,8 @@ export function useRuns(): UseRunsResult {
     const fetchRuns = useCallback(async () => {
         try {
             const apiRuns = await listRuns(true) // include archived
-            const experimentRuns = apiRuns.map(apiRunToExperimentRun)
+            const metadata = loadRunMetadata()
+            const experimentRuns = apiRuns.map(apiRun => apiRunToExperimentRun(apiRun, metadata[apiRun.id]))
             setRuns(experimentRuns)
             setError(null)
         } catch (e) {
@@ -124,7 +169,8 @@ export function useRuns(): UseRunsResult {
     // Create a new run
     const createNewRun = useCallback(async (request: CreateRunRequest): Promise<ExperimentRun> => {
         const apiRun = await createRun(request)
-        const experimentRun = apiRunToExperimentRun(apiRun)
+        const metadata = loadRunMetadata()
+        const experimentRun = apiRunToExperimentRun(apiRun, metadata[apiRun.id])
         setRuns(prev => [experimentRun, ...prev])
         return experimentRun
     }, [])
@@ -152,14 +198,32 @@ export function useRuns(): UseRunsResult {
     const unarchiveExistingRun = useCallback(async (runId: string): Promise<void> => {
         await unarchiveRun(runId)
         await fetchRuns()
-    }, [])
+    }, [fetchRuns])
 
     // Update a run locally (for UI changes like favorites, notes, etc.)
     const updateRun = useCallback((updatedRun: ExperimentRun) => {
+        const previousRun = runsRef.current.find((run) => run.id === updatedRun.id)
+        persistRunMetadata(updatedRun)
         setRuns(prev => prev.map(r =>
             r.id === updatedRun.id ? updatedRun : r
         ))
-    }, [])
+
+        if (previousRun && previousRun.isArchived !== updatedRun.isArchived) {
+            const persistArchiveState = async () => {
+                try {
+                    if (updatedRun.isArchived) {
+                        await archiveRun(updatedRun.id)
+                    } else {
+                        await unarchiveRun(updatedRun.id)
+                    }
+                    await fetchRuns()
+                } catch (error) {
+                    console.error('Failed to persist archive state:', error)
+                }
+            }
+            void persistArchiveState()
+        }
+    }, [fetchRuns])
 
     return {
         runs,

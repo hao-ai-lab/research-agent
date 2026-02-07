@@ -4,12 +4,21 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { AppSettings } from '@/lib/types'
 
 const STORAGE_KEY_APP_SETTINGS = 'research-agent-app-settings'
+const STORAGE_KEY_APPEARANCE_THEME = 'research-agent-appearance-theme'
+const STORAGE_KEY_APPEARANCE_FONT_SIZE = 'research-agent-appearance-font-size'
+const STORAGE_KEY_APPEARANCE_BUTTON_SIZE = 'research-agent-appearance-button-size'
+const STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX = 'research-agent-appearance-custom-font-size-px'
+const STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT = 'research-agent-appearance-custom-button-scale-percent'
+const STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX = 'research-agent-appearance-chat-toolbar-button-size-px'
 
 export const defaultAppSettings: AppSettings = {
   appearance: {
     theme: 'dark',
     fontSize: 'medium',
     buttonSize: 'default',
+    customFontSizePx: null,
+    customButtonScalePercent: null,
+    chatToolbarButtonSizePx: null,
   },
   integrations: {},
   notifications: {
@@ -26,6 +35,58 @@ interface AppSettingsContextValue {
 
 const AppSettingsContext = createContext<AppSettingsContextValue | null>(null)
 
+function isValidTheme(value: unknown): value is AppSettings['appearance']['theme'] {
+  return value === 'dark' || value === 'light' || value === 'system'
+}
+
+function isValidFontSize(value: unknown): value is AppSettings['appearance']['fontSize'] {
+  return value === 'small' || value === 'medium' || value === 'large'
+}
+
+function isValidButtonSize(value: unknown): value is AppSettings['appearance']['buttonSize'] {
+  return value === 'compact' || value === 'default' || value === 'large'
+}
+
+function parseStoredNumber(value: string | null): number | null {
+  if (value === null || value.trim() === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
+}
+
+function sanitizePositiveNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
+  return value
+}
+
+function writeSettingsToStorage(nextSettings: AppSettings) {
+  localStorage.setItem(STORAGE_KEY_APP_SETTINGS, JSON.stringify(nextSettings))
+  localStorage.setItem(STORAGE_KEY_APPEARANCE_THEME, nextSettings.appearance.theme)
+  localStorage.setItem(STORAGE_KEY_APPEARANCE_FONT_SIZE, nextSettings.appearance.fontSize)
+  localStorage.setItem(STORAGE_KEY_APPEARANCE_BUTTON_SIZE, nextSettings.appearance.buttonSize)
+
+  const customFontSizePx = sanitizePositiveNumber(nextSettings.appearance.customFontSizePx)
+  if (customFontSizePx === null) {
+    localStorage.removeItem(STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX)
+  } else {
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX, String(customFontSizePx))
+  }
+
+  const customButtonScalePercent = sanitizePositiveNumber(nextSettings.appearance.customButtonScalePercent)
+  if (customButtonScalePercent === null) {
+    localStorage.removeItem(STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT)
+  } else {
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT, String(customButtonScalePercent))
+  }
+
+  const chatToolbarButtonSizePx = sanitizePositiveNumber(nextSettings.appearance.chatToolbarButtonSizePx)
+  if (chatToolbarButtonSizePx === null) {
+    localStorage.removeItem(STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX)
+  } else {
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX, String(chatToolbarButtonSizePx))
+  }
+}
+
 function readStoredSettings(): AppSettings {
   if (typeof window === 'undefined') {
     return defaultAppSettings
@@ -33,20 +94,55 @@ function readStoredSettings(): AppSettings {
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY_APP_SETTINGS)
-    if (!raw) return defaultAppSettings
+    let parsed: Partial<AppSettings> | null = null
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw) as Partial<AppSettings>
+      } catch {
+        parsed = null
+      }
+    }
 
-    const parsed = JSON.parse(raw) as Partial<AppSettings>
+    const themeFromBlob = parsed?.appearance?.theme
+    const fontSizeFromBlob = parsed?.appearance?.fontSize
+    const buttonSizeFromBlob = parsed?.appearance?.buttonSize
+    const customFontSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.customFontSizePx)
+    const customButtonScalePercentFromBlob = sanitizePositiveNumber(parsed?.appearance?.customButtonScalePercent)
+    const chatToolbarButtonSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.chatToolbarButtonSizePx)
+
+    const storedTheme = localStorage.getItem(STORAGE_KEY_APPEARANCE_THEME)
+    const storedFontSize = localStorage.getItem(STORAGE_KEY_APPEARANCE_FONT_SIZE)
+    const storedButtonSize = localStorage.getItem(STORAGE_KEY_APPEARANCE_BUTTON_SIZE)
+    const storedCustomFontSizePx = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX))
+    const storedCustomButtonScalePercent = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT))
+    const storedChatToolbarButtonSizePx = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX))
+
+    const resolvedTheme = isValidTheme(storedTheme)
+      ? storedTheme
+      : (isValidTheme(themeFromBlob) ? themeFromBlob : defaultAppSettings.appearance.theme)
+
+    const resolvedFontSize = isValidFontSize(storedFontSize)
+      ? storedFontSize
+      : (isValidFontSize(fontSizeFromBlob) ? fontSizeFromBlob : defaultAppSettings.appearance.fontSize)
+
+    const resolvedButtonSize = isValidButtonSize(storedButtonSize)
+      ? storedButtonSize
+      : (isValidButtonSize(buttonSizeFromBlob) ? buttonSizeFromBlob : defaultAppSettings.appearance.buttonSize)
+
     return {
       appearance: {
-        theme: parsed.appearance?.theme || defaultAppSettings.appearance.theme,
-        fontSize: parsed.appearance?.fontSize || defaultAppSettings.appearance.fontSize,
-        buttonSize: parsed.appearance?.buttonSize || defaultAppSettings.appearance.buttonSize,
+        theme: resolvedTheme,
+        fontSize: resolvedFontSize,
+        buttonSize: resolvedButtonSize,
+        customFontSizePx: sanitizePositiveNumber(storedCustomFontSizePx) ?? customFontSizePxFromBlob ?? defaultAppSettings.appearance.customFontSizePx,
+        customButtonScalePercent: sanitizePositiveNumber(storedCustomButtonScalePercent) ?? customButtonScalePercentFromBlob ?? defaultAppSettings.appearance.customButtonScalePercent,
+        chatToolbarButtonSizePx: sanitizePositiveNumber(storedChatToolbarButtonSizePx) ?? chatToolbarButtonSizePxFromBlob ?? defaultAppSettings.appearance.chatToolbarButtonSizePx,
       },
-      integrations: parsed.integrations || defaultAppSettings.integrations,
+      integrations: parsed?.integrations || defaultAppSettings.integrations,
       notifications: {
-        alertsEnabled: parsed.notifications?.alertsEnabled ?? defaultAppSettings.notifications.alertsEnabled,
-        alertTypes: parsed.notifications?.alertTypes || defaultAppSettings.notifications.alertTypes,
-        webNotificationsEnabled: parsed.notifications?.webNotificationsEnabled ?? defaultAppSettings.notifications.webNotificationsEnabled,
+        alertsEnabled: parsed?.notifications?.alertsEnabled ?? defaultAppSettings.notifications.alertsEnabled,
+        alertTypes: parsed?.notifications?.alertTypes || defaultAppSettings.notifications.alertTypes,
+        webNotificationsEnabled: parsed?.notifications?.webNotificationsEnabled ?? defaultAppSettings.notifications.webNotificationsEnabled,
       },
     }
   } catch {
@@ -69,7 +165,11 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!isHydrated) return
-    localStorage.setItem(STORAGE_KEY_APP_SETTINGS, JSON.stringify(settings))
+    try {
+      writeSettingsToStorage(settings)
+    } catch {
+      // Ignore storage write failures (e.g. private mode / quota exceeded).
+    }
   }, [settings, isHydrated])
 
   useEffect(() => {
@@ -90,6 +190,27 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
 
     root.setAttribute('data-font-size', settings.appearance.fontSize)
     root.setAttribute('data-button-size', settings.appearance.buttonSize)
+
+    const customFontSizePx = settings.appearance.customFontSizePx
+    if (typeof customFontSizePx === 'number' && Number.isFinite(customFontSizePx) && customFontSizePx > 0) {
+      root.style.setProperty('font-size', `${customFontSizePx}px`)
+    } else {
+      root.style.removeProperty('font-size')
+    }
+
+    const customButtonScalePercent = settings.appearance.customButtonScalePercent
+    if (typeof customButtonScalePercent === 'number' && Number.isFinite(customButtonScalePercent) && customButtonScalePercent > 0) {
+      root.style.setProperty('--app-button-scale', `${customButtonScalePercent / 100}`)
+    } else {
+      root.style.removeProperty('--app-button-scale')
+    }
+
+    const chatToolbarButtonSizePx = settings.appearance.chatToolbarButtonSizePx
+    if (typeof chatToolbarButtonSizePx === 'number' && Number.isFinite(chatToolbarButtonSizePx) && chatToolbarButtonSizePx > 0) {
+      root.style.setProperty('--app-chat-toolbar-btn-size', `${chatToolbarButtonSizePx}px`)
+    } else {
+      root.style.removeProperty('--app-chat-toolbar-btn-size')
+    }
 
     const handleThemeChange = () => {
       if (settings.appearance.theme === 'system') {

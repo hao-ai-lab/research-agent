@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, ChevronRight, Bell, Settings } from 'lucide-react'
+import { Menu, ChevronRight, Bell, Settings, PlugZap, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -14,7 +14,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { useApiConfig } from '@/lib/api-config'
-import type { RunsSubTab } from './left-panel'
+import type { RunsSubTab } from './nav-page'
 
 interface BreadcrumbItem {
   label: string
@@ -22,13 +22,16 @@ interface BreadcrumbItem {
 }
 
 interface FloatingNavProps {
-  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
+  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
   runsSubTab: RunsSubTab
   onMenuClick: () => void
+  onDesktopMenuClick?: () => void
+  desktopSidebarCollapsed?: boolean
   breadcrumbs?: BreadcrumbItem[]
   // Chat-specific props
   eventCount?: number
   onAlertClick?: () => void
+  onCreateSweepClick?: () => void
   showArtifacts?: boolean
   onToggleArtifacts?: () => void
   collapseChats?: boolean
@@ -42,22 +45,24 @@ const tabLabels: Record<string, string> = {
   runs: 'Runs',
   charts: 'Charts',
   memory: 'Memory',
+  settings: 'Settings',
 }
 
 const runsSubTabLabels: Record<RunsSubTab, string> = {
   overview: 'Overview',
   details: 'Details',
-  manage: 'Manage',
-  events: 'Events',
 }
 
 export function FloatingNav({
   activeTab,
   runsSubTab,
   onMenuClick,
+  onDesktopMenuClick,
+  desktopSidebarCollapsed = false,
   breadcrumbs,
   eventCount = 0,
   onAlertClick,
+  onCreateSweepClick,
   showArtifacts = false,
   onToggleArtifacts,
   collapseChats = false,
@@ -85,10 +90,25 @@ export function FloatingNav({
           variant="ghost"
           size="icon"
           onClick={onMenuClick}
-          className={`h-9 w-9 shrink-0 ${isDemoMode ? 'ring-2 ring-red-500/50 ring-offset-1 ring-offset-background' : ''}`}
+          className={`h-9 w-9 shrink-0 lg:hidden ${isDemoMode ? 'ring-2 ring-red-500/50 ring-offset-1 ring-offset-background' : ''}`}
         >
           <Menu className={`h-5 w-5 ${isDemoMode ? 'text-red-500' : ''}`} />
           <span className="sr-only">Open menu</span>
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onDesktopMenuClick}
+          className="hidden h-9 w-9 shrink-0 lg:inline-flex"
+        >
+          {desktopSidebarCollapsed ? (
+            <PanelLeftOpen className="h-5 w-5" />
+          ) : (
+            <PanelLeftClose className="h-5 w-5" />
+          )}
+          <span className="sr-only">
+            {desktopSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          </span>
         </Button>
         {isDemoMode && (
           <Badge
@@ -148,6 +168,17 @@ export function FloatingNav({
               </Badge>
             )}
             <span className="sr-only">View alerts ({eventCount})</span>
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onCreateSweepClick}
+            className="h-8 w-8"
+            title="Create sweep"
+          >
+            <PlugZap className="h-4 w-4" />
+            <span className="sr-only">Create sweep</span>
           </Button>
 
           {/* Settings Dropdown */}

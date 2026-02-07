@@ -39,6 +39,7 @@ interface ConnectedChatViewProps {
     wildLoop?: UseWildLoopResult
     webNotificationsEnabled?: boolean
     onOpenSettings?: () => void
+    insertDraft?: { id: number; text: string } | null
 }
 
 /**
@@ -61,6 +62,7 @@ export function ConnectedChatView({
     wildLoop,
     webNotificationsEnabled = true,
     onOpenSettings,
+    insertDraft,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
@@ -365,6 +367,7 @@ export function ConnectedChatView({
                     queueCount={messageQueue.length}
                     queue={messageQueue}
                     onRemoveFromQueue={removeFromQueue}
+                    insertDraft={insertDraft}
                 />
             </div>
 

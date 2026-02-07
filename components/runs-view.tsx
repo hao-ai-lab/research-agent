@@ -7,23 +7,26 @@ import {
   Play,
   AlertCircle,
   CheckCircle2,
+  CheckSquare,
+  Square,
   Clock,
   XCircle,
   Layers,
   Archive,
+  Undo2,
+  Palette,
   Star,
   ArrowLeft,
   ChevronRight,
   ChevronDown,
   AlertTriangle,
-  Repeat,
+  Settings2,
   PlugZap,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Popover,
@@ -39,18 +42,27 @@ import {
 } from '@/components/ui/select'
 import { AllRunsChart } from './all-runs-chart'
 import { RunDetailView } from './run-detail-view'
-import { RunManageView } from './run-manage-view'
 import { VisibilityManageView } from './visibility-manage-view'
 import { CreateSweepDialog } from './create-sweep-dialog'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
-import { getRunsOverview } from '@/lib/mock-data'
+import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 import { createSweep } from '@/lib/api-client'
 
-type RunsSubTab = 'overview' | 'details' | 'manage'
+type RunsSubTab = 'overview' | 'details'
 type DetailsView = 'time' | 'priority'
+type GroupByMode = 'none' | 'sweep'
+
+const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
+  'ready',
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'canceled',
+]
 
 // Inline sweep form for popover
 function SweepFormPopover({ onClose, onRefresh }: { onClose: () => void; onRefresh?: () => void }) {
@@ -162,6 +174,13 @@ interface RunsViewProps {
 export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsByRun = {}, alerts = [], allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
+  const [manageMode, setManageMode] = useState(false)
+  const [selectedManageRunIds, setSelectedManageRunIds] = useState<Set<string>>(new Set())
+  const [groupByMode, setGroupByMode] = useState<GroupByMode>('none')
+  const [sweepFilter, setSweepFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<Set<ExperimentRun['status']>>(
+    () => new Set(RUN_STATUS_OPTIONS)
+  )
   const [visibleRunIds, setVisibleRunIds] = useState<Set<string>>(
     new Set(runs.filter((r) => !r.isArchived).map((r) => r.id))
   )
@@ -172,29 +191,77 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
   const scrollPositionRef = useRef<number>(0)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
-  const activeRuns = runs.filter((r) => !r.isArchived)
-  const archivedRuns = runs.filter((r) => r.isArchived)
-  const overview = getRunsOverview(activeRuns)
+  const allActiveRuns = runs.filter((r) => !r.isArchived)
+  const overview = getRunsOverview(allActiveRuns)
   const selectedRun = selectedRunId ? runs.find(r => r.id === selectedRunId) : null
   const selectedRunAlerts = selectedRun ? alerts.filter(alert => alert.run_id === selectedRun.id) : []
+  const sweepOptions = useMemo(
+    () =>
+      Array.from(new Set(runs.map((run) => run.sweepId).filter(Boolean) as string[])).sort((a, b) =>
+        a.localeCompare(b)
+      ),
+    [runs]
+  )
+
+  const filteredRuns = useMemo(() => {
+    return runs.filter((run) => {
+      if (!statusFilter.has(run.status)) return false
+      if (sweepFilter === 'all') return true
+      if (sweepFilter === 'none') return !run.sweepId
+      return run.sweepId === sweepFilter
+    })
+  }, [runs, statusFilter, sweepFilter])
+
+  const filteredActiveRuns = useMemo(
+    () => filteredRuns.filter((run) => !run.isArchived),
+    [filteredRuns]
+  )
+
+  const filteredArchivedRuns = useMemo(
+    () => filteredRuns.filter((run) => run.isArchived),
+    [filteredRuns]
+  )
+
+  const selectedManageRuns = useMemo(
+    () => filteredRuns.filter((run) => selectedManageRunIds.has(run.id)),
+    [filteredRuns, selectedManageRunIds]
+  )
 
   // Sort runs for quick access - favorites first
   const quickAccessRuns = useMemo(() => {
-    return [...activeRuns].sort((a, b) => {
+    return [...allActiveRuns].sort((a, b) => {
       if (a.isFavorite && !b.isFavorite) return -1
       if (!a.isFavorite && b.isFavorite) return 1
       return b.startTime.getTime() - a.startTime.getTime()
     }).slice(0, 6)
-  }, [activeRuns])
+  }, [allActiveRuns])
 
   // Sort runs for details view
   const sortedRuns = useMemo(() => {
     if (detailsView === 'time') {
-      return [...runs].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+      return [...filteredRuns].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
     }
     // Priority view - group by category
-    return runs
-  }, [runs, detailsView])
+    return filteredRuns
+  }, [filteredRuns, detailsView])
+
+  const groupedRunsBySweep = useMemo(() => {
+    const groups = new Map<string, ExperimentRun[]>()
+    sortedRuns.forEach((run) => {
+      const key = run.sweepId || 'no-sweep'
+      if (!groups.has(key)) {
+        groups.set(key, [])
+      }
+      groups.get(key)!.push(run)
+    })
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => {
+        if (a === 'no-sweep') return 1
+        if (b === 'no-sweep') return -1
+        return a.localeCompare(b)
+      })
+      .map(([sweepId, sweepRuns]) => ({ sweepId, runs: sweepRuns }))
+  }, [sortedRuns])
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -234,7 +301,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
         setVisibleRunIds(new Set(group.runIds))
       }
     } else {
-      setVisibleRunIds(new Set(activeRuns.map(r => r.id)))
+      setVisibleRunIds(new Set(allActiveRuns.map(r => r.id)))
     }
   }
 
@@ -246,8 +313,68 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
     setVisibilityGroups(prev => prev.filter(g => g.id !== groupId))
     if (activeGroupId === groupId) {
       setActiveGroupId(null)
-      setVisibleRunIds(new Set(activeRuns.map(r => r.id)))
+      setVisibleRunIds(new Set(allActiveRuns.map(r => r.id)))
     }
+  }
+
+  const toggleStatusFilter = (status: ExperimentRun['status']) => {
+    setStatusFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(status)) {
+        next.delete(status)
+      } else {
+        next.add(status)
+      }
+      return next
+    })
+  }
+
+  const resetStatusFilter = () => {
+    setStatusFilter(new Set(RUN_STATUS_OPTIONS))
+  }
+
+  const toggleManageRunSelection = (runId: string) => {
+    setSelectedManageRunIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(runId)) {
+        next.delete(runId)
+      } else {
+        next.add(runId)
+      }
+      return next
+    })
+  }
+
+  const clearManageSelection = () => {
+    setSelectedManageRunIds(new Set())
+  }
+
+  const selectAllFilteredRuns = () => {
+    setSelectedManageRunIds(new Set(filteredRuns.map((run) => run.id)))
+  }
+
+  const archiveSelectedRuns = () => {
+    selectedManageRuns.forEach((run) => {
+      if (!run.isArchived) {
+        onUpdateRun?.({ ...run, isArchived: true })
+      }
+    })
+    clearManageSelection()
+  }
+
+  const unarchiveSelectedRuns = () => {
+    selectedManageRuns.forEach((run) => {
+      if (run.isArchived) {
+        onUpdateRun?.({ ...run, isArchived: false })
+      }
+    })
+    clearManageSelection()
+  }
+
+  const setColorForSelectedRuns = (color: string) => {
+    selectedManageRuns.forEach((run) => {
+      onUpdateRun?.({ ...run, color })
+    })
   }
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -258,6 +385,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
   const handleRunClick = (run: ExperimentRun) => {
     setSelectedRunId(run.id)
     onSelectedRunChange?.(run)
+    onRunClick?.(run)
   }
 
   const handleBack = () => {
@@ -282,14 +410,36 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
   const RunItem = ({ run, showChevron = true }: { run: ExperimentRun; showChevron?: boolean }) => {
     const pendingAlertCount = pendingAlertsByRun[run.id] || 0
     const hasPendingAlerts = pendingAlertCount > 0
+    const isManageSelectionEnabled = manageMode && subTab === 'details'
+    const isSelectedForManage = selectedManageRunIds.has(run.id)
+
     return (
     <button
       type="button"
-      onClick={() => handleRunClick(run)}
-      className="w-full rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-muted-foreground/50 active:scale-[0.99]"
+      onClick={() => {
+        if (isManageSelectionEnabled) {
+          toggleManageRunSelection(run.id)
+          return
+        }
+        handleRunClick(run)
+      }}
+      className={`w-full rounded-xl border bg-card p-3 text-left transition-colors active:scale-[0.99] ${
+        isSelectedForManage
+          ? 'border-accent bg-accent/10'
+          : 'border-border hover:border-muted-foreground/50'
+      }`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
+          {isManageSelectionEnabled && (
+            <span className="shrink-0 text-muted-foreground">
+              {isSelectedForManage ? (
+                <CheckSquare className="h-4 w-4 text-accent" />
+              ) : (
+                <Square className="h-4 w-4" />
+              )}
+            </span>
+          )}
           <div
             className="h-3 w-3 rounded-full shrink-0"
             style={{ backgroundColor: run.color || '#4ade80' }}
@@ -314,9 +464,13 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
             {getStatusIcon(run.status)}
             <span className="ml-1 text-[10px]">{getStatusText(run.status)}</span>
           </Badge>
-          {showChevron && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+          {showChevron && !isManageSelectionEnabled && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
         </div>
       </div>
+      <p className="mt-1 text-[10px] text-muted-foreground truncate">
+        Run: {run.id}
+        {run.sweepId ? ` • Sweep: ${run.sweepId}` : ' • No sweep'}
+      </p>
       {run.tags && run.tags.length > 0 && (
         <div className="flex gap-1 mt-2 flex-wrap">
           {run.tags.slice(0, 3).map((tagName) => {
@@ -397,6 +551,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
                     </div>
                     <p className="text-xs text-muted-foreground truncate">
                       {selectedRun.config?.model}
+                      {selectedRun.sweepId ? ` • ${selectedRun.sweepId}` : ''}
                     </p>
                   </div>
                 </div>
@@ -453,47 +608,64 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
     )
   }
 
-  // Manage view
-  if (subTab === 'manage') {
-    return (
-      <RunManageView
-        runs={runs}
-        onUpdateRun={onUpdateRun}
-        pendingAlertsByRun={pendingAlertsByRun}
-        allTags={allTags}
-        onCreateTag={onCreateTag}
-      />
-    )
-  }
-
   // Details view
   if (subTab === 'details') {
-    const favoriteRuns = activeRuns.filter(r => r.isFavorite)
-    const alertRuns = activeRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
-    const runningRuns = activeRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-    const failedRuns = activeRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-    const completedRuns = activeRuns.filter(r => r.status === 'completed' && !r.isFavorite)
+    const favoriteRuns = filteredActiveRuns.filter(r => r.isFavorite)
+    const alertRuns = filteredActiveRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
+    const runningRuns = filteredActiveRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+    const readyRuns = filteredActiveRuns.filter(r => r.status === 'ready' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+    const queuedRuns = filteredActiveRuns.filter(r => r.status === 'queued' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+    const failedRuns = filteredActiveRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+    const completedRuns = filteredActiveRuns.filter(r => r.status === 'completed' && !r.isFavorite)
+    const canceledRuns = filteredActiveRuns.filter(r => r.status === 'canceled' && !r.isFavorite)
+    const isAllStatusSelected = statusFilter.size === RUN_STATUS_OPTIONS.length
+    const canArchiveSelection = selectedManageRuns.some((run) => !run.isArchived)
+    const canUnarchiveSelection = selectedManageRuns.some((run) => run.isArchived)
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <div className="shrink-0 border-b border-border px-4 py-3 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-foreground">Runs</h3>
-          <div className="flex items-center gap-2">
+        <div className="shrink-0 border-b border-border px-4 py-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium text-foreground">Runs</h3>
+            <div className="flex items-center gap-2">
+              <Button
+                variant={manageMode ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setManageMode((prev) => {
+                    const next = !prev
+                    if (!next) {
+                      clearManageSelection()
+                    }
+                    return next
+                  })
+                }}
+                className="h-8 gap-1.5"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                {manageMode ? 'Exit Manage' : 'Manage'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="sm"
+                  className="h-8 gap-1.5"
                   title="Create Sweep"
                 >
                   <PlugZap className="h-4 w-4" />
+                  Sweep
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-80" align="end">
                 <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
               </PopoverContent>
             </Popover>
+
             <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
               <SelectTrigger className="w-28 h-8 text-xs">
                 <SelectValue />
@@ -503,7 +675,135 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
                 <SelectItem value="priority">Priority</SelectItem>
               </SelectContent>
             </Select>
+
+            <Select value={groupByMode} onValueChange={(v) => setGroupByMode(v as GroupByMode)}>
+              <SelectTrigger className="w-32 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Group: None</SelectItem>
+                <SelectItem value="sweep">Group: Sweep</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={sweepFilter} onValueChange={setSweepFilter}>
+              <SelectTrigger className="w-36 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Sweep: All</SelectItem>
+                <SelectItem value="none">No Sweep</SelectItem>
+                {sweepOptions.map((sweepId) => (
+                  <SelectItem key={sweepId} value={sweepId}>
+                    Sweep: {sweepId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 text-xs">
+                  Status: {isAllStatusSelected ? 'All' : statusFilter.size}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-foreground">Filter by status</p>
+                  <Button variant="ghost" size="sm" onClick={resetStatusFilter} className="h-6 px-2 text-[10px]">
+                    Reset
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {RUN_STATUS_OPTIONS.map((status) => {
+                    const selected = statusFilter.has(status)
+                    return (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() => toggleStatusFilter(status)}
+                        className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
+                          selected
+                            ? 'border-primary/40 bg-primary/10 text-primary'
+                            : 'border-border bg-card text-muted-foreground hover:bg-secondary/40'
+                        }`}
+                      >
+                        {selected ? <CheckSquare className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5 rounded-sm border border-current/50" />}
+                        {getStatusText(status)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
+
+          {manageMode && (
+            <div className="rounded-lg border border-border bg-card px-2 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {selectedManageRuns.length} selected
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={selectedManageRuns.length === filteredRuns.length ? clearManageSelection : selectAllFilteredRuns}
+                  className="h-7 px-2 text-[11px]"
+                >
+                  {selectedManageRuns.length === filteredRuns.length ? 'Clear' : 'Select All'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={archiveSelectedRuns}
+                  disabled={selectedManageRuns.length === 0 || !canArchiveSelection}
+                  className="h-7 px-2 text-[11px]"
+                >
+                  <Archive className="mr-1 h-3 w-3" />
+                  Archive
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={unarchiveSelectedRuns}
+                  disabled={selectedManageRuns.length === 0 || !canUnarchiveSelection}
+                  className="h-7 px-2 text-[11px]"
+                >
+                  <Undo2 className="mr-1 h-3 w-3" />
+                  Unarchive
+                </Button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={selectedManageRuns.length === 0}
+                      className="h-7 px-2 text-[11px]"
+                    >
+                      <Palette className="mr-1 h-3 w-3" />
+                      Color
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-44 p-3" align="start">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      Color for selected
+                    </p>
+                    <div className="grid grid-cols-5 gap-2">
+                      {DEFAULT_RUN_COLORS.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setColorForSelectedRuns(color)}
+                          className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-foreground"
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 min-h-0 overflow-hidden">
@@ -544,6 +844,28 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
                       </div>
                     </div>
                   )}
+                  {readyRuns.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Clock className="h-4 w-4 text-amber-400" />
+                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Ready</h4>
+                      </div>
+                      <div className="space-y-2">
+                        {readyRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                      </div>
+                    </div>
+                  )}
+                  {queuedRuns.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Clock className="h-4 w-4 text-foreground" />
+                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Queued</h4>
+                      </div>
+                      <div className="space-y-2">
+                        {queuedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                      </div>
+                    </div>
+                  )}
                   {failedRuns.length > 0 && (
                     <div>
                       <div className="flex items-center gap-2 mb-3">
@@ -566,22 +888,67 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
                       </div>
                     </div>
                   )}
-                  {archivedRuns.length > 0 && (
+                  {canceledRuns.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <XCircle className="h-4 w-4 text-muted-foreground" />
+                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Canceled</h4>
+                      </div>
+                      <div className="space-y-2">
+                        {canceledRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                      </div>
+                    </div>
+                  )}
+                  {filteredArchivedRuns.length > 0 && (
                     <div>
                       <div className="flex items-center gap-2 mb-3">
                         <Archive className="h-4 w-4 text-muted-foreground" />
                         <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Archived</h4>
                       </div>
                       <div className="space-y-2 opacity-60">
-                        {archivedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                        {filteredArchivedRuns.map((run) => <RunItem key={run.id} run={run} />)}
                       </div>
+                    </div>
+                  )}
+                  {filteredRuns.length === 0 && (
+                    <div className="py-10 text-center text-sm text-muted-foreground">
+                      No runs match the current filters.
                     </div>
                   )}
                 </>
               ) : (
-                <div className="space-y-2">
-                  {sortedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                </div>
+                <>
+                  {groupByMode === 'sweep' ? (
+                    groupedRunsBySweep.length > 0 ? (
+                      groupedRunsBySweep.map((group) => (
+                        <div key={group.sweepId}>
+                          <div className="flex items-center gap-2 mb-3">
+                            <PlugZap className="h-4 w-4 text-muted-foreground" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                              {group.sweepId === 'no-sweep' ? 'No Sweep' : `Sweep ${group.sweepId}`}
+                            </h4>
+                          </div>
+                          <div className="space-y-2">
+                            {group.runs.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-10 text-center text-sm text-muted-foreground">
+                        No runs match the current filters.
+                      </div>
+                    )
+                  ) : (
+                    <div className="space-y-2">
+                      {sortedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                      {sortedRuns.length === 0 && (
+                        <div className="py-10 text-center text-sm text-muted-foreground">
+                          No runs match the current filters.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </ScrollArea>
@@ -651,7 +1018,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
                 Charts
               </h3>
               <AllRunsChart
-                runs={activeRuns}
+                runs={allActiveRuns}
                 visibleRunIds={visibleRunIds}
                 onToggleVisibility={toggleRunVisibility}
                 visibilityGroups={visibilityGroups}

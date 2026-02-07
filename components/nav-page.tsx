@@ -8,14 +8,13 @@ import {
   BarChart3,
   Lightbulb,
   Plus,
-  ChevronLeft,
+  X,
   Bell,
   Sparkles,
   Clock,
   Code,
   LayoutDashboard,
   List,
-  Wrench,
   Search,
   FileText,
 } from 'lucide-react'
@@ -24,7 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import type { ChatSession } from '@/lib/api'
 
-export type RunsSubTab = 'overview' | 'details' | 'manage'
+export type RunsSubTab = 'overview' | 'details'
 export type JourneySubTab = 'story' | 'devnotes'
 
 interface NavPageProps {
@@ -94,36 +93,38 @@ export function NavPage({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 bg-background flex flex-col animate-in slide-in-from-left duration-200">
-      {/* Header */}
-      <header className="shrink-0 border-b border-border px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FlaskConical className="h-5 w-5 text-primary" />
-            <span className="font-semibold text-foreground">Research Lab</span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            className="gap-2"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Back
-          </Button>
-        </div>
-      </header>
+    <div className="fixed inset-0 z-50 lg:hidden">
+      <button
+        type="button"
+        aria-label="Close navigation"
+        onClick={() => onOpenChange(false)}
+        className="absolute inset-0 bg-black/45 backdrop-blur-[1px]"
+      />
 
-      {/* Main Content - Split into two halves */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Half - Navigation Pages */}
-        <div className="flex-1 min-h-0 border-b border-border">
-          <div className="p-4 h-full flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Pages</h2>
+      <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[360px] flex-col border-r border-border bg-background shadow-2xl animate-in slide-in-from-left duration-200">
+        <header className="shrink-0 border-b border-border px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <FlaskConical className="h-5 w-5 text-primary" />
+              <span className="font-semibold text-foreground">Research Lab</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onOpenChange(false)}
+              className="h-8 w-8"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </header>
+
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="space-y-5 p-3">
+            <section>
               <Button
                 size="sm"
-                className="gap-1.5 h-8"
+                className="mb-3 h-8 w-full justify-start gap-1.5"
                 onClick={() => {
                   onNewChat?.()
                   onOpenChange(false)
@@ -132,191 +133,162 @@ export function NavPage({
                 <Plus className="h-3.5 w-3.5" />
                 New Chat
               </Button>
-            </div>
 
-            {/* Navigation Grid - All pages flattened */}
-            <ScrollArea className="flex-1">
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2 content-start pb-2">
-                {/* Chat */}
+              <div className="space-y-1">
                 <button
                   type="button"
                   onClick={() => handleNavClick('chat')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'chat'
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'chat'
                     ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    : 'text-foreground hover:bg-secondary'
                     }`}
                 >
-                  <MessageSquare className="h-5 w-5 shrink-0" />
+                  <MessageSquare className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Chat</span>
                 </button>
-
-                {/* Runs - Overview */}
                 <button
                   type="button"
                   onClick={() => handleNavClick('runs', 'overview')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'overview'
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'overview'
                     ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    : 'text-foreground hover:bg-secondary'
                     }`}
                 >
-                  <LayoutDashboard className="h-5 w-5 shrink-0" />
+                  <LayoutDashboard className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Runs Overview</span>
                 </button>
-
-                {/* Runs - Details */}
                 <button
                   type="button"
                   onClick={() => handleNavClick('runs', 'details')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'details'
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'details'
                     ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    : 'text-foreground hover:bg-secondary'
                     }`}
                 >
-                  <List className="h-5 w-5 shrink-0" />
+                  <List className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Runs Details</span>
                 </button>
-
-                {/* Runs - Manage */}
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('runs', 'manage')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'manage'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <Wrench className="h-5 w-5 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Runs Manage</span>
-                </button>
-
-                {/* Events */}
                 <button
                   type="button"
                   onClick={() => handleNavClick('events')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'events'
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'events'
                     ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    : 'text-foreground hover:bg-secondary'
                     }`}
                 >
-                  <Bell className="h-5 w-5 shrink-0" />
+                  <Bell className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Events</span>
                 </button>
-
-                {/* Charts */}
                 <button
                   type="button"
                   onClick={() => handleNavClick('charts')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'charts'
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'charts'
                     ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    : 'text-foreground hover:bg-secondary'
                     }`}
                 >
-                  <BarChart3 className="h-5 w-5 shrink-0" />
+                  <BarChart3 className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Charts</span>
                 </button>
-
-                {/* Memory */}
                 <button
                   type="button"
                   onClick={() => handleNavClick('memory')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'memory'
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'memory'
                     ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    : 'text-foreground hover:bg-secondary'
                     }`}
                 >
-                  <Lightbulb className="h-5 w-5 shrink-0" />
+                  <Lightbulb className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Memory</span>
                 </button>
-
-                {/* Report */}
                 <button
                   type="button"
                   onClick={() => handleNavClick('report')}
-                  className={`flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left ${activeTab === 'report'
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'report'
                     ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'bg-secondary/50 text-foreground hover:bg-secondary'
+                    : 'text-foreground hover:bg-secondary'
                     }`}
                 >
-                  <FileText className="h-5 w-5 shrink-0" />
+                  <FileText className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Report</span>
                 </button>
-
-                {/* Settings */}
+                <button
+                  type="button"
+                  onClick={() => handleNavClick('journey', journeySubTab)}
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'journey'
+                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    : 'text-foreground hover:bg-secondary'
+                    }`}
+                >
+                  <Sparkles className="h-4 w-4 shrink-0" />
+                  <span className="font-medium min-w-0 truncate">Journey</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
                     onOpenChange(false)
                     onSettingsClick()
                   }}
-                  className="flex items-center gap-3 rounded-lg p-3 text-sm transition-colors text-left bg-secondary/50 text-foreground hover:bg-secondary"
+                  className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left text-foreground hover:bg-secondary"
                 >
-                  <Settings className="h-5 w-5 shrink-0" />
+                  <Settings className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Settings</span>
                 </button>
               </div>
-            </ScrollArea>
-          </div>
-        </div>
+            </section>
 
-        {/* Bottom Half - Chat History */}
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="px-4 py-3 border-b border-border/50">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Recent Chats</h2>
-          </div>
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="p-2 space-y-1">
-              {filteredSessions.length === 0 ? (
-                <div className="text-center py-6 text-sm text-muted-foreground">
-                  {sessions.length === 0 ? 'No chat history' : 'No chats found'}
-                </div>
-              ) : (
-                filteredSessions.map((session) => (
-                  <button
-                    key={session.id}
-                    type="button"
-                    onClick={() => {
-                      if (onSelectSession) {
-                        onSelectSession(session.id)
-                      }
-                      onOpenChange(false)
-                    }}
-                    className="w-full text-left p-3 rounded-lg hover:bg-secondary/50 transition-colors group"
-                  >
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <h3 className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">
-                        {session.title}
-                      </h3>
-                      <span className="text-[10px] text-muted-foreground shrink-0 flex items-center gap-1" suppressHydrationWarning>
-                        <Clock className="h-3 w-3" />
-                        {formatRelativeTime(new Date(session.created_at * 1000))}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
+            <section>
+              <h2 className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Recent Chats</h2>
+
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search chats..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-8 pl-8 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                {filteredSessions.length === 0 ? (
+                  <div className="rounded-lg px-2 py-4 text-center text-xs text-muted-foreground">
+                    {sessions.length === 0 ? 'No chat history' : 'No chats found'}
+                  </div>
+                ) : (
+                  filteredSessions.map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      onClick={() => {
+                        if (onSelectSession) {
+                          onSelectSession(session.id)
+                        }
+                        onOpenChange(false)
+                      }}
+                      className="w-full rounded-lg p-2.5 text-left transition-colors hover:bg-secondary"
+                    >
+                      <div className="mb-0.5 flex items-start justify-between gap-2">
+                        <h3 className="truncate text-sm font-medium text-foreground">
+                          {session.title}
+                        </h3>
+                        <span className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground" suppressHydrationWarning>
+                          <Clock className="h-3 w-3" />
+                          {formatRelativeTime(new Date(session.created_at * 1000))}
+                        </span>
+                      </div>
                       <span className="text-[10px] text-muted-foreground/70">
                         {session.message_count} messages
                       </span>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </ScrollArea>
-
-          {/* Search Bar at Bottom */}
-          <div className="shrink-0 p-3 border-t border-border">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search chats..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 text-sm"
-              />
-            </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
           </div>
-        </div>
-      </div>
+        </ScrollArea>
+      </aside>
     </div>
   )
 }

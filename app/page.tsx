@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { FloatingNav } from '@/components/floating-nav'
 import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
@@ -11,6 +11,8 @@ import { InsightsView } from '@/components/insights-view'
 import { EventsView } from '@/components/events-view'
 import { JourneyView } from '@/components/journey-view'
 import { ReportView } from '@/components/report-view'
+import { SettingsPageContent } from '@/components/settings-page-content'
+import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
 import type { ChatMode } from '@/components/chat-input'
@@ -22,22 +24,21 @@ import { getWildMode, setWildMode } from '@/lib/api-client'
 import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
 
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
+type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
 
 const runsSubTabLabels: Record<RunsSubTab, string> = {
   overview: 'Overview',
   details: 'Details',
-  manage: 'Manage',
 }
 
 export default function ResearchChat() {
-  const router = useRouter()
   const searchParams = useSearchParams()
-  const { settings } = useAppSettings()
+  const { settings, setSettings } = useAppSettings()
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
   const [runsSubTab, setRunsSubTab] = useState<RunsSubTab>('overview')
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
 
   // Use real API data via useRuns hook
   const { runs, updateRun: apiUpdateRun, refetch, startExistingRun, stopExistingRun } = useRuns()
@@ -64,6 +65,8 @@ export default function ResearchChat() {
   const [showArtifacts, setShowArtifacts] = useState(false)
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+  const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
+  const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
   // API configuration for auth/connection check
   const { useMock, authToken, testConnection } = useApiConfig()
@@ -75,9 +78,13 @@ export default function ResearchChat() {
     if (tab === 'journey') {
       setActiveTab('journey')
     }
+    if (tab === 'settings') {
+      setActiveTab('settings')
+    }
     if (journeySubTabParam === 'story' || journeySubTabParam === 'devnotes') {
       setJourneySubTab(journeySubTabParam)
     }
+    setFocusAuthTokenInApp(searchParams.get('focusAuthToken') === '1')
   }, [searchParams])
 
   // Auto-open settings if auth token is missing or connection fails (when not in mock mode)
@@ -87,19 +94,23 @@ export default function ResearchChat() {
     const checkConnection = async () => {
       // Check if auth token is missing
       if (!authToken) {
-        router.push('/settings?focusAuthToken=1')
+        setActiveTab('settings')
+        setFocusAuthTokenInApp(true)
         return
       }
 
       // Check if connection works
       const isConnected = await testConnection()
       if (!isConnected) {
-        router.push('/settings')
+        setActiveTab('settings')
+        setFocusAuthTokenInApp(false)
+      } else {
+        setFocusAuthTokenInApp(false)
       }
     }
 
     checkConnection()
-  }, [useMock, authToken, testConnection, router])
+  }, [useMock, authToken, testConnection])
 
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
@@ -263,6 +274,8 @@ export default function ResearchChat() {
     } else if (activeTab === 'journey') {
       items.push({ label: 'Journey' })
       items.push({ label: journeySubTab === 'story' ? 'Journey Story' : 'Dev Notes' })
+    } else if (activeTab === 'settings') {
+      items.push({ label: 'Settings' })
     }
 
     return items
@@ -468,117 +481,31 @@ export default function ResearchChat() {
     }
   }, [])
 
+  const handleOpenSweepCreator = useCallback(() => {
+    setActiveTab('chat')
+    setEditingSweepConfig(null)
+    setShowSweepForm(true)
+  }, [])
+
+  const handleInsertChatReference = useCallback((text: string) => {
+    setActiveTab('chat')
+    setChatDraftInsert({
+      id: Date.now(),
+      text,
+    })
+  }, [])
+
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
-      <main
-        className="mobile-viewport-wrapper flex flex-col bg-background overflow-hidden w-full h-full"
-      >
-        <FloatingNav
+      <main className="flex h-full w-full overflow-hidden bg-background">
+        <DesktopSidebar
           activeTab={activeTab}
-          runsSubTab={runsSubTab}
-          onMenuClick={() => setLeftPanelOpen(true)}
-          breadcrumbs={breadcrumbs}
-          eventCount={events.filter(e => e.status === 'new').length}
-          onAlertClick={handleNavigateToEvents}
-          showArtifacts={showArtifacts}
-          onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
-          collapseChats={collapseChats}
-          onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
-          collapseArtifactsInChat={collapseArtifactsInChat}
-          onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
-        />
-
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {activeTab === 'chat' && !showSweepForm && (
-            <ConnectedChatView
-              runs={runs}
-              sweeps={sweeps}
-              charts={insightCharts}
-              onRunClick={handleRunClick}
-              onEditSweep={handleEditSweep}
-              onLaunchSweep={handleLaunchSweep}
-              mode={chatMode}
-              onModeChange={handleChatModeChange}
-              alerts={alerts}
-              collapseArtifactsInChat={collapseArtifactsInChat}
-              chatSession={chatSession}
-              wildLoop={wildLoop}
-              webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
-              onOpenSettings={() => router.push('/settings')}
-            />
-          )}
-          {activeTab === 'chat' && showSweepForm && (
-            <SweepForm
-              initialConfig={editingSweepConfig || undefined}
-              onSave={handleSaveSweep}
-              onCancel={() => {
-                setShowSweepForm(false)
-                setEditingSweepConfig(null)
-              }}
-              onLaunch={handleLaunchSweep}
-            />
-          )}
-          {activeTab === 'runs' && (
-            <RunsView
-              runs={runs}
-              subTab={runsSubTab}
-              onRunClick={handleRunClick}
-              onUpdateRun={handleUpdateRun}
-              pendingAlertsByRun={pendingAlertsByRun}
-              alerts={alerts}
-              allTags={allTags}
-              onCreateTag={handleCreateTag}
-              onSelectedRunChange={setSelectedRun}
-              onShowVisibilityManageChange={setShowVisibilityManage}
-              onRefresh={refetch}
-              onStartRun={startExistingRun}
-              onStopRun={stopExistingRun}
-            />
-          )}
-          {activeTab === 'events' && (
-            <EventsView
-              events={events}
-              onNavigateToRun={handleNavigateToRun}
-              onResolveByChat={handleResolveByChat}
-              onUpdateEventStatus={handleUpdateEventStatus}
-              onRespondToAlert={handleRespondToAlert}
-            />
-          )}
-          {activeTab === 'charts' && (
-            <ChartsView
-              runs={runs}
-              customCharts={insightCharts}
-              onTogglePin={handleToggleChartPin}
-              onToggleOverview={handleToggleChartOverview}
-              onUpdateRun={handleUpdateRun}
-              onShowVisibilityManageChange={setShowVisibilityManage}
-            />
-          )}
-          {activeTab === 'memory' && (
-            <InsightsView
-              rules={memoryRules}
-              onToggleRule={handleToggleRule}
-              onAddRule={handleAddRule}
-            />
-          )}
-          {activeTab === 'report' && (
-            <ReportView runs={runs} />
-          )}
-          {activeTab === 'journey' && (
-            <JourneyView
-              onBack={() => setActiveTab('chat')}
-              subTab={journeySubTab}
-            />
-          )}
-        </div>
-
-        <NavPage
-          open={leftPanelOpen}
-          onOpenChange={setLeftPanelOpen}
-          onSettingsClick={() => router.push('/settings')}
-          activeTab={activeTab}
+          collapsed={desktopSidebarCollapsed}
           runsSubTab={runsSubTab}
           journeySubTab={journeySubTab}
+          sessions={sessions}
+          runs={runs}
+          sweeps={sweeps}
           onTabChange={handleTabChange}
           onRunsSubTabChange={handleRunsSubTabChange}
           onJourneySubTabChange={setJourneySubTab}
@@ -586,13 +513,151 @@ export default function ResearchChat() {
             await createNewSession()
             setActiveTab('chat')
           }}
-          sessions={sessions}
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
             setActiveTab('chat')
           }}
+          onNavigateToRun={handleNavigateToRun}
+          onInsertReference={handleInsertChatReference}
+          onSettingsClick={() => setActiveTab('settings')}
         />
 
+        <section className="mobile-viewport-wrapper flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          <FloatingNav
+            activeTab={activeTab}
+            runsSubTab={runsSubTab}
+            onMenuClick={() => setLeftPanelOpen(true)}
+            onDesktopMenuClick={() => setDesktopSidebarCollapsed((prev) => !prev)}
+            desktopSidebarCollapsed={desktopSidebarCollapsed}
+            breadcrumbs={breadcrumbs}
+            eventCount={events.filter(e => e.status === 'new').length}
+            onAlertClick={handleNavigateToEvents}
+            onCreateSweepClick={handleOpenSweepCreator}
+            showArtifacts={showArtifacts}
+            onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
+            collapseChats={collapseChats}
+            onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
+            collapseArtifactsInChat={collapseArtifactsInChat}
+            onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
+          />
+
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {activeTab === 'chat' && !showSweepForm && (
+              <ConnectedChatView
+                runs={runs}
+                sweeps={sweeps}
+                charts={insightCharts}
+                onRunClick={handleRunClick}
+                onEditSweep={handleEditSweep}
+                onLaunchSweep={handleLaunchSweep}
+                mode={chatMode}
+                onModeChange={handleChatModeChange}
+                alerts={alerts}
+                collapseArtifactsInChat={collapseArtifactsInChat}
+                chatSession={chatSession}
+                wildLoop={wildLoop}
+                webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
+                onOpenSettings={() => setActiveTab('settings')}
+                insertDraft={chatDraftInsert}
+              />
+            )}
+            {activeTab === 'chat' && showSweepForm && (
+              <SweepForm
+                initialConfig={editingSweepConfig || undefined}
+                onSave={handleSaveSweep}
+                onCancel={() => {
+                  setShowSweepForm(false)
+                  setEditingSweepConfig(null)
+                }}
+                onLaunch={handleLaunchSweep}
+              />
+            )}
+            {activeTab === 'runs' && (
+              <RunsView
+                runs={runs}
+                subTab={runsSubTab}
+                onRunClick={handleRunClick}
+                onUpdateRun={handleUpdateRun}
+                pendingAlertsByRun={pendingAlertsByRun}
+                alerts={alerts}
+                allTags={allTags}
+                onCreateTag={handleCreateTag}
+                onSelectedRunChange={setSelectedRun}
+                onShowVisibilityManageChange={setShowVisibilityManage}
+                onRefresh={refetch}
+                onStartRun={startExistingRun}
+                onStopRun={stopExistingRun}
+              />
+            )}
+            {activeTab === 'events' && (
+              <EventsView
+                events={events}
+                onNavigateToRun={handleNavigateToRun}
+                onResolveByChat={handleResolveByChat}
+                onUpdateEventStatus={handleUpdateEventStatus}
+                onRespondToAlert={handleRespondToAlert}
+              />
+            )}
+            {activeTab === 'charts' && (
+              <ChartsView
+                runs={runs}
+                customCharts={insightCharts}
+                onTogglePin={handleToggleChartPin}
+                onToggleOverview={handleToggleChartOverview}
+                onUpdateRun={handleUpdateRun}
+                onShowVisibilityManageChange={setShowVisibilityManage}
+              />
+            )}
+            {activeTab === 'memory' && (
+              <InsightsView
+                rules={memoryRules}
+                onToggleRule={handleToggleRule}
+                onAddRule={handleAddRule}
+              />
+            )}
+            {activeTab === 'report' && (
+              <ReportView runs={runs} />
+            )}
+            {activeTab === 'journey' && (
+              <JourneyView
+                onBack={() => setActiveTab('chat')}
+                subTab={journeySubTab}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <SettingsPageContent
+                settings={settings}
+                onSettingsChange={setSettings}
+                focusAuthToken={focusAuthTokenInApp}
+                onNavigateToJourney={(subTab) => {
+                  setJourneySubTab(subTab)
+                  setActiveTab('journey')
+                }}
+              />
+            )}
+          </div>
+
+          <NavPage
+            open={leftPanelOpen}
+            onOpenChange={setLeftPanelOpen}
+            onSettingsClick={() => setActiveTab('settings')}
+            activeTab={activeTab === 'settings' ? 'chat' : activeTab}
+            runsSubTab={runsSubTab}
+            journeySubTab={journeySubTab}
+            onTabChange={handleTabChange}
+            onRunsSubTabChange={handleRunsSubTabChange}
+            onJourneySubTabChange={setJourneySubTab}
+            onNewChat={async () => {
+              await createNewSession()
+              setActiveTab('chat')
+            }}
+            sessions={sessions}
+            onSelectSession={async (sessionId) => {
+              await selectSession(sessionId)
+              setActiveTab('chat')
+            }}
+          />
+        </section>
       </main>
     </div>
   )

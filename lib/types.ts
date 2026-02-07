@@ -12,6 +12,8 @@ export interface Artifact {
 export interface ExperimentRun {
   id: string
   name: string
+  sweepId?: string
+  sweepParams?: Record<string, unknown> | null
   alias?: string
   status: RunStatus
   progress: number
@@ -56,6 +58,9 @@ export interface AppSettings {
     theme: 'dark' | 'light' | 'system'
     fontSize: 'small' | 'medium' | 'large'
     buttonSize: 'compact' | 'default' | 'large'
+    customFontSizePx?: number | null
+    customButtonScalePercent?: number | null
+    chatToolbarButtonSizePx?: number | null
   }
   integrations: {
     slack?: {

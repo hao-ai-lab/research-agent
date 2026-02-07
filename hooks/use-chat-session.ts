@@ -81,6 +81,18 @@ const initialStreamingState: StreamingState = {
     toolCalls: [],
 }
 
+function parseDevelopCommand(content: string): string | null {
+    const trimmed = content.trim()
+    const match = trimmed.match(/^\/develop(?:ment)?(?:\s+([\s\S]*))?$/i)
+    if (!match) return null
+
+    const payload = (match[1] ?? '').trim()
+    if (!payload) {
+        return 'Usage: /develop <text>'
+    }
+    return payload
+}
+
 export function useChatSession(): UseChatSessionResult {
     // Connection state
     const [isConnected, setIsConnected] = useState(false)
@@ -209,6 +221,27 @@ export function useChatSession(): UseChatSessionResult {
 
         // Track the current mode for queued messages
         currentModeRef.current = mode
+
+        const developEcho = parseDevelopCommand(content)
+        if (developEcho !== null) {
+            setError(null)
+            const timestamp = Date.now() / 1000
+
+            const userMessage: ChatMessageData = {
+                role: 'user',
+                content,
+                timestamp,
+            }
+
+            const assistantMessage: ChatMessageData = {
+                role: 'assistant',
+                content: developEcho,
+                timestamp: Date.now() / 1000,
+            }
+
+            setMessages(prev => [...prev, userMessage, assistantMessage])
+            return
+        }
 
         // Track accumulated text/thinking outside try so catch can access them
         let finalText = ''
