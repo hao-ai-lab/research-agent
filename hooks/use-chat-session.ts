@@ -71,6 +71,9 @@ export interface UseChatSessionResult {
     queueMessage: (content: string) => void
     removeFromQueue: (index: number) => void
     clearQueue: () => void
+
+    // Inject a message from an external source (e.g., wild mode runner)
+    injectMessage: (msg: ChatMessageData) => void
 }
 
 const initialStreamingState: StreamingState = {
@@ -420,6 +423,11 @@ export function useChatSession(): UseChatSessionResult {
         setMessageQueue(prev => prev.filter((_, i) => i !== index))
     }, [])
 
+    // Inject a message from an external source (e.g., wild mode SSE)
+    const injectMessage = useCallback((msg: ChatMessageData) => {
+        setMessages(prev => [...prev, msg])
+    }, [])
+
     // Process queue when streaming ends
     useEffect(() => {
         if (!streamingState.isStreaming && messageQueue.length > 0 && currentSessionId) {
@@ -449,5 +457,6 @@ export function useChatSession(): UseChatSessionResult {
         queueMessage,
         removeFromQueue,
         clearQueue,
+        injectMessage,
     }
 }

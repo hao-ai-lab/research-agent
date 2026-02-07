@@ -477,6 +477,69 @@ export async function setWildMode(enabled: boolean): Promise<WildModeState> {
     return response.json()
 }
 
+// Wild mode chat event from the runner
+export interface WildChatEvent {
+    type: 'wild_chat' | 'wild_stopped' | 'keepalive'
+    session_id?: string
+    role?: string
+    content?: string
+    timestamp?: number
+    hidden?: boolean
+}
+
+/**
+ * Stream wild mode chat events via SSE.
+ * Yields events as the runner injects messages into the chat.
+ */
+export async function* streamWildEvents(
+    signal?: AbortSignal
+): AsyncGenerator<WildChatEvent, void, unknown> {
+    const response = await fetch(`${API_URL()}/wild/events`, {
+        headers: getHeaders(),
+        signal,
+    })
+
+    if (!response.ok) {
+        throw new Error(`Failed to connect to wild events: ${response.statusText}`)
+    }
+
+    if (!response.body) {
+        throw new Error('Response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+
+            // Process SSE format: data: {...}\n\n
+            const events = buffer.split('\n\n')
+            buffer = events.pop() || ''
+
+            for (const event of events) {
+                if (event.startsWith('data: ')) {
+                    try {
+                        const parsed = JSON.parse(event.slice(6)) as WildChatEvent
+                        if (parsed.type === 'keepalive') continue
+                        yield parsed
+                    } catch {
+                        console.warn('Failed to parse wild SSE event:', event)
+                    }
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
+}
+
 /**
  * Get run logs with byte-offset pagination
  * @param runId - Run ID

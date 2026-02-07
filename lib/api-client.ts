@@ -29,6 +29,7 @@ export type {
     Sweep,
     CreateSweepRequest,
     WildModeState,
+    WildChatEvent,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -129,3 +130,6 @@ export const getSweep = (...args: Parameters<typeof realApi.getSweep>) =>
 
 export const startSweep = (...args: Parameters<typeof realApi.startSweep>) =>
     getApi().startSweep(...args)
+
+export const streamWildEvents = (...args: Parameters<typeof realApi.streamWildEvents>) =>
+    getApi().streamWildEvents(...args)

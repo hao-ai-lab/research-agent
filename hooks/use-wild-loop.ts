@@ -10,7 +10,8 @@ import type {
 } from '@/lib/types'
 import type { ChatMode } from '@/components/chat-input'
 import type { UseChatSessionResult } from '@/hooks/use-chat-session'
-import type { Alert } from '@/lib/api-client'
+import type { Alert, ChatMessageData } from '@/lib/api-client'
+import { streamWildEvents } from '@/lib/api-client'
 import { getApiUrl, getAuthToken } from '@/lib/api-config'
 
 export interface UseWildLoopResult {
@@ -39,6 +40,7 @@ export function useWildLoop({
 }: UseWildLoopParams): UseWildLoopResult {
   const [state, setState] = useState<WildLoopState | null>(null)
   const [systemEvents, setSystemEvents] = useState<WildSystemEvent[]>([])
+  const abortRef = useRef<AbortController | null>(null)
 
   const getHeaders = useCallback(() => {
     const headers: HeadersInit = { 'Content-Type': 'application/json' }
@@ -47,7 +49,7 @@ export function useWildLoop({
     return headers
   }, [])
   
-  // Polling for status
+  // Polling for status (phase, iteration, logs)
   useEffect(() => {
     let mounted = true
     const poll = async () => {
@@ -63,7 +65,6 @@ export function useWildLoop({
              setState(data)
            }
         } else {
-             // If 404 or null, maybe loop stopped?
              if (mounted) setState(null)
         }
       } catch (e) {
@@ -80,6 +81,79 @@ export function useWildLoop({
     }
   }, [])
 
+  // SSE subscription for real-time wild mode chat events
+  useEffect(() => {
+    const isActive = state !== null && state.phase !== 'idle'
+    
+    if (!isActive) {
+      // Clean up if loop is no longer active
+      if (abortRef.current) {
+        abortRef.current.abort()
+        abortRef.current = null
+      }
+      return
+    }
+
+    // Already connected
+    if (abortRef.current) return
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    const subscribe = async () => {
+      let retries = 0
+      const maxRetries = 5
+      
+      while (retries < maxRetries && !controller.signal.aborted) {
+        try {
+          console.log(`[wild-loop] Connecting to /wild/events SSE... (attempt ${retries + 1})`)
+          for await (const event of streamWildEvents(controller.signal)) {
+            retries = 0 // Reset on successful event
+            
+            if (event.type === 'wild_stopped') {
+              console.log('[wild-loop] Wild loop stopped signal received')
+              return
+            }
+
+            if (event.type === 'wild_chat' && !event.hidden && event.content) {
+              const msg: ChatMessageData = {
+                role: (event.role as 'user' | 'assistant') || 'assistant',
+                content: event.content,
+                timestamp: event.timestamp || Date.now() / 1000,
+              }
+              chatSession.injectMessage(msg)
+            }
+          }
+          // Stream ended normally
+          break
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            return // Expected on cleanup
+          }
+          retries++
+          console.warn(`[wild-loop] SSE connection failed (attempt ${retries}/${maxRetries}):`, err instanceof Error ? err.message : err)
+          if (retries < maxRetries && !controller.signal.aborted) {
+            // Backoff: 1s, 2s, 4s, 8s, 16s
+            await new Promise(r => setTimeout(r, Math.min(1000 * Math.pow(2, retries - 1), 16000)))
+          }
+        }
+      }
+    }
+
+    subscribe().finally(() => {
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+    })
+
+    return () => {
+      controller.abort()
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+    }
+  }, [state, chatSession])
+
   const isActive = state !== null && state.phase !== 'idle'
   const isPaused = state?.isPaused ?? false
 
@@ -92,7 +166,6 @@ export function useWildLoop({
             headers: getHeaders(),
             body: JSON.stringify({ goal, conditions }),
         })
-        // Force immediate poll?
     } catch (e) {
         console.error("Failed to start loop", e)
     }
@@ -105,25 +178,17 @@ export function useWildLoop({
             headers: getHeaders()
         })
         setState(null)
+        // Clean up SSE connection
+        if (abortRef.current) {
+          abortRef.current.abort()
+          abortRef.current = null
+        }
     } catch (e) {
         console.error("Failed to stop loop", e)
     }
   }, [])
   
-  // TODO: Implement Pause/Resume in backend if needed, or just keep them client-side for UI?
-  // The backend supports pause/resume.
   const pauseLoop = useCallback(async () => {
-      // Not implemented in backend endpoint yet explicitly, but we can add if critical.
-      // For now, let's assume stop is the main interaction or add endpoints.
-      // Actually, looking at server.py, I didn't add /wild/pause.
-      // Let's Just use Stop for now or add it?
-      // "Wild Mode" usually implies full autonomy. 
-      // The backend has `wild_loop_manager.pause()`, let's add the endpoints quickly or just omit for MVP.
-      // Given the user wants refactor, let's stick to start/stop for now to be safe, 
-      // OR update the server to support pause/resume. 
-      // I'll stick to start/stop to minimize complexity unless requested.
-      // But wait, the UI expects `pauseLoop`.
-      // I'll make it a no-op or log warning for now, or better: implement it.
       console.warn("Pause not yet implemented in backend")
   }, [])
 
@@ -134,7 +199,7 @@ export function useWildLoop({
 
   return {
     state,
-    systemEvents, // We might need to fetch these from backend too if we want them?
+    systemEvents,
     isActive,
     isPaused,
     startLoop,

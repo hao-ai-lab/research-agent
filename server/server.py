@@ -1518,6 +1518,9 @@ import signal
 wild_process: Optional[subprocess.Popen] = None
 WILD_STATE_FILE = os.path.join(WORKDIR, ".wild_state.json")
 
+# SSE subscribers for wild mode chat events (list of asyncio.Queue)
+wild_event_subscribers: list = []
+
 class WildLoopConfig(BaseModel):
     goal: str
     conditions: dict # Flexible dict for conditions
@@ -1554,16 +1557,42 @@ async def inject_chat_message(req: ChatInjectionRequest):
     session["messages"].append(msg)
     save_chat_state()
     
-    # If injecting a user message, we might want to trigger the model response?
-    # NO, the runner is responsible for triggering the model (via OpenCode) and injecting the response too.
-    # The runner manages the "Chat Loop".
-    # Wait, if the runner calculates the prompt, it needs to send it to the LLM.
-    # Does the runner use `server.py` to call the LLM? 
-    # Or does it call OpenCode directly?
-    # The runner should call OpenCode directly (it has the URL).
-    # Then it injects the response back here for visibility.
+    # Push to SSE subscribers so the frontend sees this in real-time
+    event_data = {"type": "wild_chat", "session_id": latest_sid, **msg}
+    dead_subs = []
+    for q in wild_event_subscribers:
+        try:
+            q.put_nowait(event_data)
+        except asyncio.QueueFull:
+            dead_subs.append(q)
+    for q in dead_subs:
+        wild_event_subscribers.remove(q)
     
     return {"status": "injected", "session_id": latest_sid}
+
+
+@app.get("/wild/events")
+async def stream_wild_events():
+    """SSE endpoint for real-time wild mode chat events."""
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    wild_event_subscribers.append(queue)
+    
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive
+                    yield f"data: {json.dumps({'type': 'keepalive'})}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if queue in wild_event_subscribers:
+                wild_event_subscribers.remove(queue)
+    
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/wild/start")
 async def start_wild_loop(config: WildLoopConfig):
@@ -1619,6 +1648,15 @@ async def stop_wild_loop():
             os.remove(WILD_STATE_FILE)
         except:
             pass
+    
+    # Signal all SSE subscribers to stop
+    stop_event = {"type": "wild_stopped"}
+    for q in wild_event_subscribers:
+        try:
+            q.put_nowait(stop_event)
+        except asyncio.QueueFull:
+            pass
+    wild_event_subscribers.clear()
             
     return {"message": "Wild Loop Stopped"}
 

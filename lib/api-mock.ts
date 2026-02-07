@@ -17,10 +17,11 @@ import type {
     Sweep,
     CreateSweepRequest,
     WildModeState,
+    WildChatEvent,
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, WildModeState }
+export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, WildModeState, WildChatEvent }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -724,4 +725,10 @@ export async function startSweep(sweepId: string, parallel: number = 1): Promise
     }
     sweep.status = 'running'
     return { message: `Started ${Math.min(parallel, sweep.run_ids.length)} runs (mock)` }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function* streamWildEvents(_signal?: AbortSignal): AsyncGenerator<WildChatEvent, void, unknown> {
+    // No-op in mock mode
+    return
 }

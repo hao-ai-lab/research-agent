@@ -1,0 +1,1 @@
+{"phase":"planning","goal":"Find my best config","iteration":1,"startedAt":1770425742479,"conditions":{"maxIterations":10,"timeLimitMs":3600000,"tokenBudget":null,"customCondition":null},"estimatedTokens":0,"isPaused":false,"logs":["[16:55:42] Ralph Runner started. Goal: Find my best config","[16:55:42] Iteration 1: Reasoning..."]}
