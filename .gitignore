@@ -32,4 +32,5 @@ __pycache__
 
 package-lock.json
 
-.mock_wandb/
+.mock_wandb
+.ruff_cache
