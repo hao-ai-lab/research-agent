@@ -21,6 +21,7 @@ import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
 import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
+import { buildSweepDraftFromPrompt } from '@/lib/sweep-nl'
 
 type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
 
@@ -446,6 +447,12 @@ export default function ResearchChat() {
     setEditingSweepConfig(null)
   }, [])
 
+  const handleDraftSweepFromPrompt = useCallback((prompt: string) => {
+    const { config } = buildSweepDraftFromPrompt(prompt)
+    setEditingSweepConfig(config)
+    setShowSweepForm(true)
+  }, [])
+
   // Clear run selection when changing tabs
   const handleTabChange = useCallback((tab: ActiveTab) => {
     setActiveTab(tab)
@@ -505,6 +512,7 @@ export default function ResearchChat() {
               wildLoop={wildLoop}
               webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
               onOpenSettings={() => router.push('/settings')}
+              onDraftSweepFromPrompt={handleDraftSweepFromPrompt}
             />
           )}
           {activeTab === 'chat' && showSweepForm && (

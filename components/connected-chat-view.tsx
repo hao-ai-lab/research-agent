@@ -8,6 +8,7 @@ import { StreamingMessage } from './streaming-message'
 import { WildLoopBanner } from './wild-loop-banner'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
+import { ChatEntryCards, type ChatEntryPromptOptions } from './chat-entry-cards'
 import { useChatSession } from '@/hooks/use-chat-session'
 import { useWebNotification } from '@/hooks/use-web-notification'
 import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
@@ -39,6 +40,7 @@ interface ConnectedChatViewProps {
     wildLoop?: UseWildLoopResult
     webNotificationsEnabled?: boolean
     onOpenSettings?: () => void
+    onDraftSweepFromPrompt?: (prompt: string) => void
 }
 
 /**
@@ -61,6 +63,7 @@ export function ConnectedChatView({
     wildLoop,
     webNotificationsEnabled = true,
     onOpenSettings,
+    onDraftSweepFromPrompt,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
@@ -79,10 +82,12 @@ export function ConnectedChatView({
         isLoading,
         error,
         currentSessionId,
+        sessions,
         messages,
         streamingState,
         sendMessage,
         createNewSession,
+        selectSession,
         stopStreaming,
         queueMessage,
         messageQueue,
@@ -178,7 +183,72 @@ export function ConnectedChatView({
     }, [wildLoop?.pendingPrompt, streamingState.isStreaming, currentSessionId, messages.length, sendMessage, mode, createNewSession, wildLoop])
 
     // Handle send - create session if needed, start wild loop if in wild mode
+    const buildUiContext = useCallback(() => {
+        const activeRuns = runs
+            .filter(run => run.status === 'running' || run.status === 'queued')
+            .slice(0, 4)
+
+        const pendingAlerts = alerts
+            .filter(alert => alert.status === 'pending')
+            .slice(0, 4)
+
+        const activeSweeps = sweeps
+            .filter(sweep => sweep.status === 'running' || sweep.status === 'pending')
+            .slice(0, 3)
+
+        const latestCompletedRun = runs
+            .filter(run => run.status === 'completed')
+            .sort((a, b) => {
+                const aTime = a.endTime?.getTime() || a.startTime.getTime()
+                const bTime = b.endTime?.getTime() || b.startTime.getTime()
+                return bTime - aTime
+            })[0]
+
+        const lines: string[] = ['UI context snapshot:']
+        lines.push(
+            activeRuns.length > 0
+                ? `- Active runs: ${activeRuns.map(run => `${run.alias || run.name} (${run.status}, ${run.progress}%)`).join('; ')}`
+                : '- Active runs: none'
+        )
+        lines.push(
+            pendingAlerts.length > 0
+                ? `- Pending alerts: ${pendingAlerts.map(alert => `${alert.severity} ${alert.id}: ${alert.message}`).join('; ')}`
+                : '- Pending alerts: none'
+        )
+        lines.push(
+            activeSweeps.length > 0
+                ? `- Active sweeps: ${activeSweeps.map(sweep => `${sweep.id} (${sweep.status}, ${sweep.progress.completed}/${sweep.progress.total})`).join('; ')}`
+                : '- Active sweeps: none'
+        )
+        if (latestCompletedRun) {
+            lines.push(`- Latest completed run: ${latestCompletedRun.alias || latestCompletedRun.name} (${latestCompletedRun.id})`)
+        }
+        return lines.join('\n')
+    }, [runs, alerts, sweeps])
+
+    const runPromptAction = useCallback(async (prompt: string, options?: ChatEntryPromptOptions) => {
+        let sessionId = currentSessionId
+        if (options?.newSession || !sessionId) {
+            sessionId = await createNewSession()
+            if (!sessionId) return
+        }
+
+        const effectiveMode = options?.mode || mode
+        await sendMessage(prompt, effectiveMode, sessionId, buildUiContext())
+    }, [currentSessionId, createNewSession, mode, sendMessage, buildUiContext])
+
+    const openSessionFromCard = useCallback(async (sessionId: string) => {
+        await selectSession(sessionId)
+    }, [selectSession])
+
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
+        const effectiveMode = msgMode || mode
+
+        if (effectiveMode === 'sweep' && onDraftSweepFromPrompt) {
+            onDraftSweepFromPrompt(message)
+            return
+        }
+
         let sessionId = currentSessionId
         if (!sessionId) {
             // Auto-create a session on first message
@@ -188,15 +258,13 @@ export function ConnectedChatView({
             }
         }
 
-        const effectiveMode = msgMode || mode
-
         // If in wild mode and loop isn't active, start the loop on first message
         if (effectiveMode === 'wild' && wildLoop && !wildLoop.isActive) {
             wildLoop.start(message, sessionId)
         }
 
-        await sendMessage(message, effectiveMode, sessionId)
-    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop])
+        await sendMessage(message, effectiveMode, sessionId, buildUiContext())
+    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onDraftSweepFromPrompt, buildUiContext])
 
     // Connection error state
     if (!isConnected && !isLoading) {
@@ -301,42 +369,17 @@ export function ConnectedChatView({
 
                         {/* Empty state */}
                         {messages.length === 0 && !streamingState.isStreaming && (
-                            <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
-                                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary">
-                                    <span className="text-2xl">{mode === 'wild' ? '🚀' : '🔬'}</span>
-                                </div>
-                                <h3 className="text-lg font-semibold text-foreground">
-                                    {mode === 'wild' ? 'Wild Mode' : 'Research Assistant'}
-                                </h3>
-                                <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                                    {mode === 'wild'
-                                        ? 'Describe your research goal and the agent will autonomously design experiments, create sweeps, and iterate.'
-                                        : 'Ask me anything about your experiments, training runs, or ML research. I can help analyze loss curves, debug issues, and suggest improvements.'}
-                                </p>
-                                <div className="mt-6 flex flex-wrap justify-center gap-2">
-                                    {(mode === 'wild' ? [
-                                        'Sweep learning rates from 1e-4 to 1e-2',
-                                        'Train model and tune hyperparams',
-                                        'Debug failing training run',
-                                    ] : [
-                                        'Analyze my latest run',
-                                        'Why did training fail?',
-                                        'Compare model configs',
-                                    ]).map((suggestion) => (
-                                        <button
-                                            key={suggestion}
-                                            type="button"
-                                            onClick={() => handleSend(suggestion)}
-                                            className={`rounded-full border px-4 py-2 text-sm transition-colors active:scale-95 ${
-                                                mode === 'wild'
-                                                    ? 'border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20'
-                                                    : 'border-border bg-secondary text-foreground hover:bg-secondary/80'
-                                            }`}
-                                        >
-                                            {suggestion}
-                                        </button>
-                                    ))}
-                                </div>
+                            <div className="flex flex-col items-center justify-center px-4 py-8">
+                                <ChatEntryCards
+                                    mode={mode}
+                                    runs={runs}
+                                    alerts={alerts}
+                                    sweeps={sweeps}
+                                    sessions={sessions}
+                                    onPrompt={runPromptAction}
+                                    onDraftSweep={onDraftSweepFromPrompt || (() => {})}
+                                    onOpenSession={openSessionFromCard}
+                                />
                             </div>
                         )}
                     </div>

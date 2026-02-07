@@ -63,7 +63,7 @@ export interface UseChatSessionResult {
     streamingState: StreamingState
 
     // Send message - optional sessionId override for newly created sessions
-    sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string) => Promise<void>
+    sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string, context?: string) => Promise<void>
     stopStreaming: () => Promise<void>
 
     // Message queue - for queuing messages during streaming
@@ -196,7 +196,7 @@ export function useChatSession(): UseChatSessionResult {
     }, [currentSessionId])
 
     // Send a message - accepts optional sessionIdOverride for newly created sessions
-    const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string) => {
+    const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string, context?: string) => {
         const targetSessionId = sessionIdOverride || currentSessionId
         if (!targetSessionId) {
             setError('No active session. Please create or select a chat.')
@@ -263,7 +263,7 @@ export function useChatSession(): UseChatSessionResult {
             }, 5_000)
 
             try {
-            for await (const event of streamChat(targetSessionId, content, wildMode, abortControllerRef.current.signal)) {
+            for await (const event of streamChat(targetSessionId, content, wildMode, abortControllerRef.current.signal, context)) {
                 lastEventTime = Date.now()
                 const partId = event.id
                 

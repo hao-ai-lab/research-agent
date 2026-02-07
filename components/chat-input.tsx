@@ -545,7 +545,13 @@ export function ChatInput({
           value={message}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
-          placeholder="Message Research Assistant... (type @ to mention)"
+          placeholder={
+            mode === 'sweep'
+              ? 'Describe a sweep in plain language... (example: lr 1e-4 to 1e-2, batch size 16/32/64)'
+              : mode === 'wild'
+              ? 'Describe the autonomous goal and constraints...'
+              : 'Message Research Assistant... (type @ to mention)'
+          }
           disabled={disabled}
           rows={1}
           className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"

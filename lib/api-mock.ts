@@ -329,7 +329,9 @@ export async function* streamChat(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _wildMode: boolean = false,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _signal?: AbortSignal
+    _signal?: AbortSignal,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _context?: string
 ): AsyncGenerator<StreamEvent, void, unknown> {
     const session = mockSessions.get(sessionId)
     if (!session) {

@@ -128,7 +128,8 @@ export async function* streamChat(
     sessionId: string,
     message: string,
     wildMode: boolean = false,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    context?: string
 ): AsyncGenerator<StreamEvent, void, unknown> {
     const response = await fetch(`${API_URL()}/chat`, {
         method: 'POST',
@@ -137,6 +138,7 @@ export async function* streamChat(
             session_id: sessionId,
             message,
             wild_mode: wildMode,
+            context,
         }),
         signal,
     })

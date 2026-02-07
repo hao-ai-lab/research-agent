@@ -142,6 +142,7 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     wild_mode: bool = False
+    context: Optional[str] = None
 
 
 class CreateSessionRequest(BaseModel):
@@ -737,7 +738,11 @@ async def chat_endpoint(req: ChatRequest):
                 if custom_cond:
                     wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
                 wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
-            content = f"{wild_mode_note}[USER] {req.message}"
+            context_note = ""
+            if req.context:
+                context_note = f"[UI_CONTEXT]\\n{req.context}\\n[/UI_CONTEXT]\\n\\n"
+
+            content = f"{wild_mode_note}{context_note}[USER] {req.message}"
 
             async with httpx.AsyncClient(timeout=None) as client:
                 logger.debug("Sending prompt to OpenCode session %s", opencode_session_id)
