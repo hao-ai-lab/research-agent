@@ -62,6 +62,7 @@ export function SweepFormPopover({ onClose, onRefresh }: SweepFormPopoverProps) 
     } finally {
       setIsSubmitting(false)
     }
+  }
 
   return (
     <div className="space-y-3">
