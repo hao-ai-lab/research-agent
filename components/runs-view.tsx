@@ -28,14 +28,16 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  Dialog,
+  DialogContent,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -51,7 +53,7 @@ import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
-import { createSweep } from '@/lib/api-client'
+
 
 type DetailsView = 'time' | 'priority'
 type GroupByMode = 'none' | 'sweep'
@@ -66,96 +68,8 @@ const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
   'canceled',
 ]
 
-// Inline sweep form for popover
-function SweepFormPopover({ onClose, onRefresh }: { onClose: () => void; onRefresh?: () => void }) {
-  const [name, setName] = React.useState('')
-  const [command, setCommand] = React.useState('')
-  const [params, setParams] = React.useState('')
-  const [isSubmitting, setIsSubmitting] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  const handleSubmit = async () => {
-    if (!name.trim() || !command.trim() || !params.trim()) {
-      setError('All fields required')
-      return
-    }
-
-    // Parse params: "lr=0.001,0.01;batch=32,64" -> {lr: [0.001, 0.01], batch: [32, 64]}
-    const paramObj: Record<string, unknown[]> = {}
-    try {
-      params.split(';').forEach(p => {
-        const [key, vals] = p.split('=')
-        if (key && vals) {
-          paramObj[key.trim()] = vals.split(',').map(v => {
-            const num = Number(v.trim())
-            return isNaN(num) ? v.trim() : num
-          })
-        }
-      })
-    } catch {
-      setError('Invalid param format')
-      return
-    }
-
-    if (Object.keys(paramObj).length === 0) {
-      setError('At least one parameter required')
-      return
-    }
-
-    setIsSubmitting(true)
-    try {
-      await createSweep({
-        name: name.trim(),
-        base_command: command.trim(),
-        parameters: paramObj,
-        max_runs: 10,
-        auto_start: false,
-      })
-      onClose()
-      onRefresh?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="font-medium text-sm">Create Sweep</div>
-      <div className="space-y-2">
-        <Input
-          placeholder="Sweep name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="h-8 text-xs"
-        />
-        <Textarea
-          placeholder="python train.py"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          className="h-16 text-xs font-mono"
-        />
-        <Input
-          placeholder="lr=0.001,0.01;batch=32,64"
-          value={params}
-          onChange={(e) => setParams(e.target.value)}
-          className="h-8 text-xs font-mono"
-        />
-        <p className="text-[10px] text-muted-foreground">
-          Format: key=val1,val2;key2=val3,val4
-        </p>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <div className="flex gap-2">
-        <Button size="sm" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
-        <Button size="sm" onClick={handleSubmit} disabled={isSubmitting} className="flex-1">
-          {isSubmitting ? 'Creating...' : 'Create'}
-        </Button>
-      </div>
-    </div>
-  )
-}
+// Rich sweep form
+import { SweepForm } from '@/components/sweep-form'
 
 interface RunsViewProps {
   runs: ExperimentRun[]
@@ -653,6 +567,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
 
   // Overview view (default)
   return (
+    <>
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full" ref={scrollAreaRef} onScrollCapture={handleScroll}>
@@ -828,26 +743,20 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                         </PopoverContent>
                       </Popover>
 
-                      <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                aria-label="Create Sweep"
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </PopoverTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent>Create Sweep</TooltipContent>
-                        </Tooltip>
-                        <PopoverContent className="w-80 max-w-[92vw]" align="end">
-                          <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
-                        </PopoverContent>
-                      </Popover>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="Create Sweep"
+                            onClick={() => setSweepDialogOpen(true)}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Create Sweep</TooltipContent>
+                      </Tooltip>
 
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1091,5 +1000,16 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
         </ScrollArea>
       </div>
     </div>
+
+      <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
+        <DialogContent showCloseButton={false} className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col p-0 gap-0">
+          <SweepForm
+            onSave={() => { setSweepDialogOpen(false); onRefresh?.() }}
+            onCancel={() => setSweepDialogOpen(false)}
+            onLaunch={() => { setSweepDialogOpen(false); onRefresh?.() }}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

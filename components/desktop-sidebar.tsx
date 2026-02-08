@@ -5,7 +5,6 @@ import {
   BarChart3,
   Bell,
   ChevronsUpDown,
-  Bot,
   FileText,
   FlaskConical,
   Lightbulb,
@@ -249,19 +248,6 @@ export function DesktopSidebar({
                   <MessageSquare className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
                   {!collapsed && 'Chat'}
                 </button>
-
-                <a
-                  href="/assistant"
-                  title="Assistant"
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${
-                    collapsed
-                      ? 'justify-center px-2 text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      : 'gap-2 px-2 text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <Bot className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Assistant'}
-                </a>
 
                 <button
                   type="button"
