@@ -1,0 +1,69 @@
+name: Prompt Tuning Toy Story
+story_type: prompt_tuning
+mode: wild_night
+scheduler:
+  total_gpus: 1
+llm:
+  mode: mock
+  # Optional real background LLM execution:
+  # mode: opencode
+  # opencode_cmd: ["opencode", "run", "--json"]
+human:
+  auto_proceed: true
+runs:
+  - run_id: pt-fn-a
+    name: variant-a-function
+    skill:
+      kind: python_function
+      target: skills.skill_functions:run_variant
+      args:
+        status: success
+        variant: A
+        score: 82
+        cost: 0.70
+        latency: 0.50
+      resources:
+        gpus: 0
+
+  - run_id: pt-py-b
+    name: variant-b-python
+    skill:
+      kind: python_script
+      target: skills/python_runner.py
+      args:
+        status: success
+        variant: B
+        score: 86
+        cost: 0.80
+        latency: 0.70
+      resources:
+        gpus: 0
+
+  - run_id: pt-sh-c
+    name: variant-c-shell
+    skill:
+      kind: shell_script
+      target: skills/shell_runner.sh
+      args:
+        status: success
+        variant: C
+        score: 86
+        cost: 0.60
+        latency: 0.60
+      resources:
+        gpus: 0
+
+  - run_id: pt-playbook-d
+    name: variant-d-playbook
+    skill:
+      kind: prompt_playbook
+      target: skills/playbooks/run_with_playbook.md
+      args:
+        status: success
+        variant: D
+        score: 80
+        cost: 0.40
+        latency: 0.40
+        summary: Playbook-driven prompt candidate.
+      resources:
+        gpus: 0

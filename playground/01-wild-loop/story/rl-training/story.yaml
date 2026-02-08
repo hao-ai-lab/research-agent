@@ -1,0 +1,101 @@
+name: RL Training Toy Story
+story_type: rl_training
+mode: balanced
+scheduler:
+  total_gpus: 2
+llm:
+  mode: mock
+  # Optional real background LLM execution:
+  # mode: opencode
+  # opencode_cmd: ["opencode", "run", "--json"]
+human:
+  auto_proceed: true
+runs:
+  - run_id: rl-fn-std
+    name: qwen-base clip0.2 bs64mbs64
+    skill:
+      kind: python_function
+      target: skills.skill_functions:run_variant
+      args:
+        status: success
+        reward: 0.62
+        clip_coef: 0.2
+        batch_size: 64
+        mini_batch_size: 64
+        model: qwen2.5-7b-base
+      resources:
+        gpus: 1
+
+  - run_id: rl-py-highclip
+    name: qwen-base clip0.28 bs64mbs32
+    skill:
+      kind: python_script
+      target: skills/python_runner.py
+      args:
+        status: success
+        reward: 0.78
+        clip_coef: 0.28
+        batch_size: 64
+        mini_batch_size: 32
+        model: qwen2.5-7b-base
+      resources:
+        gpus: 1
+
+  - run_id: rl-sh-highclip
+    name: qwen-math clip0.28 bs64mbs32
+    skill:
+      kind: shell_script
+      target: skills/shell_runner.sh
+      args:
+        status: success
+        reward: 0.76
+        clip_coef: 0.28
+        batch_size: 64
+        mini_batch_size: 32
+        model: qwen2.5-7b-math-base
+      resources:
+        gpus: 1
+
+  - run_id: rl-fallback-playbook
+    name: fallback-from-missing-script
+    skill:
+      kind: python_script
+      target: skills/missing_primary.py
+      args:
+        status: success
+        reward: 0.74
+        clip_coef: 0.2
+        batch_size: 64
+        mini_batch_size: 32
+        model: qwen2.5-7b-math-base
+      resources:
+        gpus: 1
+    fallback:
+      instruction_text: >
+        Primary run script missing. Use playbook with same arguments.
+      target_hint: skills/playbooks/run_with_playbook.md
+      args:
+        status: success
+        summary: Executed fallback playbook run for RL variant.
+        reward: 0.74
+        clip_coef: 0.2
+        batch_size: 64
+        mini_batch_size: 32
+        model: qwen2.5-7b-math-base
+
+  - run_id: rl-fail-alert
+    name: failing-run-with-alert
+    skill:
+      kind: python_script
+      target: skills/python_runner.py
+      args:
+        status: failed
+        reward: 0.20
+        clip_coef: 0.2
+        batch_size: 64
+        mini_batch_size: 16
+        model: qwen2.5-7b-base
+        alert_severity: warning
+        alert_message: Loss spike detected on rollout.
+      resources:
+        gpus: 1

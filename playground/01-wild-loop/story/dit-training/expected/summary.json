@@ -1,0 +1,635 @@
+{
+  "alerts": [
+    {
+      "choices": [
+        "continue_training",
+        "raise_to_human"
+      ],
+      "message": "Compare step-0 and step-5 generated clips.",
+      "run_id": "dit-py-improved",
+      "severity": "warning"
+    }
+  ],
+  "artifacts": [
+    {
+      "event_id": "evt_a99190cf88",
+      "resolved_instruction": "python_function::skills.skill_functions:run_variant::{\"fid\": 40, \"human_check_required\": false, \"status\": \"success\", \"video_quality\": 0.58}",
+      "result": {
+        "fid": 40,
+        "human_check_required": false,
+        "status": "success",
+        "video_quality": 0.58
+      },
+      "run_id": "dit-fn-baseline",
+      "status": "finished",
+      "ts": 1770540129.1211169,
+      "type": "run_result",
+      "used_fallback": false
+    },
+    {
+      "event_id": "evt_179d48d3e1",
+      "resolved_instruction": "python_script::/Users/mike/Project/GitHub/v0-research-agent-mobile/playground/01-wild-loop/story/dit-training/skills/python_runner.py::{\"alert_message\": \"Compare step-0 and step-5 generated clips.\", \"alert_severity\": \"warning\", \"fid\": 30, \"human_check_required\": true, \"status\": \"success\", \"video_quality\": 0.71}",
+      "result": {
+        "alert": {
+          "choices": [
+            "continue_training",
+            "raise_to_human"
+          ],
+          "message": "Compare step-0 and step-5 generated clips.",
+          "severity": "warning"
+        },
+        "fid": 30.0,
+        "human_check_required": true,
+        "status": "success",
+        "video_quality": 0.71
+      },
+      "run_id": "dit-py-improved",
+      "status": "finished",
+      "ts": 1770540129.164588,
+      "type": "run_result",
+      "used_fallback": false
+    },
+    {
+      "event_id": "evt_638484df47",
+      "mode_action": "auto_continue",
+      "run_id": "dit-py-improved",
+      "ts": 1770540129.171089,
+      "type": "alert"
+    },
+    {
+      "event_id": "evt_89b242553c",
+      "resolved_instruction": "prompt_playbook::/Users/mike/Project/GitHub/v0-research-agent-mobile/playground/01-wild-loop/story/dit-training/skills/playbooks/run_with_playbook.md::{\"fid\": 31, \"human_check_required\": true, \"status\": \"success\", \"summary\": \"Generated qualitative review packet.\", \"video_quality\": 0.69}",
+      "result": {
+        "fid": 31,
+        "human_check_required": true,
+        "playbook": "skills/playbooks/run_with_playbook.md",
+        "playbook_title": "# RL Playbook Fallback",
+        "status": "success",
+        "summary": "Generated qualitative review packet.",
+        "video_quality": 0.69
+      },
+      "run_id": "dit-playbook-review",
+      "status": "finished",
+      "ts": 1770540129.190527,
+      "type": "run_result",
+      "used_fallback": false
+    },
+    {
+      "content": "# DiT Training Report\n\nBest run by quality: dit-py-improved (video_quality=0.710)\nHuman-review packets required: 2\n\n## Run Table\n- dit-fn-baseline | finished | quality=0.58 | fid=40 | human_check_required=False\n- dit-py-improved | finished | quality=0.71 | fid=30.0 | human_check_required=True\n- dit-playbook-review | finished | quality=0.69 | fid=31 | human_check_required=True\n\nFallback runs used: none\nAlert count: 1",
+      "event_id": "evt_79942be7b0",
+      "name": "final_report.md",
+      "ts": 1770540129.20333,
+      "type": "report"
+    }
+  ],
+  "events": {
+    "completed": [
+      {
+        "event_id": "evt_534ab301d5",
+        "summary": "Planned 3 runs"
+      },
+      {
+        "event_id": "evt_054f21d3e6",
+        "summary": "Scheduler placed 2 runs"
+      },
+      {
+        "event_id": "evt_a99190cf88",
+        "summary": "Run dit-fn-baseline finished with status=finished"
+      },
+      {
+        "event_id": "evt_179d48d3e1",
+        "summary": "Run dit-py-improved finished with status=finished"
+      },
+      {
+        "event_id": "evt_638484df47",
+        "summary": "Alert auto-handled for run=dit-py-improved"
+      },
+      {
+        "event_id": "evt_ea77de79b2",
+        "summary": "Scheduler placed 1 runs"
+      },
+      {
+        "event_id": "evt_3842fc6091",
+        "summary": "No ready runs to schedule"
+      },
+      {
+        "event_id": "evt_89b242553c",
+        "summary": "Run dit-playbook-review finished with status=finished"
+      },
+      {
+        "event_id": "evt_ef2276eefe",
+        "summary": "All runs terminal; triggering analysis"
+      },
+      {
+        "event_id": "evt_79942be7b0",
+        "summary": "Generated analysis report"
+      }
+    ],
+    "failed": [],
+    "retried": []
+  },
+  "interactions": [
+    {
+      "event_id": "evt_534ab301d5",
+      "input_payload": {
+        "story": "DiT Training Toy Story"
+      },
+      "intent": "plan_sweep",
+      "lane": "user_queued",
+      "llm_note": "[mock-llm] intent=plan_sweep recommendation=continue",
+      "prompt_text": "# Event evt_534ab301d5\nIntent: plan_sweep\nLane: user_queued\n## Input\n{\n  \"story\": \"DiT Training Toy Story\"\n}\n## Procedure\n# Seed Prompt\n\nRun DiT variants and include qualitative checks for generated samples.\n\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "new_events": [
+          {
+            "blocking": false,
+            "event_id": "evt_054f21d3e6",
+            "input_payload": {},
+            "intent": "scheduler_tick",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/scheduler_tick.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          }
+        ],
+        "status": "ok",
+        "summary": "Planned 3 runs"
+      },
+      "source": "user",
+      "ts": 1770540129.107571
+    },
+    {
+      "event_id": "evt_054f21d3e6",
+      "input_payload": {},
+      "intent": "scheduler_tick",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=scheduler_tick recommendation=continue",
+      "prompt_text": "# Event evt_054f21d3e6\nIntent: scheduler_tick\nLane: agent_queued\n## Input\n{}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "new_events": [
+          {
+            "blocking": false,
+            "event_id": "evt_a99190cf88",
+            "input_payload": {
+              "run_id": "dit-fn-baseline"
+            },
+            "intent": "run_execute",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/run_finished_review.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          },
+          {
+            "blocking": false,
+            "event_id": "evt_179d48d3e1",
+            "input_payload": {
+              "run_id": "dit-py-improved"
+            },
+            "intent": "run_execute",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/run_finished_review.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          }
+        ],
+        "status": "ok",
+        "summary": "Scheduler placed 2 runs"
+      },
+      "source": "agent",
+      "ts": 1770540129.114057
+    },
+    {
+      "event_id": "evt_a99190cf88",
+      "input_payload": {
+        "run_id": "dit-fn-baseline"
+      },
+      "intent": "run_execute",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=run_execute recommendation=continue",
+      "prompt_text": "# Event evt_a99190cf88\nIntent: run_execute\nLane: agent_queued\n## Input\n{\n  \"run_id\": \"dit-fn-baseline\"\n}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "artifacts": [
+          {
+            "resolved_instruction": "python_function::skills.skill_functions:run_variant::{\"fid\": 40, \"human_check_required\": false, \"status\": \"success\", \"video_quality\": 0.58}",
+            "result": {
+              "fid": 40,
+              "human_check_required": false,
+              "status": "success",
+              "video_quality": 0.58
+            },
+            "run_id": "dit-fn-baseline",
+            "status": "finished",
+            "type": "run_result",
+            "used_fallback": false
+          }
+        ],
+        "new_events": [
+          {
+            "blocking": false,
+            "event_id": "evt_ea77de79b2",
+            "input_payload": {},
+            "intent": "scheduler_tick",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/scheduler_tick.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          }
+        ],
+        "status": "ok",
+        "summary": "Run dit-fn-baseline finished with status=finished"
+      },
+      "source": "agent",
+      "ts": 1770540129.121105
+    },
+    {
+      "event_id": "evt_179d48d3e1",
+      "input_payload": {
+        "run_id": "dit-py-improved"
+      },
+      "intent": "run_execute",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=run_execute recommendation=continue",
+      "prompt_text": "# Event evt_179d48d3e1\nIntent: run_execute\nLane: agent_queued\n## Input\n{\n  \"run_id\": \"dit-py-improved\"\n}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "artifacts": [
+          {
+            "resolved_instruction": "python_script::/Users/mike/Project/GitHub/v0-research-agent-mobile/playground/01-wild-loop/story/dit-training/skills/python_runner.py::{\"alert_message\": \"Compare step-0 and step-5 generated clips.\", \"alert_severity\": \"warning\", \"fid\": 30, \"human_check_required\": true, \"status\": \"success\", \"video_quality\": 0.71}",
+            "result": {
+              "alert": {
+                "choices": [
+                  "continue_training",
+                  "raise_to_human"
+                ],
+                "message": "Compare step-0 and step-5 generated clips.",
+                "severity": "warning"
+              },
+              "fid": 30.0,
+              "human_check_required": true,
+              "status": "success",
+              "video_quality": 0.71
+            },
+            "run_id": "dit-py-improved",
+            "status": "finished",
+            "type": "run_result",
+            "used_fallback": false
+          }
+        ],
+        "new_events": [
+          {
+            "blocking": false,
+            "event_id": "evt_3842fc6091",
+            "input_payload": {},
+            "intent": "scheduler_tick",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/scheduler_tick.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          },
+          {
+            "blocking": false,
+            "event_id": "evt_638484df47",
+            "input_payload": {
+              "alert": {
+                "choices": [
+                  "continue_training",
+                  "raise_to_human"
+                ],
+                "message": "Compare step-0 and step-5 generated clips.",
+                "severity": "warning"
+              },
+              "run_id": "dit-py-improved"
+            },
+            "intent": "run_alert",
+            "lane": "agent_steer",
+            "prompt_path": "loop/prompts/core/run_alert_triage.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          }
+        ],
+        "status": "ok",
+        "summary": "Run dit-py-improved finished with status=finished"
+      },
+      "source": "agent",
+      "ts": 1770540129.1645498
+    },
+    {
+      "event_id": "evt_638484df47",
+      "input_payload": {
+        "alert": {
+          "choices": [
+            "continue_training",
+            "raise_to_human"
+          ],
+          "message": "Compare step-0 and step-5 generated clips.",
+          "severity": "warning"
+        },
+        "run_id": "dit-py-improved"
+      },
+      "intent": "run_alert",
+      "lane": "agent_steer",
+      "llm_note": "[mock-llm] intent=run_alert recommendation=continue",
+      "prompt_text": "# Event evt_638484df47\nIntent: run_alert\nLane: agent_steer\n## Input\n{\n  \"alert\": {\n    \"choices\": [\n      \"continue_training\",\n      \"raise_to_human\"\n    ],\n    \"message\": \"Compare step-0 and step-5 generated clips.\",\n    \"severity\": \"warning\"\n  },\n  \"run_id\": \"dit-py-improved\"\n}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "artifacts": [
+          {
+            "mode_action": "auto_continue",
+            "run_id": "dit-py-improved",
+            "type": "alert"
+          }
+        ],
+        "status": "ok",
+        "summary": "Alert auto-handled for run=dit-py-improved"
+      },
+      "source": "agent",
+      "ts": 1770540129.171082
+    },
+    {
+      "event_id": "evt_ea77de79b2",
+      "input_payload": {},
+      "intent": "scheduler_tick",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=scheduler_tick recommendation=continue",
+      "prompt_text": "# Event evt_ea77de79b2\nIntent: scheduler_tick\nLane: agent_queued\n## Input\n{}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "new_events": [
+          {
+            "blocking": false,
+            "event_id": "evt_89b242553c",
+            "input_payload": {
+              "run_id": "dit-playbook-review"
+            },
+            "intent": "run_execute",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/run_finished_review.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          }
+        ],
+        "status": "ok",
+        "summary": "Scheduler placed 1 runs"
+      },
+      "source": "agent",
+      "ts": 1770540129.1774662
+    },
+    {
+      "event_id": "evt_3842fc6091",
+      "input_payload": {},
+      "intent": "scheduler_tick",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=scheduler_tick recommendation=continue",
+      "prompt_text": "# Event evt_3842fc6091\nIntent: scheduler_tick\nLane: agent_queued\n## Input\n{}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "new_events": [],
+        "status": "ok",
+        "summary": "No ready runs to schedule"
+      },
+      "source": "agent",
+      "ts": 1770540129.183816
+    },
+    {
+      "event_id": "evt_89b242553c",
+      "input_payload": {
+        "run_id": "dit-playbook-review"
+      },
+      "intent": "run_execute",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=run_execute recommendation=continue",
+      "prompt_text": "# Event evt_89b242553c\nIntent: run_execute\nLane: agent_queued\n## Input\n{\n  \"run_id\": \"dit-playbook-review\"\n}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "artifacts": [
+          {
+            "resolved_instruction": "prompt_playbook::/Users/mike/Project/GitHub/v0-research-agent-mobile/playground/01-wild-loop/story/dit-training/skills/playbooks/run_with_playbook.md::{\"fid\": 31, \"human_check_required\": true, \"status\": \"success\", \"summary\": \"Generated qualitative review packet.\", \"video_quality\": 0.69}",
+            "result": {
+              "fid": 31,
+              "human_check_required": true,
+              "playbook": "skills/playbooks/run_with_playbook.md",
+              "playbook_title": "# RL Playbook Fallback",
+              "status": "success",
+              "summary": "Generated qualitative review packet.",
+              "video_quality": 0.69
+            },
+            "run_id": "dit-playbook-review",
+            "status": "finished",
+            "type": "run_result",
+            "used_fallback": false
+          }
+        ],
+        "new_events": [
+          {
+            "blocking": false,
+            "event_id": "evt_ef2276eefe",
+            "input_payload": {},
+            "intent": "scheduler_tick",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/scheduler_tick.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          }
+        ],
+        "status": "ok",
+        "summary": "Run dit-playbook-review finished with status=finished"
+      },
+      "source": "agent",
+      "ts": 1770540129.190509
+    },
+    {
+      "event_id": "evt_ef2276eefe",
+      "input_payload": {},
+      "intent": "scheduler_tick",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=scheduler_tick recommendation=continue",
+      "prompt_text": "# Event evt_ef2276eefe\nIntent: scheduler_tick\nLane: agent_queued\n## Input\n{}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "new_events": [
+          {
+            "blocking": false,
+            "event_id": "evt_79942be7b0",
+            "input_payload": {},
+            "intent": "analyze",
+            "lane": "agent_queued",
+            "prompt_path": "loop/prompts/core/analysis_report.md",
+            "retry_budget": 2,
+            "source": "agent",
+            "timeout_s": 120
+          }
+        ],
+        "status": "ok",
+        "summary": "All runs terminal; triggering analysis"
+      },
+      "source": "agent",
+      "ts": 1770540129.1968782
+    },
+    {
+      "event_id": "evt_79942be7b0",
+      "input_payload": {},
+      "intent": "analyze",
+      "lane": "agent_queued",
+      "llm_note": "[mock-llm] intent=analyze recommendation=continue",
+      "prompt_text": "# Event evt_79942be7b0\nIntent: analyze\nLane: agent_queued\n## Input\n{}\n## Procedure\n(no prompt body)\n## Output\nEmit structured event output and promise.",
+      "result": {
+        "artifacts": [
+          {
+            "content": "# DiT Training Report\n\nBest run by quality: dit-py-improved (video_quality=0.710)\nHuman-review packets required: 2\n\n## Run Table\n- dit-fn-baseline | finished | quality=0.58 | fid=40 | human_check_required=False\n- dit-py-improved | finished | quality=0.71 | fid=30.0 | human_check_required=True\n- dit-playbook-review | finished | quality=0.69 | fid=31 | human_check_required=True\n\nFallback runs used: none\nAlert count: 1",
+            "name": "final_report.md",
+            "type": "report"
+          }
+        ],
+        "promise": "COMPLETE",
+        "status": "ok",
+        "summary": "Generated analysis report"
+      },
+      "source": "agent",
+      "ts": 1770540129.20332
+    }
+  ],
+  "loop_complete": true,
+  "mode": "away_but_ping",
+  "queue_sizes": {
+    "agent_queued": 0,
+    "agent_steer": 0,
+    "user_queued": 0,
+    "user_steer": 0
+  },
+  "runs": {
+    "dit-fn-baseline": {
+      "error": null,
+      "goal": null,
+      "name": "baseline-function",
+      "resolved_instruction": "python_function::skills.skill_functions:run_variant::{\"fid\": 40, \"human_check_required\": false, \"status\": \"success\", \"video_quality\": 0.58}",
+      "result": {
+        "fid": 40,
+        "human_check_required": false,
+        "status": "success",
+        "video_quality": 0.58
+      },
+      "run_id": "dit-fn-baseline",
+      "run_spec": {
+        "name": "baseline-function",
+        "run_id": "dit-fn-baseline",
+        "skill": {
+          "args": {
+            "fid": 40,
+            "human_check_required": false,
+            "status": "success",
+            "video_quality": 0.58
+          },
+          "kind": "python_function",
+          "resources": {
+            "gpus": 1
+          },
+          "target": "skills.skill_functions:run_variant"
+        }
+      },
+      "status": "finished",
+      "used_fallback": false
+    },
+    "dit-playbook-review": {
+      "error": null,
+      "goal": null,
+      "name": "playbook-review",
+      "resolved_instruction": "prompt_playbook::/Users/mike/Project/GitHub/v0-research-agent-mobile/playground/01-wild-loop/story/dit-training/skills/playbooks/run_with_playbook.md::{\"fid\": 31, \"human_check_required\": true, \"status\": \"success\", \"summary\": \"Generated qualitative review packet.\", \"video_quality\": 0.69}",
+      "result": {
+        "fid": 31,
+        "human_check_required": true,
+        "playbook": "skills/playbooks/run_with_playbook.md",
+        "playbook_title": "# RL Playbook Fallback",
+        "status": "success",
+        "summary": "Generated qualitative review packet.",
+        "video_quality": 0.69
+      },
+      "run_id": "dit-playbook-review",
+      "run_spec": {
+        "name": "playbook-review",
+        "run_id": "dit-playbook-review",
+        "skill": {
+          "args": {
+            "fid": 31,
+            "human_check_required": true,
+            "status": "success",
+            "summary": "Generated qualitative review packet.",
+            "video_quality": 0.69
+          },
+          "kind": "prompt_playbook",
+          "resources": {
+            "gpus": 1
+          },
+          "target": "skills/playbooks/run_with_playbook.md"
+        }
+      },
+      "status": "finished",
+      "used_fallback": false
+    },
+    "dit-py-improved": {
+      "error": null,
+      "goal": null,
+      "name": "improved-python",
+      "resolved_instruction": "python_script::/Users/mike/Project/GitHub/v0-research-agent-mobile/playground/01-wild-loop/story/dit-training/skills/python_runner.py::{\"alert_message\": \"Compare step-0 and step-5 generated clips.\", \"alert_severity\": \"warning\", \"fid\": 30, \"human_check_required\": true, \"status\": \"success\", \"video_quality\": 0.71}",
+      "result": {
+        "alert": {
+          "choices": [
+            "continue_training",
+            "raise_to_human"
+          ],
+          "message": "Compare step-0 and step-5 generated clips.",
+          "severity": "warning"
+        },
+        "fid": 30.0,
+        "human_check_required": true,
+        "status": "success",
+        "video_quality": 0.71
+      },
+      "run_id": "dit-py-improved",
+      "run_spec": {
+        "name": "improved-python",
+        "run_id": "dit-py-improved",
+        "skill": {
+          "args": {
+            "alert_message": "Compare step-0 and step-5 generated clips.",
+            "alert_severity": "warning",
+            "fid": 30,
+            "human_check_required": true,
+            "status": "success",
+            "video_quality": 0.71
+          },
+          "kind": "python_script",
+          "resources": {
+            "gpus": 1
+          },
+          "target": "skills/python_runner.py"
+        }
+      },
+      "status": "finished",
+      "used_fallback": false
+    }
+  },
+  "scheduler": {
+    "allocations": {},
+    "available_gpus": 2,
+    "queue_decisions": [
+      {
+        "allocated_gpus": 1,
+        "decision": "scheduled",
+        "run_id": "dit-fn-baseline"
+      },
+      {
+        "allocated_gpus": 1,
+        "decision": "scheduled",
+        "run_id": "dit-py-improved"
+      },
+      {
+        "allocated_gpus": 1,
+        "decision": "scheduled",
+        "run_id": "dit-playbook-review"
+      }
+    ],
+    "total_gpus": 2
+  },
+  "story": "DiT Training Toy Story"
+}

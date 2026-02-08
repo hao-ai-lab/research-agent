@@ -111,5 +111,47 @@ Run spec
 
 Insight
 
+---
 
+## Toy Implementation (KISS)
+
+This playground now includes a runnable toy backend implementation based on `PLAN.toy.md`.
+
+### Core Design
+
+- Single-file core loop: `playground/01-wild-loop/loop/loop.py`
+- Inline scheduler and run executor are implemented inside `loop.py`
+- Optional background LLM worker in `loop.py`:
+  - `mode: mock` (default)
+  - `mode: opencode` with `llm.opencode_cmd` in `story.yaml`
+
+### Story Cases
+
+- `playground/01-wild-loop/story/rl-training/`
+- `playground/01-wild-loop/story/prompt-tuning/`
+- `playground/01-wild-loop/story/dit-training/`
+
+Each story uses reference-only run skills (`python_function`, `python_script`, `shell_script`, `prompt_playbook`) and produces artifacts under `story/<case>/expected/`.
+
+### Visibility
+
+Every interaction/event is written for easy inspection:
+- `expected/summary.json`
+- `expected/interactions.jsonl`
+- `expected/timeline.md`
+- `expected/final_report.md`
+
+### Run Stories
+
+```bash
+playground/01-wild-loop/story/rl-training/run.sh
+playground/01-wild-loop/story/prompt-tuning/run.sh
+playground/01-wild-loop/story/dit-training/run.sh
+```
+
+### Run Tests
+
+```bash
+python3 -m unittest discover -s playground/01-wild-loop/tests -p "test_*.py"
+```
 

@@ -1,0 +1,54 @@
+name: DiT Training Toy Story
+story_type: dit_training
+mode: away_but_ping
+scheduler:
+  total_gpus: 2
+llm:
+  mode: mock
+  # Optional real background LLM execution:
+  # mode: opencode
+  # opencode_cmd: ["opencode", "run", "--json"]
+human:
+  auto_proceed: true
+runs:
+  - run_id: dit-fn-baseline
+    name: baseline-function
+    skill:
+      kind: python_function
+      target: skills.skill_functions:run_variant
+      args:
+        status: success
+        video_quality: 0.58
+        fid: 40
+        human_check_required: false
+      resources:
+        gpus: 1
+
+  - run_id: dit-py-improved
+    name: improved-python
+    skill:
+      kind: python_script
+      target: skills/python_runner.py
+      args:
+        status: success
+        video_quality: 0.71
+        fid: 30
+        human_check_required: true
+        alert_severity: warning
+        alert_message: Compare step-0 and step-5 generated clips.
+      resources:
+        gpus: 1
+
+  - run_id: dit-playbook-review
+    name: playbook-review
+    skill:
+      kind: prompt_playbook
+      target: skills/playbooks/run_with_playbook.md
+      args:
+        status: success
+        summary: Generated qualitative review packet.
+        video_quality: 0.69
+        fid: 31
+        human_check_required: true
+      resources:
+        gpus: 1
