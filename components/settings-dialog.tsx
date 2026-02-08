@@ -21,6 +21,7 @@ import {
   Wifi,
   WifiOff,
   RotateCcw,
+  LayoutDashboard,
 } from 'lucide-react'
 import {
   Dialog,
@@ -35,6 +36,7 @@ import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { useApiConfig } from '@/lib/api-config'
 import type { AppSettings } from '@/lib/types'
+import { LeftPanelConfig } from '@/components/left-panel-config'
 
 interface SettingsDialogProps {
   open: boolean
@@ -55,7 +57,7 @@ export function SettingsDialog({
   focusAuthToken = false,
   onRefresh,
 }: SettingsDialogProps) {
-  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'about'>('api')
+  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'devMode' | 'about'>('api')
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
   const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
@@ -208,6 +210,19 @@ export function SettingsDialog({
           icon: Bell,
           type: 'toggle' as const,
           value: settings.notifications.webNotificationsEnabled,
+        },
+      ],
+    },
+    {
+      id: 'devMode',
+      title: 'Dev Mode',
+      items: [
+        {
+          id: 'leftPanelConfig',
+          label: 'Left Panel Items',
+          description: 'Reorder and toggle navigation items',
+          icon: LayoutDashboard,
+          type: 'custom' as const,
         },
       ],
     },
@@ -685,6 +700,11 @@ export function SettingsDialog({
             </div>
           )
         }
+
+        if (item.id === 'leftPanelConfig') {
+          return <LeftPanelConfig settings={settings} onSettingsChange={onSettingsChange} />
+        }
+
         return null
       default:
         return null

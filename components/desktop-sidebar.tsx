@@ -482,16 +482,6 @@ export function DesktopSidebar({
               <DropdownMenuItem
                 onSelect={(event) => {
                   event.preventDefault()
-                  onTabChange('journey')
-                  onJourneySubTabChange(journeySubTab)
-                }}
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Journey
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={(event) => {
-                  event.preventDefault()
                   onSettingsClick()
                 }}
               >

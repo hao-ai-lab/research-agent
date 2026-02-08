@@ -202,17 +202,6 @@ export function NavPage({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleNavClick('journey', journeySubTab)}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'journey'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <Sparkles className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Journey</span>
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     onOpenChange(false)
                     onSettingsClick()
