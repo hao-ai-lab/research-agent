@@ -44,7 +44,6 @@ import {
 import { AllRunsChart } from './all-runs-chart'
 import { RunDetailView } from './run-detail-view'
 import { VisibilityManageView } from './visibility-manage-view'
-import { CreateSweepDialog } from './create-sweep-dialog'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
@@ -276,15 +275,6 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
     () => filteredRuns.filter((run) => selectedManageRunIds.has(run.id)),
     [filteredRuns, selectedManageRunIds]
   )
-
-  // Sort runs for quick access - favorites first
-  const quickAccessRuns = useMemo(() => {
-    return [...allActiveRuns].sort((a, b) => {
-      if (a.isFavorite && !b.isFavorite) return -1
-      if (!a.isFavorite && b.isFavorite) return 1
-      return b.startTime.getTime() - a.startTime.getTime()
-    }).slice(0, 6)
-  }, [allActiveRuns])
 
   // Sort runs for details view
   const sortedRuns = useMemo(() => {
@@ -643,17 +633,6 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
             onStopRun={onStopRun}
           />
         </div>
-
-        {/* Sweep Dialog */}
-        <CreateSweepDialog
-          open={sweepDialogOpen}
-          onOpenChange={setSweepDialogOpen}
-          baseCommand={selectedRun.command}
-          onSweepCreated={(sweepId, runCount) => {
-            // Dialog will close, runs will be refetched by polling
-            console.log(`Created sweep ${sweepId} with ${runCount} runs`)
-          }}
-        />
       </div>
     )
   }
@@ -739,18 +718,6 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                 onSelectGroup={handleSelectGroup}
                 onOpenManage={() => handleShowVisibilityManage(true)}
               />
-            </div>
-
-            {/* Quick Access to Runs */}
-            <div>
-              <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
-                Quick Access
-              </h3>
-              <div className="space-y-2">
-                {quickAccessRuns.map((run) => (
-                  <RunItem key={run.id} run={run} />
-                ))}
-              </div>
             </div>
 
             {/* All Runs */}
@@ -1095,15 +1062,6 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
           </div>
         </ScrollArea>
       </div>
-
-      {/* Sweep Dialog */}
-      <CreateSweepDialog
-        open={sweepDialogOpen}
-        onOpenChange={setSweepDialogOpen}
-        onSweepCreated={(sweepId, runCount) => {
-          console.log(`Created sweep ${sweepId} with ${runCount} runs`)
-        }}
-      />
     </div>
   )
 }
