@@ -22,6 +22,8 @@ import {
   AlertTriangle,
   Settings2,
   PlugZap,
+  Filter,
+  Plus,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -724,99 +726,125 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  All Runs
+                  Runs
                 </h3>
               </div>
               <div className="rounded-xl border border-border bg-card">
                 <div className="border-b border-border px-4 py-3 space-y-2">
-                  <div className="flex items-center gap-2 overflow-x-auto">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
-                        <SelectTrigger className="w-28 h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="time">Time</SelectItem>
-                          <SelectItem value="priority">Priority</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={groupByMode} onValueChange={(v) => setGroupByMode(v as GroupByMode)}>
-                        <SelectTrigger className="w-32 h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Group: None</SelectItem>
-                          <SelectItem value="sweep">Group: Sweep</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={sweepFilter} onValueChange={setSweepFilter}>
-                        <SelectTrigger className="w-36 h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Sweep: All</SelectItem>
-                          <SelectItem value="none">No Sweep</SelectItem>
-                          {sweepOptions.map((sweepId) => (
-                            <SelectItem key={sweepId} value={sweepId}>
-                              Sweep: {sweepId}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="outline" size="sm" className="h-8 text-xs">
-                            Status: {isAllStatusSelected ? 'All' : statusFilter.size}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-64 p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-medium text-foreground">Filter by status</p>
-                            <Button variant="ghost" size="sm" onClick={resetStatusFilter} className="h-6 px-2 text-[10px]">
-                              Reset
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {RUN_STATUS_OPTIONS.map((status) => {
-                              const selected = statusFilter.has(status)
-                              return (
-                                <button
-                                  key={status}
-                                  type="button"
-                                  onClick={() => toggleStatusFilter(status)}
-                                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
-                                    selected
-                                      ? 'border-primary/40 bg-primary/10 text-primary'
-                                      : 'border-border bg-card text-muted-foreground hover:bg-secondary/40'
-                                  }`}
-                                >
-                                  {selected ? <CheckSquare className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5 rounded-sm border border-current/50" />}
-                                  {getStatusText(status)}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
+                  <div className="flex items-center gap-2">
+                    <div className="hidden min-w-0 flex-1 sm:block">
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        Time: {detailsView === 'time' ? 'Time' : 'Priority'} · Group: {groupByMode === 'sweep' ? 'Sweep' : 'None'} · Sweep: {sweepFilter === 'all' ? 'All' : sweepFilter === 'none' ? 'No Sweep' : sweepFilter} · Status: {isAllStatusSelected ? 'All' : `${statusFilter.size} selected`}
+                      </p>
                     </div>
 
                     <div className="ml-auto flex shrink-0 items-center gap-2">
+                      <Popover>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Open Filters">
+                                <Filter className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent>Filters</TooltipContent>
+                        </Tooltip>
+                        <PopoverContent align="end" className="w-[min(92vw,360px)] p-3">
+                          <div className="space-y-3">
+                            <div className="grid gap-1.5">
+                              <p className="text-[11px] font-medium text-muted-foreground">Time</p>
+                              <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="time">Time</SelectItem>
+                                  <SelectItem value="priority">Priority</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                              <p className="text-[11px] font-medium text-muted-foreground">Group By</p>
+                              <Select value={groupByMode} onValueChange={(v) => setGroupByMode(v as GroupByMode)}>
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">None</SelectItem>
+                                  <SelectItem value="sweep">Sweep</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                              <p className="text-[11px] font-medium text-muted-foreground">Sweep</p>
+                              <Select value={sweepFilter} onValueChange={setSweepFilter}>
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All</SelectItem>
+                                  <SelectItem value="none">No Sweep</SelectItem>
+                                  {sweepOptions.map((sweepId) => (
+                                    <SelectItem key={sweepId} value={sweepId}>
+                                      {sweepId}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="border-t border-border pt-3">
+                              <div className="mb-2 flex items-center justify-between">
+                                <p className="text-[11px] font-medium text-muted-foreground">Status</p>
+                                <Button variant="ghost" size="sm" onClick={resetStatusFilter} className="h-6 px-2 text-[10px]">
+                                  Reset
+                                </Button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {RUN_STATUS_OPTIONS.map((status) => {
+                                  const selected = statusFilter.has(status)
+                                  return (
+                                    <button
+                                      key={status}
+                                      type="button"
+                                      onClick={() => toggleStatusFilter(status)}
+                                      className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
+                                        selected
+                                          ? 'border-primary/40 bg-primary/10 text-primary'
+                                          : 'border-border bg-card text-muted-foreground hover:bg-secondary/40'
+                                      }`}
+                                    >
+                                      {selected ? <CheckSquare className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5 rounded-sm border border-current/50" />}
+                                      {getStatusText(status)}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+
                       <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 gap-1.5"
-                            title="Create Sweep"
-                          >
-                            <PlugZap className="h-4 w-4" />
-                            Sweep
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-80" align="end">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                aria-label="Create Sweep"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent>Create Sweep</TooltipContent>
+                        </Tooltip>
+                        <PopoverContent className="w-80 max-w-[92vw]" align="end">
                           <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
                         </PopoverContent>
                       </Popover>
@@ -841,7 +869,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                             <Settings2 className="h-3.5 w-3.5" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage'}</TooltipContent>
+                        <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage Runs'}</TooltipContent>
                       </Tooltip>
                     </div>
                   </div>
