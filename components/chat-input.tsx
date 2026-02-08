@@ -79,6 +79,7 @@ interface ChatInputProps {
   queue?: string[]
   onRemoveFromQueue?: (index: number) => void
   insertDraft?: { id: number; text: string } | null
+  layout?: 'docked' | 'centered'
 }
 
 export function ChatInput({
@@ -99,6 +100,7 @@ export function ChatInput({
   queue = [],
   onRemoveFromQueue,
   insertDraft = null,
+  layout = 'docked',
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -122,6 +124,13 @@ export function ChatInput({
   const highlightRef = useRef<HTMLDivElement>(null)
   const mentionPopoverRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
+
+  useEffect(() => {
+    // Sweep mode is no longer exposed in the UI.
+    if (mode === 'sweep') {
+      onModeChange('agent')
+    }
+  }, [mode, onModeChange])
 
   // Build mention items from data
   const mentionItems = useMemo<MentionItem[]>(() => {
@@ -666,7 +675,13 @@ export function ChatInput({
   // Removed format/emoji popovers for compact design - using insertText for @ mentions and commands
 
   return (
-    <div className="border-t border-border bg-background px-3 pb-3 pt-2">
+    <div
+      className={
+        layout === 'centered'
+          ? 'rounded-2xl border border-border bg-background px-4 pb-4 pt-3 shadow-[0_8px_20px_rgba(15,23,42,0.07)]'
+          : 'border-t border-border bg-background px-4 pb-4 pt-3'
+      }
+    >
       {/* Attachments preview */}
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
@@ -864,11 +879,11 @@ export function ChatInput({
           </div>
         )}
 
-        <div className="relative rounded-lg border border-border bg-card focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+        <div className="relative rounded-xl border border-border bg-card focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
           <div
             ref={highlightRef}
             aria-hidden
-            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 text-sm leading-5 text-foreground"
+            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-4 py-3 text-base leading-6 text-foreground"
           >
             {message ? highlightedMessage : (
               <span className="text-muted-foreground">Message Research Assistant... (type @ or /)</span>
@@ -887,10 +902,10 @@ export function ChatInput({
             placeholder="Message Research Assistant... (type @ or /)"
             disabled={disabled}
             rows={1}
-            className="relative z-10 w-full resize-none bg-transparent px-3 py-2 pr-11 text-sm leading-5 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
+            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
-              minHeight: '40px',
-              maxHeight: '100px',
+              minHeight: '58px',
+              maxHeight: '170px',
               caretColor: 'hsl(var(--foreground))',
               color: 'transparent',
               WebkitTextFillColor: 'transparent',
@@ -899,7 +914,7 @@ export function ChatInput({
           <Button
             variant="ghost"
             size="icon"
-            className={`chat-toolbar-icon absolute bottom-1.5 right-1.5 z-20 h-7 w-7 ${isRecording ? 'text-destructive bg-destructive/10' : ''}`}
+            className={`chat-toolbar-icon absolute bottom-2 right-2 z-20 ${isRecording ? 'text-destructive bg-destructive/10' : ''}`}
             onClick={toggleRecording}
             disabled={!dictationSupported}
             title={dictationSupported ? (isRecording ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported'}
@@ -911,7 +926,7 @@ export function ChatInput({
             )}
           </Button>
           {isRecording && (
-            <span className="absolute bottom-3.5 right-10 z-20 flex items-center gap-1 text-[10px] text-destructive animate-pulse">
+            <span className="absolute bottom-4 right-12 z-20 flex items-center gap-1 text-[10px] text-destructive animate-pulse">
               <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
               Rec
             </span>
@@ -920,19 +935,19 @@ export function ChatInput({
       </div>
 
       {/* Action buttons - bottom row */}
-      <div className="flex items-center justify-between gap-1">
+      <div className="flex items-center justify-between gap-1.5">
         <div className="flex items-center gap-0.5">
           {/* Mode toggle */}
           <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className={`chat-toolbar-pill flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
+                className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                   mode === 'agent'
-                    ? 'bg-accent/20 text-accent'
+                    ? 'border border-transparent bg-primary text-primary-foreground shadow-sm hover:bg-primary/92'
                     : mode === 'wild'
-                    ? 'bg-purple-500/20 text-purple-400'
-                    : 'bg-blue-500/20 text-blue-400'
+                    ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
+                    : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
                 }`}
               >
                 {mode === 'agent' ? (
@@ -940,9 +955,9 @@ export function ChatInput({
                 ) : mode === 'wild' ? (
                   <Zap className="h-3 w-3" />
                 ) : (
-                  <Sparkles className="h-3 w-3" />
+                  <MessageSquare className="h-3 w-3" />
                 )}
-                {mode === 'agent' ? 'Agent' : mode === 'wild' ? 'Wild' : 'Sweep'}
+                {mode === 'wild' ? 'Wild' : 'Agent'}
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-56 p-1.5">
@@ -955,12 +970,12 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'agent'
-                      ? 'bg-accent/10 border border-accent/30'
+                      ? 'bg-primary/10 border border-primary/35 dark:bg-primary/18 dark:border-primary/45'
                       : 'hover:bg-secondary'
                   }`}
                 >
                   <MessageSquare
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-accent' : 'text-muted-foreground'}`}
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-primary' : 'text-muted-foreground'}`}
                   />
                   <div>
                     <p className="text-xs font-medium text-foreground">Agent Mode</p>
@@ -975,36 +990,16 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'wild'
-                      ? 'bg-purple-400/10 border border-purple-400/30'
+                      ? 'bg-violet-500/10 border border-violet-500/35 dark:bg-violet-500/18 dark:border-violet-400/45'
                       : 'hover:bg-secondary'
                   }`}
                 >
                   <Zap
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-purple-400' : 'text-muted-foreground'}`}
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground'}`}
                   />
                   <div>
                     <p className="text-xs font-medium text-foreground">Wild Mode</p>
                     <p className="text-[10px] text-muted-foreground">Autonomous loop — agent runs experiments</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onModeChange('sweep')
-                    setIsModeOpen(false)
-                  }}
-                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                    mode === 'sweep'
-                      ? 'bg-purple-400/10 border border-purple-400/30'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <Sparkles
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'sweep' ? 'text-purple-400' : 'text-muted-foreground'}`}
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Sweep Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Create experiment sweeps</p>
                   </div>
                 </button>
               </div>
@@ -1111,7 +1106,7 @@ export function ChatInput({
               onClick={onStop}
               variant="outline"
               size="sm"
-              className="h-7 px-2 text-[10px] border-destructive/40 text-destructive hover:bg-destructive/10"
+              className="h-9 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
             >
               Stop
             </Button>
@@ -1120,7 +1115,7 @@ export function ChatInput({
             onClick={handleSubmit}
             disabled={!message.trim() && attachments.length === 0}
             size="icon"
-            className={`h-7 w-7 rounded-md disabled:opacity-30 relative ${
+            className={`h-9 w-9 rounded-lg disabled:opacity-30 relative ${
               isStreaming && onQueue
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
                 : 'bg-primary text-primary-foreground hover:bg-primary/90'

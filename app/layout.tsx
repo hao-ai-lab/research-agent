@@ -1,19 +1,28 @@
 import React from "react"
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { Manrope, JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ApiConfigProvider } from '@/lib/api-config'
 import { AppSettingsProvider } from '@/lib/app-settings'
 import './globals.css'
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+const manrope = Manrope({
+  subsets: ['latin'],
+  variable: '--font-ui-sans',
+  display: 'swap',
+})
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-ui-mono',
+  display: 'swap',
+})
 
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  themeColor: '#1a1a1a',
+  themeColor: '#f8f6f2',
 }
 
 export const metadata: Metadata = {
@@ -46,7 +55,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="bg-background" suppressHydrationWarning>
-      <body className={`font-sans antialiased`} suppressHydrationWarning>
+      <body className={`${manrope.variable} ${jetbrainsMono.variable} font-sans antialiased`} suppressHydrationWarning>
         <ApiConfigProvider>
           <AppSettingsProvider>
             {children}

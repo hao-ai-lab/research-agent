@@ -29,7 +29,7 @@ import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
 
 type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
-const DESKTOP_SIDEBAR_MIN_WIDTH = 240
+const DESKTOP_SIDEBAR_MIN_WIDTH = 72
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
 const STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH = 'desktopSidebarWidth'
@@ -45,7 +45,7 @@ export default function ResearchChat() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
+  const [desktopSidebarHidden, setDesktopSidebarHidden] = useState(false)
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
   const [reportToolbar, setReportToolbar] = useState<ReportToolbarState | null>(null)
   const sidebarWidthRef = useRef(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
@@ -96,7 +96,7 @@ export default function ResearchChat() {
   useEffect(() => {
     const storedCollapsed = window.localStorage.getItem(STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED)
     if (storedCollapsed != null) {
-      setDesktopSidebarCollapsed(storedCollapsed === 'true')
+      setDesktopSidebarHidden(storedCollapsed === 'true')
     }
 
     const storedJourneySubTab = window.localStorage.getItem(STORAGE_KEY_JOURNEY_SUB_TAB)
@@ -125,8 +125,8 @@ export default function ResearchChat() {
   }, [desktopSidebarWidth])
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED, String(desktopSidebarCollapsed))
-  }, [desktopSidebarCollapsed])
+    window.localStorage.setItem(STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED, String(desktopSidebarHidden))
+  }, [desktopSidebarHidden])
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY_JOURNEY_SUB_TAB, journeySubTab)
@@ -537,7 +537,7 @@ export default function ResearchChat() {
       <main className="flex h-full w-full overflow-hidden bg-background">
         <DesktopSidebar
           activeTab={activeTab}
-          collapsed={desktopSidebarCollapsed}
+          hidden={desktopSidebarHidden}
           width={desktopSidebarWidth}
           minWidth={DESKTOP_SIDEBAR_MIN_WIDTH}
           maxWidth={DESKTOP_SIDEBAR_MAX_WIDTH}
@@ -558,7 +558,7 @@ export default function ResearchChat() {
           onNavigateToRun={handleNavigateToRun}
           onInsertReference={handleInsertChatReference}
           onSettingsClick={() => setActiveTab('settings')}
-          onToggleCollapse={() => setDesktopSidebarCollapsed((prev) => !prev)}
+          onToggleCollapse={() => setDesktopSidebarHidden(true)}
           onWidthChange={handleSidebarWidthChange}
           onResizeEnd={handleSidebarResizeEnd}
         />
@@ -567,6 +567,8 @@ export default function ResearchChat() {
           <FloatingNav
             activeTab={activeTab}
             onMenuClick={() => setLeftPanelOpen(true)}
+            showDesktopSidebarToggle={desktopSidebarHidden}
+            onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
             onCreateSweepClick={handleOpenSweepCreator}

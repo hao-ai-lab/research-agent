@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles } from 'lucide-react'
+import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -19,6 +19,8 @@ import type { ReportCellType } from './report-view'
 interface FloatingNavProps {
   activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
   onMenuClick: () => void
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
   // Chat-specific props
   eventCount?: number
   onAlertClick?: () => void
@@ -38,6 +40,8 @@ interface FloatingNavProps {
 export function FloatingNav({
   activeTab,
   onMenuClick,
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
   eventCount = 0,
   onAlertClick,
   onCreateSweepClick,
@@ -56,7 +60,7 @@ export function FloatingNav({
   const { useMock: isDemoMode } = useApiConfig()
 
   return (
-    <header className="shrink-0 h-12 flex items-center gap-3 px-3 border-b border-border bg-background">
+    <header className="shrink-0 h-14 flex items-center gap-3 px-3 border-b border-border/80 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
       <div className="relative">
         <Button
           variant="ghost"
@@ -76,6 +80,19 @@ export function FloatingNav({
           </Badge>
         )}
       </div>
+
+      {showDesktopSidebarToggle && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onDesktopSidebarToggle}
+          className="hidden h-9 w-9 shrink-0 lg:inline-flex"
+          title="Show sidebar"
+        >
+          <PanelLeftOpen className="h-5 w-5" />
+          <span className="sr-only">Show sidebar</span>
+        </Button>
+      )}
 
       <div className="flex-1" />
 

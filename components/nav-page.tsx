@@ -89,11 +89,11 @@ export function NavPage({
         type="button"
         aria-label="Close navigation"
         onClick={() => onOpenChange(false)}
-        className="absolute inset-0 bg-black/45 backdrop-blur-[1px]"
+        className="absolute inset-0 bg-black/28 backdrop-blur-[2px]"
       />
 
-      <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[360px] flex-col border-r border-border bg-background shadow-2xl animate-in slide-in-from-left duration-200">
-        <header className="shrink-0 border-b border-border px-4 py-3">
+      <aside className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[360px] flex-col border-r border-border/80 bg-sidebar/95 shadow-2xl animate-in slide-in-from-left duration-200">
+        <header className="shrink-0 border-b border-border/80 px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <FlaskConical className="h-5 w-5 text-primary" />
@@ -130,7 +130,7 @@ export function NavPage({
                   type="button"
                   onClick={() => handleNavClick('chat')}
                   className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'chat'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
                     : 'text-foreground hover:bg-secondary'
                     }`}
                 >
@@ -141,7 +141,7 @@ export function NavPage({
                   type="button"
                   onClick={() => handleNavClick('runs')}
                   className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'runs'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
                     : 'text-foreground hover:bg-secondary'
                     }`}
                 >
@@ -152,7 +152,7 @@ export function NavPage({
                   type="button"
                   onClick={() => handleNavClick('events')}
                   className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'events'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
                     : 'text-foreground hover:bg-secondary'
                     }`}
                 >
@@ -163,7 +163,7 @@ export function NavPage({
                   type="button"
                   onClick={() => handleNavClick('charts')}
                   className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'charts'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
                     : 'text-foreground hover:bg-secondary'
                     }`}
                 >
@@ -174,7 +174,7 @@ export function NavPage({
                   type="button"
                   onClick={() => handleNavClick('memory')}
                   className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'memory'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
                     : 'text-foreground hover:bg-secondary'
                     }`}
                 >
@@ -185,7 +185,7 @@ export function NavPage({
                   type="button"
                   onClick={() => handleNavClick('report')}
                   className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'report'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
+                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
                     : 'text-foreground hover:bg-secondary'
                     }`}
                 >
