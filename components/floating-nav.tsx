@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, ChevronRight, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles } from 'lucide-react'
+import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -14,19 +14,11 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { useApiConfig } from '@/lib/api-config'
-import type { RunsSubTab } from './nav-page'
 import type { ReportCellType } from './report-view'
-
-interface BreadcrumbItem {
-  label: string
-  onClick?: () => void
-}
 
 interface FloatingNavProps {
   activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
-  runsSubTab: RunsSubTab
   onMenuClick: () => void
-  breadcrumbs?: BreadcrumbItem[]
   // Chat-specific props
   eventCount?: number
   onAlertClick?: () => void
@@ -43,24 +35,9 @@ interface FloatingNavProps {
   onReportAddCell?: (type: ReportCellType) => void
 }
 
-const tabLabels: Record<string, string> = {
-  chat: 'Chat',
-  runs: 'Runs',
-  charts: 'Charts',
-  memory: 'Memory',
-  settings: 'Settings',
-}
-
-const runsSubTabLabels: Record<RunsSubTab, string> = {
-  overview: 'Overview',
-  details: 'Details',
-}
-
 export function FloatingNav({
   activeTab,
-  runsSubTab,
   onMenuClick,
-  breadcrumbs,
   eventCount = 0,
   onAlertClick,
   onCreateSweepClick,
@@ -74,16 +51,6 @@ export function FloatingNav({
   onReportPreviewModeChange,
   onReportAddCell,
 }: FloatingNavProps) {
-  // Build default breadcrumbs if not provided
-  const defaultBreadcrumbs: BreadcrumbItem[] = [
-    { label: tabLabels[activeTab] }
-  ]
-
-  if (activeTab === 'runs') {
-    defaultBreadcrumbs.push({ label: runsSubTabLabels[runsSubTab] })
-  }
-
-  const items = breadcrumbs || defaultBreadcrumbs
   const isChat = activeTab === 'chat'
   const isReport = activeTab === 'report'
   const { useMock: isDemoMode } = useApiConfig()
@@ -110,33 +77,7 @@ export function FloatingNav({
         )}
       </div>
 
-      <nav className="flex items-center gap-1.5 text-sm min-w-0 overflow-hidden flex-1">
-        {items.map((item, index) => {
-          const isLast = index === items.length - 1
-          const isClickable = !!item.onClick
-
-          return (
-            <div key={index} className="flex items-center gap-1.5 min-w-0">
-              {index > 0 && (
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              )}
-              {isClickable ? (
-                <button
-                  type="button"
-                  onClick={item.onClick}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate"
-                >
-                  {item.label}
-                </button>
-              ) : (
-                <span className={`truncate ${isLast ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
-                  {item.label}
-                </span>
-              )}
-            </div>
-          )
-        })}
-      </nav>
+      <div className="flex-1" />
 
       {/* Right side buttons - only show in chat */}
       {isChat && (

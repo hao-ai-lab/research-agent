@@ -14,7 +14,6 @@ import {
   Clock,
   Code,
   LayoutDashboard,
-  List,
   Search,
   FileText,
 } from 'lucide-react'
@@ -23,7 +22,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import type { ChatSession } from '@/lib/api'
 
-export type RunsSubTab = 'overview' | 'details'
 export type JourneySubTab = 'story' | 'devnotes'
 
 interface NavPageProps {
@@ -31,10 +29,8 @@ interface NavPageProps {
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
   activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
-  runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
   onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report') => void
-  onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
   onNewChat?: () => void
   // Real sessions from backend
@@ -47,10 +43,8 @@ export function NavPage({
   onOpenChange,
   onSettingsClick,
   activeTab,
-  runsSubTab,
   journeySubTab,
   onTabChange,
-  onRunsSubTabChange,
   onJourneySubTabChange,
   onNewChat,
   sessions = [],
@@ -65,12 +59,9 @@ export function NavPage({
 
   const handleNavClick = (
     tab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report',
-    subTab?: RunsSubTab | JourneySubTab
+    subTab?: JourneySubTab
   ) => {
     onTabChange(tab)
-    if (tab === 'runs' && subTab) {
-      onRunsSubTabChange(subTab as RunsSubTab)
-    }
     if (tab === 'journey' && subTab) {
       onJourneySubTabChange(subTab as JourneySubTab)
     }
@@ -148,24 +139,13 @@ export function NavPage({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleNavClick('runs', 'overview')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'overview'
+                  onClick={() => handleNavClick('runs')}
+                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'runs'
                     ? 'bg-primary/10 text-primary border border-primary/20'
                     : 'text-foreground hover:bg-secondary'
                     }`}
                 >
                   <LayoutDashboard className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Overview</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('runs', 'details')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'runs' && runsSubTab === 'details'
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <List className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Runs</span>
                 </button>
                 <button
