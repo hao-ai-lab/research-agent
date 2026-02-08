@@ -30,12 +30,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import type { ExperimentRun, Artifact, InsightChart, ChatMessage } from '@/lib/types'
+import type { ExperimentRun, Artifact, InsightChart, ChatMessage, Sweep } from '@/lib/types'
 import type { Alert as ApiAlert } from '@/lib/api-client'
 
 export type ChatMode = 'agent' | 'wild' | 'sweep'
 
-export type MentionType = 'run' | 'artifact' | 'alert' | 'chart' | 'chat'
+export type MentionType = 'run' | 'sweep' | 'artifact' | 'alert' | 'chart' | 'chat'
 
 export interface MentionItem {
   id: string
@@ -67,6 +67,7 @@ interface ChatInputProps {
   mode: ChatMode
   onModeChange: (mode: ChatMode) => void
   runs?: ExperimentRun[]
+  sweeps?: Sweep[]
   alerts?: ApiAlert[]
   artifacts?: Artifact[]
   charts?: InsightChart[]
@@ -87,6 +88,7 @@ export function ChatInput({
   mode,
   onModeChange,
   runs = [],
+  sweeps = [],
   alerts = [],
   artifacts = [],
   charts = [],
@@ -126,6 +128,17 @@ export function ChatInput({
     const items: MentionItem[] = []
     const runById = new Map(runs.map(run => [run.id, run]))
     const alertIds = new Set<string>()
+
+    // Sweeps
+    sweeps.forEach((sweep) => {
+      items.push({
+        id: `sweep:${sweep.id}`,
+        type: 'sweep',
+        label: sweep.config.name || `Sweep ${sweep.id}`,
+        sublabel: `${sweep.status} · ${sweep.progress.running} running · ${sweep.progress.completed} done`,
+        icon: <Sparkles className="h-3 w-3" />,
+      })
+    })
 
     // Runs
     runs.forEach(run => {
@@ -222,7 +235,7 @@ export function ChatInput({
     })
 
     return items
-  }, [runs, artifacts, charts, messages, alerts])
+  }, [runs, sweeps, artifacts, charts, messages, alerts])
 
   // Filter mention items based on query and type filter
   const filteredMentionItems = useMemo(() => {
@@ -740,7 +753,7 @@ export function ChatInput({
               <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
               <div className="flex-1 min-w-0 overflow-x-auto">
                 <div className="flex min-w-max items-center gap-1 pr-1">
-                  {(['all', 'run', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
+                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
                     <button
                       key={type}
                       type="button"

@@ -40,6 +40,8 @@ interface ConnectedChatViewProps {
     webNotificationsEnabled?: boolean
     onOpenSettings?: () => void
     insertDraft?: { id: number; text: string } | null
+    injectedMessages?: ChatMessageType[]
+    onUserMessage?: (message: string) => void
 }
 
 /**
@@ -63,6 +65,8 @@ export function ConnectedChatView({
     webNotificationsEnabled = true,
     onOpenSettings,
     insertDraft,
+    injectedMessages = [],
+    onUserMessage,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
@@ -104,7 +108,7 @@ export function ConnectedChatView({
     }, [messages, streamingState.textContent, streamingState.thinkingContent])
 
     // Convert API messages to the ChatMessage type expected by components
-    const displayMessages: ChatMessageType[] = useMemo(() => {
+    const apiDisplayMessages: ChatMessageType[] = useMemo(() => {
         return messages.map((msg, idx) => ({
             id: `${currentSessionId}-${idx}`,
             role: msg.role,
@@ -114,6 +118,15 @@ export function ConnectedChatView({
             source: wildMessageIndices.has(idx) ? ('agent_wild' as const) : undefined,
         }))
     }, [messages, currentSessionId, wildMessageIndices])
+
+    const displayMessages: ChatMessageType[] = useMemo(() => {
+        if (injectedMessages.length === 0) {
+            return apiDisplayMessages
+        }
+        return [...apiDisplayMessages, ...injectedMessages].sort(
+            (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+        )
+    }, [apiDisplayMessages, injectedMessages])
 
     // ========== Wild Loop Integration ==========
 
@@ -191,6 +204,7 @@ export function ConnectedChatView({
         }
 
         const effectiveMode = msgMode || mode
+        onUserMessage?.(message)
 
         // If in wild mode and loop isn't active, start the loop on first message
         if (effectiveMode === 'wild' && wildLoop && !wildLoop.isActive) {
@@ -198,7 +212,7 @@ export function ConnectedChatView({
         }
 
         await sendMessage(message, effectiveMode, sessionId)
-    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop])
+    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage])
 
     // Connection error state
     if (!isConnected && !isLoading) {
@@ -360,6 +374,7 @@ export function ConnectedChatView({
                     onModeChange={onModeChange}
                     runs={runs}
                     alerts={alerts}
+                    sweeps={sweeps}
                     charts={charts}
                     messages={displayMessages}
                     isStreaming={streamingState.isStreaming}

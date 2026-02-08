@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import {
   MessageSquare,
+  Bot,
   FlaskConical,
   Settings,
   BarChart3,
@@ -146,6 +147,13 @@ export function NavPage({
                   <MessageSquare className="h-4 w-4 shrink-0" />
                   <span className="font-medium min-w-0 truncate">Chat</span>
                 </button>
+                <a
+                  href="/assistant"
+                  className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left text-foreground hover:bg-secondary"
+                >
+                  <Bot className="h-4 w-4 shrink-0" />
+                  <span className="font-medium min-w-0 truncate">Assistant</span>
+                </a>
                 <button
                   type="button"
                   onClick={() => handleNavClick('runs', 'overview')}

@@ -35,6 +35,12 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -624,6 +630,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
     const canUnarchiveSelection = selectedManageRuns.some((run) => run.isArchived)
 
     return (
+      <>
       <div className="flex flex-col h-full overflow-hidden">
         <div className="shrink-0 border-b border-border px-4 py-3 space-y-2">
           <div className="flex items-center gap-2 overflow-x-auto">
@@ -702,22 +709,16 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 gap-1.5"
-                    title="Create Sweep"
-                  >
-                    <PlugZap className="h-4 w-4" />
-                    Sweep
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80" align="end">
-                  <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
-                </PopoverContent>
-              </Popover>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5"
+                title="Create Sweep"
+                onClick={() => setSweepDialogOpen(true)}
+              >
+                <PlugZap className="h-4 w-4" />
+                Sweep
+              </Button>
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -960,6 +961,16 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
           </ScrollArea>
         </div>
       </div>
+
+      <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Create Sweep</DialogTitle>
+          </DialogHeader>
+          <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
+        </DialogContent>
+      </Dialog>
+      </>
     )
   }
 
