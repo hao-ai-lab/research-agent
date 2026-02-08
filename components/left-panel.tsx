@@ -19,6 +19,8 @@ import {
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { useAppSettings } from '@/lib/app-settings'
+import type { LeftPanelItemId } from '@/lib/types'
 
 interface LeftPanelProps {
   open: boolean
@@ -28,6 +30,25 @@ interface LeftPanelProps {
   onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => void
 }
 
+const NAV_ITEM_CONFIG = {
+  chat: {
+    icon: MessageSquare,
+    label: 'Chat',
+  },
+  runs: {
+    icon: LayoutDashboard,
+    label: 'Runs',
+  },
+  charts: {
+    icon: BarChart3,
+    label: 'Charts',
+  },
+  insights: {
+    icon: Lightbulb,
+    label: 'Insights',
+  },
+} as const
+
 export function LeftPanel({ 
   open, 
   onOpenChange, 
@@ -35,10 +56,17 @@ export function LeftPanel({
   activeTab,
   onTabChange,
 }: LeftPanelProps) {
+  const { settings } = useAppSettings()
+  
   const handleNavClick = (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => {
     onTabChange(tab)
     onOpenChange(false)
   }
+
+  // Get ordered and visible nav items from settings
+  const navItems = (settings.leftPanel?.items || [])
+    .filter((item) => item.visible)
+    .sort((a, b) => a.order - b.order)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -60,61 +88,28 @@ export function LeftPanel({
 
           <nav className="flex-1 overflow-y-auto px-2">
             <div className="space-y-1">
-              {/* Chat */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('chat')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeTab === 'chat'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                }`}
-              >
-                <MessageSquare className="h-4 w-4" />
-                Chat
-              </button>
-
-              {/* Runs */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('runs')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeTab === 'runs'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                }`}
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                Runs
-              </button>
-
-              {/* Charts */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('charts')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeTab === 'charts'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                }`}
-              >
-                <BarChart3 className="h-4 w-4" />
-                Charts
-              </button>
-
-              {/* Insights */}
-              <button
-                type="button"
-                onClick={() => handleNavClick('insights')}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeTab === 'insights'
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                }`}
-              >
-                <Lightbulb className="h-4 w-4" />
-                Insights
-              </button>
+              {navItems.map((item) => {
+                const config = NAV_ITEM_CONFIG[item.id as LeftPanelItemId]
+                if (!config) return null
+                
+                const Icon = config.icon
+                
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleNavClick(item.id as 'chat' | 'runs' | 'charts' | 'insights')}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                      activeTab === item.id
+                        ? 'bg-secondary text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {config.label}
+                  </button>
+                )
+              })}
             </div>
           </nav>
 

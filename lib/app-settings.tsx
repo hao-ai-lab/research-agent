@@ -26,6 +26,14 @@ export const defaultAppSettings: AppSettings = {
     alertTypes: ['error', 'warning', 'info'],
     webNotificationsEnabled: true,
   },
+  leftPanel: {
+    items: [
+      { id: 'chat', label: 'Chat', visible: true, order: 0 },
+      { id: 'runs', label: 'Runs', visible: true, order: 1 },
+      { id: 'charts', label: 'Charts', visible: true, order: 2 },
+      { id: 'insights', label: 'Insights', visible: true, order: 3 },
+    ],
+  },
 }
 
 interface AppSettingsContextValue {

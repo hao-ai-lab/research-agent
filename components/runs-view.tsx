@@ -22,18 +22,22 @@ import {
   AlertTriangle,
   Settings2,
   PlugZap,
+  Filter,
+  Plus,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  Dialog,
+  DialogContent,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -44,13 +48,12 @@ import {
 import { AllRunsChart } from './all-runs-chart'
 import { RunDetailView } from './run-detail-view'
 import { VisibilityManageView } from './visibility-manage-view'
-import { CreateSweepDialog } from './create-sweep-dialog'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
-import { createSweep } from '@/lib/api-client'
+
 
 type DetailsView = 'time' | 'priority'
 type GroupByMode = 'none' | 'sweep'
@@ -65,96 +68,8 @@ const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
   'canceled',
 ]
 
-// Inline sweep form for popover
-function SweepFormPopover({ onClose, onRefresh }: { onClose: () => void; onRefresh?: () => void }) {
-  const [name, setName] = React.useState('')
-  const [command, setCommand] = React.useState('')
-  const [params, setParams] = React.useState('')
-  const [isSubmitting, setIsSubmitting] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  const handleSubmit = async () => {
-    if (!name.trim() || !command.trim() || !params.trim()) {
-      setError('All fields required')
-      return
-    }
-
-    // Parse params: "lr=0.001,0.01;batch=32,64" -> {lr: [0.001, 0.01], batch: [32, 64]}
-    const paramObj: Record<string, unknown[]> = {}
-    try {
-      params.split(';').forEach(p => {
-        const [key, vals] = p.split('=')
-        if (key && vals) {
-          paramObj[key.trim()] = vals.split(',').map(v => {
-            const num = Number(v.trim())
-            return isNaN(num) ? v.trim() : num
-          })
-        }
-      })
-    } catch {
-      setError('Invalid param format')
-      return
-    }
-
-    if (Object.keys(paramObj).length === 0) {
-      setError('At least one parameter required')
-      return
-    }
-
-    setIsSubmitting(true)
-    try {
-      await createSweep({
-        name: name.trim(),
-        base_command: command.trim(),
-        parameters: paramObj,
-        max_runs: 10,
-        auto_start: false,
-      })
-      onClose()
-      onRefresh?.()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="font-medium text-sm">Create Sweep</div>
-      <div className="space-y-2">
-        <Input
-          placeholder="Sweep name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="h-8 text-xs"
-        />
-        <Textarea
-          placeholder="python train.py"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          className="h-16 text-xs font-mono"
-        />
-        <Input
-          placeholder="lr=0.001,0.01;batch=32,64"
-          value={params}
-          onChange={(e) => setParams(e.target.value)}
-          className="h-8 text-xs font-mono"
-        />
-        <p className="text-[10px] text-muted-foreground">
-          Format: key=val1,val2;key2=val3,val4
-        </p>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <div className="flex gap-2">
-        <Button size="sm" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
-        <Button size="sm" onClick={handleSubmit} disabled={isSubmitting} className="flex-1">
-          {isSubmitting ? 'Creating...' : 'Create'}
-        </Button>
-      </div>
-    </div>
-  )
-}
+// Rich sweep form
+import { SweepForm } from '@/components/sweep-form'
 
 interface RunsViewProps {
   runs: ExperimentRun[]
@@ -176,7 +91,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [manageMode, setManageMode] = useState(false)
   const [selectedManageRunIds, setSelectedManageRunIds] = useState<Set<string>>(new Set())
-  const [groupByMode, setGroupByMode] = useState<GroupByMode>('none')
+  const [groupByMode, setGroupByMode] = useState<GroupByMode>('sweep')
   const [sweepFilter, setSweepFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<Set<ExperimentRun['status']>>(
     () => new Set(RUN_STATUS_OPTIONS)
@@ -276,15 +191,6 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
     () => filteredRuns.filter((run) => selectedManageRunIds.has(run.id)),
     [filteredRuns, selectedManageRunIds]
   )
-
-  // Sort runs for quick access - favorites first
-  const quickAccessRuns = useMemo(() => {
-    return [...allActiveRuns].sort((a, b) => {
-      if (a.isFavorite && !b.isFavorite) return -1
-      if (!a.isFavorite && b.isFavorite) return 1
-      return b.startTime.getTime() - a.startTime.getTime()
-    }).slice(0, 6)
-  }, [allActiveRuns])
 
   // Sort runs for details view
   const sortedRuns = useMemo(() => {
@@ -643,17 +549,6 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
             onStopRun={onStopRun}
           />
         </div>
-
-        {/* Sweep Dialog */}
-        <CreateSweepDialog
-          open={sweepDialogOpen}
-          onOpenChange={setSweepDialogOpen}
-          baseCommand={selectedRun.command}
-          onSweepCreated={(sweepId, runCount) => {
-            // Dialog will close, runs will be refetched by polling
-            console.log(`Created sweep ${sweepId} with ${runCount} runs`)
-          }}
-        />
       </div>
     )
   }
@@ -672,6 +567,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
 
   // Overview view (default)
   return (
+    <>
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full" ref={scrollAreaRef} onScrollCapture={handleScroll}>
@@ -741,118 +637,126 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
               />
             </div>
 
-            {/* Quick Access to Runs */}
-            <div>
-              <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
-                Quick Access
-              </h3>
-              <div className="space-y-2">
-                {quickAccessRuns.map((run) => (
-                  <RunItem key={run.id} run={run} />
-                ))}
-              </div>
-            </div>
-
             {/* All Runs */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  All Runs
+                  Runs
                 </h3>
               </div>
               <div className="rounded-xl border border-border bg-card">
                 <div className="border-b border-border px-4 py-3 space-y-2">
-                  <div className="flex items-center gap-2 overflow-x-auto">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
-                        <SelectTrigger className="w-28 h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="time">Time</SelectItem>
-                          <SelectItem value="priority">Priority</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={groupByMode} onValueChange={(v) => setGroupByMode(v as GroupByMode)}>
-                        <SelectTrigger className="w-32 h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Group: None</SelectItem>
-                          <SelectItem value="sweep">Group: Sweep</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={sweepFilter} onValueChange={setSweepFilter}>
-                        <SelectTrigger className="w-36 h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Sweep: All</SelectItem>
-                          <SelectItem value="none">No Sweep</SelectItem>
-                          {sweepOptions.map((sweepId) => (
-                            <SelectItem key={sweepId} value={sweepId}>
-                              Sweep: {sweepId}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="outline" size="sm" className="h-8 text-xs">
-                            Status: {isAllStatusSelected ? 'All' : statusFilter.size}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-64 p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-medium text-foreground">Filter by status</p>
-                            <Button variant="ghost" size="sm" onClick={resetStatusFilter} className="h-6 px-2 text-[10px]">
-                              Reset
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {RUN_STATUS_OPTIONS.map((status) => {
-                              const selected = statusFilter.has(status)
-                              return (
-                                <button
-                                  key={status}
-                                  type="button"
-                                  onClick={() => toggleStatusFilter(status)}
-                                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
-                                    selected
-                                      ? 'border-primary/40 bg-primary/10 text-primary'
-                                      : 'border-border bg-card text-muted-foreground hover:bg-secondary/40'
-                                  }`}
-                                >
-                                  {selected ? <CheckSquare className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5 rounded-sm border border-current/50" />}
-                                  {getStatusText(status)}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
+                  <div className="flex items-center gap-2">
+                    <div className="hidden min-w-0 flex-1 sm:block">
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        Time: {detailsView === 'time' ? 'Time' : 'Priority'} · Group: {groupByMode === 'sweep' ? 'Sweep' : 'None'} · Sweep: {sweepFilter === 'all' ? 'All' : sweepFilter === 'none' ? 'No Sweep' : sweepFilter} · Status: {isAllStatusSelected ? 'All' : `${statusFilter.size} selected`}
+                      </p>
                     </div>
 
                     <div className="ml-auto flex shrink-0 items-center gap-2">
-                      <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 gap-1.5"
-                            title="Create Sweep"
-                          >
-                            <PlugZap className="h-4 w-4" />
-                            Sweep
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-80" align="end">
-                          <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
+                      <Popover>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Open Filters">
+                                <Filter className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent>Filters</TooltipContent>
+                        </Tooltip>
+                        <PopoverContent align="end" className="w-[min(92vw,360px)] p-3">
+                          <div className="space-y-3">
+                            <div className="grid gap-1.5">
+                              <p className="text-[11px] font-medium text-muted-foreground">Time</p>
+                              <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="time">Time</SelectItem>
+                                  <SelectItem value="priority">Priority</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                              <p className="text-[11px] font-medium text-muted-foreground">Group By</p>
+                              <Select value={groupByMode} onValueChange={(v) => setGroupByMode(v as GroupByMode)}>
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">None</SelectItem>
+                                  <SelectItem value="sweep">Sweep</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                              <p className="text-[11px] font-medium text-muted-foreground">Sweep</p>
+                              <Select value={sweepFilter} onValueChange={setSweepFilter}>
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All</SelectItem>
+                                  <SelectItem value="none">No Sweep</SelectItem>
+                                  {sweepOptions.map((sweepId) => (
+                                    <SelectItem key={sweepId} value={sweepId}>
+                                      {sweepId}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="border-t border-border pt-3">
+                              <div className="mb-2 flex items-center justify-between">
+                                <p className="text-[11px] font-medium text-muted-foreground">Status</p>
+                                <Button variant="ghost" size="sm" onClick={resetStatusFilter} className="h-6 px-2 text-[10px]">
+                                  Reset
+                                </Button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {RUN_STATUS_OPTIONS.map((status) => {
+                                  const selected = statusFilter.has(status)
+                                  return (
+                                    <button
+                                      key={status}
+                                      type="button"
+                                      onClick={() => toggleStatusFilter(status)}
+                                      className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
+                                        selected
+                                          ? 'border-primary/40 bg-primary/10 text-primary'
+                                          : 'border-border bg-card text-muted-foreground hover:bg-secondary/40'
+                                      }`}
+                                    >
+                                      {selected ? <CheckSquare className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5 rounded-sm border border-current/50" />}
+                                      {getStatusText(status)}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </div>
                         </PopoverContent>
                       </Popover>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="Create Sweep"
+                            onClick={() => setSweepDialogOpen(true)}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Create Sweep</TooltipContent>
+                      </Tooltip>
 
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -874,7 +778,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                             <Settings2 className="h-3.5 w-3.5" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage'}</TooltipContent>
+                        <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage Runs'}</TooltipContent>
                       </Tooltip>
                     </div>
                   </div>
@@ -1095,15 +999,17 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
           </div>
         </ScrollArea>
       </div>
-
-      {/* Sweep Dialog */}
-      <CreateSweepDialog
-        open={sweepDialogOpen}
-        onOpenChange={setSweepDialogOpen}
-        onSweepCreated={(sweepId, runCount) => {
-          console.log(`Created sweep ${sweepId} with ${runCount} runs`)
-        }}
-      />
     </div>
+
+      <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
+        <DialogContent showCloseButton={false} className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col p-0 gap-0">
+          <SweepForm
+            onSave={() => { setSweepDialogOpen(false); onRefresh?.() }}
+            onCancel={() => setSweepDialogOpen(false)}
+            onLaunch={() => { setSweepDialogOpen(false); onRefresh?.() }}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
