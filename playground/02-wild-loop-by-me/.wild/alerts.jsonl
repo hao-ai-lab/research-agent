@@ -1,0 +1,1 @@
+{"id":"alert-001","timestamp":"2026-02-08T16:52:36.642Z","severity":"warning","source":"training-job-3","type":"divergence","description":"Loss spike at step 250: loss went from 2.3 to 15.7","status":"pending","context":{"batch_size":64,"model":"mlp-128"}}
