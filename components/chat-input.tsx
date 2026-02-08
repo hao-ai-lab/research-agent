@@ -79,6 +79,7 @@ interface ChatInputProps {
   queue?: string[]
   onRemoveFromQueue?: (index: number) => void
   insertDraft?: { id: number; text: string } | null
+  layout?: 'docked' | 'centered'
 }
 
 export function ChatInput({
@@ -99,6 +100,7 @@ export function ChatInput({
   queue = [],
   onRemoveFromQueue,
   insertDraft = null,
+  layout = 'docked',
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -666,7 +668,13 @@ export function ChatInput({
   // Removed format/emoji popovers for compact design - using insertText for @ mentions and commands
 
   return (
-    <div className="border-t border-border bg-background px-3 pb-3 pt-2">
+    <div
+      className={
+        layout === 'centered'
+          ? 'rounded-2xl border border-border bg-background px-3 pb-3 pt-2 shadow-[0_6px_16px_rgba(15,23,42,0.06)]'
+          : 'border-t border-border bg-background px-3 pb-3 pt-2'
+      }
+    >
       {/* Attachments preview */}
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
@@ -929,10 +937,10 @@ export function ChatInput({
                 type="button"
                 className={`chat-toolbar-pill flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
                   mode === 'agent'
-                    ? 'bg-accent/20 text-accent'
+                    ? 'border border-primary/35 bg-primary/12 text-primary dark:border-primary/45 dark:bg-primary/24'
                     : mode === 'wild'
-                    ? 'bg-purple-500/20 text-purple-400'
-                    : 'bg-blue-500/20 text-blue-400'
+                    ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
+                    : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
                 }`}
               >
                 {mode === 'agent' ? (
@@ -955,12 +963,12 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'agent'
-                      ? 'bg-accent/10 border border-accent/30'
+                      ? 'bg-primary/10 border border-primary/35 dark:bg-primary/18 dark:border-primary/45'
                       : 'hover:bg-secondary'
                   }`}
                 >
                   <MessageSquare
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-accent' : 'text-muted-foreground'}`}
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-primary' : 'text-muted-foreground'}`}
                   />
                   <div>
                     <p className="text-xs font-medium text-foreground">Agent Mode</p>
@@ -975,12 +983,12 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'wild'
-                      ? 'bg-purple-400/10 border border-purple-400/30'
+                      ? 'bg-violet-500/10 border border-violet-500/35 dark:bg-violet-500/18 dark:border-violet-400/45'
                       : 'hover:bg-secondary'
                   }`}
                 >
                   <Zap
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-purple-400' : 'text-muted-foreground'}`}
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground'}`}
                   />
                   <div>
                     <p className="text-xs font-medium text-foreground">Wild Mode</p>
@@ -995,12 +1003,12 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'sweep'
-                      ? 'bg-purple-400/10 border border-purple-400/30'
+                      ? 'bg-blue-500/10 border border-blue-500/35 dark:bg-blue-500/18 dark:border-blue-400/45'
                       : 'hover:bg-secondary'
                   }`}
                 >
                   <Sparkles
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'sweep' ? 'text-purple-400' : 'text-muted-foreground'}`}
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'sweep' ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground'}`}
                   />
                   <div>
                     <p className="text-xs font-medium text-foreground">Sweep Mode</p>
