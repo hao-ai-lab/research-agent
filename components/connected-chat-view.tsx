@@ -257,46 +257,6 @@ export function ConnectedChatView({
 
     const hasConversation = displayMessages.length > 0 || streamingState.isStreaming
 
-    const renderEmptyState = (compact = false) => (
-        <div className={`flex flex-col items-center justify-center px-4 text-center ${compact ? 'py-4' : 'py-12'}`}>
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary">
-                <span className="text-2xl">{mode === 'wild' ? '🚀' : '🔬'}</span>
-            </div>
-            <h3 className="text-lg font-semibold text-foreground">
-                {mode === 'wild' ? 'Wild Mode' : 'Research Assistant'}
-            </h3>
-            <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                {mode === 'wild'
-                    ? 'Describe your research goal and the agent will autonomously design experiments, create sweeps, and iterate.'
-                    : 'Ask me anything about your experiments, training runs, or ML research. I can help analyze loss curves, debug issues, and suggest improvements.'}
-            </p>
-            <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {(mode === 'wild' ? [
-                    'Sweep learning rates from 1e-4 to 1e-2',
-                    'Train model and tune hyperparams',
-                    'Debug failing training run',
-                ] : [
-                    'Analyze my latest run',
-                    'Why did training fail?',
-                    'Compare model configs',
-                ]).map((suggestion) => (
-                    <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => handleSend(suggestion)}
-                        className={`rounded-full border px-4 py-2 text-sm transition-colors active:scale-95 ${
-                            mode === 'wild'
-                                ? 'border-purple-500/30 bg-purple-500/10 text-purple-700 hover:bg-purple-500/20 dark:text-purple-300'
-                                : 'border-border bg-secondary text-foreground hover:bg-secondary/80'
-                        }`}
-                    >
-                        {suggestion}
-                    </button>
-                ))}
-            </div>
-        </div>
-    )
-
     const renderChatInput = (layout: 'docked' | 'centered') => (
         <ChatInput
             onSend={handleSend}
@@ -357,20 +317,13 @@ export function ConnectedChatView({
                     {/* Centered composer for new chats on wide screens */}
                     <div className="hidden flex-1 min-h-0 lg:flex lg:items-center lg:justify-center lg:px-6">
                         <div className="w-full max-w-3xl">
-                            {renderEmptyState(true)}
                             {renderChatInput('centered')}
                         </div>
                     </div>
 
                     {/* Mobile/compact layout keeps docked composer */}
                     <div className="flex flex-1 min-h-0 flex-col overflow-hidden lg:hidden">
-                        <div className="flex-1 min-h-0 overflow-hidden">
-                            <ScrollArea className="h-full">
-                                <div className="pb-4">
-                                    {renderEmptyState(false)}
-                                </div>
-                            </ScrollArea>
-                        </div>
+                        <div className="flex-1 min-h-0" />
                         <div className="shrink-0">
                             {renderChatInput('docked')}
                         </div>

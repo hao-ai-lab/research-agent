@@ -39,7 +39,7 @@
   --sidebar-ring: oklch(0.69 0.18 52);
   --success: oklch(0.66 0.15 150);
   --warning: oklch(0.78 0.16 88);
-  --app-button-scale: 1.12;
+  --app-button-scale: 1.2;
   --app-btn-h-default: 2.25rem;
   --app-btn-px-default: 1rem;
   --app-btn-py-default: 0.5rem;
@@ -53,7 +53,7 @@
   --app-btn-fixed-7: 1.75rem;
   --app-btn-fixed-8: 2rem;
   --app-btn-fixed-9: 2.25rem;
-  --app-chat-toolbar-btn-size: 2rem;
+  --app-chat-toolbar-btn-size: 2.25rem;
 }
 
 .dark {

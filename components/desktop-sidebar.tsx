@@ -10,7 +10,6 @@ import {
   Lightbulb,
   MessageSquare,
   PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Settings,
   Sparkles,
@@ -33,10 +32,12 @@ import { getStatusText } from '@/lib/status-utils'
 import type { JourneySubTab } from './nav-page'
 
 type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
+const ICON_RAIL_WIDTH = 72
+const ICON_RAIL_TRIGGER_WIDTH = 136
 
 interface DesktopSidebarProps {
   activeTab: ActiveTab
-  collapsed?: boolean
+  hidden?: boolean
   width?: number
   minWidth?: number
   maxWidth?: number
@@ -90,7 +91,7 @@ function getSweepStatusClass(status: Sweep['status']) {
 
 export function DesktopSidebar({
   activeTab,
-  collapsed = false,
+  hidden = false,
   width = 300,
   minWidth = 240,
   maxWidth = 520,
@@ -110,6 +111,7 @@ export function DesktopSidebar({
   onResizeStart,
   onResizeEnd,
 }: DesktopSidebarProps) {
+  const isIconRail = !hidden && width <= ICON_RAIL_TRIGGER_WIDTH
   const recentRuns = useMemo(
     () =>
       [...runs]
@@ -136,21 +138,22 @@ export function DesktopSidebar({
   const resizeStartWidthRef = useRef(width)
 
   const handleResizeStart = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
-    if (collapsed) return
+    if (hidden) return
     e.preventDefault()
     resizeStartXRef.current = e.clientX
     resizeStartWidthRef.current = width
     setIsResizing(true)
     onResizeStart?.()
-  }, [collapsed, onResizeStart, width])
+  }, [hidden, onResizeStart, width])
 
   useEffect(() => {
     if (!isResizing) return
 
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - resizeStartXRef.current
-      const nextWidth = Math.min(maxWidth, Math.max(minWidth, resizeStartWidthRef.current + deltaX))
-      onWidthChange?.(nextWidth)
+      const rawWidth = Math.min(maxWidth, Math.max(minWidth, resizeStartWidthRef.current + deltaX))
+      const snappedWidth = rawWidth <= ICON_RAIL_TRIGGER_WIDTH ? ICON_RAIL_WIDTH : rawWidth
+      onWidthChange?.(snappedWidth)
     }
 
     const handleMouseUp = () => {
@@ -176,27 +179,23 @@ export function DesktopSidebar({
       className={`relative hidden h-full shrink-0 border-r border-border/80 bg-sidebar/90 backdrop-blur supports-[backdrop-filter]:bg-sidebar/75 transition-[width] ${
         isResizing ? 'duration-0' : 'duration-200'
       } lg:flex ${
-        collapsed ? 'w-[72px]' : ''
+        hidden ? 'w-0 border-r-0 overflow-hidden' : isIconRail ? 'w-[72px]' : ''
       }`}
-      style={collapsed ? undefined : { width: `${width}px` }}
+      style={hidden || isIconRail ? undefined : { width: `${width}px` }}
     >
-      <div className="flex h-full w-full flex-col">
-        <div className={`shrink-0 border-b border-border/80 ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
-          <div className={`relative inline-flex ${collapsed ? 'mx-auto' : ''}`}>
+      <div className={`flex h-full w-full flex-col ${hidden ? 'pointer-events-none opacity-0' : ''}`}>
+        <div className={`shrink-0 border-b border-border/80 ${isIconRail ? 'px-2 py-2' : 'px-3 py-2'}`}>
+          <div className={`relative inline-flex ${isIconRail ? 'mx-auto' : ''}`}>
             <Button
               variant="ghost"
               size="icon"
               onClick={onToggleCollapse}
               className={`h-8 w-8 ${isDemoMode ? 'ring-2 ring-red-500/50 ring-offset-1 ring-offset-background' : ''}`}
-              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title="Hide sidebar"
             >
-              {collapsed ? (
-                <PanelLeftOpen className={`h-4 w-4 ${isDemoMode ? 'text-red-500' : ''}`} />
-              ) : (
-                <PanelLeftClose className={`h-4 w-4 ${isDemoMode ? 'text-red-500' : ''}`} />
-              )}
+              <PanelLeftClose className={`h-4 w-4 ${isDemoMode ? 'text-red-500' : ''}`} />
               <span className="sr-only">
-                {collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                Hide sidebar
               </span>
             </Button>
             {isDemoMode && (
@@ -211,9 +210,9 @@ export function DesktopSidebar({
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className={`space-y-5 py-3 ${collapsed ? 'px-2' : 'px-3'}`}>
+          <div className={`space-y-5 py-3 ${isIconRail ? 'px-2' : 'px-3'}`}>
             <section>
-              {!collapsed && (
+              {!isIconRail && (
                 <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Sections
                 </p>
@@ -225,103 +224,103 @@ export function DesktopSidebar({
                   onClick={() => {
                     void onNewChat()
                   }}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
-                    collapsed
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
+                    isIconRail
                       ? 'justify-center px-2 text-foreground hover:bg-secondary/50'
                       : 'gap-2 px-2 text-foreground hover:bg-secondary/50'
                   }`}
                 >
                   <Plus className="h-4 w-4 shrink-0" />
-                  {!collapsed && 'New Chat'}
+                  {!isIconRail && 'New Chat'}
                 </button>
 
                 <button
                   type="button"
                   title="Chat"
                   onClick={() => onTabChange('chat')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'chat'
                       ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <MessageSquare className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Chat'}
+                  <MessageSquare className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
+                  {!isIconRail && 'Chat'}
                 </button>
 
                 <button
                   type="button"
                   title="Runs"
                   onClick={() => onTabChange('runs')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'runs'
                       ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <FlaskConical className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Runs'}
+                  <FlaskConical className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
+                  {!isIconRail && 'Runs'}
                 </button>
 
                 <button
                   type="button"
                   title="Events"
                   onClick={() => onTabChange('events')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'events'
                       ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <Bell className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Events'}
+                  <Bell className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
+                  {!isIconRail && 'Events'}
                 </button>
 
                 <button
                   type="button"
                   title="Charts"
                   onClick={() => onTabChange('charts')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'charts'
                       ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <BarChart3 className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Charts'}
+                  <BarChart3 className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
+                  {!isIconRail && 'Charts'}
                 </button>
 
                 <button
                   type="button"
                   title="Memory"
                   onClick={() => onTabChange('memory')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'memory'
                       ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <Lightbulb className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Memory'}
+                  <Lightbulb className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
+                  {!isIconRail && 'Memory'}
                 </button>
 
                 <button
                   type="button"
                   title="Report"
                   onClick={() => onTabChange('report')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
+                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'report'
                       ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
-                  <FileText className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Report'}
+                  <FileText className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
+                  {!isIconRail && 'Report'}
                 </button>
               </div>
             </section>
 
-            {!collapsed && (
+            {!isIconRail && (
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -365,7 +364,7 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!collapsed && (
+            {!isIconRail && (
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -404,7 +403,7 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!collapsed && (
+            {!isIconRail && (
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -438,17 +437,17 @@ export function DesktopSidebar({
           </div>
         </ScrollArea>
 
-        <div className={`shrink-0 border-t border-border/80 ${collapsed ? 'p-2' : 'p-3'}`}>
+        <div className={`shrink-0 border-t border-border/80 ${isIconRail ? 'p-2' : 'p-3'}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                title={collapsed ? 'Workspace / Settings' : undefined}
+                title={isIconRail ? 'Workspace / Settings' : undefined}
                 className={`flex w-full items-center rounded-lg border border-border bg-card text-left transition-colors hover:bg-secondary/60 ${
-                  collapsed ? 'justify-center px-2 py-2' : 'justify-between px-3 py-2'
+                  isIconRail ? 'justify-center px-2 py-2' : 'justify-between px-3 py-2'
                 }`}
               >
-                {collapsed ? (
+                {isIconRail ? (
                   <Settings className="h-4 w-4 text-muted-foreground" />
                 ) : (
                   <>
@@ -461,7 +460,7 @@ export function DesktopSidebar({
                 )}
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align={collapsed ? 'center' : 'start'} className="w-64">
+            <DropdownMenuContent side="top" align={isIconRail ? 'center' : 'start'} className="w-64">
               <DropdownMenuLabel>Workspace</DropdownMenuLabel>
               <DropdownMenuItem disabled>Research Lab</DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -478,14 +477,14 @@ export function DesktopSidebar({
           </DropdownMenu>
         </div>
       </div>
-      {!collapsed && (
+      {!hidden && (
         <div
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
           onMouseDown={handleResizeStart}
-          className={`absolute -right-1 inset-y-0 z-30 w-3 cursor-col-resize touch-none transition-colors before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 ${
-            isResizing ? 'before:bg-primary/40' : 'before:bg-transparent hover:before:bg-border'
+          className={`absolute -right-2 inset-y-0 z-30 w-5 cursor-col-resize touch-none transition-colors before:absolute before:inset-y-0 before:left-1/2 before:w-0.5 before:-translate-x-1/2 ${
+            isResizing ? 'before:bg-primary/45' : 'before:bg-transparent hover:before:bg-border'
           }`}
         />
       )}
