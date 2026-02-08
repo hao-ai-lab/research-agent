@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { FloatingNav } from '@/components/floating-nav'
-import { NavPage, type RunsSubTab, type JourneySubTab } from '@/components/nav-page'
+import { NavPage, type JourneySubTab } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
 import { RunsView } from '@/components/runs-view'
 import { ChartsView } from '@/components/charts-view'
@@ -28,17 +28,25 @@ type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 
 const DESKTOP_SIDEBAR_MIN_WIDTH = 240
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
+const STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH = 'desktopSidebarWidth'
+const STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED = 'desktopSidebarCollapsed'
+const STORAGE_KEY_JOURNEY_SUB_TAB = 'journeySubTab'
+const STORAGE_KEY_CHAT_SHOW_ARTIFACTS = 'chatShowArtifacts'
+const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
+const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
 
 export default function ResearchChat() {
   const searchParams = useSearchParams()
   const { settings, setSettings } = useAppSettings()
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
-  const [runsSubTab, setRunsSubTab] = useState<RunsSubTab>('overview')
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
   const [reportToolbar, setReportToolbar] = useState<ReportToolbarState | null>(null)
+  const sidebarWidthRef = useRef(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
+  const pendingSidebarWidthRef = useRef<number | null>(null)
+  const sidebarRafRef = useRef<number | null>(null)
 
   // Use real API data via useRuns hook
   const { runs, updateRun: apiUpdateRun, refetch, startExistingRun, stopExistingRun } = useRuns()
@@ -49,7 +57,7 @@ export default function ResearchChat() {
   const [chatMode, setChatMode] = useState<ChatMode>('agent')
   const [allTags, setAllTags] = useState<TagDefinition[]>(defaultTags)
 
-  // State for breadcrumb navigation
+  // State for navigation
   const [selectedRun, setSelectedRun] = useState<ExperimentRun | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
 
@@ -72,7 +80,7 @@ export default function ResearchChat() {
   const { useMock, authToken, testConnection } = useApiConfig()
 
   useEffect(() => {
-    const storedWidth = window.localStorage.getItem('desktopSidebarWidth')
+    const storedWidth = window.localStorage.getItem(STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH)
     if (!storedWidth) return
     const parsed = Number(storedWidth)
     if (!Number.isFinite(parsed)) return
@@ -82,8 +90,63 @@ export default function ResearchChat() {
   }, [])
 
   useEffect(() => {
-    window.localStorage.setItem('desktopSidebarWidth', String(desktopSidebarWidth))
+    const storedCollapsed = window.localStorage.getItem(STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED)
+    if (storedCollapsed != null) {
+      setDesktopSidebarCollapsed(storedCollapsed === 'true')
+    }
+
+    const storedJourneySubTab = window.localStorage.getItem(STORAGE_KEY_JOURNEY_SUB_TAB)
+    if (storedJourneySubTab === 'story' || storedJourneySubTab === 'devnotes') {
+      setJourneySubTab(storedJourneySubTab)
+    }
+
+    const storedShowArtifacts = window.localStorage.getItem(STORAGE_KEY_CHAT_SHOW_ARTIFACTS)
+    if (storedShowArtifacts != null) {
+      setShowArtifacts(storedShowArtifacts === 'true')
+    }
+
+    const storedCollapseChats = window.localStorage.getItem(STORAGE_KEY_CHAT_COLLAPSE_CHATS)
+    if (storedCollapseChats != null) {
+      setCollapseChats(storedCollapseChats === 'true')
+    }
+
+    const storedCollapseArtifacts = window.localStorage.getItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS)
+    if (storedCollapseArtifacts != null) {
+      setCollapseArtifactsInChat(storedCollapseArtifacts === 'true')
+    }
+  }, [])
+
+  useEffect(() => {
+    sidebarWidthRef.current = desktopSidebarWidth
   }, [desktopSidebarWidth])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED, String(desktopSidebarCollapsed))
+  }, [desktopSidebarCollapsed])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_JOURNEY_SUB_TAB, journeySubTab)
+  }, [journeySubTab])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_CHAT_SHOW_ARTIFACTS, String(showArtifacts))
+  }, [showArtifacts])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_CHATS, String(collapseChats))
+  }, [collapseChats])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS, String(collapseArtifactsInChat))
+  }, [collapseArtifactsInChat])
+
+  useEffect(() => {
+    return () => {
+      if (sidebarRafRef.current != null) {
+        cancelAnimationFrame(sidebarRafRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const tab = searchParams.get('tab')
@@ -233,70 +296,14 @@ export default function ResearchChat() {
     })
   }, [alerts])
 
-  // Build breadcrumbs based on current state
-  const breadcrumbs = useMemo(() => {
-    const items: { label: string; onClick?: () => void }[] = []
-
-    if (activeTab === 'chat') {
-      items.push({ label: 'Chat' })
-    } else if (activeTab === 'runs') {
-      const baseRunsLabel = runsSubTab === 'overview' ? 'Overview' : 'Runs'
-
-      // Base level (clickable if we're deeper)
-      if (selectedRun || showVisibilityManage) {
-        items.push({
-          label: baseRunsLabel,
-          onClick: () => {
-            setSelectedRun(null)
-            setShowVisibilityManage(false)
-          }
-        })
-      } else {
-        items.push({ label: baseRunsLabel })
-      }
-
-      // Details beyond base level
-      if (selectedRun) {
-        items.push({ label: selectedRun.alias || selectedRun.name })
-      } else if (showVisibilityManage) {
-        items.push({ label: 'Visibility' })
-      }
-    } else if (activeTab === 'charts') {
-      if (showVisibilityManage) {
-        items.push({
-          label: 'Charts',
-          onClick: () => setShowVisibilityManage(false)
-        })
-        items.push({ label: 'Visibility' })
-      } else {
-        items.push({ label: 'Charts' })
-      }
-    } else if (activeTab === 'events') {
-      items.push({ label: 'Events' })
-    } else if (activeTab === 'memory') {
-      items.push({ label: 'Memory' })
-    } else if (activeTab === 'report') {
-      items.push({ label: 'Report' })
-    } else if (activeTab === 'journey') {
-      items.push({ label: 'Journey' })
-      items.push({ label: journeySubTab === 'story' ? 'Journey Story' : 'Dev Notes' })
-    } else if (activeTab === 'settings') {
-      items.push({ label: 'Settings' })
-    }
-
-    return items
-  }, [activeTab, runsSubTab, selectedRun, showVisibilityManage, journeySubTab])
-
   const handleRunClick = useCallback((run: ExperimentRun) => {
     setActiveTab('runs')
-    setRunsSubTab('overview')
   }, [])
 
   const handleNavigateToRun = useCallback((runId: string) => {
     const run = runs.find(r => r.id === runId)
     if (run) {
       setActiveTab('runs')
-      setRunsSubTab('details')
       setSelectedRun(run)
     }
   }, [runs])
@@ -472,12 +479,6 @@ export default function ResearchChat() {
     setShowVisibilityManage(false)
   }, [])
 
-  const handleRunsSubTabChange = useCallback((subTab: RunsSubTab) => {
-    setRunsSubTab(subTab)
-    setSelectedRun(null)
-    setShowVisibilityManage(false)
-  }, [])
-
   const handleChatModeChange = useCallback(async (mode: ChatMode) => {
     setChatMode(mode)
     try {
@@ -501,6 +502,32 @@ export default function ResearchChat() {
     })
   }, [])
 
+  const handleSidebarWidthChange = useCallback((nextWidth: number) => {
+    pendingSidebarWidthRef.current = nextWidth
+    if (sidebarRafRef.current != null) return
+
+    sidebarRafRef.current = requestAnimationFrame(() => {
+      sidebarRafRef.current = null
+      if (pendingSidebarWidthRef.current == null) return
+      setDesktopSidebarWidth(pendingSidebarWidthRef.current)
+      pendingSidebarWidthRef.current = null
+    })
+  }, [])
+
+  const handleSidebarResizeEnd = useCallback(() => {
+    if (sidebarRafRef.current != null) {
+      cancelAnimationFrame(sidebarRafRef.current)
+      sidebarRafRef.current = null
+    }
+    if (pendingSidebarWidthRef.current != null) {
+      setDesktopSidebarWidth(pendingSidebarWidthRef.current)
+      sidebarWidthRef.current = pendingSidebarWidthRef.current
+      pendingSidebarWidthRef.current = null
+    }
+
+    window.localStorage.setItem(STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH, String(sidebarWidthRef.current))
+  }, [])
+
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main className="flex h-full w-full overflow-hidden bg-background">
@@ -510,13 +537,11 @@ export default function ResearchChat() {
           width={desktopSidebarWidth}
           minWidth={DESKTOP_SIDEBAR_MIN_WIDTH}
           maxWidth={DESKTOP_SIDEBAR_MAX_WIDTH}
-          runsSubTab={runsSubTab}
           journeySubTab={journeySubTab}
           sessions={sessions}
           runs={runs}
           sweeps={sweeps}
           onTabChange={handleTabChange}
-          onRunsSubTabChange={handleRunsSubTabChange}
           onJourneySubTabChange={setJourneySubTab}
           onNewChat={async () => {
             await createNewSession()
@@ -530,15 +555,14 @@ export default function ResearchChat() {
           onInsertReference={handleInsertChatReference}
           onSettingsClick={() => setActiveTab('settings')}
           onToggleCollapse={() => setDesktopSidebarCollapsed((prev) => !prev)}
-          onWidthChange={setDesktopSidebarWidth}
+          onWidthChange={handleSidebarWidthChange}
+          onResizeEnd={handleSidebarResizeEnd}
         />
 
         <section className="mobile-viewport-wrapper flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
           <FloatingNav
             activeTab={activeTab}
-            runsSubTab={runsSubTab}
             onMenuClick={() => setLeftPanelOpen(true)}
-            breadcrumbs={breadcrumbs}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
             onCreateSweepClick={handleOpenSweepCreator}
@@ -587,7 +611,6 @@ export default function ResearchChat() {
             {activeTab === 'runs' && (
               <RunsView
                 runs={runs}
-                subTab={runsSubTab}
                 onRunClick={handleRunClick}
                 onUpdateRun={handleUpdateRun}
                 pendingAlertsByRun={pendingAlertsByRun}
@@ -654,10 +677,8 @@ export default function ResearchChat() {
             onOpenChange={setLeftPanelOpen}
             onSettingsClick={() => setActiveTab('settings')}
             activeTab={activeTab === 'settings' ? 'chat' : activeTab}
-            runsSubTab={runsSubTab}
             journeySubTab={journeySubTab}
             onTabChange={handleTabChange}
-            onRunsSubTabChange={handleRunsSubTabChange}
             onJourneySubTabChange={setJourneySubTab}
             onNewChat={async () => {
               await createNewSession()

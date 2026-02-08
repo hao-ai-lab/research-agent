@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import {
   Play,
   AlertCircle,
@@ -35,12 +35,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -58,9 +52,9 @@ import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 import { createSweep } from '@/lib/api-client'
 
-type RunsSubTab = 'overview' | 'details'
 type DetailsView = 'time' | 'priority'
 type GroupByMode = 'none' | 'sweep'
+const STORAGE_KEY_RUNS_VIEW_PREFERENCES = 'runsViewPreferences'
 
 const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
   'ready',
@@ -164,7 +158,6 @@ function SweepFormPopover({ onClose, onRefresh }: { onClose: () => void; onRefre
 
 interface RunsViewProps {
   runs: ExperimentRun[]
-  subTab: RunsSubTab
   onRunClick?: (run: ExperimentRun) => void
   onUpdateRun?: (run: ExperimentRun) => void
   pendingAlertsByRun?: Record<string, number>
@@ -178,7 +171,7 @@ interface RunsViewProps {
   onStopRun?: (runId: string) => Promise<void>
 }
 
-export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsByRun = {}, alerts = [], allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
+export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {}, alerts = [], allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [manageMode, setManageMode] = useState(false)
@@ -209,6 +202,56 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
       ),
     [runs]
   )
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem(STORAGE_KEY_RUNS_VIEW_PREFERENCES)
+    if (!raw) return
+
+    try {
+      const parsed = JSON.parse(raw) as {
+        detailsView?: DetailsView
+        groupByMode?: GroupByMode
+        sweepFilter?: string
+        statusFilter?: ExperimentRun['status'][]
+      }
+
+      if (parsed.detailsView === 'time' || parsed.detailsView === 'priority') {
+        setDetailsView(parsed.detailsView)
+      }
+      if (parsed.groupByMode === 'none' || parsed.groupByMode === 'sweep') {
+        setGroupByMode(parsed.groupByMode)
+      }
+      if (typeof parsed.sweepFilter === 'string') {
+        setSweepFilter(parsed.sweepFilter)
+      }
+      if (Array.isArray(parsed.statusFilter)) {
+        const validStatuses = parsed.statusFilter.filter((status): status is ExperimentRun['status'] =>
+          RUN_STATUS_OPTIONS.includes(status as ExperimentRun['status'])
+        )
+        if (validStatuses.length > 0) {
+          setStatusFilter(new Set(validStatuses))
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to parse runs view preferences:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (sweepFilter === 'all' || sweepFilter === 'none') return
+    if (sweepOptions.includes(sweepFilter)) return
+    setSweepFilter('all')
+  }, [sweepFilter, sweepOptions])
+
+  useEffect(() => {
+    const preferences = {
+      detailsView,
+      groupByMode,
+      sweepFilter,
+      statusFilter: Array.from(statusFilter),
+    }
+    window.localStorage.setItem(STORAGE_KEY_RUNS_VIEW_PREFERENCES, JSON.stringify(preferences))
+  }, [detailsView, groupByMode, sweepFilter, statusFilter])
 
   const filteredRuns = useMemo(() => {
     return runs.filter((run) => {
@@ -417,7 +460,7 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
   const RunItem = ({ run, showChevron = true }: { run: ExperimentRun; showChevron?: boolean }) => {
     const pendingAlertCount = pendingAlertsByRun[run.id] || 0
     const hasPendingAlerts = pendingAlertCount > 0
-    const isManageSelectionEnabled = manageMode && subTab === 'details'
+    const isManageSelectionEnabled = manageMode
     const isSelectedForManage = selectedManageRunIds.has(run.id)
 
     return (
@@ -615,364 +658,17 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
     )
   }
 
-  // Details view
-  if (subTab === 'details') {
-    const favoriteRuns = filteredActiveRuns.filter(r => r.isFavorite)
-    const alertRuns = filteredActiveRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
-    const runningRuns = filteredActiveRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-    const readyRuns = filteredActiveRuns.filter(r => r.status === 'ready' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-    const queuedRuns = filteredActiveRuns.filter(r => r.status === 'queued' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-    const failedRuns = filteredActiveRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-    const completedRuns = filteredActiveRuns.filter(r => r.status === 'completed' && !r.isFavorite)
-    const canceledRuns = filteredActiveRuns.filter(r => r.status === 'canceled' && !r.isFavorite)
-    const isAllStatusSelected = statusFilter.size === RUN_STATUS_OPTIONS.length
-    const canArchiveSelection = selectedManageRuns.some((run) => !run.isArchived)
-    const canUnarchiveSelection = selectedManageRuns.some((run) => run.isArchived)
-
-    return (
-      <>
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="shrink-0 border-b border-border px-4 py-3 space-y-2">
-          <div className="flex items-center gap-2 overflow-x-auto">
-            <h3 className="shrink-0 text-sm font-medium text-foreground">Runs</h3>
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-            <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
-              <SelectTrigger className="w-28 h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="time">Time</SelectItem>
-                <SelectItem value="priority">Priority</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={groupByMode} onValueChange={(v) => setGroupByMode(v as GroupByMode)}>
-              <SelectTrigger className="w-32 h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Group: None</SelectItem>
-                <SelectItem value="sweep">Group: Sweep</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={sweepFilter} onValueChange={setSweepFilter}>
-              <SelectTrigger className="w-36 h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Sweep: All</SelectItem>
-                <SelectItem value="none">No Sweep</SelectItem>
-                {sweepOptions.map((sweepId) => (
-                  <SelectItem key={sweepId} value={sweepId}>
-                    Sweep: {sweepId}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 text-xs">
-                  Status: {isAllStatusSelected ? 'All' : statusFilter.size}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-64 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-medium text-foreground">Filter by status</p>
-                  <Button variant="ghost" size="sm" onClick={resetStatusFilter} className="h-6 px-2 text-[10px]">
-                    Reset
-                  </Button>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {RUN_STATUS_OPTIONS.map((status) => {
-                    const selected = statusFilter.has(status)
-                    return (
-                      <button
-                        key={status}
-                        type="button"
-                        onClick={() => toggleStatusFilter(status)}
-                        className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
-                          selected
-                            ? 'border-primary/40 bg-primary/10 text-primary'
-                            : 'border-border bg-card text-muted-foreground hover:bg-secondary/40'
-                        }`}
-                      >
-                        {selected ? <CheckSquare className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5 rounded-sm border border-current/50" />}
-                        {getStatusText(status)}
-                      </button>
-                    )
-                  })}
-                </div>
-              </PopoverContent>
-            </Popover>
-            </div>
-
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 gap-1.5"
-                title="Create Sweep"
-                onClick={() => setSweepDialogOpen(true)}
-              >
-                <PlugZap className="h-4 w-4" />
-                Sweep
-              </Button>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={manageMode ? 'default' : 'outline'}
-                    size="icon"
-                    onClick={() => {
-                      setManageMode((prev) => {
-                        const next = !prev
-                        if (!next) {
-                          clearManageSelection()
-                        }
-                        return next
-                      })
-                    }}
-                    aria-label={manageMode ? 'Exit Manage' : 'Manage'}
-                    className="h-8 w-8"
-                  >
-                    <Settings2 className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage'}</TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-
-          {manageMode && (
-            <div className="rounded-lg border border-border bg-card px-2 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  {selectedManageRuns.length} selected
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={selectedManageRuns.length === filteredRuns.length ? clearManageSelection : selectAllFilteredRuns}
-                  className="h-7 px-2 text-[11px]"
-                >
-                  {selectedManageRuns.length === filteredRuns.length ? 'Clear' : 'Select All'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={archiveSelectedRuns}
-                  disabled={selectedManageRuns.length === 0 || !canArchiveSelection}
-                  className="h-7 px-2 text-[11px]"
-                >
-                  <Archive className="mr-1 h-3 w-3" />
-                  Archive
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={unarchiveSelectedRuns}
-                  disabled={selectedManageRuns.length === 0 || !canUnarchiveSelection}
-                  className="h-7 px-2 text-[11px]"
-                >
-                  <Undo2 className="mr-1 h-3 w-3" />
-                  Unarchive
-                </Button>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={selectedManageRuns.length === 0}
-                      className="h-7 px-2 text-[11px]"
-                    >
-                      <Palette className="mr-1 h-3 w-3" />
-                      Color
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-44 p-3" align="start">
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">
-                      Color for selected
-                    </p>
-                    <div className="grid grid-cols-5 gap-2">
-                      {DEFAULT_RUN_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          onClick={() => setColorForSelectedRuns(color)}
-                          className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-foreground"
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <ScrollArea className="h-full">
-            <div className="p-4 space-y-5">
-              {detailsView === 'priority' ? (
-                <>
-                  {favoriteRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Star className="h-4 w-4 text-yellow-500" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Favorites</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {favoriteRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {alertRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <AlertTriangle className="h-4 w-4 text-warning" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Has Alerts</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {alertRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {runningRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Play className="h-4 w-4 text-accent" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Running</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {runningRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {readyRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Clock className="h-4 w-4 text-amber-400" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Ready</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {readyRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {queuedRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Clock className="h-4 w-4 text-foreground" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Queued</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {queuedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {failedRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <AlertCircle className="h-4 w-4 text-destructive" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Failed</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {failedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {completedRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <CheckCircle2 className="h-4 w-4 text-green-400" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Finished</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {completedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {canceledRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <XCircle className="h-4 w-4 text-muted-foreground" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Canceled</h4>
-                      </div>
-                      <div className="space-y-2">
-                        {canceledRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {filteredArchivedRuns.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Archive className="h-4 w-4 text-muted-foreground" />
-                        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Archived</h4>
-                      </div>
-                      <div className="space-y-2 opacity-60">
-                        {filteredArchivedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      </div>
-                    </div>
-                  )}
-                  {filteredRuns.length === 0 && (
-                    <div className="py-10 text-center text-sm text-muted-foreground">
-                      No runs match the current filters.
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  {groupByMode === 'sweep' ? (
-                    groupedRunsBySweep.length > 0 ? (
-                      groupedRunsBySweep.map((group) => (
-                        <div key={group.sweepId}>
-                          <div className="flex items-center gap-2 mb-3">
-                            <PlugZap className="h-4 w-4 text-muted-foreground" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                              {group.sweepId === 'no-sweep' ? 'No Sweep' : `Sweep ${group.sweepId}`}
-                            </h4>
-                          </div>
-                          <div className="space-y-2">
-                            {group.runs.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="py-10 text-center text-sm text-muted-foreground">
-                        No runs match the current filters.
-                      </div>
-                    )
-                  ) : (
-                    <div className="space-y-2">
-                      {sortedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                      {sortedRuns.length === 0 && (
-                        <div className="py-10 text-center text-sm text-muted-foreground">
-                          No runs match the current filters.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </ScrollArea>
-        </div>
-      </div>
-
-      <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
-            <DialogTitle>Create Sweep</DialogTitle>
-          </DialogHeader>
-          <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
-        </DialogContent>
-      </Dialog>
-      </>
-    )
-  }
+  const favoriteRuns = filteredActiveRuns.filter(r => r.isFavorite)
+  const alertRuns = filteredActiveRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
+  const runningRuns = filteredActiveRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const readyRuns = filteredActiveRuns.filter(r => r.status === 'ready' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const queuedRuns = filteredActiveRuns.filter(r => r.status === 'queued' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const failedRuns = filteredActiveRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const completedRuns = filteredActiveRuns.filter(r => r.status === 'completed' && !r.isFavorite)
+  const canceledRuns = filteredActiveRuns.filter(r => r.status === 'canceled' && !r.isFavorite)
+  const isAllStatusSelected = statusFilter.size === RUN_STATUS_OPTIONS.length
+  const canArchiveSelection = selectedManageRuns.some((run) => !run.isArchived)
+  const canUnarchiveSelection = selectedManageRuns.some((run) => run.isArchived)
 
   // Overview view (default)
   return (
@@ -1054,6 +750,346 @@ export function RunsView({ runs, subTab, onRunClick, onUpdateRun, pendingAlertsB
                 {quickAccessRuns.map((run) => (
                   <RunItem key={run.id} run={run} />
                 ))}
+              </div>
+            </div>
+
+            {/* All Runs */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  All Runs
+                </h3>
+              </div>
+              <div className="rounded-xl border border-border bg-card">
+                <div className="border-b border-border px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-2 overflow-x-auto">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <Select value={detailsView} onValueChange={(v) => setDetailsView(v as DetailsView)}>
+                        <SelectTrigger className="w-28 h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="time">Time</SelectItem>
+                          <SelectItem value="priority">Priority</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      <Select value={groupByMode} onValueChange={(v) => setGroupByMode(v as GroupByMode)}>
+                        <SelectTrigger className="w-32 h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Group: None</SelectItem>
+                          <SelectItem value="sweep">Group: Sweep</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      <Select value={sweepFilter} onValueChange={setSweepFilter}>
+                        <SelectTrigger className="w-36 h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Sweep: All</SelectItem>
+                          <SelectItem value="none">No Sweep</SelectItem>
+                          {sweepOptions.map((sweepId) => (
+                            <SelectItem key={sweepId} value={sweepId}>
+                              Sweep: {sweepId}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="sm" className="h-8 text-xs">
+                            Status: {isAllStatusSelected ? 'All' : statusFilter.size}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-64 p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-medium text-foreground">Filter by status</p>
+                            <Button variant="ghost" size="sm" onClick={resetStatusFilter} className="h-6 px-2 text-[10px]">
+                              Reset
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {RUN_STATUS_OPTIONS.map((status) => {
+                              const selected = statusFilter.has(status)
+                              return (
+                                <button
+                                  key={status}
+                                  type="button"
+                                  onClick={() => toggleStatusFilter(status)}
+                                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
+                                    selected
+                                      ? 'border-primary/40 bg-primary/10 text-primary'
+                                      : 'border-border bg-card text-muted-foreground hover:bg-secondary/40'
+                                  }`}
+                                >
+                                  {selected ? <CheckSquare className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5 rounded-sm border border-current/50" />}
+                                  {getStatusText(status)}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      <Popover open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1.5"
+                            title="Create Sweep"
+                          >
+                            <PlugZap className="h-4 w-4" />
+                            Sweep
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80" align="end">
+                          <SweepFormPopover onClose={() => setSweepDialogOpen(false)} onRefresh={onRefresh} />
+                        </PopoverContent>
+                      </Popover>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant={manageMode ? 'default' : 'outline'}
+                            size="icon"
+                            onClick={() => {
+                              setManageMode((prev) => {
+                                const next = !prev
+                                if (!next) {
+                                  clearManageSelection()
+                                }
+                                return next
+                              })
+                            }}
+                            aria-label={manageMode ? 'Exit Manage' : 'Manage'}
+                            className="h-8 w-8"
+                          >
+                            <Settings2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage'}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+
+                  {manageMode && (
+                    <div className="rounded-lg border border-border bg-card px-2 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          {selectedManageRuns.length} selected
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={selectedManageRuns.length === filteredRuns.length ? clearManageSelection : selectAllFilteredRuns}
+                          className="h-7 px-2 text-[11px]"
+                        >
+                          {selectedManageRuns.length === filteredRuns.length ? 'Clear' : 'Select All'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={archiveSelectedRuns}
+                          disabled={selectedManageRuns.length === 0 || !canArchiveSelection}
+                          className="h-7 px-2 text-[11px]"
+                        >
+                          <Archive className="mr-1 h-3 w-3" />
+                          Archive
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={unarchiveSelectedRuns}
+                          disabled={selectedManageRuns.length === 0 || !canUnarchiveSelection}
+                          className="h-7 px-2 text-[11px]"
+                        >
+                          <Undo2 className="mr-1 h-3 w-3" />
+                          Unarchive
+                        </Button>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={selectedManageRuns.length === 0}
+                              className="h-7 px-2 text-[11px]"
+                            >
+                              <Palette className="mr-1 h-3 w-3" />
+                              Color
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-44 p-3" align="start">
+                            <p className="mb-2 text-xs font-medium text-muted-foreground">
+                              Color for selected
+                            </p>
+                            <div className="grid grid-cols-5 gap-2">
+                              {DEFAULT_RUN_COLORS.map((color) => (
+                                <button
+                                  key={color}
+                                  type="button"
+                                  onClick={() => setColorForSelectedRuns(color)}
+                                  className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-foreground"
+                                  style={{ backgroundColor: color }}
+                                />
+                              ))}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-4 space-y-5">
+                  {detailsView === 'priority' ? (
+                    <>
+                      {favoriteRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Star className="h-4 w-4 text-yellow-500" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Favorites</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {favoriteRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {alertRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertTriangle className="h-4 w-4 text-warning" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Has Alerts</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {alertRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {runningRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Play className="h-4 w-4 text-accent" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Running</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {runningRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {readyRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Clock className="h-4 w-4 text-amber-400" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Ready</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {readyRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {queuedRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Clock className="h-4 w-4 text-foreground" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Queued</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {queuedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {failedRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertCircle className="h-4 w-4 text-destructive" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Failed</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {failedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {completedRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <CheckCircle2 className="h-4 w-4 text-green-400" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Finished</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {completedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {canceledRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <XCircle className="h-4 w-4 text-muted-foreground" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Canceled</h4>
+                          </div>
+                          <div className="space-y-2">
+                            {canceledRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {filteredArchivedRuns.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Archive className="h-4 w-4 text-muted-foreground" />
+                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Archived</h4>
+                          </div>
+                          <div className="space-y-2 opacity-60">
+                            {filteredArchivedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          </div>
+                        </div>
+                      )}
+                      {filteredRuns.length === 0 && (
+                        <div className="py-10 text-center text-sm text-muted-foreground">
+                          No runs match the current filters.
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {groupByMode === 'sweep' ? (
+                        groupedRunsBySweep.length > 0 ? (
+                          groupedRunsBySweep.map((group) => (
+                            <div key={group.sweepId}>
+                              <div className="flex items-center gap-2 mb-3">
+                                <PlugZap className="h-4 w-4 text-muted-foreground" />
+                                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                  {group.sweepId === 'no-sweep' ? 'No Sweep' : `Sweep ${group.sweepId}`}
+                                </h4>
+                              </div>
+                              <div className="space-y-2">
+                                {group.runs.map((run) => <RunItem key={run.id} run={run} />)}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="py-10 text-center text-sm text-muted-foreground">
+                            No runs match the current filters.
+                          </div>
+                        )
+                      ) : (
+                        <div className="space-y-2">
+                          {sortedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                          {sortedRuns.length === 0 && (
+                            <div className="py-10 text-center text-sm text-muted-foreground">
+                              No runs match the current filters.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>

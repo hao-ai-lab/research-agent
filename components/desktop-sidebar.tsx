@@ -9,7 +9,6 @@ import {
   FileText,
   FlaskConical,
   Lightbulb,
-  List,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -32,7 +31,7 @@ import { useApiConfig } from '@/lib/api-config'
 import type { ChatSession } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
 import { getStatusText } from '@/lib/status-utils'
-import type { JourneySubTab, RunsSubTab } from './nav-page'
+import type { JourneySubTab } from './nav-page'
 
 type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
 
@@ -42,13 +41,11 @@ interface DesktopSidebarProps {
   width?: number
   minWidth?: number
   maxWidth?: number
-  runsSubTab: RunsSubTab
   journeySubTab: JourneySubTab
   sessions: ChatSession[]
   runs: ExperimentRun[]
   sweeps: Sweep[]
   onTabChange: (tab: ActiveTab) => void
-  onRunsSubTabChange: (subTab: RunsSubTab) => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
   onNewChat: () => Promise<void> | void
   onSelectSession: (sessionId: string) => Promise<void> | void
@@ -57,6 +54,8 @@ interface DesktopSidebarProps {
   onSettingsClick: () => void
   onToggleCollapse?: () => void
   onWidthChange?: (width: number) => void
+  onResizeStart?: () => void
+  onResizeEnd?: () => void
 }
 
 function formatRelativeTime(date: Date) {
@@ -96,13 +95,11 @@ export function DesktopSidebar({
   width = 300,
   minWidth = 240,
   maxWidth = 520,
-  runsSubTab,
   journeySubTab,
   sessions,
   runs,
   sweeps,
   onTabChange,
-  onRunsSubTabChange,
   onJourneySubTabChange,
   onNewChat,
   onSelectSession,
@@ -111,6 +108,8 @@ export function DesktopSidebar({
   onSettingsClick,
   onToggleCollapse,
   onWidthChange,
+  onResizeStart,
+  onResizeEnd,
 }: DesktopSidebarProps) {
   const recentRuns = useMemo(
     () =>
@@ -143,7 +142,8 @@ export function DesktopSidebar({
     resizeStartXRef.current = e.clientX
     resizeStartWidthRef.current = width
     setIsResizing(true)
-  }, [collapsed, width])
+    onResizeStart?.()
+  }, [collapsed, onResizeStart, width])
 
   useEffect(() => {
     if (!isResizing) return
@@ -156,6 +156,7 @@ export function DesktopSidebar({
 
     const handleMouseUp = () => {
       setIsResizing(false)
+      onResizeEnd?.()
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -169,11 +170,13 @@ export function DesktopSidebar({
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-  }, [isResizing, maxWidth, minWidth, onWidthChange])
+  }, [isResizing, maxWidth, minWidth, onResizeEnd, onWidthChange])
 
   return (
     <aside
-      className={`relative hidden h-full shrink-0 border-r border-border bg-background transition-[width] duration-200 lg:flex ${
+      className={`relative hidden h-full shrink-0 border-r border-border bg-background transition-[width] ${
+        isResizing ? 'duration-0' : 'duration-200'
+      } lg:flex ${
         collapsed ? 'w-[72px]' : ''
       }`}
       style={collapsed ? undefined : { width: `${width}px` }}
@@ -262,35 +265,15 @@ export function DesktopSidebar({
 
                 <button
                   type="button"
-                  title="Overview"
-                  onClick={() => {
-                    onTabChange('runs')
-                    onRunsSubTabChange('overview')
-                  }}
+                  title="Runs"
+                  onClick={() => onTabChange('runs')}
                   className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'runs' && runsSubTab === 'overview'
+                    activeTab === 'runs'
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
                   <FlaskConical className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
-                  {!collapsed && 'Overview'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Runs"
-                  onClick={() => {
-                    onTabChange('runs')
-                    onRunsSubTabChange('details')
-                  }}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'runs' && runsSubTab === 'details'
-                      ? 'bg-secondary text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <List className={`h-4 w-4 shrink-0 ${collapsed ? '' : 'mr-2'}`} />
                   {!collapsed && 'Runs'}
                 </button>
 
@@ -354,25 +337,40 @@ export function DesktopSidebar({
 
             {!collapsed && (
               <section>
-              <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Recent Chats
-              </p>
+              <div className="mb-2 flex items-center justify-between px-1">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Recent Chats
+                </p>
+                <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
+              </div>
               <div className="space-y-1">
                 {sessions.slice(0, 10).map((session) => (
-                  <button
+                  <div
                     key={session.id}
-                    type="button"
-                    onClick={() => {
-                      onTabChange('chat')
-                      void onSelectSession(session.id)
-                    }}
-                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm text-foreground transition-colors hover:bg-secondary/50"
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
                   >
-                    <span className="truncate">{session.title || 'Untitled chat'}</span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
-                      {formatRelativeTime(new Date(session.created_at * 1000))}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTabChange('chat')
+                        void onSelectSession(session.id)
+                      }}
+                      className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                    >
+                      <span className="min-w-0 truncate text-foreground">{session.title || 'Untitled chat'}</span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                        {formatRelativeTime(new Date(session.created_at * 1000))}
+                      </span>
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 shrink-0 px-2 text-[10px]"
+                      onClick={() => onInsertReference(`@chat:${session.id} `)}
+                    >
+                      @
+                    </Button>
+                  </div>
                 ))}
                 {sessions.length === 0 && (
                   <p className="px-2 py-1 text-xs text-muted-foreground">No recent chats yet.</p>
@@ -510,8 +508,8 @@ export function DesktopSidebar({
           aria-orientation="vertical"
           aria-label="Resize sidebar"
           onMouseDown={handleResizeStart}
-          className={`absolute right-0 top-0 h-full w-1 cursor-col-resize transition-colors ${
-            isResizing ? 'bg-primary/40' : 'bg-transparent hover:bg-border'
+          className={`absolute -right-1 inset-y-0 z-30 w-3 cursor-col-resize touch-none transition-colors before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 ${
+            isResizing ? 'before:bg-primary/40' : 'before:bg-transparent hover:before:bg-border'
           }`}
         />
       )}

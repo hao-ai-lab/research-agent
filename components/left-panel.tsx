@@ -8,9 +8,7 @@ import {
   BarChart3,
   Lightbulb,
   Plus,
-  ChevronRight,
   LayoutDashboard,
-  List,
   Sparkles,
 } from 'lucide-react'
 import {
@@ -21,23 +19,13 @@ import {
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import { useState } from 'react'
-
-export type RunsSubTab = 'overview' | 'details'
 
 interface LeftPanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
   activeTab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey'
-  runsSubTab: RunsSubTab
   onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => void
-  onRunsSubTabChange: (subTab: RunsSubTab) => void
 }
 
 export function LeftPanel({ 
@@ -45,32 +33,10 @@ export function LeftPanel({
   onOpenChange, 
   onSettingsClick,
   activeTab,
-  runsSubTab,
   onTabChange,
-  onRunsSubTabChange,
 }: LeftPanelProps) {
-  const [runsExpanded, setRunsExpanded] = useState(() => {
-    // Check localStorage for saved state, default to true (expanded)
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('runsExpanded')
-      return saved !== null ? JSON.parse(saved) : true
-    }
-    return true
-  })
-
-  // Update localStorage when runsExpanded changes
-  const handleRunsExpandedChange = (expanded: boolean) => {
-    setRunsExpanded(expanded)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('runsExpanded', JSON.stringify(expanded))
-    }
-  }
-
-  const handleNavClick = (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey', subTab?: RunsSubTab) => {
+  const handleNavClick = (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => {
     onTabChange(tab)
-    if (tab === 'runs' && subTab) {
-      onRunsSubTabChange(subTab)
-    }
     onOpenChange(false)
   }
 
@@ -108,53 +74,19 @@ export function LeftPanel({
                 Chat
               </button>
 
-              {/* Runs with sub-navigation */}
-              <Collapsible open={runsExpanded} onOpenChange={handleRunsExpandedChange}>
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                      activeTab === 'runs'
-                        ? 'bg-secondary text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                    }`}
-                  >
-                    <FlaskConical className="h-4 w-4" />
-                    <span className="flex-1 text-left">Runs</span>
-                    <ChevronRight 
-                      className={`h-4 w-4 transition-transform ${runsExpanded ? 'rotate-90' : ''}`} 
-                    />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'overview')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'overview'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
-                    >
-                      <LayoutDashboard className="h-3.5 w-3.5" />
-                      Overview
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNavClick('runs', 'details')}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                        activeTab === 'runs' && runsSubTab === 'details'
-                          ? 'bg-secondary/70 text-foreground'
-                          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                      }`}
-                    >
-                      <List className="h-3.5 w-3.5" />
-                      Details
-                    </button>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
+              {/* Runs */}
+              <button
+                type="button"
+                onClick={() => handleNavClick('runs')}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                  activeTab === 'runs'
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+                }`}
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                Runs
+              </button>
 
               {/* Charts */}
               <button
