@@ -37,12 +37,15 @@ const DESKTOP_SIDEBAR_MIN_WIDTH = 240
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
 const SPLIT_HEIGHT_STORAGE_KEY = 'assistantSplitHeightRatio'
+const DESKTOP_ARTIFACT_SPLIT_STORAGE_KEY = 'assistantDesktopArtifactRatio'
 const DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY = 'assistantDesktopSidebarCollapsed'
 const ASSISTANT_CONNECTIONS_STORAGE_KEY = 'assistantSessionConnections'
 const ASSISTANT_UNASSIGNED_SESSION_KEY = '__assistant-unassigned-session__'
 
 const SPLIT_MIN_RATIO = 0.08
 const SPLIT_MAX_RATIO = 0.92
+const DESKTOP_ARTIFACT_MIN_RATIO = 0.22
+const DESKTOP_ARTIFACT_MAX_RATIO = 0.78
 
 function mapApiSweepStatusToUi(status: ApiSweep['status']): SweepStatus {
   if (status === 'ready') return 'pending'
@@ -290,10 +293,13 @@ export default function AssistantPage() {
   const [editingArtifactConfig, setEditingArtifactConfig] = useState<SweepConfig | null>(null)
   const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
 
-  const splitContainerRef = useRef<HTMLDivElement>(null)
+  const mobileSplitContainerRef = useRef<HTMLDivElement>(null)
+  const desktopSplitContainerRef = useRef<HTMLDivElement>(null)
   const splitPointerIdRef = useRef<number | null>(null)
-  const [splitRatio, setSplitRatio] = useState(0.42)
-  const [isDraggingSplit, setIsDraggingSplit] = useState(false)
+  const [mobileSplitRatio, setMobileSplitRatio] = useState(0.42)
+  const [desktopArtifactRatio, setDesktopArtifactRatio] = useState(0.42)
+  const [dragMode, setDragMode] = useState<'mobile' | 'desktop' | null>(null)
+  const [isDesktopLayout, setIsDesktopLayout] = useState(false)
 
   const currentSessionKey = currentSessionId || ASSISTANT_UNASSIGNED_SESSION_KEY
 
@@ -332,7 +338,17 @@ export default function AssistantPage() {
     if (storedRatio) {
       const parsed = Number(storedRatio)
       if (Number.isFinite(parsed)) {
-        setSplitRatio(Math.min(SPLIT_MAX_RATIO, Math.max(SPLIT_MIN_RATIO, parsed)))
+        setMobileSplitRatio(Math.min(SPLIT_MAX_RATIO, Math.max(SPLIT_MIN_RATIO, parsed)))
+      }
+    }
+
+    const storedDesktopRatio = window.localStorage.getItem(DESKTOP_ARTIFACT_SPLIT_STORAGE_KEY)
+    if (storedDesktopRatio) {
+      const parsed = Number(storedDesktopRatio)
+      if (Number.isFinite(parsed)) {
+        setDesktopArtifactRatio(
+          Math.min(DESKTOP_ARTIFACT_MAX_RATIO, Math.max(DESKTOP_ARTIFACT_MIN_RATIO, parsed))
+        )
       }
     }
 
@@ -349,8 +365,12 @@ export default function AssistantPage() {
   }, [desktopSidebarCollapsed])
 
   useEffect(() => {
-    window.localStorage.setItem(SPLIT_HEIGHT_STORAGE_KEY, String(splitRatio))
-  }, [splitRatio])
+    window.localStorage.setItem(SPLIT_HEIGHT_STORAGE_KEY, String(mobileSplitRatio))
+  }, [mobileSplitRatio])
+
+  useEffect(() => {
+    window.localStorage.setItem(DESKTOP_ARTIFACT_SPLIT_STORAGE_KEY, String(desktopArtifactRatio))
+  }, [desktopArtifactRatio])
 
   useEffect(() => {
     window.localStorage.setItem(ASSISTANT_CONNECTIONS_STORAGE_KEY, JSON.stringify(connectionsBySession))
@@ -391,17 +411,34 @@ export default function AssistantPage() {
   }, [currentSessionId, connectionsBySession, injectedMessagesBySession])
 
   useEffect(() => {
-    if (!isDraggingSplit) return
+    const mediaQuery = window.matchMedia('(min-width: 1024px)')
+    const onChange = () => setIsDesktopLayout(mediaQuery.matches)
+    onChange()
+    mediaQuery.addEventListener('change', onChange)
+    return () => mediaQuery.removeEventListener('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    if (!dragMode) return
 
     const onPointerMove = (event: PointerEvent) => {
       if (splitPointerIdRef.current !== null && event.pointerId !== splitPointerIdRef.current) {
         return
       }
-      const container = splitContainerRef.current
+      const container = dragMode === 'desktop'
+        ? desktopSplitContainerRef.current
+        : mobileSplitContainerRef.current
       if (!container) return
       const rect = container.getBoundingClientRect()
+      if (dragMode === 'desktop') {
+        const nextRatio = (event.clientX - rect.left) / rect.width
+        setDesktopArtifactRatio(
+          Math.min(DESKTOP_ARTIFACT_MAX_RATIO, Math.max(DESKTOP_ARTIFACT_MIN_RATIO, nextRatio))
+        )
+        return
+      }
       const nextRatio = (event.clientY - rect.top) / rect.height
-      setSplitRatio(Math.min(SPLIT_MAX_RATIO, Math.max(SPLIT_MIN_RATIO, nextRatio)))
+      setMobileSplitRatio(Math.min(SPLIT_MAX_RATIO, Math.max(SPLIT_MIN_RATIO, nextRatio)))
     }
 
     const onPointerUp = (event: PointerEvent) => {
@@ -409,12 +446,12 @@ export default function AssistantPage() {
         return
       }
       splitPointerIdRef.current = null
-      setIsDraggingSplit(false)
+      setDragMode(null)
     }
 
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp)
-    document.body.style.cursor = 'row-resize'
+    document.body.style.cursor = dragMode === 'desktop' ? 'col-resize' : 'row-resize'
     document.body.style.userSelect = 'none'
 
     return () => {
@@ -423,7 +460,7 @@ export default function AssistantPage() {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-  }, [isDraggingSplit])
+  }, [dragMode])
 
   const uiSweeps = useMemo<UiSweep[]>(() => sweeps.map(mapApiSweepToUiSweep), [sweeps])
 
@@ -565,6 +602,41 @@ export default function AssistantPage() {
     [alerts]
   )
 
+  const assistantBoard = (
+    <AssistantWorkflowBoard
+      runs={runs}
+      alerts={alerts}
+      sweeps={sweeps}
+      onReferInChat={handleInsertReference}
+      onOpenAlertInChat={handleOpenAlertInChat}
+      onAlertRespond={handleAlertRespond}
+      focusedSweepIds={focusedSweepIds}
+      focusedRunIds={focusedRunIds}
+      connectedTargets={connectedTargets}
+      onConnectTarget={handleConnectTarget}
+      onDisconnectTarget={handleDisconnectTarget}
+    />
+  )
+
+  const chatPane = (
+    <ConnectedChatView
+      runs={runs}
+      alerts={alerts}
+      sweeps={uiSweeps}
+      mode={chatMode}
+      onModeChange={setChatMode}
+      onRunClick={() => {
+        // Keep assistant context in-place.
+      }}
+      onEditSweep={(config) => setEditingArtifactConfig(config)}
+      onLaunchSweep={handleLaunchSweepFromArtifact}
+      chatSession={chatSession}
+      insertDraft={chatDraftInsert}
+      injectedMessages={injectedMessages}
+      onUserMessage={handleUserMessage}
+    />
+  )
+
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main className="flex h-full w-full overflow-hidden bg-background">
@@ -654,58 +726,64 @@ export default function AssistantPage() {
             </div>
           </div>
 
-          <div ref={splitContainerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <section className="shrink-0 border-b border-border/60 bg-background/80" style={{ height: `${splitRatio * 100}%`, minHeight: '120px' }}>
-              <div className="h-full min-h-0 overflow-hidden">
-                <AssistantWorkflowBoard
-                  runs={runs}
-                  alerts={alerts}
-                  sweeps={sweeps}
-                  onReferInChat={handleInsertReference}
-                  onOpenAlertInChat={handleOpenAlertInChat}
-                  onAlertRespond={handleAlertRespond}
-                  focusedSweepIds={focusedSweepIds}
-                  focusedRunIds={focusedRunIds}
-                  connectedTargets={connectedTargets}
-                  onConnectTarget={handleConnectTarget}
-                  onDisconnectTarget={handleDisconnectTarget}
-                />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {isDesktopLayout ? (
+              <div ref={desktopSplitContainerRef} className="h-full min-h-0 flex overflow-hidden">
+                <section
+                  className="h-full min-w-[260px] shrink-0 border-r border-border/60 bg-background/80"
+                  style={{ width: `${desktopArtifactRatio * 100}%` }}
+                >
+                  <div className="h-full min-h-0 overflow-hidden">{assistantBoard}</div>
+                </section>
+
+                <div className="shrink-0 border-r border-border bg-background px-0.5 py-2 flex items-center">
+                  <button
+                    type="button"
+                    onPointerDown={(event) => {
+                      splitPointerIdRef.current = event.pointerId
+                      setDragMode('desktop')
+                    }}
+                    className="h-full cursor-col-resize select-none flex items-center"
+                    aria-label="Drag to resize artifact and chat panes"
+                    style={{ touchAction: 'none' }}
+                  >
+                    <div className="mx-auto h-8 w-[1px] rounded-full bg-muted-foreground/40 transition-colors hover:bg-muted-foreground/70" />
+                  </button>
+                </div>
+
+                <section className="min-w-0 flex-1 overflow-hidden">
+                  {chatPane}
+                </section>
               </div>
-            </section>
+            ) : (
+              <div ref={mobileSplitContainerRef} className="h-full min-h-0 flex flex-col overflow-hidden">
+                <section
+                  className="shrink-0 border-b border-border/60 bg-background/80"
+                  style={{ height: `${mobileSplitRatio * 100}%`, minHeight: '120px' }}
+                >
+                  <div className="h-full min-h-0 overflow-hidden">{assistantBoard}</div>
+                </section>
 
-            <div className="shrink-0 border-b border-border bg-background px-3 py-0.5">
-              <button
-                type="button"
-                onPointerDown={(event) => {
-                  splitPointerIdRef.current = event.pointerId
-                  setIsDraggingSplit(true)
-                }}
-                className="w-full cursor-row-resize select-none"
-                aria-label="Drag to resize top and bottom panes"
-                style={{ touchAction: 'none' }}
-              >
-                <div className="mx-auto h-0.5 w-10 rounded-full bg-muted-foreground/40 transition-colors hover:bg-muted-foreground/70" />
-              </button>
-            </div>
+                <div className="shrink-0 border-b border-border bg-background px-3 py-0">
+                  <button
+                    type="button"
+                    onPointerDown={(event) => {
+                      splitPointerIdRef.current = event.pointerId
+                      setDragMode('mobile')
+                    }}
+                    className="w-full cursor-row-resize select-none"
+                    aria-label="Drag to resize top and bottom panes"
+                    style={{ touchAction: 'none' }}
+                  >
+                    <div className="mx-auto h-[1px] w-7 rounded-full bg-muted-foreground/40 transition-colors hover:bg-muted-foreground/70" />
+                  </button>
+                </div>
 
-            <section className="min-h-0 flex-1 overflow-hidden">
-              <ConnectedChatView
-                runs={runs}
-                alerts={alerts}
-                sweeps={uiSweeps}
-                mode={chatMode}
-                onModeChange={setChatMode}
-                onRunClick={() => {
-                  // Keep assistant context in-place.
-                }}
-                onEditSweep={(config) => setEditingArtifactConfig(config)}
-                onLaunchSweep={handleLaunchSweepFromArtifact}
-                chatSession={chatSession}
-                insertDraft={chatDraftInsert}
-                injectedMessages={injectedMessages}
-                onUserMessage={handleUserMessage}
-              />
-            </section>
+                <section className="min-h-0 flex-1 overflow-hidden">
+                  {chatPane}
+                </section>
+              </div>
+            )}
           </div>
 
           <NavPage
