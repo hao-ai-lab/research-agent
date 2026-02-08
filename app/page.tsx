@@ -19,6 +19,10 @@ import type { ChatMode } from '@/components/chat-input'
 import { mockMemoryRules, mockInsightCharts, defaultTags, mockSweeps } from '@/lib/mock-data'
 import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
+import {
+  Dialog,
+  DialogContent,
+} from '@/components/ui/dialog'
 import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
 import { useWildLoop } from '@/hooks/use-wild-loop'
@@ -578,7 +582,7 @@ export default function ResearchChat() {
           />
 
           <div className="flex-1 min-h-0 overflow-hidden">
-            {activeTab === 'chat' && !showSweepForm && (
+            {activeTab === 'chat' && (
               <ConnectedChatView
                 runs={runs}
                 sweeps={sweeps}
@@ -595,17 +599,6 @@ export default function ResearchChat() {
                 webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
                 onOpenSettings={() => setActiveTab('settings')}
                 insertDraft={chatDraftInsert}
-              />
-            )}
-            {activeTab === 'chat' && showSweepForm && (
-              <SweepForm
-                initialConfig={editingSweepConfig || undefined}
-                onSave={handleSaveSweep}
-                onCancel={() => {
-                  setShowSweepForm(false)
-                  setEditingSweepConfig(null)
-                }}
-                onLaunch={handleLaunchSweep}
               />
             )}
             {activeTab === 'runs' && (
@@ -692,6 +685,22 @@ export default function ResearchChat() {
           />
         </section>
       </main>
+
+      <Dialog open={showSweepForm} onOpenChange={(open) => {
+        if (!open) { setShowSweepForm(false); setEditingSweepConfig(null) }
+      }}>
+        <DialogContent showCloseButton={false} className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col p-0 gap-0">
+          <SweepForm
+            initialConfig={editingSweepConfig || undefined}
+            onSave={handleSaveSweep}
+            onCancel={() => {
+              setShowSweepForm(false)
+              setEditingSweepConfig(null)
+            }}
+            onLaunch={handleLaunchSweep}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
