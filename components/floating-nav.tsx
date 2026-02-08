@@ -56,7 +56,7 @@ export function FloatingNav({
   const { useMock: isDemoMode } = useApiConfig()
 
   return (
-    <header className="shrink-0 h-12 flex items-center gap-3 px-3 border-b border-border bg-background">
+    <header className="shrink-0 h-14 flex items-center gap-3 px-3 border-b border-border/80 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
       <div className="relative">
         <Button
           variant="ghost"

@@ -13,7 +13,7 @@ const STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX = 'research-agent-appea
 
 export const defaultAppSettings: AppSettings = {
   appearance: {
-    theme: 'dark',
+    theme: 'light',
     fontSize: 'medium',
     buttonSize: 'default',
     customFontSizePx: null,

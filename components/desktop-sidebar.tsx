@@ -174,7 +174,7 @@ export function DesktopSidebar({
 
   return (
     <aside
-      className={`relative hidden h-full shrink-0 border-r border-border bg-background transition-[width] ${
+      className={`relative hidden h-full shrink-0 border-r border-border/80 bg-sidebar/90 backdrop-blur supports-[backdrop-filter]:bg-sidebar/75 transition-[width] ${
         isResizing ? 'duration-0' : 'duration-200'
       } lg:flex ${
         collapsed ? 'w-[72px]' : ''
@@ -182,7 +182,7 @@ export function DesktopSidebar({
       style={collapsed ? undefined : { width: `${width}px` }}
     >
       <div className="flex h-full w-full flex-col">
-        <div className={`shrink-0 border-b border-border ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
+        <div className={`shrink-0 border-b border-border/80 ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
           <div className={`relative inline-flex ${collapsed ? 'mx-auto' : ''}`}>
             <Button
               variant="ghost"
@@ -242,7 +242,7 @@ export function DesktopSidebar({
                   onClick={() => onTabChange('chat')}
                   className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'chat'
-                      ? 'bg-secondary text-foreground'
+                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
@@ -269,7 +269,7 @@ export function DesktopSidebar({
                   onClick={() => onTabChange('runs')}
                   className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'runs'
-                      ? 'bg-secondary text-foreground'
+                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
@@ -283,7 +283,7 @@ export function DesktopSidebar({
                   onClick={() => onTabChange('events')}
                   className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'events'
-                      ? 'bg-secondary text-foreground'
+                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
@@ -297,7 +297,7 @@ export function DesktopSidebar({
                   onClick={() => onTabChange('charts')}
                   className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'charts'
-                      ? 'bg-secondary text-foreground'
+                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
@@ -311,7 +311,7 @@ export function DesktopSidebar({
                   onClick={() => onTabChange('memory')}
                   className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'memory'
-                      ? 'bg-secondary text-foreground'
+                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
@@ -325,7 +325,7 @@ export function DesktopSidebar({
                   onClick={() => onTabChange('report')}
                   className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${collapsed ? 'justify-center px-2' : 'px-2'} ${
                     activeTab === 'report'
-                      ? 'bg-secondary text-foreground'
+                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
                   }`}
                 >
@@ -452,13 +452,13 @@ export function DesktopSidebar({
           </div>
         </ScrollArea>
 
-        <div className={`shrink-0 border-t border-border ${collapsed ? 'p-2' : 'p-3'}`}>
+        <div className={`shrink-0 border-t border-border/80 ${collapsed ? 'p-2' : 'p-3'}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
                 title={collapsed ? 'Workspace / Settings' : undefined}
-                className={`flex w-full items-center rounded-md border border-border bg-card text-left transition-colors hover:bg-secondary/40 ${
+                className={`flex w-full items-center rounded-lg border border-border bg-card text-left transition-colors hover:bg-secondary/60 ${
                   collapsed ? 'justify-center px-2 py-2' : 'justify-between px-3 py-2'
                 }`}
               >
