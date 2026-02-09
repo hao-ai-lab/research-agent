@@ -810,45 +810,6 @@ export function ChatInput({
             ref={mentionPopoverRef}
             className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-card border border-border rounded-lg shadow-lg overflow-hidden"
           >
-            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-secondary/30">
-              <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
-              <div className="flex-1 min-w-0 overflow-x-auto">
-                <div className="flex min-w-max items-center gap-1 pr-1">
-                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setMentionFilter(type)}
-                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${
-                        mentionFilter === type
-                          ? 'border-transparent'
-                          : 'border-transparent text-muted-foreground hover:bg-secondary'
-                      }`}
-                      style={
-                        mentionFilter === type
-                          ? type === 'all'
-                            ? {
-                                backgroundColor: 'hsl(var(--secondary))',
-                                color: 'hsl(var(--foreground))',
-                                borderColor: 'hsl(var(--border))',
-                              }
-                            : {
-                                color: mentionTypeColorMap[type],
-                                backgroundColor: mentionTypeBackgroundMap[type],
-                                borderColor: `${mentionTypeColorMap[type]}66`,
-                              }
-                          : undefined
-                      }
-                    >
-                      <span className="block truncate">
-                        {type === 'all' ? 'All' : type.charAt(0).toUpperCase() + type.slice(1)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
             <div className="max-h-[200px] overflow-y-auto py-1">
               {filteredMentionItems.length > 0 ? (
                 filteredMentionItems.map((item, index) => (
@@ -897,6 +858,45 @@ export function ChatInput({
                       : `No ${mentionFilter} items available.`}
                 </div>
               )}
+            </div>
+
+            <div className="flex items-center gap-1 px-2 py-1.5 border-t border-border bg-secondary/30">
+              <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
+              <div className="flex-1 min-w-0 overflow-x-auto">
+                <div className="flex min-w-max items-center gap-1 pr-1">
+                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setMentionFilter(type)}
+                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${
+                        mentionFilter === type
+                          ? 'border-transparent'
+                          : 'border-transparent text-muted-foreground hover:bg-secondary'
+                      }`}
+                      style={
+                        mentionFilter === type
+                          ? type === 'all'
+                            ? {
+                                backgroundColor: 'hsl(var(--secondary))',
+                                color: 'hsl(var(--foreground))',
+                                borderColor: 'hsl(var(--border))',
+                              }
+                            : {
+                                color: mentionTypeColorMap[type],
+                                backgroundColor: mentionTypeBackgroundMap[type],
+                                borderColor: `${mentionTypeColorMap[type]}66`,
+                              }
+                          : undefined
+                      }
+                    >
+                      <span className="block truncate">
+                        {type === 'all' ? 'All' : type.charAt(0).toUpperCase() + type.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="px-2 py-1 border-t border-border bg-secondary/20">
