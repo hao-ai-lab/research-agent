@@ -19,7 +19,10 @@ import time
 import uuid
 import logging
 import asyncio
-from typing import Dict, Optional, AsyncIterator, List
+import shutil
+import socket
+import subprocess
+from typing import Any, Dict, Optional, AsyncIterator, List
 
 import httpx
 import uvicorn
@@ -97,6 +100,7 @@ AUTH_PROTECTED_PREFIXES = (
     "/alerts",
     "/wild",
     "/sweeps",
+    "/cluster",
 )
 
 
@@ -225,6 +229,20 @@ class SweepCreate(BaseModel):
     parameters: dict  # e.g., {"lr": [0.001, 0.01], "batch_size": [32, 64]}
     max_runs: int = 10
     auto_start: bool = False
+    goal: Optional[str] = None
+    status: Optional[str] = None  # draft, pending, running
+    ui_config: Optional[dict] = None
+
+
+class SweepUpdate(BaseModel):
+    name: Optional[str] = None
+    base_command: Optional[str] = None
+    workdir: Optional[str] = None
+    parameters: Optional[dict] = None
+    max_runs: Optional[int] = None
+    goal: Optional[str] = None
+    status: Optional[str] = None  # draft, pending, running, completed, failed, canceled
+    ui_config: Optional[dict] = None
 
 
 class AlertRecord(BaseModel):
@@ -270,6 +288,21 @@ class WildLoopConfigRequest(BaseModel):
     custom_condition: Optional[str] = None
 
 
+class ClusterUpdateRequest(BaseModel):
+    type: Optional[str] = None
+    status: Optional[str] = None
+    source: Optional[str] = None
+    head_node: Optional[str] = None
+    node_count: Optional[int] = None
+    gpu_count: Optional[int] = None
+    notes: Optional[str] = None
+    details: Optional[dict] = None
+
+
+class ClusterDetectRequest(BaseModel):
+    preferred_type: Optional[str] = None
+
+
 # =============================================================================
 # State
 # =============================================================================
@@ -296,6 +329,39 @@ wild_loop_state: dict = {
 }
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
+
+CLUSTER_TYPE_VALUES = {
+    "unknown",
+    "slurm",
+    "local_gpu",
+    "kubernetes",
+    "ray",
+    "shared_head_node",
+}
+CLUSTER_STATUS_VALUES = {"unknown", "healthy", "degraded", "offline"}
+CLUSTER_SOURCE_VALUES = {"unset", "manual", "detected"}
+
+
+def _default_cluster_state() -> dict:
+    now = time.time()
+    return {
+        "type": "unknown",
+        "status": "unknown",
+        "source": "unset",
+        "label": "Unknown",
+        "description": "Cluster has not been configured yet.",
+        "head_node": None,
+        "node_count": None,
+        "gpu_count": None,
+        "notes": None,
+        "confidence": None,
+        "details": {},
+        "last_detected_at": None,
+        "updated_at": now,
+    }
+
+
+cluster_state: dict = _default_cluster_state()
 
 
 def save_chat_state():
@@ -337,6 +403,9 @@ def load_runs_state():
                 data = json.load(f)
                 runs = data.get("runs", {})
                 sweeps = data.get("sweeps", {})
+                for sweep in sweeps.values():
+                    sweep["status"] = _normalize_sweep_status(sweep.get("status"))
+                recompute_all_sweep_states()
         except Exception as e:
             logger.error(f"Error loading runs state: {e}")
 
@@ -367,18 +436,107 @@ def load_alerts_state():
             logger.error(f"Error loading alerts state: {e}")
 
 
+def _cluster_type_label(cluster_type: str) -> str:
+    mapping = {
+        "unknown": "Unknown",
+        "slurm": "Slurm",
+        "local_gpu": "Local GPU",
+        "kubernetes": "Kubernetes",
+        "ray": "Ray",
+        "shared_head_node": "Shared GPU Head Node",
+    }
+    return mapping.get(cluster_type, "Unknown")
+
+
+def _cluster_type_description(cluster_type: str) -> str:
+    mapping = {
+        "unknown": "Cluster has not been configured yet.",
+        "slurm": "Slurm-managed cluster scheduler detected.",
+        "local_gpu": "Single-host GPU workstation/cluster detected.",
+        "kubernetes": "Kubernetes cluster control plane detected.",
+        "ray": "Ray cluster runtime detected.",
+        "shared_head_node": "Head node with SSH fan-out to worker nodes.",
+    }
+    return mapping.get(cluster_type, "Cluster has not been configured yet.")
+
+
+def _normalize_cluster_type(raw_type: Optional[str]) -> str:
+    if not raw_type:
+        return "unknown"
+    value = raw_type.strip().lower().replace("-", "_")
+    aliases = {
+        "localgpu": "local_gpu",
+        "local_gpu_cluster": "local_gpu",
+        "shared_gpu_head_node": "shared_head_node",
+        "shared_gpu": "shared_head_node",
+        "head_node": "shared_head_node",
+        "k8s": "kubernetes",
+    }
+    value = aliases.get(value, value)
+    return value if value in CLUSTER_TYPE_VALUES else "unknown"
+
+
+def _normalize_cluster_status(raw_status: Optional[str]) -> str:
+    if not raw_status:
+        return "unknown"
+    value = raw_status.strip().lower()
+    return value if value in CLUSTER_STATUS_VALUES else "unknown"
+
+
+def _normalize_cluster_source(raw_source: Optional[str]) -> str:
+    if not raw_source:
+        return "unset"
+    value = raw_source.strip().lower()
+    return value if value in CLUSTER_SOURCE_VALUES else "unset"
+
+
+def _normalize_cluster_state(raw_state: Any) -> dict:
+    normalized = _default_cluster_state()
+    if not isinstance(raw_state, dict):
+        return normalized
+
+    cluster_type = _normalize_cluster_type(raw_state.get("type"))
+    normalized.update(
+        {
+            "type": cluster_type,
+            "status": _normalize_cluster_status(raw_state.get("status")),
+            "source": _normalize_cluster_source(raw_state.get("source")),
+            "label": _cluster_type_label(cluster_type),
+            "description": _cluster_type_description(cluster_type),
+            "head_node": raw_state.get("head_node"),
+            "node_count": raw_state.get("node_count"),
+            "gpu_count": raw_state.get("gpu_count"),
+            "notes": raw_state.get("notes"),
+            "confidence": raw_state.get("confidence"),
+            "details": raw_state.get("details") if isinstance(raw_state.get("details"), dict) else {},
+            "last_detected_at": raw_state.get("last_detected_at"),
+            "updated_at": raw_state.get("updated_at") or time.time(),
+        }
+    )
+    return normalized
+
+
 def save_settings_state():
     """Persist settings to disk."""
     try:
         with open(SETTINGS_DATA_FILE, "w") as f:
-            json.dump({"wild_mode": wild_mode_enabled, "wild_loop": wild_loop_state}, f, indent=2, default=str)
+            json.dump(
+                {
+                    "wild_mode": wild_mode_enabled,
+                    "wild_loop": wild_loop_state,
+                    "cluster": cluster_state,
+                },
+                f,
+                indent=2,
+                default=str,
+            )
     except Exception as e:
         logger.error(f"Error saving settings state: {e}")
 
 
 def load_settings_state():
     """Load settings from disk."""
-    global wild_mode_enabled, wild_loop_state
+    global wild_mode_enabled, wild_loop_state, cluster_state
     if os.path.exists(SETTINGS_DATA_FILE):
         try:
             with open(SETTINGS_DATA_FILE, "r") as f:
@@ -387,8 +545,282 @@ def load_settings_state():
                 saved_loop = data.get("wild_loop")
                 if saved_loop and isinstance(saved_loop, dict):
                     wild_loop_state.update(saved_loop)
+                cluster_state = _normalize_cluster_state(data.get("cluster"))
         except Exception as e:
             logger.error(f"Error loading settings state: {e}")
+
+
+# =============================================================================
+# Run/Sweep State Helpers
+# =============================================================================
+
+RUN_STATUS_ACTIVE = {"launching", "running"}
+RUN_STATUS_PENDING = {"ready", "queued"}
+RUN_STATUS_TERMINAL = {"finished", "failed", "stopped"}
+
+SWEEP_STATUS_TERMINAL = {"completed", "failed", "canceled"}
+SWEEP_STATUS_EDITABLE = {"draft", "pending"}
+
+
+def _normalize_sweep_status(raw_status: Optional[str]) -> str:
+    if not raw_status:
+        return "pending"
+    normalized = raw_status.strip().lower()
+    if normalized == "ready":
+        return "pending"
+    if normalized in {"draft", "pending", "running", "completed", "failed", "canceled"}:
+        return normalized
+    return "pending"
+
+
+def _compute_sweep_progress(sweep: dict) -> dict:
+    """Compute progress counts for a sweep from current run statuses."""
+    run_ids = sweep.get("run_ids", []) or []
+    sweep_runs = [runs[rid] for rid in run_ids if rid in runs]
+
+    return {
+        "total": len(sweep_runs),
+        "completed": sum(1 for r in sweep_runs if r.get("status") == "finished"),
+        "failed": sum(1 for r in sweep_runs if r.get("status") == "failed"),
+        "running": sum(1 for r in sweep_runs if r.get("status") == "running"),
+        "launching": sum(1 for r in sweep_runs if r.get("status") == "launching"),
+        "ready": sum(1 for r in sweep_runs if r.get("status") == "ready"),
+        "queued": sum(1 for r in sweep_runs if r.get("status") == "queued"),
+        "canceled": sum(1 for r in sweep_runs if r.get("status") == "stopped"),
+    }
+
+
+def _infer_sweep_status(previous_status: str, progress: dict) -> str:
+    """Derive a sweep status from run state counts."""
+    total = progress.get("total", 0)
+    running = progress.get("running", 0) + progress.get("launching", 0)
+    queued = progress.get("queued", 0)
+    ready = progress.get("ready", 0)
+    completed = progress.get("completed", 0)
+    failed = progress.get("failed", 0)
+    canceled = progress.get("canceled", 0)
+    terminal = completed + failed + canceled
+
+    if previous_status == "draft" and total == 0:
+        return "draft"
+    if total == 0:
+        return "pending"
+    if running > 0:
+        return "running"
+    if queued > 0:
+        return "pending"
+    if ready > 0:
+        return "pending"
+    if terminal < total:
+        return "running"
+    if failed > 0:
+        return "failed"
+    if completed > 0:
+        return "completed"
+    return "canceled"
+
+
+def recompute_sweep_state(sweep_id: str) -> Optional[dict]:
+    """Refresh a single sweep's progress and derived status."""
+    sweep = sweeps.get(sweep_id)
+    if not sweep:
+        return None
+
+    previous_status = _normalize_sweep_status(sweep.get("status"))
+    progress = _compute_sweep_progress(sweep)
+    next_status = _infer_sweep_status(previous_status, progress)
+
+    sweep["status"] = next_status
+    sweep["progress"] = progress
+
+    if next_status == "running":
+        if not sweep.get("started_at"):
+            sweep["started_at"] = time.time()
+        sweep.pop("completed_at", None)
+    elif next_status in SWEEP_STATUS_TERMINAL:
+        sweep["completed_at"] = sweep.get("completed_at") or time.time()
+    else:
+        sweep.pop("completed_at", None)
+
+    return sweep
+
+
+def recompute_all_sweep_states() -> None:
+    for sweep_id in list(sweeps.keys()):
+        recompute_sweep_state(sweep_id)
+
+
+def _sync_run_membership_with_sweep(run_id: str, sweep_id: Optional[str]) -> None:
+    if not sweep_id:
+        return
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail=f"Sweep not found: {sweep_id}")
+    run_ids = sweeps[sweep_id].setdefault("run_ids", [])
+    if run_id not in run_ids:
+        run_ids.append(run_id)
+    recompute_sweep_state(sweep_id)
+
+
+def _run_command_capture(args: list[str], timeout: float = 2.0) -> tuple[bool, str]:
+    try:
+        proc = subprocess.run(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        output = (proc.stdout or proc.stderr or "").strip()
+        return proc.returncode == 0, output
+    except Exception:
+        return False, ""
+
+
+def _count_gpu_devices() -> Optional[int]:
+    if not shutil.which("nvidia-smi"):
+        return None
+    ok, output = _run_command_capture(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], timeout=2.5)
+    if not ok:
+        return None
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return len(lines) if lines else 0
+
+
+def _count_slurm_nodes() -> Optional[int]:
+    if not shutil.which("sinfo"):
+        return None
+    ok, output = _run_command_capture(["sinfo", "-h", "-N"], timeout=2.0)
+    if not ok:
+        return None
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return len(lines) if lines else 0
+
+
+def _count_kubernetes_nodes() -> Optional[int]:
+    if not shutil.which("kubectl"):
+        return None
+    ok, output = _run_command_capture(["kubectl", "get", "nodes", "--no-headers"], timeout=2.5)
+    if not ok:
+        return None
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return len(lines) if lines else 0
+
+
+def _count_ssh_hosts() -> int:
+    ssh_config = os.path.expanduser("~/.ssh/config")
+    if not os.path.exists(ssh_config):
+        return 0
+    try:
+        count = 0
+        with open(ssh_config, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line.lower().startswith("host "):
+                    continue
+                host_targets = [segment for segment in line[5:].split(" ") if segment]
+                has_real_target = any(
+                    target not in {"*", "?"} and "*" not in target and "?" not in target
+                    for target in host_targets
+                )
+                if has_real_target:
+                    count += 1
+        return count
+    except Exception:
+        return 0
+
+
+def _infer_cluster_from_environment() -> dict:
+    now = time.time()
+    type_hint = _normalize_cluster_type(os.environ.get("RESEARCH_AGENT_CLUSTER_TYPE"))
+    gpu_count = _count_gpu_devices()
+    slurm_nodes = _count_slurm_nodes()
+    kube_nodes = _count_kubernetes_nodes()
+    ssh_hosts = _count_ssh_hosts()
+
+    has_slurm_env = any(key.startswith("SLURM_") for key in os.environ.keys())
+    has_kube_env = bool(os.environ.get("KUBERNETES_SERVICE_HOST")) or os.path.exists(
+        "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    )
+    has_ray_env = bool(os.environ.get("RAY_ADDRESS"))
+    has_ray_cli = bool(shutil.which("ray"))
+
+    detected_type = "unknown"
+    confidence = 0.35
+    details: dict[str, Any] = {
+        "signals": [],
+        "slurm_nodes": slurm_nodes,
+        "kubernetes_nodes": kube_nodes,
+        "ssh_hosts": ssh_hosts,
+    }
+
+    if type_hint != "unknown":
+        detected_type = type_hint
+        confidence = 0.98
+        details["signals"].append("RESEARCH_AGENT_CLUSTER_TYPE")
+    elif has_kube_env or (kube_nodes or 0) > 0:
+        detected_type = "kubernetes"
+        confidence = 0.93 if has_kube_env else 0.82
+        details["signals"].append("kubernetes")
+    elif has_slurm_env or (slurm_nodes or 0) > 0:
+        detected_type = "slurm"
+        confidence = 0.9 if has_slurm_env else 0.8
+        details["signals"].append("slurm")
+    elif has_ray_env or has_ray_cli:
+        detected_type = "ray"
+        confidence = 0.85 if has_ray_env else 0.65
+        details["signals"].append("ray")
+    elif ssh_hosts >= 3:
+        detected_type = "shared_head_node"
+        confidence = 0.64
+        details["signals"].append("ssh-host-fanout")
+    elif gpu_count is not None and gpu_count > 0:
+        detected_type = "local_gpu"
+        confidence = 0.78 if gpu_count > 1 else 0.68
+        details["signals"].append("nvidia-smi")
+
+    if detected_type == "slurm":
+        node_count = slurm_nodes
+    elif detected_type == "kubernetes":
+        node_count = kube_nodes
+    elif detected_type == "shared_head_node":
+        node_count = ssh_hosts if ssh_hosts > 0 else None
+    elif detected_type == "local_gpu":
+        node_count = 1
+    else:
+        node_count = None
+
+    host = socket.gethostname() if detected_type in {"local_gpu", "shared_head_node"} else None
+    status = "healthy" if detected_type != "unknown" else "unknown"
+
+    return {
+        "type": detected_type,
+        "status": status,
+        "source": "detected",
+        "label": _cluster_type_label(detected_type),
+        "description": _cluster_type_description(detected_type),
+        "head_node": host,
+        "node_count": node_count,
+        "gpu_count": gpu_count,
+        "notes": None,
+        "confidence": round(confidence, 2),
+        "details": details,
+        "last_detected_at": now,
+        "updated_at": now,
+    }
+
+
+def _current_run_summary() -> dict:
+    active_runs = [run for run in runs.values() if not run.get("is_archived", False)]
+    return {
+        "total": len(active_runs),
+        "running": sum(1 for run in active_runs if run.get("status") == "running"),
+        "launching": sum(1 for run in active_runs if run.get("status") == "launching"),
+        "queued": sum(1 for run in active_runs if run.get("status") == "queued"),
+        "ready": sum(1 for run in active_runs if run.get("status") == "ready"),
+        "failed": sum(1 for run in active_runs if run.get("status") == "failed"),
+        "finished": sum(1 for run in active_runs if run.get("status") == "finished"),
+    }
 
 
 # =============================================================================
@@ -936,6 +1368,9 @@ async def list_runs(
 async def create_run(req: RunCreate):
     """Create a new run. Starts in 'ready' state unless auto_start=True."""
     run_id = uuid.uuid4().hex[:12]
+
+    if req.sweep_id and req.sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail=f"Sweep not found: {req.sweep_id}")
     
     initial_status = "queued" if req.auto_start else "ready"
     
@@ -957,6 +1392,7 @@ async def create_run(req: RunCreate):
     }
     
     runs[run_id] = run_data
+    _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
     
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
@@ -983,6 +1419,8 @@ async def queue_run(run_id: str):
     
     run["status"] = "queued"
     run["queued_at"] = time.time()
+    if run.get("sweep_id"):
+        recompute_sweep_state(run["sweep_id"])
     save_runs_state()
     
     return {"message": "Run queued", "id": run_id, **run}
@@ -1005,6 +1443,8 @@ async def start_run(run_id: str):
     
     try:
         tmux_window = launch_run_in_tmux(run_id, run)
+        if run.get("sweep_id"):
+            recompute_sweep_state(run["sweep_id"])
         save_runs_state()
         return {"message": "Run started", "tmux_window": tmux_window}
     except Exception as e:
@@ -1034,6 +1474,8 @@ async def stop_run(run_id: str):
     
     run["status"] = "stopped"
     run["stopped_at"] = time.time()
+    if run.get("sweep_id"):
+        recompute_sweep_state(run["sweep_id"])
     save_runs_state()
     
     return {"message": "Run stopped"}
@@ -1071,11 +1513,15 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
     }
 
     runs[new_run_id] = new_run
+    _sync_run_membership_with_sweep(new_run_id, new_run.get("sweep_id"))
     save_runs_state()
 
     if initial_status == "queued":
         try:
             launch_run_in_tmux(new_run_id, new_run)
+            if new_run.get("sweep_id"):
+                recompute_sweep_state(new_run["sweep_id"])
+            save_runs_state()
         except Exception as e:
             logger.error(f"Failed to launch rerun {new_run_id}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -1090,8 +1536,9 @@ async def archive_run(run_id: str):
         raise HTTPException(status_code=404, detail="Run not found")
     
     runs[run_id]["is_archived"] = True
+    runs[run_id]["archived_at"] = time.time()
     save_runs_state()
-    return {"message": "Run archived"}
+    return {"message": "Run archived", "run": {"id": run_id, **runs[run_id]}}
 
 
 @app.post("/runs/{run_id}/unarchive")
@@ -1101,8 +1548,9 @@ async def unarchive_run(run_id: str):
         raise HTTPException(status_code=404, detail="Run not found")
     
     runs[run_id]["is_archived"] = False
+    runs[run_id].pop("archived_at", None)
     save_runs_state()
-    return {"message": "Run unarchived"}
+    return {"message": "Run unarchived", "run": {"id": run_id, **runs[run_id]}}
 
 
 @app.post("/runs/{run_id}/status")
@@ -1128,11 +1576,13 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
         run["wandb_dir"] = update.wandb_dir
     
     # Track timestamps
-    if update.status == "running" and "started_at" not in run:
+    if update.status == "running" and not run.get("started_at"):
         run["started_at"] = time.time()
-    elif update.status in ["finished", "failed"]:
+    elif update.status in ["finished", "failed", "stopped"]:
         run["ended_at"] = time.time()
-    
+
+    if run.get("sweep_id"):
+        recompute_sweep_state(run["sweep_id"])
     save_runs_state()
     return {"message": "Status updated"}
 
@@ -1347,9 +1797,91 @@ async def configure_wild_loop(req: WildLoopConfigRequest):
     return wild_loop_state
 
 
+@app.get("/cluster")
+async def get_cluster_state():
+    """Get the persisted cluster state and current run summary."""
+    return {"cluster": cluster_state, "run_summary": _current_run_summary()}
+
+
+@app.post("/cluster/detect")
+async def detect_cluster(req: Optional[ClusterDetectRequest] = None):
+    """Auto-detect cluster setup, or apply a user-specified preferred type."""
+    global cluster_state
+
+    detected = _infer_cluster_from_environment()
+    preferred_type = _normalize_cluster_type(req.preferred_type) if req else "unknown"
+
+    if preferred_type != "unknown":
+        now = time.time()
+        detected["type"] = preferred_type
+        detected["source"] = "manual"
+        detected["status"] = "healthy"
+        detected["label"] = _cluster_type_label(preferred_type)
+        detected["description"] = _cluster_type_description(preferred_type)
+        detected["confidence"] = 1.0
+        detected["updated_at"] = now
+        detected["last_detected_at"] = now
+
+    cluster_state = _normalize_cluster_state(detected)
+    save_settings_state()
+    return {"cluster": cluster_state, "run_summary": _current_run_summary()}
+
+
+@app.post("/cluster")
+async def update_cluster_state(req: ClusterUpdateRequest):
+    """Update persisted cluster metadata with user-provided values."""
+    global cluster_state
+
+    now = time.time()
+    payload = req.model_dump(exclude_unset=True)
+    next_state = dict(cluster_state)
+
+    if "type" in payload:
+        raw_type = payload.get("type")
+        normalized_type = _normalize_cluster_type(raw_type)
+        if raw_type and normalized_type == "unknown" and raw_type.strip().lower() not in {"unknown", "unset"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported cluster type: {raw_type}")
+        next_state["type"] = normalized_type
+        next_state["label"] = _cluster_type_label(normalized_type)
+        next_state["description"] = _cluster_type_description(normalized_type)
+
+    if "status" in payload:
+        raw_status = payload.get("status")
+        normalized_status = _normalize_cluster_status(raw_status)
+        if raw_status and normalized_status == "unknown" and raw_status.strip().lower() != "unknown":
+            raise HTTPException(status_code=400, detail=f"Unsupported cluster status: {raw_status}")
+        next_state["status"] = normalized_status
+
+    if "source" in payload:
+        raw_source = payload.get("source")
+        normalized_source = _normalize_cluster_source(raw_source)
+        if raw_source and normalized_source == "unset" and raw_source.strip().lower() != "unset":
+            raise HTTPException(status_code=400, detail=f"Unsupported cluster source: {raw_source}")
+        next_state["source"] = normalized_source
+    else:
+        next_state["source"] = "manual"
+
+    if "head_node" in payload:
+        next_state["head_node"] = payload.get("head_node")
+    if "node_count" in payload:
+        next_state["node_count"] = payload.get("node_count")
+    if "gpu_count" in payload:
+        next_state["gpu_count"] = payload.get("gpu_count")
+    if "notes" in payload:
+        next_state["notes"] = payload.get("notes")
+    if "details" in payload:
+        next_state["details"] = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+
+    next_state["updated_at"] = now
+    cluster_state = _normalize_cluster_state(next_state)
+    save_settings_state()
+    return {"cluster": cluster_state, "run_summary": _current_run_summary()}
+
+
 def _build_experiment_context() -> str:
     """Build a summary of current experiment state for the wild mode prompt."""
     lines = ["\n--- Current Experiment State ---"]
+    recompute_all_sweep_states()
 
     # Active runs
     active_runs = [{"id": rid, **r} for rid, r in runs.items()
@@ -1418,6 +1950,7 @@ async def list_sweeps(
     limit: int = Query(50, description="Max sweeps to return")
 ):
     """List all sweeps."""
+    recompute_all_sweep_states()
     result = []
     for sweep_id, sweep in sweeps.items():
         result.append({"id": sweep_id, **sweep})
@@ -1446,19 +1979,25 @@ async def create_wild_sweep(req: WildSweepCreate):
         "workdir": WORKDIR,
         "parameters": {},
         "run_ids": [],
-        "status": "running",
+        "status": "pending",
         "created_at": time.time(),
         "goal": req.goal,
         "is_wild": True,
+        "ui_config": None,
         "progress": {
             "total": 0,
             "completed": 0,
             "failed": 0,
             "running": 0,
+            "launching": 0,
+            "ready": 0,
+            "queued": 0,
+            "canceled": 0,
         },
     }
     
     sweeps[sweep_id] = sweep_data
+    recompute_sweep_state(sweep_id)
     wild_loop_state["sweep_id"] = sweep_id
     save_runs_state()
     
@@ -1468,11 +2007,46 @@ async def create_wild_sweep(req: WildSweepCreate):
 
 @app.post("/sweeps")
 async def create_sweep(req: SweepCreate):
-    """Create a new sweep with associated runs."""
+    """Create a sweep in draft/pending/running mode, optionally with generated runs."""
     sweep_id = uuid.uuid4().hex[:12]
+    requested_status = _normalize_sweep_status(req.status)
+    if req.auto_start and requested_status == "pending":
+        # auto_start implies immediate queue/launch intent
+        requested_status = "running"
+
+    if requested_status not in {"draft", "pending", "running"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported sweep status: {requested_status}")
+
+    # Create draft sweep without materializing runs
+    if requested_status == "draft":
+        sweep_data = {
+            "name": req.name,
+            "base_command": req.base_command,
+            "workdir": req.workdir or WORKDIR,
+            "parameters": req.parameters or {},
+            "run_ids": [],
+            "status": "draft",
+            "created_at": time.time(),
+            "goal": req.goal,
+            "ui_config": req.ui_config,
+            "progress": {
+                "total": 0,
+                "completed": 0,
+                "failed": 0,
+                "running": 0,
+                "launching": 0,
+                "ready": 0,
+                "queued": 0,
+                "canceled": 0,
+            },
+        }
+        sweeps[sweep_id] = sweep_data
+        save_runs_state()
+        logger.info(f"Created draft sweep {sweep_id}: {req.name}")
+        return {"id": sweep_id, **sweep_data}
     
     # Expand parameters into run configurations
-    param_combinations = expand_parameter_grid(req.parameters, req.max_runs)
+    param_combinations = expand_parameter_grid(req.parameters or {}, req.max_runs)
     
     # Create runs for each combination
     run_ids = []
@@ -1484,7 +2058,7 @@ async def create_sweep(req: SweepCreate):
             "name": f"{req.name} #{i+1}",
             "command": command,
             "workdir": req.workdir or WORKDIR,
-            "status": "queued" if req.auto_start else "ready",
+            "status": "queued" if requested_status == "running" else "ready",
             "created_at": time.time(),
             "is_archived": False,
             "sweep_id": sweep_id,
@@ -1506,21 +2080,90 @@ async def create_sweep(req: SweepCreate):
         "workdir": req.workdir or WORKDIR,
         "parameters": req.parameters,
         "run_ids": run_ids,
-        "status": "running" if req.auto_start else "ready",
+        "status": "running" if requested_status == "running" else "pending",
         "created_at": time.time(),
+        "goal": req.goal,
+        "ui_config": req.ui_config,
         "progress": {
             "total": len(run_ids),
             "completed": 0,
             "failed": 0,
             "running": 0,
+            "launching": 0,
+            "ready": len(run_ids) if requested_status != "running" else 0,
+            "queued": len(run_ids) if requested_status == "running" else 0,
+            "canceled": 0,
         },
     }
     
     sweeps[sweep_id] = sweep_data
+    recompute_sweep_state(sweep_id)
     save_runs_state()
     
-    logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs")
+    logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
+
+
+@app.put("/sweeps/{sweep_id}")
+async def update_sweep(sweep_id: str, req: SweepUpdate):
+    """Update an existing sweep configuration/state."""
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+
+    sweep = sweeps[sweep_id]
+    current_status = _normalize_sweep_status(sweep.get("status"))
+    structural_update_requested = any(
+        field is not None
+        for field in [req.base_command, req.parameters, req.max_runs]
+    )
+
+    # Keep running sweeps immutable to avoid mutating active experiments in place.
+    if current_status == "running" and structural_update_requested:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot modify base command/parameters/max_runs while sweep is running. "
+                "Create a draft revision and launch it as a new sweep."
+            ),
+        )
+
+    if sweep.get("run_ids") and structural_update_requested:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot mutate structure for a sweep that already has runs. "
+                "Create a draft revision instead."
+            ),
+        )
+
+    if req.status is not None:
+        next_status = _normalize_sweep_status(req.status)
+        if next_status == "draft" and sweep.get("run_ids"):
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot move a sweep with existing runs back to draft.",
+            )
+        sweep["status"] = next_status
+
+    if req.name is not None:
+        sweep["name"] = req.name
+    if req.base_command is not None:
+        sweep["base_command"] = req.base_command
+    if req.workdir is not None:
+        sweep["workdir"] = req.workdir
+    if req.parameters is not None:
+        sweep["parameters"] = req.parameters
+    if req.goal is not None:
+        sweep["goal"] = req.goal
+    if req.ui_config is not None:
+        sweep["ui_config"] = req.ui_config
+
+    if req.max_runs is not None and req.max_runs > 0:
+        sweep["max_runs"] = req.max_runs
+
+    recompute_sweep_state(sweep_id)
+    save_runs_state()
+    return {"id": sweep_id, **sweep}
 
 
 @app.get("/sweeps/{sweep_id}")
@@ -1528,21 +2171,9 @@ async def get_sweep(sweep_id: str):
     """Get sweep details with run status summary."""
     if sweep_id not in sweeps:
         raise HTTPException(status_code=404, detail="Sweep not found")
-    
-    sweep = sweeps[sweep_id]
-    
-    # Calculate progress from runs
-    sweep_runs = [runs[rid] for rid in sweep.get("run_ids", []) if rid in runs]
-    progress = {
-        "total": len(sweep_runs),
-        "completed": sum(1 for r in sweep_runs if r.get("status") == "finished"),
-        "failed": sum(1 for r in sweep_runs if r.get("status") == "failed"),
-        "running": sum(1 for r in sweep_runs if r.get("status") == "running"),
-        "ready": sum(1 for r in sweep_runs if r.get("status") == "ready"),
-        "queued": sum(1 for r in sweep_runs if r.get("status") == "queued"),
-    }
-    
-    return {"id": sweep_id, **sweep, "progress": progress}
+
+    sweep = recompute_sweep_state(sweep_id) or sweeps[sweep_id]
+    return {"id": sweep_id, **sweep}
 
 
 @app.post("/sweeps/{sweep_id}/start")
@@ -1552,12 +2183,16 @@ async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max p
         raise HTTPException(status_code=404, detail="Sweep not found")
     
     sweep = sweeps[sweep_id]
+    if _normalize_sweep_status(sweep.get("status")) == "draft":
+        raise HTTPException(status_code=400, detail="Draft sweep has no runnable jobs yet")
     started = 0
+    attempted = 0
     
     for run_id in sweep.get("run_ids", []):
         if run_id in runs:
             run = runs[run_id]
             if run["status"] in ["ready", "queued"] and started < parallel:
+                attempted += 1
                 try:
                     # Queue if ready
                     if run["status"] == "ready":
@@ -1568,11 +2203,11 @@ async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max p
                     started += 1
                 except Exception as e:
                     logger.error(f"Failed to start run {run_id}: {e}")
-    
-    sweep["status"] = "running"
+
+    recompute_sweep_state(sweep_id)
     save_runs_state()
     
-    return {"message": f"Started {started} runs", "sweep_id": sweep_id}
+    return {"message": f"Started {started}/{attempted} runs", "sweep_id": sweep_id}
 
 
 @app.post("/runs/{run_id}/add-to-sweep")
@@ -1583,9 +2218,29 @@ async def add_run_to_sweep(run_id: str, sweep_id: str = Query(..., description="
     if sweep_id not in sweeps:
         raise HTTPException(status_code=404, detail="Sweep not found")
 
-    runs[run_id]["sweep_id"] = sweep_id
+    run = runs[run_id]
+    old_sweep_id = run.get("sweep_id")
+    if old_sweep_id == sweep_id:
+        return {"message": f"Run {run_id} is already in sweep {sweep_id}"}
+
+    if old_sweep_id and old_sweep_id in sweeps and run.get("status") in RUN_STATUS_ACTIVE.union({"queued"}):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot move an active/queued run between sweeps. "
+                "Stop it first or rerun into a new sweep."
+            ),
+        )
+
+    if old_sweep_id and old_sweep_id in sweeps:
+        old_ids = sweeps[old_sweep_id].get("run_ids", [])
+        sweeps[old_sweep_id]["run_ids"] = [rid for rid in old_ids if rid != run_id]
+        recompute_sweep_state(old_sweep_id)
+
+    run["sweep_id"] = sweep_id
     if run_id not in sweeps[sweep_id].get("run_ids", []):
         sweeps[sweep_id].setdefault("run_ids", []).append(run_id)
+    recompute_sweep_state(sweep_id)
     save_runs_state()
     return {"message": f"Run {run_id} added to sweep {sweep_id}"}
 
@@ -1741,8 +2396,6 @@ async def list_artifacts(run_id: str):
 # Main
 # =============================================================================
 
-import subprocess
-
 def start_opencode_server_subprocess(args):
     # Start OpenCode server subprocess
     opencode_process = subprocess.Popen(
@@ -1814,6 +2467,10 @@ def main():
     load_runs_state()
     load_alerts_state()
     load_settings_state()
+    if cluster_state.get("source") == "unset":
+        inferred = _infer_cluster_from_environment()
+        cluster_state.update(_normalize_cluster_state(inferred))
+        save_settings_state()
     maybe_mount_frontend_static()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")

@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   Monitor,
   Moon,
+  Rows3,
   RotateCcw,
   Server,
   Slack,
@@ -162,6 +163,15 @@ export function SettingsPageContent({
           value: settings.appearance.buttonSize,
         },
         {
+          id: 'runItemInteractionMode',
+          label: 'Runs/Sweeps Click Mode',
+          description: 'Open detail page or expand inline details',
+          icon: Rows3,
+          type: 'select' as const,
+          options: ['detail-page', 'inline-expand'],
+          value: settings.appearance.runItemInteractionMode || 'detail-page',
+        },
+        {
           id: 'showStarterCards',
           label: 'Starter Cards',
           description: 'Show contextual prompt cards on new chats',
@@ -242,6 +252,13 @@ export function SettingsPageContent({
     onSettingsChange({
       ...settings,
       appearance: { ...settings.appearance, buttonSize },
+    })
+  }
+
+  const handleRunItemInteractionModeChange = (mode: 'detail-page' | 'inline-expand') => {
+    onSettingsChange({
+      ...settings,
+      appearance: { ...settings.appearance, runItemInteractionMode: mode },
     })
   }
 
@@ -401,12 +418,13 @@ export function SettingsPageContent({
                     if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                     if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                     if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
+                    if (item.id === 'runItemInteractionMode') handleRunItemInteractionModeChange(option as 'detail-page' | 'inline-expand')
                   }}
                   className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize transition-colors ${item.value === option
                     ? 'bg-accent text-accent-foreground'
                     : 'bg-background text-muted-foreground hover:text-foreground'}`}
                 >
-                  {option}
+                  {option.replace('-', ' ')}
                 </button>
               ))}
             </div>

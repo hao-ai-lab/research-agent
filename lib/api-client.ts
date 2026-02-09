@@ -28,7 +28,15 @@ export type {
     Alert,
     Sweep,
     CreateSweepRequest,
+    UpdateSweepRequest,
     WildModeState,
+    ClusterType,
+    ClusterState,
+    ClusterHealthStatus,
+    ClusterSource,
+    ClusterStatusResponse,
+    ClusterUpdateRequest,
+    ClusterDetectRequest,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -124,8 +132,20 @@ export const listSweeps = (...args: Parameters<typeof realApi.listSweeps>) =>
 export const createSweep = (...args: Parameters<typeof realApi.createSweep>) =>
     getApi().createSweep(...args)
 
+export const updateSweep = (...args: Parameters<typeof realApi.updateSweep>) =>
+    getApi().updateSweep(...args)
+
 export const getSweep = (...args: Parameters<typeof realApi.getSweep>) =>
     getApi().getSweep(...args)
 
 export const startSweep = (...args: Parameters<typeof realApi.startSweep>) =>
     getApi().startSweep(...args)
+
+export const getClusterStatus = (...args: Parameters<typeof realApi.getClusterStatus>) =>
+    getApi().getClusterStatus(...args)
+
+export const detectCluster = (...args: Parameters<typeof realApi.detectCluster>) =>
+    getApi().detectCluster(...args)
+
+export const updateCluster = (...args: Parameters<typeof realApi.updateCluster>) =>
+    getApi().updateCluster(...args)

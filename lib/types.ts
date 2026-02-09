@@ -32,6 +32,11 @@ export interface ExperimentRun {
   alias?: string;
   status: RunStatus;
   progress: number;
+  createdAt?: Date;
+  queuedAt?: Date;
+  launchedAt?: Date;
+  startedAt?: Date;
+  stoppedAt?: Date;
   startTime: Date;
   endTime?: Date;
   command: string;
@@ -74,6 +79,7 @@ export interface AppSettings {
     theme: "dark" | "light" | "system";
     fontSize: "small" | "medium" | "large";
     buttonSize: "compact" | "default" | "large";
+    runItemInteractionMode?: "detail-page" | "inline-expand";
     customFontSizePx?: number | null;
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;

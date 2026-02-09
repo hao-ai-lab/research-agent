@@ -16,8 +16,8 @@ import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
 import type { ChatMode } from '@/components/chat-input'
-import { mockMemoryRules, mockInsightCharts, defaultTags, mockSweeps } from '@/lib/mock-data'
-import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
+import { mockMemoryRules, mockInsightCharts, defaultTags } from '@/lib/mock-data'
+import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
 import {
   Dialog,
@@ -27,6 +27,8 @@ import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
 import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
+import { useSweeps } from '@/hooks/use-sweeps'
+import { useCluster } from '@/hooks/use-cluster'
 import {
   buildHomeSearchParams,
   isJourneySubTab,
@@ -59,7 +61,22 @@ export default function ResearchChat() {
   const sidebarRafRef = useRef<number | null>(null)
 
   // Use real API data via useRuns hook
-  const { runs, updateRun: apiUpdateRun, refetch, startExistingRun, stopExistingRun } = useRuns()
+  const { runs, updateRun: apiUpdateRun, refetch: refetchRuns, startExistingRun, stopExistingRun } = useRuns()
+  const {
+    sweeps,
+    refetch: refetchSweeps,
+    saveDraftSweep,
+    launchSweepFromConfig,
+  } = useSweeps()
+  const {
+    cluster,
+    runSummary: clusterRunSummary,
+    isLoading: clusterLoading,
+    error: clusterError,
+    autoDetect: detectClusterSetup,
+    saveCluster: updateClusterSetup,
+    refetch: refetchCluster,
+  } = useCluster()
   const { alerts, respond: respondAlert } = useAlerts()
 
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
@@ -75,7 +92,6 @@ export default function ResearchChat() {
   const [eventStatusOverrides, setEventStatusOverrides] = useState<Record<string, EventStatus>>({})
 
   // Sweeps state
-  const [sweeps, setSweeps] = useState<Sweep[]>(mockSweeps)
   const [showSweepForm, setShowSweepForm] = useState(false)
   const [editingSweepConfig, setEditingSweepConfig] = useState<SweepConfig | null>(null)
 
@@ -452,88 +468,50 @@ export default function ResearchChat() {
     )
   }, [])
 
-  // Sweep handlers
-  const upsertSweepFromConfig = useCallback((config: SweepConfig, status: 'draft' | 'running') => {
-    const now = new Date()
-    const existingSweep = sweeps.find((sweep) => sweep.config.id === config.id)
-    const normalizedConfig: SweepConfig = {
-      ...config,
-      createdAt: existingSweep?.config.createdAt || config.createdAt || now,
-      updatedAt: now,
-    }
-    const sweepId = existingSweep?.id || `sweep-${Date.now()}`
-    const createdAt = existingSweep?.createdAt || now
-
-    const nextSweep: Sweep =
-      status === 'draft'
-        ? {
-            id: sweepId,
-            config: normalizedConfig,
-            status: 'draft',
-            runIds: [],
-            createdAt,
-            progress: {
-              completed: 0,
-              total: normalizedConfig.maxRuns || 0,
-              failed: 0,
-              running: 0,
-            },
-          }
-        : {
-            id: sweepId,
-            config: normalizedConfig,
-            status: 'running',
-            runIds: existingSweep?.runIds || [],
-            startedAt: now,
-            createdAt,
-            progress: {
-              completed: 0,
-              total: normalizedConfig.maxRuns || 10,
-              failed: 0,
-              running: Math.min(
-                normalizedConfig.parallelRuns || 2,
-                normalizedConfig.maxRuns || 10,
-              ),
-            },
-          }
-
-    setSweeps((prev) => {
-      if (existingSweep) {
-        return prev.map((sweep) => (sweep.id === existingSweep.id ? nextSweep : sweep))
-      }
-      return [nextSweep, ...prev]
-    })
-
-    return nextSweep
-  }, [sweeps])
-
   const handleEditSweep = useCallback((config: SweepConfig) => {
     setEditingSweepConfig(config)
     setShowSweepForm(true)
   }, [])
 
-  const handleSaveSweep = useCallback((config: SweepConfig) => {
-    upsertSweepFromConfig(config, 'draft')
-    setShowSweepForm(false)
-    setEditingSweepConfig(null)
-  }, [upsertSweepFromConfig])
+  const handleSaveSweep = useCallback(async (config: SweepConfig) => {
+    try {
+      await saveDraftSweep(config)
+      setShowSweepForm(false)
+      setEditingSweepConfig(null)
+    } catch (error) {
+      console.error('Failed to save draft sweep:', error)
+    }
+  }, [saveDraftSweep])
 
-  const handleCreateSweep = useCallback((config: SweepConfig) => {
-    const draftSweep = upsertSweepFromConfig(config, 'draft')
-    setActiveTab('chat')
-    setChatDraftInsert({
-      id: Date.now(),
-      text: `@sweep:${draftSweep.id} Improve this sweep before launch. Optimize search space, metrics, and stop conditions.`,
-    })
-    setShowSweepForm(false)
-    setEditingSweepConfig(null)
-  }, [upsertSweepFromConfig])
+  const handleCreateSweep = useCallback(async (config: SweepConfig) => {
+    try {
+      const draftSweep = await saveDraftSweep(config)
+      setActiveTab('chat')
+      setChatDraftInsert({
+        id: Date.now(),
+        text: `@sweep:${draftSweep.id} Improve this sweep before launch. Optimize search space, metrics, and stop conditions.`,
+      })
+      setShowSweepForm(false)
+      setEditingSweepConfig(null)
+    } catch (error) {
+      console.error('Failed to create draft sweep:', error)
+    }
+  }, [saveDraftSweep])
 
-  const handleLaunchSweep = useCallback((config: SweepConfig) => {
-    upsertSweepFromConfig(config, 'running')
-    setShowSweepForm(false)
-    setEditingSweepConfig(null)
-  }, [upsertSweepFromConfig])
+  const handleLaunchSweep = useCallback(async (config: SweepConfig) => {
+    try {
+      await launchSweepFromConfig(config)
+      await refetchRuns()
+      setShowSweepForm(false)
+      setEditingSweepConfig(null)
+    } catch (error) {
+      console.error('Failed to launch sweep:', error)
+    }
+  }, [launchSweepFromConfig, refetchRuns])
+
+  const handleRefreshExperimentState = useCallback(async () => {
+    await Promise.all([refetchRuns(), refetchSweeps(), refetchCluster()])
+  }, [refetchRuns, refetchSweeps, refetchCluster])
 
   const handleChatModeChange = useCallback(async (mode: ChatMode) => {
     setChatMode(mode)
@@ -671,12 +649,19 @@ export default function ResearchChat() {
                 onCreateTag={handleCreateTag}
                 onSelectedRunChange={setSelectedRun}
                 onShowVisibilityManageChange={setShowVisibilityManage}
-                onRefresh={refetch}
+                onRefresh={handleRefreshExperimentState}
                 onStartRun={startExistingRun}
                 onStopRun={stopExistingRun}
                 onSaveSweep={handleSaveSweep}
                 onCreateSweep={handleCreateSweep}
                 onLaunchSweep={handleLaunchSweep}
+                cluster={cluster}
+                clusterRunSummary={clusterRunSummary}
+                clusterLoading={clusterLoading}
+                clusterError={clusterError}
+                onDetectCluster={detectClusterSetup}
+                onUpdateCluster={updateClusterSetup}
+                onNavigateToCharts={() => handleTabChange('charts')}
               />
             )}
             {activeTab === 'events' && (
