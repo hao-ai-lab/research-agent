@@ -305,6 +305,42 @@ export interface Artifact {
     type: 'checkpoint' | 'metrics' | 'wandb' | 'other'
 }
 
+export type RepoDiffFileStatus = 'modified' | 'added' | 'deleted'
+export type RepoDiffLineType = 'context' | 'add' | 'remove' | 'hunk'
+
+export interface RepoDiffLine {
+    type: RepoDiffLineType
+    text: string
+    oldLine: number | null
+    newLine: number | null
+}
+
+export interface RepoDiffFile {
+    path: string
+    status: RepoDiffFileStatus
+    additions: number
+    deletions: number
+    lines: RepoDiffLine[]
+}
+
+export interface RepoDiffResponse {
+    repo_path: string
+    head: string | null
+    files: RepoDiffFile[]
+}
+
+export interface RepoFilesResponse {
+    repo_path: string
+    files: string[]
+}
+
+export interface RepoFileResponse {
+    path: string
+    content: string
+    binary: boolean
+    truncated: boolean
+}
+
 // =============================================================================
 // Run Management Functions
 // =============================================================================
@@ -664,6 +700,49 @@ export async function queueRun(runId: string): Promise<Run> {
     })
     if (!response.ok) {
         throw new Error(`Failed to queue run: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get repository diff for changed files in the active workdir
+ */
+export async function getRepoDiff(unified: number = 3): Promise<RepoDiffResponse> {
+    const response = await fetch(`${API_URL()}/git/diff?unified=${unified}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get repository diff: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get repository file list for file explorer mode
+ */
+export async function getRepoFiles(limit: number = 5000): Promise<RepoFilesResponse> {
+    const response = await fetch(`${API_URL()}/git/files?limit=${limit}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get repository files: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Read a repository file for file explorer mode
+ */
+export async function getRepoFile(path: string, maxBytes: number = 120000): Promise<RepoFileResponse> {
+    const params = new URLSearchParams({
+        path,
+        max_bytes: String(maxBytes),
+    })
+    const response = await fetch(`${API_URL()}/git/file?${params.toString()}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to read repository file: ${response.statusText}`)
     }
     return response.json()
 }

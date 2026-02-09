@@ -32,6 +32,8 @@ An AI-powered research assistant for ML experiment tracking. Provides a mobile-f
 
 ### 1. YOLO install
 
+Don't do YOLO install if you are a developer since you will get staled code. Go to manual setup below if you are a developer.
+
 ```bash
 curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLGDb_PWNIwGS" | bash
 ```
