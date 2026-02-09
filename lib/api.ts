@@ -679,17 +679,23 @@ export interface Sweep {
     workdir?: string
     parameters: Record<string, unknown[]>
     run_ids: string[]
-    status: 'ready' | 'running' | 'completed' | 'failed'
+    status: 'draft' | 'pending' | 'ready' | 'running' | 'completed' | 'failed' | 'canceled'
     created_at: number
+    started_at?: number
+    completed_at?: number
+    max_runs?: number
     goal?: string
     is_wild?: boolean
+    ui_config?: Record<string, unknown> | null
     progress: {
         total: number
         completed: number
         failed: number
         running: number
+        launching?: number
         ready?: number
         queued?: number
+        canceled?: number
     }
 }
 
@@ -700,6 +706,20 @@ export interface CreateSweepRequest {
     parameters: Record<string, unknown[]>
     max_runs?: number
     auto_start?: boolean
+    goal?: string
+    status?: 'draft' | 'pending' | 'running'
+    ui_config?: Record<string, unknown>
+}
+
+export interface UpdateSweepRequest {
+    name?: string
+    base_command?: string
+    workdir?: string
+    parameters?: Record<string, unknown[]>
+    max_runs?: number
+    goal?: string
+    status?: 'draft' | 'pending' | 'running' | 'completed' | 'failed' | 'canceled'
+    ui_config?: Record<string, unknown>
 }
 
 // =============================================================================
@@ -730,6 +750,22 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
     })
     if (!response.ok) {
         throw new Error(`Failed to create sweep: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update an existing sweep
+ */
+export async function updateSweep(sweepId: string, request: UpdateSweepRequest): Promise<Sweep> {
+    const response = await fetch(`${API_URL()}/sweeps/${sweepId}`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to update sweep: ${error}`)
     }
     return response.json()
 }
@@ -772,6 +808,96 @@ export async function createWildSweep(name: string, goal: string): Promise<Sweep
     })
     if (!response.ok) {
         throw new Error(`Failed to create wild sweep: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+// =============================================================================
+// Cluster Management Types
+// =============================================================================
+
+export type ClusterType = 'unknown' | 'slurm' | 'local_gpu' | 'kubernetes' | 'ray' | 'shared_head_node'
+export type ClusterHealthStatus = 'unknown' | 'healthy' | 'degraded' | 'offline'
+export type ClusterSource = 'unset' | 'manual' | 'detected'
+
+export interface ClusterState {
+    type: ClusterType
+    status: ClusterHealthStatus
+    source: ClusterSource
+    label: string
+    description: string
+    head_node?: string | null
+    node_count?: number | null
+    gpu_count?: number | null
+    notes?: string | null
+    confidence?: number | null
+    details?: Record<string, unknown>
+    last_detected_at?: number | null
+    updated_at?: number | null
+}
+
+export interface ClusterStatusResponse {
+    cluster: ClusterState
+    run_summary: {
+        total: number
+        running: number
+        launching: number
+        queued: number
+        ready: number
+        failed: number
+        finished: number
+    }
+}
+
+export interface ClusterUpdateRequest {
+    type?: ClusterType
+    status?: ClusterHealthStatus
+    source?: ClusterSource
+    head_node?: string | null
+    node_count?: number | null
+    gpu_count?: number | null
+    notes?: string | null
+    details?: Record<string, unknown>
+}
+
+export interface ClusterDetectRequest {
+    preferred_type?: ClusterType
+}
+
+// =============================================================================
+// Cluster Management Functions
+// =============================================================================
+
+export async function getClusterStatus(): Promise<ClusterStatusResponse> {
+    const response = await fetch(`${API_URL()}/cluster`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get cluster status: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function detectCluster(request?: ClusterDetectRequest): Promise<ClusterStatusResponse> {
+    const response = await fetch(`${API_URL()}/cluster/detect`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request || {}),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to detect cluster: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function updateCluster(request: ClusterUpdateRequest): Promise<ClusterStatusResponse> {
+    const response = await fetch(`${API_URL()}/cluster`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to update cluster: ${response.statusText}`)
     }
     return response.json()
 }

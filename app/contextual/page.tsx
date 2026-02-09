@@ -38,59 +38,12 @@ import { listSweeps, type Sweep as ApiSweep } from '@/lib/api-client'
 import { buildHomeHref, type HomeTab, type JourneySubTab } from '@/lib/navigation'
 import { extractContextReferences } from '@/lib/contextual-chat'
 import type { ChatMode } from '@/components/chat-input'
-import type { Sweep as UiSweep, SweepStatus } from '@/lib/types'
+import type { Sweep as UiSweep } from '@/lib/types'
+import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
 
 const DESKTOP_SIDEBAR_MIN_WIDTH = 72
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
-
-function mapApiSweepStatusToUi(status: ApiSweep['status']): SweepStatus {
-  if (status === 'ready') return 'pending'
-  return status
-}
-
-function toChoiceValues(values: unknown[]): Array<string | number> {
-  return values.filter((value): value is string | number => {
-    return typeof value === 'string' || typeof value === 'number'
-  })
-}
-
-function mapApiSweepToUiSweep(sweep: ApiSweep): UiSweep {
-  const createdAt = new Date(sweep.created_at * 1000)
-  return {
-    id: sweep.id,
-    config: {
-      id: sweep.id,
-      name: sweep.name,
-      description: sweep.goal || '',
-      goal: sweep.goal || '',
-      command: sweep.base_command,
-      hyperparameters: Object.entries(sweep.parameters || {}).map(([name, values]) => ({
-        name,
-        type: 'choice' as const,
-        values: Array.isArray(values) ? toChoiceValues(values) : [],
-      })),
-      metrics: [],
-      insights: [],
-      maxRuns: sweep.progress.total,
-      parallelRuns: Math.max(1, sweep.progress.running),
-      earlyStoppingEnabled: false,
-      earlyStoppingPatience: 3,
-      createdAt,
-      updatedAt: createdAt,
-    },
-    status: mapApiSweepStatusToUi(sweep.status),
-    runIds: sweep.run_ids,
-    createdAt,
-    startedAt: sweep.status === 'running' ? createdAt : undefined,
-    progress: {
-      completed: sweep.progress.completed,
-      total: sweep.progress.total,
-      failed: sweep.progress.failed,
-      running: sweep.progress.running,
-    },
-  }
-}
 
 export default function ContextualChatPage() {
   const router = useRouter()

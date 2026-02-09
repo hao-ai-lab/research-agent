@@ -9,6 +9,7 @@ import {
   Clock3,
   FlaskConical,
   Play,
+  Server,
   Sparkles,
   XCircle,
 } from 'lucide-react'
@@ -42,6 +43,24 @@ interface CardSelectorProps {
   options: SelectorOption[]
   onValueChange: (value: string) => void
   emptyLabel?: string
+}
+
+const CLUSTER_SETUP_OPTIONS: SelectorOption[] = [
+  { value: 'auto', label: 'Auto detect' },
+  { value: 'slurm', label: 'Slurm cluster' },
+  { value: 'local_gpu', label: 'Local GPU cluster' },
+  { value: 'kubernetes', label: 'Kubernetes cluster' },
+  { value: 'ray', label: 'Ray cluster' },
+  { value: 'shared_head_node', label: 'Shared head node SSH' },
+]
+
+const CLUSTER_SETUP_LABELS: Record<string, string> = {
+  auto: 'Auto detect',
+  slurm: 'Slurm cluster',
+  local_gpu: 'Local GPU cluster',
+  kubernetes: 'Kubernetes cluster',
+  ray: 'Ray cluster',
+  shared_head_node: 'Shared head node SSH cluster',
 }
 
 interface StarterInteractiveCardProps {
@@ -311,6 +330,7 @@ export function ChatStarterCards({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedSweepId, setSelectedSweepId] = useState<string | null>(null)
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null)
+  const [selectedClusterSetup, setSelectedClusterSetup] = useState<string>('auto')
 
   useEffect(() => {
     if (recentRuns.length === 0) {
@@ -682,6 +702,42 @@ export function ChatStarterCards({
             onPromptSelect(
               `Given ${runningJobs} running jobs, ${queuedJobs} queued jobs, and ${pendingAlerts.length} pending alerts, propose a scheduling strategy that maximizes learning-per-hour.`
             )
+          }}
+        />
+
+        <StarterInteractiveCard
+          title="Identify cluster setup"
+          icon={Server}
+          toneClass="from-violet-500/12 to-fuchsia-500/5 border-violet-500/25"
+          selector={{
+            value: selectedClusterSetup,
+            options: CLUSTER_SETUP_OPTIONS,
+            onValueChange: setSelectedClusterSetup,
+          }}
+          hint="Onboarding card for run/sweep execution environment."
+          previewNode={
+            <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
+              <p className="text-sm font-medium text-foreground">
+                {CLUSTER_SETUP_LABELS[selectedClusterSetup] || 'Auto detect'}
+              </p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Determine whether this project uses Slurm, local GPU, Kubernetes, Ray, or a shared head node.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-1.5">
+                {['Slurm', 'Local GPU', 'Kubernetes', 'Ray'].map((label) => (
+                  <span key={label} className="rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          }
+          onActivate={() => {
+            const selectedLabel = CLUSTER_SETUP_LABELS[selectedClusterSetup] || 'Auto detect'
+            const prompt = selectedClusterSetup === 'auto'
+              ? 'Help me identify my cluster setup (Slurm, local GPU, Kubernetes, Ray, or shared head-node SSH). Ask the minimum questions, give verification commands, and tell me what to set in Runs > Cluster Status.'
+              : `My cluster setup is ${selectedLabel}. Give me an onboarding checklist for runs/sweeps, command templates, scheduler assumptions, and failure checks.`
+            onPromptSelect(prompt)
           }}
         />
       </div>

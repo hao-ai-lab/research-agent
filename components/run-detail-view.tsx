@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import {
   Clock,
   Terminal,
@@ -26,6 +26,7 @@ import {
   BarChart3,
   AlertTriangle,
   Sparkles,
+  Bell,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -228,6 +229,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const [logsFullPage, setLogsFullPage] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(true)
   const [sweepObjectOpen, setSweepObjectOpen] = useState(true)
+  const alertsSectionRef = useRef<HTMLDivElement | null>(null)
 
   const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
   const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
@@ -301,6 +303,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     setIsStarting(true)
     try {
       await onStartRun(run.id)
+      onRefresh?.()
     } finally {
       setIsStarting(false)
     }
@@ -311,6 +314,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     setIsStopping(true)
     try {
       await onStopRun(run.id)
+      onRefresh?.()
     } finally {
       setIsStopping(false)
     }
@@ -361,10 +365,23 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const allSecondaryExpanded = secondaryMetrics.every(m => expandedCharts.has(m.id))
 
   const runAlerts = alerts
+  const pendingAlertCount = runAlerts.filter((alert) => alert.status === 'pending').length
+
+  const formatTimestamp = (value?: Date) => {
+    if (!value) return '--'
+    return value.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
 
   const formatAlertTime = (timestamp: number) => {
     const date = new Date(timestamp * 1000)
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const handleCheckAlerts = () => {
+    setAlertsOpen(true)
+    requestAnimationFrame(() => {
+      alertsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
 
   return (
@@ -475,6 +492,29 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                     {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
                   </Button>
                 )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-1 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-3">
+                <div>
+                  <p className="uppercase tracking-wide">Start</p>
+                  <p className="text-foreground">
+                    {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
+                      ? formatTimestamp(run.startedAt || run.startTime)
+                      : '--'}
+                  </p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide">Created</p>
+                  <p className="text-foreground">{formatTimestamp(run.createdAt)}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide">Running Time</p>
+                  <p className="text-foreground">
+                    {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
+                      ? formatDuration(run.startedAt || run.startTime, run.endTime)
+                      : '--'}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -592,6 +632,16 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                     <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                   </Button>
                 )}
+
+                <Button
+                  variant={pendingAlertCount > 0 ? 'default' : 'ghost'}
+                  size="icon"
+                  onClick={handleCheckAlerts}
+                  className={`h-7 w-7 ${pendingAlertCount > 0 ? '' : 'text-muted-foreground'}`}
+                  title={pendingAlertCount > 0 ? `Check alerts (${pendingAlertCount} pending)` : 'Check alerts'}
+                >
+                  <Bell className="h-4 w-4" />
+                </Button>
 
                 <Button
                   variant="ghost"
@@ -716,8 +766,9 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
             </Collapsible>
 
             {/* Alerts */}
-            <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
-              <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
+            <div ref={alertsSectionRef}>
+              <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
+                <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
                 <CollapsibleTrigger asChild>
                   <button type="button" className="flex w-full items-center justify-between p-3">
                     <div className="flex items-center gap-2">
@@ -779,8 +830,9 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                     )}
                   </div>
                 </CollapsibleContent>
-              </div>
-            </Collapsible>
+                </div>
+              </Collapsible>
+            </div>
 
             {/* Charts Section - Primary */}
             {run.lossHistory && run.lossHistory.length > 0 && (
