@@ -1048,14 +1048,14 @@ export function ChatInput({
                   <Archive className="h-3.5 w-3.5" />
                   <span>Add artifact</span>
                 </button>
-                <button
+                {/* <button
                   type="button"
                   onClick={() => openMentionFromToolbar('chat')}
                   className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
                   <span>Add chat</span>
-                </button>
+                </button> */}
               </div>
             </PopoverContent>
           </Popover>

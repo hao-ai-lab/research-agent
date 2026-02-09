@@ -305,6 +305,7 @@ export interface SweepConfig {
   parallelRuns?: number;
   earlyStoppingEnabled?: boolean;
   earlyStoppingPatience?: number;
+  notes?: string;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -51,7 +51,7 @@ import { VisibilityManageView } from './visibility-manage-view'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
-import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
+import { DEFAULT_RUN_COLORS, getRunsOverview, mockSweeps } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 
 
@@ -547,6 +547,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
             onRefresh={onRefresh}
             onStartRun={onStartRun}
             onStopRun={onStopRun}
+            sweeps={mockSweeps}
           />
         </div>
       </div>
