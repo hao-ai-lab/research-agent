@@ -426,12 +426,24 @@ export function ConnectedChatView({
                                                 collapseArtifacts={collapseArtifactsInChat}
                                                 sweeps={sweeps}
                                                 runs={runs}
+                                                alerts={alerts}
                                                 onEditSweep={onEditSweep}
                                                 onLaunchSweep={onLaunchSweep}
                                                 onRunClick={onRunClick}
                                             />
                                         ))
-                                        : displayMessages.map((message) => (
+                                        : displayMessages.map((message, index) => {
+                                            // Find the previous user message for context extraction
+                                            let prevUserContent: string | undefined
+                                            if (message.role === 'assistant') {
+                                                for (let i = index - 1; i >= 0; i--) {
+                                                    if (displayMessages[i].role === 'user') {
+                                                        prevUserContent = displayMessages[i].content
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                            return (
                                             <div
                                                 key={message.id}
                                                 style={message.source === 'agent_wild' ? {
@@ -445,12 +457,14 @@ export function ConnectedChatView({
                                                     collapseArtifacts={collapseArtifactsInChat}
                                                     sweeps={sweeps}
                                                     runs={runs}
+                                                    alerts={alerts}
                                                     onEditSweep={onEditSweep}
                                                     onLaunchSweep={onLaunchSweep}
                                                     onRunClick={onRunClick}
+                                                    previousUserContent={prevUserContent}
                                                 />
                                             </div>
-                                        ))}
+                                        )})}
 
                                     {/* Streaming message */}
                                     {streamingState.isStreaming && (
@@ -489,6 +503,7 @@ function CollapsedChatPair({
     collapseArtifacts,
     sweeps,
     runs,
+    alerts,
     onEditSweep,
     onLaunchSweep,
     onRunClick,
@@ -497,6 +512,7 @@ function CollapsedChatPair({
     collapseArtifacts: boolean
     sweeps: Sweep[]
     runs: ExperimentRun[]
+    alerts?: Alert[]
     onEditSweep?: (config: SweepConfig) => void
     onLaunchSweep?: (config: SweepConfig) => void
     onRunClick: (run: ExperimentRun) => void
@@ -535,6 +551,7 @@ function CollapsedChatPair({
                         collapseArtifacts={collapseArtifacts}
                         sweeps={sweeps}
                         runs={runs}
+                        alerts={alerts}
                         onEditSweep={onEditSweep}
                         onLaunchSweep={onLaunchSweep}
                         onRunClick={onRunClick}
@@ -545,9 +562,11 @@ function CollapsedChatPair({
                             collapseArtifacts={collapseArtifacts}
                             sweeps={sweeps}
                             runs={runs}
+                            alerts={alerts}
                             onEditSweep={onEditSweep}
                             onLaunchSweep={onLaunchSweep}
                             onRunClick={onRunClick}
+                            previousUserContent={pair.user.content}
                         />
                     )}
                 </div>

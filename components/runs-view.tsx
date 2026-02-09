@@ -28,6 +28,7 @@ import {
   Loader2,
   RefreshCw,
   Server,
+  Bell,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,6 +62,7 @@ import type {
   ClusterType,
   ClusterUpdateRequest,
 } from '@/lib/api-client'
+import { startSweep as apiStartSweep } from '@/lib/api-client'
 import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 import { Progress } from '@/components/ui/progress'
@@ -118,6 +120,7 @@ interface RunsViewProps {
   onDetectCluster?: (preferredType?: ClusterType) => Promise<void>
   onUpdateCluster?: (request: ClusterUpdateRequest) => Promise<void>
   onNavigateToCharts?: () => void
+  onRespondToAlert?: (alertId: string, choice: string) => Promise<void>
 }
 
 export function RunsView({
@@ -144,6 +147,7 @@ export function RunsView({
   onDetectCluster,
   onUpdateCluster,
   onNavigateToCharts,
+  onRespondToAlert,
 }: RunsViewProps) {
   const { settings } = useAppSettings()
   const interactionMode = settings.appearance.runItemInteractionMode || 'detail-page'
@@ -157,6 +161,7 @@ export function RunsView({
   const [collapsedRunSections, setCollapsedRunSections] = useState<Set<string>>(new Set())
   const [collapsedTopSections, setCollapsedTopSections] = useState<Set<string>>(new Set())
   const [runActionBusy, setRunActionBusy] = useState<Record<string, 'starting' | 'stopping' | undefined>>({})
+  const [sweepActionBusy, setSweepActionBusy] = useState<string | null>(null)
   const [clusterDraftType, setClusterDraftType] = useState<ClusterType>(cluster?.type || 'unknown')
   const [clusterActionBusy, setClusterActionBusy] = useState<'detecting' | 'saving' | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
@@ -1099,6 +1104,39 @@ export function RunsView({
 
   if (!useInlineDetails && selectedSweep) {
     const sweepRuns = runs.filter((run) => selectedSweep.runIds.includes(run.id))
+    const sweepAlerts = alerts.filter((alert) => selectedSweep.runIds.includes(alert.run_id))
+    const pendingSweepAlerts = sweepAlerts.filter((alert) => alert.status === 'pending')
+    const canStartSweep = selectedSweep.status === 'draft' || selectedSweep.status === 'pending'
+    const canStopSweep = selectedSweep.status === 'running'
+    const runningInSweep = sweepRuns.filter((r) => r.status === 'running')
+    const isSweepBusy = sweepActionBusy === selectedSweep.id
+
+    const handleStartSweep = async () => {
+      setSweepActionBusy(selectedSweep.id)
+      try {
+        const parallel = Math.max(1, selectedSweep.config.parallelRuns || 1)
+        await apiStartSweep(selectedSweep.id, parallel)
+        await onRefresh?.()
+      } catch (e) {
+        console.error('Failed to start sweep:', e)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
+
+    const handleStopSweep = async () => {
+      if (!onStopRun) return
+      setSweepActionBusy(selectedSweep.id)
+      try {
+        await Promise.allSettled(runningInSweep.map(r => onStopRun(r.id)))
+        await onRefresh?.()
+      } catch (e) {
+        console.error('Failed to stop sweep runs:', e)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
+
     return (
       <div className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-5 duration-200">
         <div className="shrink-0 flex items-center gap-3 border-b border-border px-4 py-3">
@@ -1116,14 +1154,117 @@ export function RunsView({
               {selectedSweep.id} • {selectedSweep.progress.completed}/{selectedSweep.progress.total} runs
             </p>
           </div>
-          <Badge variant="outline" className={`capitalize ${getSweepStatusBadgeClass(selectedSweep.status)}`}>
-            {selectedSweep.status}
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {canStartSweep && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-green-600 border-green-500/40 hover:bg-green-500/10 dark:text-green-400"
+                onClick={() => { void handleStartSweep() }}
+                disabled={isSweepBusy}
+              >
+                {isSweepBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                <span className="text-xs">Start</span>
+              </Button>
+            )}
+            {canStopSweep && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
+                onClick={() => { void handleStopSweep() }}
+                disabled={isSweepBusy}
+              >
+                {isSweepBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                <span className="text-xs">Stop</span>
+              </Button>
+            )}
+            <Badge variant="outline" className={`capitalize ${getSweepStatusBadgeClass(selectedSweep.status)}`}>
+              {selectedSweep.status}
+            </Badge>
+          </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="p-4 space-y-3">
+              {/* Aggregated Alerts */}
+              {sweepAlerts.length > 0 && (
+                <div className="rounded-xl border border-border bg-card p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Bell className="h-4 w-4 text-muted-foreground" />
+                    <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Sweep Alerts</h4>
+                    {pendingSweepAlerts.length > 0 && (
+                      <Badge variant="outline" className="border-destructive/50 bg-destructive/10 text-destructive text-[9px] px-1.5 py-0 h-4">
+                        {pendingSweepAlerts.length} pending
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {sweepAlerts.slice(0, 10).map((alert) => {
+                      const alertRun = runs.find(r => r.id === alert.run_id)
+                      return (
+                        <div
+                          key={alert.id}
+                          className={`rounded-lg px-2.5 py-2 text-[11px] ${
+                            alert.status === 'pending'
+                              ? 'bg-secondary/50 border border-border'
+                              : 'bg-secondary/25 opacity-60'
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            {alert.severity === 'critical' ? (
+                              <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                            ) : alert.severity === 'warning' ? (
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                            ) : (
+                              <Bell className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-foreground line-clamp-2">{alert.message}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
+                                {alertRun?.alias || alertRun?.name || alert.run_id}
+                                {alert.status === 'resolved' && alert.response && ` • Response: ${alert.response}`}
+                              </p>
+                              {alert.status === 'pending' && alert.choices.length > 0 && onRespondToAlert && (
+                                <div className="flex gap-1 mt-1.5 flex-wrap">
+                                  {alert.choices.map((choice) => (
+                                    <Button
+                                      key={choice}
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-5 px-2 text-[10px]"
+                                      onClick={() => { void onRespondToAlert(alert.id, choice) }}
+                                    >
+                                      {choice}
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={`shrink-0 text-[8px] h-4 px-1 ${
+                                alert.severity === 'critical' ? 'border-destructive/50 text-destructive' :
+                                alert.severity === 'warning' ? 'border-amber-500/50 text-amber-500' :
+                                'border-blue-400/50 text-blue-400'
+                              }`}
+                            >
+                              {alert.severity}
+                            </Badge>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {sweepAlerts.length > 10 && (
+                      <p className="text-center text-[10px] text-muted-foreground py-1">
+                        +{sweepAlerts.length - 10} more alerts
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {selectedSweep.status === 'draft' ? (
                 <SweepArtifact config={selectedSweep.config} sweep={selectedSweep} isCollapsed={false} />
               ) : (

@@ -199,6 +199,10 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
 
 
+class SystemPromptUpdate(BaseModel):
+    system_prompt: str = ""
+
+
 # Run Models
 # Run State Machine: ready -> queued -> launching -> running -> finished/failed/stopped
 # - ready: Created but not submitted for execution
@@ -332,6 +336,13 @@ wild_loop_state: dict = {
 }
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
+
+active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
+
+STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS = 0.75
+STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS = 20
+STREAM_RUNTIME_RETENTION_SECONDS = 120.0
+
 _wandb_metrics_cache: Dict[str, dict] = {}
 
 LOSS_KEYS = ("loss", "train/loss", "train_loss", "training_loss")
@@ -347,6 +358,7 @@ IGNORED_METRIC_KEYS = set(STEP_KEYS) | {
     "_wall_time",
     "_timestamp_step",
 }
+
 
 CLUSTER_TYPE_VALUES = {
     "unknown",
@@ -399,6 +411,13 @@ def load_chat_state():
             with open(CHAT_DATA_FILE, "r") as f:
                 data = json.load(f)
                 chat_sessions = data.get("chat_sessions", {})
+                for session in chat_sessions.values():
+                    if not isinstance(session, dict):
+                        continue
+                    active_stream = session.get("active_stream")
+                    if isinstance(active_stream, dict) and active_stream.get("status") == "running":
+                        # Streaming workers are in-memory only; mark stale snapshots as interrupted on restart.
+                        active_stream["status"] = "interrupted"
         except Exception as e:
             logger.error(f"Error loading chat state: {e}")
 
@@ -1537,6 +1556,12 @@ class StreamPartsAccumulator:
         if event.get("type") == "session_status":
             self._flush_text_buffer()
 
+    def snapshot(self) -> list[dict[str, Any]]:
+        parts = list(self._parts)
+        if self._text_buffer and self._text_buffer.get("content"):
+            parts.append({k: v for k, v in self._text_buffer.items() if k != "source_id"})
+        return parts
+
     def finalize(self) -> list[dict[str, Any]]:
         self._flush_text_buffer()
         return list(self._parts)
@@ -1608,6 +1633,194 @@ class StreamPartsAccumulator:
             flushed_part = {k: v for k, v in self._text_buffer.items() if k != "source_id"}
             self._parts.append(flushed_part)
         self._text_buffer = None
+
+
+class ChatStreamRuntime:
+    """In-memory runtime state for a single in-flight assistant response."""
+
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.run_id = uuid.uuid4().hex[:12]
+        self.status = "running"
+        self.error: Optional[str] = None
+        self.started_at = time.time()
+        self.updated_at = self.started_at
+        self.full_text = ""
+        self.full_thinking = ""
+        self.parts_accumulator = StreamPartsAccumulator()
+        self.events: list[dict[str, Any]] = []
+        self.next_sequence = 1
+        self.last_persist_at = 0.0
+        self.last_persist_sequence = 0
+        self.subscribers: set[asyncio.Queue] = set()
+        self.lock = asyncio.Lock()
+        self.cleanup_task: Optional[asyncio.Task] = None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "status": self.status,
+            "sequence": max(0, self.next_sequence - 1),
+            "text": self.full_text,
+            "thinking": self.full_thinking,
+            "parts": self.parts_accumulator.snapshot(),
+            "error": self.error,
+            "started_at": self.started_at,
+            "updated_at": self.updated_at,
+        }
+
+
+def _public_stream_event(event: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in event.items() if not str(k).startswith("_")}
+
+
+def _persist_active_stream_snapshot(
+    session_id: str,
+    runtime: ChatStreamRuntime,
+    *,
+    force: bool = False,
+) -> None:
+    session = chat_sessions.get(session_id)
+    if not isinstance(session, dict):
+        return
+
+    now = time.time()
+    current_sequence = max(0, runtime.next_sequence - 1)
+    if not force:
+        if current_sequence == runtime.last_persist_sequence:
+            return
+        if (
+            current_sequence - runtime.last_persist_sequence < STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS
+            and now - runtime.last_persist_at < STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS
+        ):
+            return
+
+    session["active_stream"] = runtime.snapshot()
+    save_chat_state()
+    runtime.last_persist_at = now
+    runtime.last_persist_sequence = current_sequence
+
+
+async def _append_runtime_event(runtime: ChatStreamRuntime, event: dict[str, Any]) -> dict[str, Any]:
+    public_event = _public_stream_event(event)
+    runtime.parts_accumulator.consume(public_event)
+
+    if public_event.get("type") == "part_delta":
+        delta = public_event.get("delta")
+        if isinstance(delta, str):
+            if public_event.get("ptype") == "text":
+                runtime.full_text += delta
+            elif public_event.get("ptype") == "reasoning":
+                runtime.full_thinking += delta
+    elif public_event.get("type") == "error":
+        runtime.error = public_event.get("message") or "Unknown chat stream error"
+        runtime.status = "failed"
+    elif public_event.get("type") == "session_status" and public_event.get("status") == "idle":
+        if runtime.status == "running":
+            runtime.status = "completed"
+
+    runtime.updated_at = time.time()
+    async with runtime.lock:
+        seq_event = {"seq": runtime.next_sequence, **public_event}
+        runtime.next_sequence += 1
+        runtime.events.append(seq_event)
+        subscribers = list(runtime.subscribers)
+
+    for queue in subscribers:
+        try:
+            queue.put_nowait(seq_event)
+        except asyncio.QueueFull:
+            logger.warning("Dropping chat stream event for session %s due to full subscriber queue", runtime.session_id)
+
+    return seq_event
+
+
+async def _close_runtime_subscribers(runtime: ChatStreamRuntime) -> None:
+    async with runtime.lock:
+        subscribers = list(runtime.subscribers)
+        runtime.subscribers.clear()
+
+    for queue in subscribers:
+        try:
+            queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
+
+
+async def _expire_runtime_after(session_id: str, runtime: ChatStreamRuntime, delay_seconds: float) -> None:
+    try:
+        await asyncio.sleep(delay_seconds)
+    except asyncio.CancelledError:
+        return
+
+    if active_chat_streams.get(session_id) is runtime:
+        active_chat_streams.pop(session_id, None)
+
+
+async def _finalize_runtime(session_id: str, runtime: ChatStreamRuntime, *, retain: bool = True) -> None:
+    await _close_runtime_subscribers(runtime)
+    if runtime.cleanup_task and not runtime.cleanup_task.done():
+        runtime.cleanup_task.cancel()
+        runtime.cleanup_task = None
+
+    if not retain:
+        if active_chat_streams.get(session_id) is runtime:
+            active_chat_streams.pop(session_id, None)
+        return
+
+    runtime.cleanup_task = asyncio.create_task(
+        _expire_runtime_after(session_id, runtime, STREAM_RUNTIME_RETENTION_SECONDS)
+    )
+
+
+async def _stream_runtime_events(
+    session_id: str,
+    *,
+    from_seq: int = 1,
+    run_id: Optional[str] = None,
+) -> AsyncIterator[str]:
+    runtime = active_chat_streams.get(session_id)
+    if runtime is None:
+        yield json.dumps({"type": "session_status", "status": "idle"}) + "\n"
+        return
+
+    if run_id and runtime.run_id != run_id:
+        yield json.dumps({"type": "session_status", "status": "idle"}) + "\n"
+        return
+
+    from_seq = max(1, from_seq)
+    queue: asyncio.Queue = asyncio.Queue()
+    subscribed = False
+
+    async with runtime.lock:
+        backlog = [event for event in runtime.events if int(event.get("seq", 0)) >= from_seq]
+        done = runtime.status != "running"
+        if not done:
+            runtime.subscribers.add(queue)
+            subscribed = True
+
+    try:
+        for event in backlog:
+            yield json.dumps(event) + "\n"
+            if event.get("type") == "session_status" and event.get("status") == "idle":
+                return
+
+        if done:
+            return
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            if int(item.get("seq", 0)) < from_seq:
+                continue
+            yield json.dumps(item) + "\n"
+            if item.get("type") == "session_status" and item.get("status") == "idle":
+                break
+    finally:
+        if subscribed:
+            async with runtime.lock:
+                runtime.subscribers.discard(queue)
 
 
 async def run_opencode_session(chat_session_id: str, opencode_session_id: str, content: str) -> tuple[str, str, list]:
@@ -2107,7 +2320,8 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "title": title,
         "created_at": time.time(),
         "messages": [],
-        "opencode_session_id": None
+        "opencode_session_id": None,
+        "system_prompt": "",
     }
     save_chat_state()
     return {"id": session_id, "title": title, "created_at": chat_sessions[session_id]["created_at"], "message_count": 0}
@@ -2119,11 +2333,15 @@ async def get_session(session_id: str):
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     session = chat_sessions[session_id]
+    runtime = active_chat_streams.get(session_id)
+    active_stream = runtime.snapshot() if runtime and runtime.status == "running" else session.get("active_stream")
     return {
         "id": session_id,
         "title": session.get("title", "New Chat"),
         "created_at": session.get("created_at"),
-        "messages": session.get("messages", [])
+        "messages": session.get("messages", []),
+        "system_prompt": session.get("system_prompt", ""),
+        "active_stream": active_stream,
     }
 
 
@@ -2137,133 +2355,215 @@ async def delete_session(session_id: str):
     return {"message": "Session deleted"}
 
 
-@app.post("/chat")
-async def chat_endpoint(req: ChatRequest):
-    """Send a message and receive streaming response."""
-    session_id = req.session_id
-    
+@app.get("/sessions/{session_id}/system-prompt")
+async def get_system_prompt(session_id: str):
+    """Get the system prompt for a chat session."""
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+    return {"system_prompt": chat_sessions[session_id].get("system_prompt", "")}
+
+
+@app.put("/sessions/{session_id}/system-prompt")
+async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
+    """Update the system prompt for a chat session."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    chat_sessions[session_id]["system_prompt"] = req.system_prompt
+    save_chat_state()
+    return {"system_prompt": req.system_prompt}
+
+
+def _build_chat_prompt(session: dict, message: str, wild_mode: bool) -> str:
+    wild_mode_note = ""
+    if wild_mode:
+        # Build Ralph-style loop prompt
+        iteration = wild_loop_state.get("iteration", 0) + 1
+        goal = wild_loop_state.get("goal") or "No specific goal set"
+        max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+        custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
+
+        # Build experiment state summary
+        experiment_context = _build_experiment_context()
+
+        iter_display = f"{iteration}"
+        if max_iter:
+            iter_display += f" / {max_iter}"
+        else:
+            iter_display += " (unlimited)"
+
+        # Include sweep_id so the agent associates runs with this wild loop
+        sweep_id = wild_loop_state.get("sweep_id")
+        sweep_note = ""
+        if sweep_id:
+            sweep_note = (
+                f"\n## Active Wild Sweep\n"
+                f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
+                f"so they are tracked as part of this wild loop session.\n"
+            )
+
+        wild_mode_note = (
+            f"# Wild Loop — Iteration {iter_display}\n\n"
+            f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
+            f"## Your Goal\n{goal}\n\n"
+            f"{experiment_context}\n"
+            f"{sweep_note}"
+            f"## Instructions\n"
+            f"1. Read the current state of runs, sweeps, and alerts above\n"
+            f"2. Plan what work remains to achieve the goal\n"
+            f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
+            f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
+            f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
+            f"6. At the END of your response, output exactly ONE promise tag:\n"
+            f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
+            f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
+            f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
+            f"## Critical Rules\n"
+            f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
+            f"- Creating or launching runs is NOT completion — you must check their results\n"
+            f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
+            f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
+            f"- If stuck, try a different approach\n"
+            f"- The loop will continue until you succeed or are stopped\n"
+        )
+        if custom_cond:
+            wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
+        wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
+
+    content = f"{wild_mode_note}[USER] {message}"
+    session_system_prompt = str(session.get("system_prompt", "")).strip()
+    if session_system_prompt:
+        content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
+    return content
+
+
+def _log_background_chat_task(task: asyncio.Task) -> None:
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Failed to inspect background chat task")
+        return
+
+    if exc:
+        logger.error("Background chat worker failed: %s", exc, exc_info=(type(exc), exc, exc.__traceback__))
+
+
+async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime) -> None:
+    """Run the OpenCode stream for a chat session independent of HTTP clients."""
+    session_stop_flags.pop(session_id, None)
+    logger.debug("Starting background chat worker for session %s run %s", session_id, runtime.run_id)
+
+    try:
+        opencode_session_id = await get_opencode_session_for_chat(session_id)
+        async with httpx.AsyncClient(timeout=None) as client:
+            logger.debug("Sending prompt to OpenCode session %s", opencode_session_id)
+            logger.debug("Content: %s", content)
+            await send_prompt_to_opencode(client, opencode_session_id, content)
+            logger.debug("Sent prompt to OpenCode session %s", opencode_session_id)
+
+            async for event, _text_delta, _thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
+                if should_stop_session(session_id):
+                    runtime.status = "stopped"
+                    break
+
+                await _append_runtime_event(runtime, event)
+                _persist_active_stream_snapshot(session_id, runtime)
+
+        if should_stop_session(session_id):
+            runtime.status = "stopped"
+    except asyncio.CancelledError:
+        runtime.status = "stopped"
+        logger.info("Background chat worker cancelled for session %s", session_id)
+    except Exception as e:
+        runtime.status = "failed"
+        runtime.error = str(e)
+        logger.error("Chat worker failed for session %s: %s", session_id, e, exc_info=True)
+        await _append_runtime_event(runtime, {"type": "error", "message": str(e)})
+    finally:
+        parts = runtime.parts_accumulator.finalize()
+        if runtime.full_text or runtime.full_thinking or parts:
+            session = chat_sessions.get(session_id)
+            if isinstance(session, dict):
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": runtime.full_text.strip(),
+                    "thinking": runtime.full_thinking.strip() if runtime.full_thinking else None,
+                    "parts": parts if parts else None,
+                    "timestamp": time.time(),
+                }
+                session.setdefault("messages", []).append(assistant_msg)
+
+        session = chat_sessions.get(session_id)
+        if isinstance(session, dict):
+            session.pop("active_stream", None)
+        save_chat_state()
+
+        await _append_runtime_event(runtime, {"type": "session_status", "status": "idle"})
+        await _finalize_runtime(session_id, runtime)
+
+        active_chat_tasks.pop(session_id, None)
+        session_stop_flags.pop(session_id, None)
+        logger.debug("Background chat worker finished for session %s run %s", session_id, runtime.run_id)
+
+
+async def _start_chat_worker(session_id: str, content: str) -> ChatStreamRuntime:
+    existing = active_chat_streams.get(session_id)
+    if existing and existing.status == "running":
+        raise HTTPException(status_code=409, detail="Session already has an active response")
+    if existing:
+        await _finalize_runtime(session_id, existing, retain=False)
+
+    runtime = ChatStreamRuntime(session_id)
+    active_chat_streams[session_id] = runtime
+    _persist_active_stream_snapshot(session_id, runtime, force=True)
+
+    task = asyncio.create_task(_chat_worker(session_id, content, runtime))
+    active_chat_tasks[session_id] = task
+    task.add_done_callback(_log_background_chat_task)
+    return runtime
+
+
+@app.get("/sessions/{session_id}/stream")
+async def stream_session(session_id: str, from_seq: int = Query(1, ge=1), run_id: Optional[str] = Query(None)):
+    """Attach/re-attach to an in-flight chat stream with catch-up replay."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return StreamingResponse(
+        _stream_runtime_events(session_id, from_seq=from_seq, run_id=run_id),
+        media_type="application/x-ndjson",
+    )
+
+
+@app.post("/chat")
+async def chat_endpoint(req: ChatRequest):
+    """Send a message, start background generation, and attach to the stream."""
+    session_id = req.session_id
+
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    existing_runtime = active_chat_streams.get(session_id)
+    if existing_runtime and existing_runtime.status == "running":
+        raise HTTPException(status_code=409, detail="Session already has an active response")
+
     session = chat_sessions[session_id]
     messages = session.get("messages", [])
-    
+
     user_msg = {"role": "user", "content": req.message, "timestamp": time.time()}
     messages.append(user_msg)
     session["messages"] = messages
-    
+
     if session.get("title") == "New Chat" and len(messages) == 1:
         session["title"] = req.message[:50] + ("..." if len(req.message) > 50 else "")
-    
+
     save_chat_state()
 
-    async def response_generator():
-        session_stop_flags.pop(session_id, None)
-        active_chat_tasks[session_id] = asyncio.current_task()
-        try:
-            opencode_session_id = await get_opencode_session_for_chat(session_id)
-            
-            wild_mode_note = ""
-            if req.wild_mode:
-                # Build Ralph-style loop prompt
-                iteration = wild_loop_state.get("iteration", 0) + 1
-                goal = wild_loop_state.get("goal") or "No specific goal set"
-                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
-                custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
-                
-                # Build experiment state summary
-                experiment_context = _build_experiment_context()
-                
-                iter_display = f"{iteration}"
-                if max_iter:
-                    iter_display += f" / {max_iter}"
-                else:
-                    iter_display += " (unlimited)"
-                
-                # Include sweep_id so the agent associates runs with this wild loop
-                sweep_id = wild_loop_state.get("sweep_id")
-                sweep_note = ""
-                if sweep_id:
-                    sweep_note = (
-                        f"\n## Active Wild Sweep\n"
-                        f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
-                        f"so they are tracked as part of this wild loop session.\n"
-                    )
-
-                wild_mode_note = (
-                    f"# Wild Loop — Iteration {iter_display}\n\n"
-                    f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
-                    f"## Your Goal\n{goal}\n\n"
-                    f"{experiment_context}\n"
-                    f"{sweep_note}"
-                    f"## Instructions\n"
-                    f"1. Read the current state of runs, sweeps, and alerts above\n"
-                    f"2. Plan what work remains to achieve the goal\n"
-                    f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
-                    f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
-                    f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
-                    f"6. At the END of your response, output exactly ONE promise tag:\n"
-                    f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
-                    f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
-                    f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
-                    f"## Critical Rules\n"
-                    f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
-                    f"- Creating or launching runs is NOT completion — you must check their results\n"
-                    f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
-                    f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
-                    f"- If stuck, try a different approach\n"
-                    f"- The loop will continue until you succeed or are stopped\n"
-                )
-                if custom_cond:
-                    wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
-                wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
-            content = f"{wild_mode_note}[USER] {req.message}"
-
-            async with httpx.AsyncClient(timeout=None) as client:
-                logger.debug("Sending prompt to OpenCode session %s", opencode_session_id)
-                logger.debug("Content: %s", content)
-                await send_prompt_to_opencode(client, opencode_session_id, content)
-                logger.debug("Sent prompt to OpenCode session")
-                
-                full_text = ""
-                full_thinking = ""
-                parts_accumulator = StreamPartsAccumulator()
-                
-                logger.debug("Start streaming events from OpenCode session")
-                async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
-                    if should_stop_session(session_id):
-                        break
-                    full_text += text_delta
-                    full_thinking += thinking_delta
-                    parts_accumulator.consume(event)
-                    
-                    event_to_send = {k: v for k, v in event.items() if not k.startswith("_")}
-                    logger.debug("Event: %s", event_to_send)
-                    yield json.dumps(event_to_send) + "\n"
-
-                logger.debug("End streaming events from OpenCode session")
-                parts = parts_accumulator.finalize()
-                if full_text or full_thinking or parts:
-                    assistant_msg = {
-                        "role": "assistant",
-                        "content": full_text.strip(),
-                        "thinking": full_thinking.strip() if full_thinking else None,
-                        "parts": parts if parts else None,  # NEW: store ordered parts
-                        "timestamp": time.time()
-                    }
-                    session["messages"].append(assistant_msg)
-                    save_chat_state()
-
-        except asyncio.CancelledError:
-            logger.info("Chat stream cancelled for session %s", session_id)
-        except Exception as e:
-            logger.error(f"Chat error: {e}", exc_info=True)
-            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
-        finally:
-            active_chat_tasks.pop(session_id, None)
-            session_stop_flags.pop(session_id, None)
-
-    return StreamingResponse(response_generator(), media_type="application/x-ndjson")
+    content = _build_chat_prompt(session, req.message, req.wild_mode)
+    runtime = await _start_chat_worker(session_id, content)
+    return StreamingResponse(
+        _stream_runtime_events(session_id, from_seq=1, run_id=runtime.run_id),
+        media_type="application/x-ndjson",
+    )
 
 
 @app.post("/sessions/{session_id}/stop")
@@ -2273,8 +2573,14 @@ async def stop_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     session_stop_flags[session_id] = True
+    runtime = active_chat_streams.get(session_id)
+    if runtime and runtime.status == "running":
+        runtime.status = "stopped"
+        _persist_active_stream_snapshot(session_id, runtime, force=True)
+
     task = active_chat_tasks.get(session_id)
-    if task and not task.done():
+    # For legacy/auto-alert tasks we still cancel directly. Chat workers stop via flag + abort call below.
+    if task and not task.done() and runtime is None:
         task.cancel()
 
     # Also abort the OpenCode session so the model actually stops generating

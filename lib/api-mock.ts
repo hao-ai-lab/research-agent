@@ -5,6 +5,7 @@
 
 import type {
     ChatSession,
+    ActiveSessionStream,
     SessionWithMessages,
     StreamEvent,
     Run,
@@ -32,7 +33,7 @@ import type {
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
+export type { ChatSession, ActiveSessionStream, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -544,6 +545,19 @@ export async function* streamChat(
     })
     session.message_count++
 
+    yield { type: 'session_status', status: 'idle' }
+}
+
+export async function* streamSession(
+    _sessionId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _fromSeq: number = 1,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _signal?: AbortSignal,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _runId?: string
+): AsyncGenerator<StreamEvent, void, unknown> {
+    await delay(50)
     yield { type: 'session_status', status: 'idle' }
 }
 

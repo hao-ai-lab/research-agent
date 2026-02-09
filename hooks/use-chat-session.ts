@@ -7,9 +7,11 @@ import {
     getSession,
     deleteSession,
     streamChat,
+    streamSession,
     checkApiHealth,
     stopSession,
     type ChatSession,
+    type ActiveSessionStream,
     type ChatMessageData,
     type StreamEvent,
 } from '@/lib/api-client'
@@ -281,6 +283,112 @@ function upsertStreamingDeltaPart(
     return [...parts, { id, sourceId, type, content: delta }]
 }
 
+function baseSourceId(partId: string): string {
+    const hashIndex = partId.indexOf('#')
+    return hashIndex >= 0 ? partId.slice(0, hashIndex) : partId
+}
+
+function normalizeActiveStreamParts(parts: MessagePartData[] | null | undefined): MessagePartData[] {
+    if (!parts || parts.length === 0) return []
+    const normalized = normalizeMessage({
+        role: 'assistant',
+        content: '',
+        timestamp: 0,
+        parts,
+    })
+    return normalized.parts || []
+}
+
+function messagePartToStreamingPart(part: MessagePartData): StreamingPart {
+    const sourceId = baseSourceId(part.id)
+    if (part.type === 'tool') {
+        const details = extractToolDetails({
+            state: part.tool_state_raw,
+            toolInput: part.tool_input,
+            toolOutput: part.tool_output,
+            toolStartedAt: part.tool_started_at,
+            toolEndedAt: part.tool_ended_at,
+            toolDurationMs: part.tool_duration_ms,
+        })
+        return {
+            id: part.id,
+            sourceId,
+            type: 'tool',
+            content: '',
+            toolName: part.tool_name,
+            toolState: normalizeToolStatus(part.tool_state ?? part.tool_state_raw),
+            toolStateRaw: part.tool_state_raw,
+            toolInput: details.toolInput,
+            toolOutput: details.toolOutput,
+            toolStartedAt: details.toolStartedAt,
+            toolEndedAt: details.toolEndedAt,
+            toolDurationMs: details.toolDurationMs,
+            toolDescription: details.description,
+        }
+    }
+
+    return {
+        id: part.id,
+        sourceId,
+        type: part.type === 'thinking' ? 'thinking' : 'text',
+        content: part.content || '',
+    }
+}
+
+function buildToolCallsFromStreamingParts(parts: StreamingPart[]): ToolCallState[] {
+    const byId = new Map<string, ToolCallState>()
+    for (const part of parts) {
+        if (part.type !== 'tool') continue
+        const toolId = part.sourceId || part.id
+        byId.set(toolId, {
+            id: toolId,
+            name: part.toolName,
+            description: part.toolDescription,
+            state: part.toolState || 'pending',
+            input: part.toolInput,
+            output: part.toolOutput,
+            startedAt: part.toolStartedAt,
+            endedAt: part.toolEndedAt,
+            durationMs: part.toolDurationMs,
+        })
+    }
+    return Array.from(byId.values())
+}
+
+function buildStreamingStateFromActiveStream(activeStream: ActiveSessionStream): StreamingState {
+    const normalizedParts = normalizeActiveStreamParts(activeStream.parts)
+    const parts = normalizedParts.map(messagePartToStreamingPart)
+    const textContent = typeof activeStream.text === 'string' ? activeStream.text : ''
+    const thinkingContent = typeof activeStream.thinking === 'string' ? activeStream.thinking : ''
+
+    if (parts.length === 0) {
+        if (thinkingContent) {
+            parts.push({
+                id: 'thinking-replay',
+                sourceId: 'thinking-replay',
+                type: 'thinking',
+                content: thinkingContent,
+            })
+        }
+        if (textContent) {
+            parts.push({
+                id: 'text-replay',
+                sourceId: 'text-replay',
+                type: 'text',
+                content: textContent,
+            })
+        }
+    }
+
+    return {
+        isStreaming: activeStream.status === 'running',
+        parts,
+        thinkingContent,
+        textContent,
+        toolCalls: buildToolCallsFromStreamingParts(parts),
+    }
+}
+
 export function useChatSession(): UseChatSessionResult {
     // Connection state
     const [isConnected, setIsConnected] = useState(false)
@@ -306,6 +414,124 @@ export function useChatSession(): UseChatSessionResult {
     // Get current session object
     const currentSession = sessions.find(s => s.id === currentSessionId) || null
 
+    const processStreamEvent = useCallback((event: StreamEvent) => {
+        const partId = event.id
+
+        if (event.type === 'part_delta') {
+            const delta = event.delta || ''
+            if (!delta) {
+                return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false }
+            }
+            const partType = event.ptype === 'reasoning' ? 'thinking' : 'text'
+
+            setStreamingState(prev => {
+                const legacyUpdate = event.ptype === 'text'
+                    ? { textContent: prev.textContent + delta }
+                    : event.ptype === 'reasoning'
+                    ? { thinkingContent: prev.thinkingContent + delta }
+                    : {}
+
+                return {
+                    ...prev,
+                    ...legacyUpdate,
+                    parts: upsertStreamingDeltaPart(prev.parts, partId, partType, delta),
+                }
+            })
+
+            return {
+                textDelta: event.ptype === 'text' ? delta : '',
+                thinkingDelta: event.ptype === 'reasoning' ? delta : '',
+                sawToolPart: false,
+                done: false,
+            }
+        }
+
+        if (event.type === 'part_update' && event.ptype === 'tool') {
+            const stateValue = normalizeToolStatus(event.tool_status ?? event.state)
+            const details = extractToolDetails({
+                state: event.state,
+                toolInput: event.tool_input,
+                toolOutput: event.tool_output,
+                toolStartedAt: event.tool_started_at,
+                toolEndedAt: event.tool_ended_at,
+                toolDurationMs: event.tool_duration_ms,
+            })
+
+            setStreamingState(prev => {
+                const toolId = event.id || `tool-${prev.toolCalls.length}`
+                const existingToolIndex = prev.toolCalls.findIndex(t => t.id === toolId)
+                const toolState: ToolCallState = {
+                    id: toolId,
+                    name: event.name,
+                    description: details.description,
+                    state: stateValue,
+                    input: details.toolInput,
+                    output: details.toolOutput,
+                    startedAt: details.toolStartedAt,
+                    endedAt: details.toolEndedAt,
+                    durationMs: details.toolDurationMs,
+                }
+                const newToolCalls = existingToolIndex >= 0
+                    ? prev.toolCalls.map((t, i) => i === existingToolIndex ? toolState : t)
+                    : [...prev.toolCalls, toolState]
+
+                const sourceId = partId || toolId
+                const existingPartIndex = prev.parts.findIndex(p => p.type === 'tool' && (p.sourceId ?? p.id) === sourceId)
+                if (existingPartIndex >= 0) {
+                    const updatedParts = [...prev.parts]
+                    updatedParts[existingPartIndex] = {
+                        ...updatedParts[existingPartIndex],
+                        toolState: stateValue,
+                        toolStateRaw: event.state,
+                        toolName: event.name || updatedParts[existingPartIndex].toolName,
+                        toolDescription: details.description || updatedParts[existingPartIndex].toolDescription,
+                        toolInput: details.toolInput,
+                        toolOutput: details.toolOutput,
+                        toolStartedAt: details.toolStartedAt,
+                        toolEndedAt: details.toolEndedAt,
+                        toolDurationMs: details.toolDurationMs,
+                    }
+                    return { ...prev, toolCalls: newToolCalls, parts: updatedParts }
+                }
+
+                const segmentCount = prev.parts.filter((p) => (p.sourceId ?? p.id) === sourceId && p.type === 'tool').length
+                const partSegmentId = segmentCount === 0 ? sourceId : `${sourceId}#${segmentCount}`
+                return {
+                    ...prev,
+                    toolCalls: newToolCalls,
+                    parts: [...prev.parts, {
+                        id: partSegmentId,
+                        sourceId,
+                        type: 'tool' as const,
+                        content: '',
+                        toolName: event.name,
+                        toolDescription: details.description,
+                        toolState: stateValue,
+                        toolStateRaw: event.state,
+                        toolInput: details.toolInput,
+                        toolOutput: details.toolOutput,
+                        toolStartedAt: details.toolStartedAt,
+                        toolEndedAt: details.toolEndedAt,
+                        toolDurationMs: details.toolDurationMs,
+                    }],
+                }
+            })
+
+            return { textDelta: '', thinkingDelta: '', sawToolPart: true, done: false }
+        }
+
+        if (event.type === 'error') {
+            setError(event.message || 'Stream error')
+            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true }
+        }
+
+        if (event.type === 'session_status' && event.status === 'idle') {
+            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true }
+        }
+
+        return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false }
+    }, [])
+
     // Check API connection on mount
     useEffect(() => {
         const checkConnection = async () => {
@@ -330,6 +556,55 @@ export function useChatSession(): UseChatSessionResult {
             setError(err instanceof Error ? err.message : 'Failed to load sessions')
         }
     }, [archivedSessionIds])
+
+    const attachToExistingStream = useCallback((sessionId: string, activeStream: ActiveSessionStream) => {
+        if (activeStream.status !== 'running') {
+            return
+        }
+
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+        }
+
+        const snapshotState = buildStreamingStateFromActiveStream(activeStream)
+        setStreamingState(snapshotState)
+
+        const controller = new AbortController()
+        abortControllerRef.current = controller
+
+        void (async () => {
+            let finalText = snapshotState.textContent
+            let finalThinking = snapshotState.thinkingContent
+            let sawToolPart = snapshotState.toolCalls.length > 0
+
+            try {
+                const fromSeq = Math.max(1, Math.floor((activeStream.sequence || 0) + 1))
+                for await (const event of streamSession(sessionId, fromSeq, controller.signal, activeStream.run_id)) {
+                    const update = processStreamEvent(event)
+                    finalText += update.textDelta
+                    finalThinking += update.thinkingDelta
+                    if (update.sawToolPart) sawToolPart = true
+                    if (update.done) break
+                }
+
+                if (finalText || finalThinking || sawToolPart) {
+                    const sessionData = await getSession(sessionId)
+                    setMessages(sessionData.messages.map(normalizeMessage))
+                    await refreshSessions()
+                }
+            } catch (err) {
+                if (!(err instanceof DOMException && err.name === 'AbortError')) {
+                    console.error('Failed to resume session stream:', err)
+                    setError(err instanceof Error ? err.message : 'Failed to resume session stream')
+                }
+            } finally {
+                if (abortControllerRef.current === controller) {
+                    abortControllerRef.current = null
+                    setStreamingState(initialStreamingState)
+                }
+            }
+        })()
+    }, [processStreamEvent, refreshSessions])
 
     // Load sessions on mount (after connection check)
     useEffect(() => {
@@ -383,14 +658,19 @@ export function useChatSession(): UseChatSessionResult {
             const sessionData = await getSession(sessionId)
             setCurrentSessionId(sessionId)
             setMessages(sessionData.messages.map(normalizeMessage))
-            setStreamingState(initialStreamingState)
+            const activeStream = sessionData.active_stream
+            if (activeStream && activeStream.status === 'running') {
+                attachToExistingStream(sessionId, activeStream)
+            } else {
+                setStreamingState(initialStreamingState)
+            }
         } catch (err) {
             console.error('Failed to select session:', err)
             setError(err instanceof Error ? err.message : 'Failed to load session')
         } finally {
             setIsLoading(false)
         }
-    }, [archivedSessionIds])
+    }, [archivedSessionIds, attachToExistingStream])
 
     // Delete a session
     const removeSession = useCallback(async (sessionId: string) => {
@@ -472,6 +752,7 @@ export function useChatSession(): UseChatSessionResult {
         let finalText = ''
         let finalThinking = ''
         let sawToolPart = false
+        let streamController: AbortController | null = null
 
         try {
             setError(null)
@@ -494,7 +775,8 @@ export function useChatSession(): UseChatSessionResult {
             })
 
             // Create abort controller
-            abortControllerRef.current = new AbortController()
+            streamController = new AbortController()
+            abortControllerRef.current = streamController
 
             // Stream the response
             const wildMode = mode === 'wild'
@@ -506,125 +788,26 @@ export function useChatSession(): UseChatSessionResult {
                 const elapsed = Date.now() - lastEventTime
                 if (elapsed > 60_000) {
                     console.warn(`[chat-session] Stream inactivity timeout (${Math.round(elapsed/1000)}s), aborting`)
-                    abortControllerRef.current?.abort()
+                    streamController?.abort()
                 }
             }, 5_000)
 
             try {
-            for await (const event of streamChat(targetSessionId, content, wildMode, abortControllerRef.current.signal)) {
+            for await (const event of streamChat(targetSessionId, content, wildMode, streamController!.signal)) {
                 lastEventTime = Date.now()
-                const partId = event.id
-                
+
                 // Debug logging for stream events
                 if (event.type === 'session_status' || event.type === 'error') {
                     console.log(`[chat-session] Stream event: ${event.type}`, event)
                 }
 
-                if (event.type === 'part_delta') {
-                    const delta = event.delta || ''
-                    const partType = event.ptype === 'reasoning' ? 'thinking' : 'text'
-
-                    // Update legacy fields
-                    if (event.ptype === 'text') {
-                        finalText += delta
-                    } else if (event.ptype === 'reasoning') {
-                        finalThinking += delta
-                    }
-
-                    setStreamingState(prev => {
-                        // Update legacy fields
-                        const legacyUpdate = event.ptype === 'text'
-                            ? { textContent: prev.textContent + delta }
-                            : event.ptype === 'reasoning'
-                            ? { thinkingContent: prev.thinkingContent + delta }
-                            : {}
-
-                        return {
-                            ...prev,
-                            ...legacyUpdate,
-                            parts: upsertStreamingDeltaPart(prev.parts, partId, partType, delta),
-                        }
-                    })
-                } else if (event.type === 'part_update' && event.ptype === 'tool') {
+                const update = processStreamEvent(event)
+                finalText += update.textDelta
+                finalThinking += update.thinkingDelta
+                if (update.sawToolPart) {
                     sawToolPart = true
-                    const stateValue = normalizeToolStatus(event.tool_status ?? event.state)
-                    const details = extractToolDetails({
-                        state: event.state,
-                        toolInput: event.tool_input,
-                        toolOutput: event.tool_output,
-                        toolStartedAt: event.tool_started_at,
-                        toolEndedAt: event.tool_ended_at,
-                        toolDurationMs: event.tool_duration_ms,
-                    })
-
-                    setStreamingState(prev => {
-                        // Update legacy toolCalls
-                        const toolId = event.id || `tool-${prev.toolCalls.length}`
-                        const existingToolIndex = prev.toolCalls.findIndex(t => t.id === toolId)
-                        const toolState: ToolCallState = {
-                            id: toolId,
-                            name: event.name,
-                            description: details.description,
-                            state: stateValue,
-                            input: details.toolInput,
-                            output: details.toolOutput,
-                            startedAt: details.toolStartedAt,
-                            endedAt: details.toolEndedAt,
-                            durationMs: details.toolDurationMs,
-                        }
-                        const newToolCalls = existingToolIndex >= 0
-                            ? prev.toolCalls.map((t, i) => i === existingToolIndex ? toolState : t)
-                            : [...prev.toolCalls, toolState]
-
-                        // Update parts array
-                        const sourceId = partId || toolId
-                        const existingPartIndex = prev.parts.findIndex(p => p.type === 'tool' && (p.sourceId ?? p.id) === sourceId)
-                        if (existingPartIndex >= 0) {
-                            // Update existing tool part
-                            const updatedParts = [...prev.parts]
-                            updatedParts[existingPartIndex] = {
-                                ...updatedParts[existingPartIndex],
-                                toolState: stateValue,
-                                toolStateRaw: event.state,
-                                toolName: event.name || updatedParts[existingPartIndex].toolName,
-                                toolDescription: details.description || updatedParts[existingPartIndex].toolDescription,
-                                toolInput: details.toolInput,
-                                toolOutput: details.toolOutput,
-                                toolStartedAt: details.toolStartedAt,
-                                toolEndedAt: details.toolEndedAt,
-                                toolDurationMs: details.toolDurationMs,
-                            }
-                            return { ...prev, toolCalls: newToolCalls, parts: updatedParts }
-                        } else {
-                            // Create new tool part
-                            const segmentCount = prev.parts.filter((p) => (p.sourceId ?? p.id) === sourceId && p.type === 'tool').length
-                            const partSegmentId = segmentCount === 0 ? sourceId : `${sourceId}#${segmentCount}`
-                            return {
-                                ...prev,
-                                toolCalls: newToolCalls,
-                                parts: [...prev.parts, {
-                                    id: partSegmentId,
-                                    sourceId,
-                                    type: 'tool' as const,
-                                    content: '',
-                                    toolName: event.name,
-                                    toolDescription: details.description,
-                                    toolState: stateValue,
-                                    toolStateRaw: event.state,
-                                    toolInput: details.toolInput,
-                                    toolOutput: details.toolOutput,
-                                    toolStartedAt: details.toolStartedAt,
-                                    toolEndedAt: details.toolEndedAt,
-                                    toolDurationMs: details.toolDurationMs,
-                                }],
-                            }
-                        }
-                    })
-                } else if (event.type === 'session_status' && event.status === 'idle') {
-                    // Stream complete
-                    break
-                } else if (event.type === 'error') {
-                    setError(event.message || 'Stream error')
+                }
+                if (update.done) {
                     break
                 }
             }
@@ -653,10 +836,12 @@ export function useChatSession(): UseChatSessionResult {
                 setError(err instanceof Error ? err.message : 'Failed to send message')
             }
         } finally {
-            setStreamingState(initialStreamingState)
-            abortControllerRef.current = null
+            if (streamController && abortControllerRef.current === streamController) {
+                abortControllerRef.current = null
+                setStreamingState(initialStreamingState)
+            }
         }
-    }, [currentSessionId, streamingState.isStreaming, refreshSessions])
+    }, [currentSessionId, streamingState.isStreaming, refreshSessions, processStreamEvent])
 
     const stopStreaming = useCallback(async () => {
         if (abortControllerRef.current) {

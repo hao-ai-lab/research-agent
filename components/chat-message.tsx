@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2 } from 'lucide-react'
 import {
   Collapsible,
@@ -19,20 +19,26 @@ import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } 
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
 import type { ExperimentRun } from '@/lib/types'
+import type { Alert } from '@/lib/api-client'
 import {
   REFERENCE_TYPE_BACKGROUND_MAP,
   REFERENCE_TYPE_COLOR_MAP,
   type ReferenceTokenType,
 } from '@/lib/reference-token-colors'
+import { extractContextReferences } from '@/lib/extract-context-references'
+import { ContextReferencesBar } from './context-references-bar'
 
 interface ChatMessageProps {
   message: ChatMessageType
   collapseArtifacts?: boolean
   sweeps?: Sweep[]
   runs?: ExperimentRun[]
+  alerts?: Alert[]
   onEditSweep?: (config: SweepConfig) => void
   onLaunchSweep?: (config: SweepConfig) => void
   onRunClick?: (run: ExperimentRun) => void
+  /** Content of the user message that prompted this assistant response (for context extraction) */
+  previousUserContent?: string
 }
 
 export function ChatMessage({ 
@@ -40,13 +46,27 @@ export function ChatMessage({
   collapseArtifacts = false,
   sweeps = [],
   runs = [],
+  alerts = [],
   onEditSweep,
   onLaunchSweep,
   onRunClick,
+  previousUserContent,
 }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
   const isUser = message.role === 'user'
+
+  // Extract context references from the current round (user question + assistant answer)
+  const contextReferences = useMemo(() => {
+    if (isUser) return []
+    // Gather text from all parts, plus the main content
+    const partTexts = (message.parts || []).filter(p => p.type === 'text').map(p => p.content)
+    return extractContextReferences(
+      previousUserContent,
+      message.content,
+      ...partTexts,
+    )
+  }, [isUser, message.content, message.parts, previousUserContent])
 
   const formatDateTime = (date: Date) => {
     const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
@@ -360,6 +380,19 @@ export function ChatMessage({
           <div className="px-1 py-1 text-base leading-relaxed">
             {renderMarkdown(message.content)}
           </div>
+
+          {/* Context references bar */}
+          {contextReferences.length > 0 && (
+            <ContextReferencesBar
+              references={contextReferences}
+              sweeps={sweeps}
+              runs={runs}
+              alerts={alerts}
+              onEditSweep={onEditSweep}
+              onLaunchSweep={onLaunchSweep}
+              onRunClick={onRunClick}
+            />
+          )}
 
           <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
             {formatDateTime(message.timestamp)}

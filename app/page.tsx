@@ -104,7 +104,7 @@ export default function ResearchChat() {
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
   // API configuration for auth/connection check
-  const { useMock, authToken, testConnection } = useApiConfig()
+  const { useMock, apiUrl, authToken, testConnection } = useApiConfig()
 
   useEffect(() => {
     const storedWidth = window.localStorage.getItem(STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH)
@@ -496,7 +496,7 @@ export default function ResearchChat() {
       setActiveTab('chat')
       setChatDraftInsert({
         id: Date.now(),
-        text: `@sweep:${draftSweep.id} Improve this sweep before launch. Optimize search space, metrics, and stop conditions.`,
+        text: `@sweep:${draftSweep.id} You goal is to improve this sweep before we launch it. Optimize search space, metrics, and stop conditions. Do not change the name of the sweep. Use the \`/sweeps\` endpoint to get and edit the sweep information and \`/runs\` endpoint to create runs. The server base url is ${apiUrl}. IMPORTANT: All API endpoints require authentication. You MUST include the header \`X-Auth-Token\` in every request. The token should be taken from environment variable \`RESEARCH_AGENT_USER_AUTH_TOKEN\`.`,
       })
       setShowSweepForm(false)
       setEditingSweepConfig(null)
@@ -669,6 +669,7 @@ export default function ResearchChat() {
                 onDetectCluster={detectClusterSetup}
                 onUpdateCluster={updateClusterSetup}
                 onNavigateToCharts={() => handleTabChange('charts')}
+                onRespondToAlert={async (alertId, choice) => { await respondAlert(alertId, choice) }}
               />
             )}
             {activeTab === 'events' && (
