@@ -935,6 +935,38 @@ export function RunsView({
   const SweepItem = ({ sweep }: { sweep: Sweep }) => {
     const isDraft = sweep.status === 'draft'
     const isExpanded = expandedSweepIds.has(sweep.id)
+    const canStart = sweep.status === 'draft' || sweep.status === 'pending'
+    const canStop = sweep.status === 'running'
+    const isBusy = sweepActionBusy === sweep.id
+    const sweepRunningRuns = canStop ? runs.filter(r => sweep.runIds.includes(r.id) && r.status === 'running') : []
+
+    const handleStartSweepItem = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      setSweepActionBusy(sweep.id)
+      try {
+        const parallel = Math.max(1, sweep.config.parallelRuns || 1)
+        await apiStartSweep(sweep.id, parallel)
+        await onRefresh?.()
+      } catch (err) {
+        console.error('Failed to start sweep:', err)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
+
+    const handleStopSweepItem = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!onStopRun) return
+      setSweepActionBusy(sweep.id)
+      try {
+        await Promise.allSettled(sweepRunningRuns.map(r => onStopRun(r.id)))
+        await onRefresh?.()
+      } catch (err) {
+        console.error('Failed to stop sweep runs:', err)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
 
     return (
       <div
@@ -961,6 +993,28 @@ export function RunsView({
             </p>
             <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
           </div>
+          {canStart && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-6 w-6 shrink-0 text-green-600 border-green-500/40 hover:bg-green-500/10 dark:text-green-400"
+              onClick={(e) => { void handleStartSweepItem(e) }}
+              disabled={isBusy}
+            >
+              {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            </Button>
+          )}
+          {canStop && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-6 w-6 shrink-0 text-destructive border-destructive/40 hover:bg-destructive/10"
+              onClick={(e) => { void handleStopSweepItem(e) }}
+              disabled={isBusy}
+            >
+              {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+            </Button>
+          )}
           <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusBadgeClass(sweep.status)}`}>
             {sweep.status}
           </Badge>
