@@ -53,7 +53,16 @@ export default function ContextualChatPage() {
   const { runs } = useRuns()
   const { alerts } = useAlerts()
   const chatSession = useChatSession()
-  const { sessions, messages, createNewSession, selectSession, archiveSession } = chatSession
+  const {
+    sessions,
+    savedSessionIds,
+    messages,
+    createNewSession,
+    selectSession,
+    saveSession,
+    unsaveSession,
+    archiveSession,
+  } = chatSession
 
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [chatMode, setChatMode] = useState<ChatMode>('agent')
@@ -174,6 +183,7 @@ export default function ContextualChatPage() {
           minWidth={DESKTOP_SIDEBAR_MIN_WIDTH}
           maxWidth={DESKTOP_SIDEBAR_MAX_WIDTH}
           sessions={sessions}
+          savedSessionIds={savedSessionIds}
           runs={runs}
           sweeps={uiSweeps}
           pendingAlertsByRun={pendingAlertsByRun}
@@ -183,6 +193,12 @@ export default function ContextualChatPage() {
           }}
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
+          }}
+          onSaveSession={async (sessionId) => {
+            await saveSession(sessionId)
+          }}
+          onUnsaveSession={async (sessionId) => {
+            await unsaveSession(sessionId)
           }}
           onArchiveSession={async (sessionId) => {
             await archiveSession(sessionId)

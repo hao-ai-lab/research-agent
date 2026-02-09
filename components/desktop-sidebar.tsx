@@ -4,15 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import {
   AlertCircle,
   AlertTriangle,
+  AtSign,
   Archive,
   CheckCircle2,
   Clock3,
   ChevronsUpDown,
+  Ellipsis,
   FlaskConical,
   PanelLeftClose,
   Play,
   Plus,
   Settings,
+  Star,
   XCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -44,12 +47,15 @@ interface DesktopSidebarProps {
   minWidth?: number
   maxWidth?: number
   sessions: ChatSession[]
+  savedSessionIds?: string[]
   runs: ExperimentRun[]
   sweeps: Sweep[]
   pendingAlertsByRun?: Record<string, number>
   onTabChange: (tab: HomeTab | 'contextual') => void
   onNewChat: () => Promise<void> | void
   onSelectSession: (sessionId: string) => Promise<void> | void
+  onSaveSession?: (sessionId: string) => Promise<void> | void
+  onUnsaveSession?: (sessionId: string) => Promise<void> | void
   onArchiveSession?: (sessionId: string) => Promise<void> | void
   onNavigateToRun: (runId: string) => void
   onInsertReference: (text: string) => void
@@ -100,12 +106,15 @@ export function DesktopSidebar({
   minWidth = 240,
   maxWidth = 520,
   sessions,
+  savedSessionIds = [],
   runs,
   sweeps,
   pendingAlertsByRun = {},
   onTabChange,
   onNewChat,
   onSelectSession,
+  onSaveSession,
+  onUnsaveSession,
   onArchiveSession,
   onNavigateToRun,
   onInsertReference,
@@ -157,9 +166,17 @@ export function DesktopSidebar({
   )
   const { useMock: isDemoMode } = useApiConfig()
   const [isResizing, setIsResizing] = useState(false)
-  const [chatEditEnabled, setChatEditEnabled] = useState(false)
   const resizeStartXRef = useRef(0)
   const resizeStartWidthRef = useRef(width)
+  const savedSessionIdSet = useMemo(() => new Set(savedSessionIds), [savedSessionIds])
+  const savedSessions = useMemo(
+    () => sessions.filter((session) => savedSessionIdSet.has(session.id)).slice(0, 10),
+    [sessions, savedSessionIdSet]
+  )
+  const recentSessions = useMemo(
+    () => sessions.filter((session) => !savedSessionIdSet.has(session.id)).slice(0, 10),
+    [sessions, savedSessionIdSet]
+  )
 
   const handleResizeStart = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     if (hidden) return
@@ -197,11 +214,6 @@ export function DesktopSidebar({
       document.body.style.userSelect = ''
     }
   }, [isResizing, maxWidth, minWidth, onResizeEnd, onWidthChange])
-
-  useEffect(() => {
-    if (!isIconRail) return
-    setChatEditEnabled(false)
-  }, [isIconRail])
 
   return (
     <aside
@@ -278,22 +290,81 @@ export function DesktopSidebar({
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Chats
+                  Saved
                 </p>
-                {onArchiveSession ? (
-                  <button
-                    type="button"
-                    onClick={() => setChatEditEnabled((prev) => !prev)}
-                    className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {chatEditEnabled ? 'Done' : 'Edit'}
-                  </button>
-                ) : (
-                  <span className="text-[10px] text-muted-foreground">Edit</span>
-                )}
               </div>
               <div className="space-y-1">
-                {sessions.slice(0, 10).map((session) => (
+                {savedSessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTabChange('chat')
+                        void onSelectSession(session.id)
+                      }}
+                      className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                    >
+                      <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
+                        <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                        <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                      </span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                        {formatRelativeTime(new Date(session.created_at * 1000))}
+                      </span>
+                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                          title="Chat options"
+                        >
+                          <Ellipsis className="h-3.5 w-3.5" />
+                          <span className="sr-only">Chat options</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onSelect={() => void onUnsaveSession?.(session.id)}>
+                          <Star className="mr-2 h-3.5 w-3.5" />
+                          Unsave
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => onInsertReference(`@chat:${session.id} `)}>
+                          <AtSign className="mr-2 h-3.5 w-3.5" />
+                          Reference @
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          disabled={!onArchiveSession}
+                          onSelect={() => void onArchiveSession?.(session.id)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Archive className="mr-2 h-3.5 w-3.5" />
+                          Archive
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                ))}
+                {savedSessions.length === 0 && (
+                  <p className="px-2 py-1 text-xs text-muted-foreground">No saved chats yet.</p>
+                )}
+              </div>
+              </section>
+            )}
+
+            {!isIconRail && (
+              <section>
+              <div className="mb-2 flex items-center justify-between px-1">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Chats
+                </p>
+              </div>
+              <div className="space-y-1">
+                {recentSessions.map((session) => (
                   <div
                     key={session.id}
                     className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
@@ -311,31 +382,41 @@ export function DesktopSidebar({
                         {formatRelativeTime(new Date(session.created_at * 1000))}
                       </span>
                     </button>
-                    {chatEditEnabled && onArchiveSession ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="h-6 shrink-0 px-0.5 text-[10px] text-muted-foreground"
-                        onClick={() => {
-                          void onArchiveSession(session.id)
-                        }}
+                        size="icon-sm"
+                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                        title="Chat options"
                       >
-                        <Archive className="mr-1 h-3.5 w-1.5" />
-                        
+                        <Ellipsis className="h-3.5 w-3.5" />
+                        <span className="sr-only">Chat options</span>
                       </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 shrink-0 px-2 text-[16px]"
-                        onClick={() => onInsertReference(`@chat:${session.id} `)}
-                      >
-                        @
-                      </Button>
-                    )}
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onSelect={() => void onSaveSession?.(session.id)}>
+                          <Star className="mr-2 h-3.5 w-3.5" />
+                          Save
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => onInsertReference(`@chat:${session.id} `)}>
+                          <AtSign className="mr-2 h-3.5 w-3.5" />
+                          Reference @
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          disabled={!onArchiveSession}
+                          onSelect={() => void onArchiveSession?.(session.id)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Archive className="mr-2 h-3.5 w-3.5" />
+                          Archive
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 ))}
-                {sessions.length === 0 && (
+                {recentSessions.length === 0 && (
                   <p className="px-2 py-1 text-xs text-muted-foreground">No recent chats yet.</p>
                 )}
               </div>

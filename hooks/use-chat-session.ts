@@ -64,10 +64,13 @@ export interface UseChatSessionResult {
 
     // Session management
     sessions: ChatSession[]
+    savedSessionIds: string[]
     currentSessionId: string | null
     currentSession: ChatSession | null
     createNewSession: () => Promise<string | null>
     selectSession: (sessionId: string) => Promise<void>
+    saveSession: (sessionId: string) => Promise<void>
+    unsaveSession: (sessionId: string) => Promise<void>
     archiveSession: (sessionId: string) => Promise<void>
     removeSession: (sessionId: string) => Promise<void>
     refreshSessions: () => Promise<void>
@@ -98,12 +101,29 @@ const initialStreamingState: StreamingState = {
 }
 
 const STORAGE_KEY_ARCHIVED_CHAT_SESSIONS = 'archivedChatSessionIds'
+const STORAGE_KEY_SAVED_CHAT_SESSIONS = 'savedChatSessionIds'
 
 function readArchivedSessionIds(): string[] {
     if (typeof window === 'undefined') return []
 
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY_ARCHIVED_CHAT_SESSIONS)
+        if (!raw) return []
+
+        const parsed = JSON.parse(raw)
+        if (!Array.isArray(parsed)) return []
+
+        return parsed.filter((id): id is string => typeof id === 'string')
+    } catch {
+        return []
+    }
+}
+
+function readSavedSessionIds(): string[] {
+    if (typeof window === 'undefined') return []
+
+    try {
+        const raw = window.localStorage.getItem(STORAGE_KEY_SAVED_CHAT_SESSIONS)
         if (!raw) return []
 
         const parsed = JSON.parse(raw)
@@ -398,6 +418,7 @@ export function useChatSession(): UseChatSessionResult {
     // Session state
     const [sessions, setSessions] = useState<ChatSession[]>([])
     const [archivedSessionIds, setArchivedSessionIds] = useState<string[]>(() => readArchivedSessionIds())
+    const [savedSessionIds, setSavedSessionIds] = useState<string[]>(() => readSavedSessionIds())
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
     const [messages, setMessages] = useState<ChatMessageData[]>([])
 
@@ -621,6 +642,14 @@ export function useChatSession(): UseChatSessionResult {
         )
     }, [archivedSessionIds])
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(
+            STORAGE_KEY_SAVED_CHAT_SESSIONS,
+            JSON.stringify(savedSessionIds)
+        )
+    }, [savedSessionIds])
+
     // Create new session - returns the new session ID
     const createNewSession = useCallback(async (): Promise<string | null> => {
         try {
@@ -703,6 +732,7 @@ export function useChatSession(): UseChatSessionResult {
         setArchivedSessionIds((prev) => (
             prev.includes(sessionId) ? prev : [...prev, sessionId]
         ))
+        setSavedSessionIds((prev) => prev.filter((id) => id !== sessionId))
         setSessions((prev) => prev.filter((session) => session.id !== sessionId))
 
         if (sessionId === currentSessionId) {
@@ -711,6 +741,16 @@ export function useChatSession(): UseChatSessionResult {
             setStreamingState(initialStreamingState)
         }
     }, [currentSessionId])
+
+    const saveSession = useCallback(async (sessionId: string) => {
+        setError(null)
+        setSavedSessionIds((prev) => (prev.includes(sessionId) ? prev : [...prev, sessionId]))
+    }, [])
+
+    const unsaveSession = useCallback(async (sessionId: string) => {
+        setError(null)
+        setSavedSessionIds((prev) => prev.filter((id) => id !== sessionId))
+    }, [])
 
     // Send a message - accepts optional sessionIdOverride for newly created sessions
     const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string) => {
@@ -887,10 +927,13 @@ export function useChatSession(): UseChatSessionResult {
         isLoading,
         error,
         sessions,
+        savedSessionIds,
         currentSessionId,
         currentSession,
         createNewSession,
         selectSession,
+        saveSession,
+        unsaveSession,
         archiveSession,
         removeSession,
         refreshSessions,
