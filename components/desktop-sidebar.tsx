@@ -2,17 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
-  BarChart3,
-  Bell,
   ChevronsUpDown,
-  FileText,
   FlaskConical,
-  Lightbulb,
-  MessageSquare,
   PanelLeftClose,
   Plus,
   Settings,
-  Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -29,24 +23,23 @@ import { useApiConfig } from '@/lib/api-config'
 import type { ChatSession } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
 import { getStatusText } from '@/lib/status-utils'
-import type { JourneySubTab } from './nav-page'
+import type { AppTab, HomeTab } from '@/lib/navigation'
+import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
+import { NavTabButton } from '@/components/navigation/nav-tab-button'
 
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
 const ICON_RAIL_WIDTH = 72
 const ICON_RAIL_TRIGGER_WIDTH = 136
 
 interface DesktopSidebarProps {
-  activeTab: ActiveTab
+  activeTab: AppTab
   hidden?: boolean
   width?: number
   minWidth?: number
   maxWidth?: number
-  journeySubTab: JourneySubTab
   sessions: ChatSession[]
   runs: ExperimentRun[]
   sweeps: Sweep[]
-  onTabChange: (tab: ActiveTab) => void
-  onJourneySubTabChange: (subTab: JourneySubTab) => void
+  onTabChange: (tab: HomeTab | 'contextual') => void
   onNewChat: () => Promise<void> | void
   onSelectSession: (sessionId: string) => Promise<void> | void
   onNavigateToRun: (runId: string) => void
@@ -95,12 +88,10 @@ export function DesktopSidebar({
   width = 300,
   minWidth = 240,
   maxWidth = 520,
-  journeySubTab,
   sessions,
   runs,
   sweeps,
   onTabChange,
-  onJourneySubTabChange,
   onNewChat,
   onSelectSession,
   onNavigateToRun,
@@ -218,105 +209,30 @@ export function DesktopSidebar({
                 </p>
               )}
               <div className="space-y-1">
-                <button
+                <Button
                   type="button"
                   title="New Chat"
+                  variant="ghost"
+                  size={isIconRail ? 'icon-sm' : 'sm'}
                   onClick={() => {
                     void onNewChat()
                   }}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    isIconRail
-                      ? 'justify-center px-2 text-foreground hover:bg-secondary/50'
-                      : 'gap-2 px-2 text-foreground hover:bg-secondary/50'
-                  }`}
+                  className={isIconRail ? 'h-[var(--app-btn-icon-sm)] w-full' : 'h-[var(--app-btn-h-sm)] w-full justify-start px-2.5'}
                 >
-                  <Plus className="h-4 w-4 shrink-0" />
+                  <Plus className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
                   {!isIconRail && 'New Chat'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Chat"
-                  onClick={() => onTabChange('chat')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'chat'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <MessageSquare className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Chat'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Runs"
-                  onClick={() => onTabChange('runs')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'runs'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <FlaskConical className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Runs'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Events"
-                  onClick={() => onTabChange('events')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'events'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <Bell className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Events'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Charts"
-                  onClick={() => onTabChange('charts')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'charts'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <BarChart3 className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Charts'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Memory"
-                  onClick={() => onTabChange('memory')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'memory'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <Lightbulb className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Memory'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Report"
-                  onClick={() => onTabChange('report')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'report'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <FileText className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Report'}
-                </button>
+                  <span className="sr-only">New Chat</span>
+                </Button>
+                {PRIMARY_NAV_ITEMS.map((item) => (
+                  <NavTabButton
+                    key={item.tab}
+                    compact={isIconRail}
+                    label={item.label}
+                    icon={item.icon}
+                    active={activeTab === item.tab}
+                    onClick={() => onTabChange(item.tab)}
+                  />
+                ))}
               </div>
             </section>
 
