@@ -305,7 +305,7 @@ function StarterInteractiveCard({
 
 function StarterCardSlide({ children }: { children: ReactNode }) {
   return (
-    <div className="w-full shrink-0 snap-start md:w-[22.5rem]">
+    <div className="w-[min(20rem,calc(100vw-5rem))] max-w-full shrink-0 snap-center sm:w-[min(21rem,calc(100vw-4.5rem))] md:w-[22.5rem] md:snap-start">
       {children}
     </div>
   )
@@ -458,8 +458,8 @@ export function ChatStarterCards({
         <p className="mt-0.5 text-xs text-muted-foreground">Pick a card to stage a contextual prompt.</p>
       </div>
 
-      <div className="-mx-1">
-        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2 [scrollbar-width:thin]">
+      <div className="w-full">
+        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1.5 pb-2 [scrollbar-width:thin]">
           <StarterCardSlide>
             <StarterInteractiveCard
               title="Observe latest run"
