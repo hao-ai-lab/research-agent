@@ -19,6 +19,11 @@ import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } 
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
 import type { ExperimentRun } from '@/lib/types'
+import {
+  REFERENCE_TYPE_BACKGROUND_MAP,
+  REFERENCE_TYPE_COLOR_MAP,
+  type ReferenceTokenType,
+} from '@/lib/reference-token-colors'
 
 interface ChatMessageProps {
   message: ChatMessageType
@@ -52,24 +57,14 @@ export function ChatMessage({
   const renderReferenceToken = (reference: string, key: string) => {
     const [type, ...idParts] = reference.split(':')
     const itemId = idParts.join(':')
-    const typeColorMap: Record<string, string> = {
-      run: '#22c55e',
-      sweep: '#a855f7',
-      artifact: '#0ea5e9',
-      alert: '#f97316',
-      chart: '#14b8a6',
-      chat: '#64748b',
-    }
-    const typeBgMap: Record<string, string> = {
-      run: 'rgba(34, 197, 94, 0.18)',
-      sweep: 'rgba(168, 85, 247, 0.2)',
-      artifact: 'rgba(14, 165, 233, 0.16)',
-      alert: 'rgba(249, 115, 22, 0.18)',
-      chart: 'rgba(20, 184, 166, 0.16)',
-      chat: 'rgba(100, 116, 139, 0.2)',
-    }
-    const color = typeColorMap[type] || '#64748b'
-    const backgroundColor = typeBgMap[type] || 'rgba(100, 116, 139, 0.2)'
+    const tokenType = (type in REFERENCE_TYPE_COLOR_MAP ? type : 'chat') as ReferenceTokenType
+    const color = REFERENCE_TYPE_COLOR_MAP[tokenType]
+    const backgroundColor = REFERENCE_TYPE_BACKGROUND_MAP[tokenType]
+    const tokenStyle = {
+      color,
+      backgroundColor,
+      ['--reference-border' as string]: `${color}66`,
+    } as React.CSSProperties
 
     if (type === 'sweep') {
       const sweep = sweeps.find((candidate) => candidate.id === itemId)
@@ -80,8 +75,8 @@ export function ChatMessage({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="mx-0.5 inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] leading-none"
-                style={{ color, backgroundColor, borderColor: `${color}66` }}
+                className="mx-0.5 inline-flex items-center align-middle rounded-sm border border-[color:var(--reference-border)] px-2.5 py-1.5 text-base leading-none outline-none transition-colors hover:border-transparent focus:outline-none focus-visible:ring-0 focus-visible:outline-none"
+                style={tokenStyle}
               >
                 @{reference}
               </button>
@@ -114,8 +109,8 @@ export function ChatMessage({
     return (
       <span
         key={key}
-        className="mx-0.5 inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] leading-none"
-        style={{ color, backgroundColor, borderColor: `${color}66` }}
+        className="mx-0.5 inline-flex items-center align-middle rounded-sm border border-[color:var(--reference-border)] px-2.5 py-1.5 text-base leading-none"
+        style={tokenStyle}
       >
         @{reference}
       </span>
@@ -179,7 +174,7 @@ export function ChatMessage({
           elements.push(
             <pre
               key={`code-${codeKey++}`}
-              className="my-2 overflow-x-auto rounded-lg bg-background p-3 text-xs"
+              className="my-2 overflow-x-auto rounded-lg bg-background p-3 text-sm"
             >
               <code>{codeContent.trim()}</code>
             </pre>
@@ -237,7 +232,7 @@ export function ChatMessage({
         return (
           <code
             key={i}
-            className="rounded bg-background px-1.5 py-0.5 text-xs text-accent"
+            className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
           >
             {part.slice(1, -1)}
           </code>
@@ -265,8 +260,8 @@ export function ChatMessage({
   if (isUser) {
     return (
       <div className="px-0.5 py-2">
-        <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
-          <p className="text-sm leading-relaxed">{renderInlineMarkdown(message.content)}</p>
+        <div className="border-l-4 border-primary px-3 py-1">
+          <p className="text-base leading-relaxed text-foreground">{renderInlineMarkdown(message.content)}</p>
         </div>
       </div>
     )
@@ -289,7 +284,7 @@ export function ChatMessage({
             // Legacy: single thinking block
             message.thinking && (
               <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
-                <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
                   {isThinkingOpen ? (
                     <ChevronDown className="h-3 w-3" />
                   ) : (
@@ -299,7 +294,7 @@ export function ChatMessage({
                   <span>Thinking process</span>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-2">
-                  <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                  <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
                     {message.thinking.split('\n').map((line, i) => (
                       <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                         {line}
@@ -362,7 +357,7 @@ export function ChatMessage({
             </div>
           )}
 
-          <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+          <div className="px-1 py-1 text-base leading-relaxed">
             {renderMarkdown(message.content)}
           </div>
 
@@ -389,7 +384,7 @@ function SavedPartRenderer({
   if (part.type === 'thinking') {
     return (
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+        <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
           {isOpen ? (
             <ChevronDown className="h-3 w-3" />
           ) : (
@@ -399,7 +394,7 @@ function SavedPartRenderer({
           <span>Thinking process</span>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
-          <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+          <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
             {part.content.split('\n').map((line, i) => (
               <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                 {line}
@@ -440,7 +435,7 @@ function SavedPartRenderer({
 
     return (
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground w-fit transition-colors hover:bg-secondary hover:text-foreground">
+        <CollapsibleTrigger className="flex w-full items-center justify-start gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
           {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           {getStatusIcon()}
           <Wrench className="h-3 w-3" />
@@ -453,7 +448,7 @@ function SavedPartRenderer({
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
           {(part.toolInput || part.toolOutput || part.content) && (
-            <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl space-y-2">
+            <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2">
               {part.toolInput && (
                 <div>
                   <span className="font-medium text-foreground/70">Input:</span>
@@ -484,7 +479,7 @@ function SavedPartRenderer({
 
   if (part.type === 'text') {
     return (
-      <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+      <div className="px-1 py-1 text-base leading-relaxed">
         {renderMarkdown(part.content)}
       </div>
     )

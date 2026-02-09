@@ -91,6 +91,7 @@ export interface AppSettings {
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
     showStarterCards?: boolean;
+    starterCardTemplates?: Record<string, string>;
   };
   integrations: {
     slack?: {
