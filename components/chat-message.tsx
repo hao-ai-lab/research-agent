@@ -9,6 +9,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { LossChart } from './loss-chart'
 import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } from '@/lib/types'
 import { SweepArtifact } from './sweep-artifact'
@@ -42,6 +47,120 @@ export function ChatMessage({
     const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
     const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return `${dateStr}, ${timeStr}`
+  }
+
+  const renderReferenceToken = (reference: string, key: string) => {
+    const [type, ...idParts] = reference.split(':')
+    const itemId = idParts.join(':')
+    const typeColorMap: Record<string, string> = {
+      run: '#22c55e',
+      sweep: '#a855f7',
+      artifact: '#0ea5e9',
+      alert: '#f97316',
+      chart: '#14b8a6',
+      chat: '#64748b',
+    }
+    const typeBgMap: Record<string, string> = {
+      run: 'rgba(34, 197, 94, 0.18)',
+      sweep: 'rgba(168, 85, 247, 0.2)',
+      artifact: 'rgba(14, 165, 233, 0.16)',
+      alert: 'rgba(249, 115, 22, 0.18)',
+      chart: 'rgba(20, 184, 166, 0.16)',
+      chat: 'rgba(100, 116, 139, 0.2)',
+    }
+    const color = typeColorMap[type] || '#64748b'
+    const backgroundColor = typeBgMap[type] || 'rgba(100, 116, 139, 0.2)'
+
+    if (type === 'sweep') {
+      const sweep = sweeps.find((candidate) => candidate.id === itemId)
+
+      if (sweep) {
+        return (
+          <Popover key={key}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="mx-0.5 inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] leading-none"
+                style={{ color, backgroundColor, borderColor: `${color}66` }}
+              >
+                @{reference}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" className="w-[min(94vw,430px)] p-0">
+              <div className="p-2">
+                {sweep.status === 'draft' ? (
+                  <SweepArtifact
+                    config={sweep.config}
+                    sweep={sweep}
+                    onEdit={onEditSweep}
+                    onLaunch={onLaunchSweep}
+                    isCollapsed={false}
+                  />
+                ) : (
+                  <SweepStatus
+                    sweep={sweep}
+                    runs={runs}
+                    onRunClick={onRunClick}
+                    isCollapsed={false}
+                  />
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )
+      }
+    }
+
+    return (
+      <span
+        key={key}
+        className="mx-0.5 inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] leading-none"
+        style={{ color, backgroundColor, borderColor: `${color}66` }}
+      >
+        @{reference}
+      </span>
+    )
+  }
+
+  const renderReferences = (text: string, keyPrefix: string) => {
+    const output: React.ReactNode[] = []
+    const referenceRegex = /@((?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+)(?=$|[\s,.;!?)\]])/g
+    let cursor = 0
+    let match: RegExpExecArray | null
+    let partIndex = 0
+
+    while ((match = referenceRegex.exec(text)) !== null) {
+      const tokenStart = match.index
+      const tokenEnd = tokenStart + match[0].length
+      if (tokenStart > cursor) {
+        output.push(
+          <span key={`${keyPrefix}-txt-${partIndex++}`}>
+            {text.slice(cursor, tokenStart)}
+          </span>
+        )
+      }
+
+      output.push(renderReferenceToken(match[1], `${keyPrefix}-ref-${tokenStart}`))
+      cursor = tokenEnd
+    }
+
+    if (cursor < text.length) {
+      output.push(
+        <span key={`${keyPrefix}-txt-${partIndex++}`}>
+          {text.slice(cursor)}
+        </span>
+      )
+    }
+
+    if (output.length === 0) {
+      output.push(
+        <span key={`${keyPrefix}-txt-empty`}>
+          {text}
+        </span>
+      )
+    }
+
+    return output
   }
 
   const renderMarkdown = (content: string) => {
@@ -130,11 +249,15 @@ export function ChatMessage({
         if (bp.startsWith('**') && bp.endsWith('**')) {
           return (
             <strong key={`${i}-${j}`} className="font-semibold">
-              {bp.slice(2, -2)}
+              {renderReferences(bp.slice(2, -2), `bold-${i}-${j}`)}
             </strong>
           )
         }
-        return <span key={`${i}-${j}`}>{bp}</span>
+        return (
+          <React.Fragment key={`${i}-${j}`}>
+            {renderReferences(bp, `text-${i}-${j}`)}
+          </React.Fragment>
+        )
       })
     })
   }
@@ -143,7 +266,7 @@ export function ChatMessage({
     return (
       <div className="px-0.5 py-2">
         <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
-          <p className="text-sm leading-relaxed">{message.content}</p>
+          <p className="text-sm leading-relaxed">{renderInlineMarkdown(message.content)}</p>
         </div>
       </div>
     )

@@ -74,6 +74,8 @@ function formatRelativeTime(date: Date) {
 
 function getSweepStatusClass(status: Sweep['status']) {
   switch (status) {
+    case 'draft':
+      return 'bg-violet-500/15 text-violet-500 border-violet-500/30'
     case 'running':
       return 'bg-blue-500/15 text-blue-500 border-blue-500/30'
     case 'completed':
@@ -409,24 +411,30 @@ export function DesktopSidebar({
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Sweeps
                 </p>
-                <span className="text-[10px] text-muted-foreground">Click to reference</span>
+                <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
               </div>
               <div className="space-y-1">
                 {recentSweeps.map((sweep) => (
-                  <button
+                  <div
                     key={sweep.id}
-                    type="button"
-                    onClick={() => onInsertReference(`/sweep ${sweep.id} `)}
-                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-secondary/50"
+                    className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1 text-left">
                       <p className="truncate text-sm text-foreground">{sweep.config.name}</p>
                       <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
                     </div>
-                    <Badge variant="outline" className={`text-[10px] ${getSweepStatusClass(sweep.status)}`}>
+                    <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusClass(sweep.status)}`}>
                       {sweep.status}
                     </Badge>
-                  </button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[16px]"
+                      onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
+                    >
+                      @
+                    </Button>
+                  </div>
                 ))}
                 {recentSweeps.length === 0 && (
                   <p className="px-2 py-1 text-xs text-muted-foreground">No sweeps yet.</p>

@@ -24,6 +24,7 @@ import {
   PlugZap,
   Filter,
   Plus,
+  Sparkles,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -49,9 +50,9 @@ import { AllRunsChart } from './all-runs-chart'
 import { RunDetailView } from './run-detail-view'
 import { VisibilityManageView } from './visibility-manage-view'
 import { RunName } from './run-name'
-import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
+import type { ExperimentRun, TagDefinition, VisibilityGroup, Sweep, SweepConfig } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
-import { DEFAULT_RUN_COLORS, getRunsOverview, mockSweeps } from '@/lib/mock-data'
+import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 
 
@@ -73,6 +74,7 @@ import { SweepForm } from '@/components/sweep-form'
 
 interface RunsViewProps {
   runs: ExperimentRun[]
+  sweeps?: Sweep[]
   onRunClick?: (run: ExperimentRun) => void
   onUpdateRun?: (run: ExperimentRun) => void
   pendingAlertsByRun?: Record<string, number>
@@ -84,9 +86,29 @@ interface RunsViewProps {
   onRefresh?: () => Promise<void>
   onStartRun?: (runId: string) => Promise<void>
   onStopRun?: (runId: string) => Promise<void>
+  onSaveSweep?: (config: SweepConfig) => void
+  onCreateSweep?: (config: SweepConfig) => void
+  onLaunchSweep?: (config: SweepConfig) => void
 }
 
-export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {}, alerts = [], allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
+export function RunsView({
+  runs,
+  sweeps = [],
+  onRunClick,
+  onUpdateRun,
+  pendingAlertsByRun = {},
+  alerts = [],
+  allTags,
+  onCreateTag,
+  onSelectedRunChange,
+  onShowVisibilityManageChange,
+  onRefresh,
+  onStartRun,
+  onStopRun,
+  onSaveSweep,
+  onCreateSweep,
+  onLaunchSweep,
+}: RunsViewProps) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [manageMode, setManageMode] = useState(false)
@@ -110,12 +132,28 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   const overview = getRunsOverview(allActiveRuns)
   const selectedRun = selectedRunId ? runs.find(r => r.id === selectedRunId) : null
   const selectedRunAlerts = selectedRun ? alerts.filter(alert => alert.run_id === selectedRun.id) : []
+  const sweepById = useMemo(
+    () => new Map(sweeps.map((sweep) => [sweep.id, sweep])),
+    [sweeps]
+  )
+  const sortedSweeps = useMemo(
+    () =>
+      [...sweeps].sort(
+        (a, b) =>
+          (b.startedAt?.getTime() || b.createdAt.getTime()) -
+          (a.startedAt?.getTime() || a.createdAt.getTime())
+      ),
+    [sweeps]
+  )
   const sweepOptions = useMemo(
     () =>
-      Array.from(new Set(runs.map((run) => run.sweepId).filter(Boolean) as string[])).sort((a, b) =>
-        a.localeCompare(b)
-      ),
-    [runs]
+      Array.from(
+        new Set([
+          ...runs.map((run) => run.sweepId).filter(Boolean) as string[],
+          ...sweeps.map((sweep) => sweep.id),
+        ])
+      ).sort((a, b) => a.localeCompare(b)),
+    [runs, sweeps]
   )
 
   useEffect(() => {
@@ -235,6 +273,25 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   }
 
   const getStatusBadgeClass = (status: string) => getStatusBadgeClassUtil(status as any)
+
+  const getSweepStatusBadgeClass = (status: Sweep['status']) => {
+    switch (status) {
+      case 'draft':
+        return 'border-violet-500/35 bg-violet-500/12 text-violet-600 dark:border-violet-400/45 dark:bg-violet-500/20 dark:text-violet-300'
+      case 'running':
+        return 'border-blue-500/35 bg-blue-500/12 text-blue-600 dark:border-blue-400/45 dark:bg-blue-500/20 dark:text-blue-300'
+      case 'completed':
+        return 'border-emerald-500/35 bg-emerald-500/12 text-emerald-600 dark:border-emerald-400/45 dark:bg-emerald-500/20 dark:text-emerald-300'
+      case 'failed':
+        return 'border-destructive/35 bg-destructive/12 text-destructive'
+      case 'pending':
+        return 'border-amber-500/35 bg-amber-500/12 text-amber-600 dark:border-amber-400/45 dark:bg-amber-500/20 dark:text-amber-300'
+      case 'canceled':
+        return 'border-muted-foreground/30 bg-muted/40 text-muted-foreground'
+      default:
+        return 'border-border bg-secondary text-muted-foreground'
+    }
+  }
 
   const toggleRunVisibility = (runId: string) => {
     setVisibleRunIds((prev) => {
@@ -547,7 +604,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
             onRefresh={onRefresh}
             onStartRun={onStartRun}
             onStopRun={onStopRun}
-            sweeps={mockSweeps}
+            sweeps={sweeps}
           />
         </div>
       </div>
@@ -636,6 +693,63 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                 onSelectGroup={handleSelectGroup}
                 onOpenManage={() => handleShowVisibilityManage(true)}
               />
+            </div>
+
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Sweeps
+                </h3>
+                <Badge variant="secondary" className="text-[10px]">
+                  {sortedSweeps.length}
+                </Badge>
+              </div>
+              <div className="rounded-xl border border-border bg-card p-3">
+                {sortedSweeps.length > 0 ? (
+                  <div className="space-y-2">
+                    {sortedSweeps.map((sweep) => {
+                      const isDraft = sweep.status === 'draft'
+                      return (
+                        <div
+                          key={sweep.id}
+                          className={`rounded-lg border p-2.5 ${
+                            isDraft
+                              ? 'border-violet-500/35 bg-violet-500/8'
+                              : 'border-border bg-secondary/35'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Sparkles className={`h-3.5 w-3.5 shrink-0 ${isDraft ? 'text-violet-500' : 'text-violet-400'}`} />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium text-foreground">
+                                {sweep.config.name || sweep.id}
+                              </p>
+                              <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
+                            </div>
+                            <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusBadgeClass(sweep.status)}`}>
+                              {sweep.status}
+                            </Badge>
+                          </div>
+                          <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                            <span className="truncate">
+                              {isDraft
+                                ? 'Draft sweep ready for AI refinement'
+                                : `${sweep.progress.completed}/${sweep.progress.total} runs`}
+                            </span>
+                            {sweep.progress.failed > 0 && (
+                              <span className="shrink-0 text-destructive">{sweep.progress.failed} failed</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-xs text-muted-foreground">
+                    No sweep objects yet. Save a draft to create one.
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* All Runs */}
@@ -969,7 +1083,9 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                               <div className="flex items-center gap-2 mb-3">
                                 <PlugZap className="h-4 w-4 text-muted-foreground" />
                                 <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                                  {group.sweepId === 'no-sweep' ? 'No Sweep' : `Sweep ${group.sweepId}`}
+                                  {group.sweepId === 'no-sweep'
+                                    ? 'No Sweep'
+                                    : sweepById.get(group.sweepId)?.config.name || `Sweep ${group.sweepId}`}
                                 </h4>
                               </div>
                               <div className="space-y-2">
@@ -1005,9 +1121,11 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
       <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
         <DialogContent showCloseButton={false} className="w-[95vw] h-[90vh] max-w-[900px] max-h-[800px] flex flex-col p-0 gap-0">
           <SweepForm
-            onSave={() => { setSweepDialogOpen(false); onRefresh?.() }}
+            previousSweeps={sweeps}
+            onSave={(config) => { onSaveSweep?.(config); setSweepDialogOpen(false); onRefresh?.() }}
+            onCreate={(config) => { onCreateSweep?.(config); setSweepDialogOpen(false); onRefresh?.() }}
             onCancel={() => setSweepDialogOpen(false)}
-            onLaunch={() => { setSweepDialogOpen(false); onRefresh?.() }}
+            onLaunch={(config) => { onLaunchSweep?.(config); setSweepDialogOpen(false); onRefresh?.() }}
           />
         </DialogContent>
       </Dialog>
