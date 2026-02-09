@@ -465,7 +465,7 @@ export function SweepForm({
                 </CollapsibleContent>
               </Collapsible>
 
-              {/* Parameters — optional, collapsible */}
+              {/* Hyperparameters — optional, collapsible */}
               <Collapsible open={expandedSections.hyperparameters} onOpenChange={() => toggleSection('hyperparameters')}>
                 <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 text-left">
                   {expandedSections.hyperparameters ? (
@@ -474,25 +474,22 @@ export function SweepForm({
                     <ChevronRight className="h-3 w-3 text-muted-foreground" />
                   )}
                   <Sliders className="h-3.5 w-3.5 text-purple-400" />
-                  <span className="text-xs font-medium">Parameters</span>
+                  <span className="text-xs font-medium">Hyperparameters</span>
                   {simpleParams.some(p => p.key.trim()) && (
                     <Badge variant="secondary" className="text-[10px] ml-auto">
                       {simpleParams.filter(p => p.key.trim()).length}
                     </Badge>
                   )}
+                  <Button
+                    variant="default"
+                    size="icon"
+                    className={`h-5 w-5 shrink-0 ${simpleParams.some(p => p.key.trim()) ? '' : 'ml-auto'}`}
+                    onClick={(e) => { e.stopPropagation(); setSimpleParams([...simpleParams, { key: '', values: '' }]); if (!expandedSections.hyperparameters) toggleSection('hyperparameters') }}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-1 space-y-2">
-                  <div className="flex justify-end mb-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => setSimpleParams([...simpleParams, { key: '', values: '' }])}
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add
-                    </Button>
-                  </div>
                   <div className="space-y-2">
                     {simpleParams.map((param, index) => (
                       <div key={index} className="flex gap-2 items-start">
@@ -532,6 +529,13 @@ export function SweepForm({
                   <p className="text-[10px] text-muted-foreground">
                     Example: lr → 0.001, 0.01, 0.1
                   </p>
+                  {simpleParams.some(p => p.key.trim()) && (
+                    <div className="flex justify-end pt-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSimpleParams([...simpleParams, { key: '', values: '' }])}>
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
                 </CollapsibleContent>
               </Collapsible>
 
@@ -634,6 +638,14 @@ export function SweepForm({
                   <Badge variant="secondary" className="text-[10px] ml-auto">
                     {config.hyperparameters.length}
                   </Badge>
+                  <Button
+                    variant="default"
+                    size="icon"
+                    className="h-5 w-5 shrink-0"
+                    onClick={(e) => { e.stopPropagation(); addHyperparameter(); if (!expandedSections.hyperparameters) toggleSection('hyperparameters') }}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-2 space-y-2">
                   {config.hyperparameters.map((param, index) => (
@@ -735,16 +747,13 @@ export function SweepForm({
                       )}
                     </div>
                   ))}
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 text-xs"
-                    onClick={addHyperparameter}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    Add Hyperparameter
-                  </Button>
+                  {config.hyperparameters.length > 0 && (
+                    <div className="flex justify-end pt-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={addHyperparameter}>
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
                 </CollapsibleContent>
               </Collapsible>
 
@@ -761,32 +770,31 @@ export function SweepForm({
                   <Badge variant="secondary" className="text-[10px] ml-auto">
                     {config.metrics.length}
                   </Badge>
+                  <Button
+                    variant="default"
+                    size="icon"
+                    className="h-5 w-5 shrink-0"
+                    onClick={(e) => { e.stopPropagation(); addMetric(); if (!expandedSections.metrics) toggleSection('metrics') }}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-2 space-y-2">
                   {config.metrics.map((metric, index) => (
-                    <div key={index} className="p-2 rounded-lg bg-secondary/30 border border-border/50 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={metric.name}
-                          onChange={(e) => updateMetric(index, { name: e.target.value })}
-                          placeholder="Metric name"
-                          className="h-7 text-xs flex-1"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => removeMetric(index)}
-                        >
-                          <Trash2 className="h-3 w-3 text-destructive" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center gap-2">
+                    <div key={index} className="p-2 rounded-lg bg-secondary/30 border border-border/50 space-y-1.5">
+                      {/* Row 1: Metric ID (path) + Name (alias) + Goal + Delete */}
+                      <div className="flex items-center gap-1.5">
                         <Input
                           value={metric.path}
                           onChange={(e) => updateMetric(index, { path: e.target.value })}
-                          placeholder="Metric path (e.g., val/loss)"
-                          className="h-7 text-xs flex-1"
+                          placeholder="Metric ID (e.g., val/loss)"
+                          className="h-7 text-xs flex-[2] min-w-0"
+                        />
+                        <Input
+                          value={metric.name}
+                          onChange={(e) => updateMetric(index, { name: e.target.value })}
+                          placeholder="Alias"
+                          className="h-7 text-xs flex-1 min-w-0"
                         />
                         <Select
                           value={metric.goal}
@@ -794,7 +802,7 @@ export function SweepForm({
                             updateMetric(index, { goal: value })
                           }
                         >
-                          <SelectTrigger className="h-7 w-24 text-xs">
+                          <SelectTrigger className="h-7 w-[70px] text-xs shrink-0">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -802,27 +810,31 @@ export function SweepForm({
                             <SelectItem value="maximize">Max</SelectItem>
                           </SelectContent>
                         </Select>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={metric.isPrimary}
-                          onCheckedChange={(checked) => updateMetric(index, { isPrimary: checked })}
-                          className="scale-75"
-                        />
-                        <span className="text-[10px] text-muted-foreground">Primary metric</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Switch
+                            checked={metric.isPrimary}
+                            onCheckedChange={(checked) => updateMetric(index, { isPrimary: checked })}
+                            className="scale-[0.6]"
+                          />
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0"
+                          onClick={() => removeMetric(index)}
+                        >
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
                       </div>
                     </div>
                   ))}
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 text-xs"
-                    onClick={addMetric}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    Add Metric
-                  </Button>
+                  {config.metrics.length > 0 && (
+                    <div className="flex justify-end pt-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={addMetric}>
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
                 </CollapsibleContent>
               </Collapsible>
 
@@ -839,6 +851,14 @@ export function SweepForm({
                   <Badge variant="secondary" className="text-[10px] ml-auto">
                     {config.insights.length}
                   </Badge>
+                  <Button
+                    variant="default"
+                    size="icon"
+                    className="h-5 w-5 shrink-0"
+                    onClick={(e) => { e.stopPropagation(); addInsight(); if (!expandedSections.insights) toggleSection('insights') }}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-2 space-y-2">
                   <p className="text-[10px] text-muted-foreground">
@@ -892,15 +912,13 @@ export function SweepForm({
                     </div>
                   ))}
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 text-xs"
-                    onClick={addInsight}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    Add Insight Rule
-                  </Button>
+                  {config.insights.length > 0 && (
+                    <div className="flex justify-end pt-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={addInsight}>
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
                 </CollapsibleContent>
               </Collapsible>
 
@@ -1099,7 +1117,7 @@ export function SweepForm({
             <Button
               variant="secondary"
               size="sm"
-              className="flex-1 h-7 text-[11px]"
+              className="flex-1 h-7 text-[11px] bg-green-600 hover:bg-green-700 text-white"
               onClick={() => onSave(prepareConfig())}
               disabled={!isValid}
             >
