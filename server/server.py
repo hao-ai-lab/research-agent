@@ -26,7 +26,8 @@ import uvicorn
 import libtmux
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Configure logging
@@ -40,7 +41,28 @@ logger = logging.getLogger("research-agent-server")
 
 # OpenCode configuration
 _SERVER_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
-OPENCODE_CONFIG = os.environ.get("OPENCODE_CONFIG", os.path.join(_SERVER_FILE_DIR, "opencode.json"))
+
+
+def get_default_opencode_config() -> str:
+    """Resolve opencode.json path for source and frozen-binary execution."""
+    candidates: list[str] = []
+
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(os.path.join(meipass, "opencode.json"))
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "opencode.json"))
+
+    candidates.append(os.path.join(_SERVER_FILE_DIR, "opencode.json"))
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+
+    return candidates[-1]
+
+
+OPENCODE_CONFIG = os.environ.get("OPENCODE_CONFIG", get_default_opencode_config())
 OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://127.0.0.1:4096")
 OPENCODE_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
@@ -66,6 +88,24 @@ ALERTS_DATA_FILE = ""
 SETTINGS_DATA_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
+FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
+
+AUTH_PROTECTED_PREFIXES = (
+    "/sessions",
+    "/chat",
+    "/runs",
+    "/alerts",
+    "/wild",
+    "/sweeps",
+)
+
+
+def requires_api_auth(path: str) -> bool:
+    """Only enforce auth token on API routes."""
+    for prefix in AUTH_PROTECTED_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return True
+    return False
 
 
 def init_paths(workdir: str):
@@ -107,12 +147,16 @@ app.add_middleware(
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Validate X-Auth-Token header if USER_AUTH_TOKEN is configured."""
-    # Skip auth for health check and CORS preflight
-    if request.url.path == "/" or request.method == "OPTIONS":
+    # Skip auth for CORS preflight
+    if request.method == "OPTIONS":
         return await call_next(request)
     
     # If no auth token configured, allow all requests
     if not USER_AUTH_TOKEN:
+        return await call_next(request)
+
+    # Static frontend routes should be public
+    if not requires_api_auth(request.url.path):
         return await call_next(request)
     
     # Validate token
@@ -412,14 +456,24 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     server_url = SERVER_CALLBACK_URL
     run_workdir = run_data.get("workdir") or WORKDIR
     
-    sidecar_cmd = (
-        f'{sys.executable} "{sidecar_path}" '
-        f'--job_id {run_id} '
-        f'--server_url {server_url} '
-        f'--command_file "{command_file}" '
-        f'--agent_run_dir "{run_dir}" '
-        f'--workdir "{run_workdir}"'
-    )
+    if getattr(sys, "frozen", False):
+        sidecar_cmd = (
+            f"{shlex.quote(sys.executable)} --run-sidecar "
+            f"--job_id {shlex.quote(run_id)} "
+            f"--server_url {shlex.quote(server_url)} "
+            f"--command_file {shlex.quote(command_file)} "
+            f"--agent_run_dir {shlex.quote(run_dir)} "
+            f"--workdir {shlex.quote(run_workdir)}"
+        )
+    else:
+        sidecar_cmd = (
+            f'{shlex.quote(sys.executable)} "{sidecar_path}" '
+            f'--job_id {shlex.quote(run_id)} '
+            f'--server_url {shlex.quote(server_url)} '
+            f'--command_file {shlex.quote(command_file)} '
+            f'--agent_run_dir {shlex.quote(run_dir)} '
+            f'--workdir {shlex.quote(run_workdir)}'
+        )
     if USER_AUTH_TOKEN:
         sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
     
@@ -600,7 +654,17 @@ async def stream_opencode_events(client: httpx.AsyncClient, session_id: str) -> 
 
 @app.get("/")
 async def health():
-    """Health check endpoint."""
+    """Health check endpoint, or frontend index if static bundle is configured."""
+    if FRONTEND_STATIC_DIR:
+        index_file = os.path.join(FRONTEND_STATIC_DIR, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+
+
+@app.get("/health")
+async def health_json():
+    """JSON health endpoint."""
     return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
 
 
@@ -1691,9 +1755,28 @@ def start_opencode_server_subprocess(args):
     logger.info(f"Started OpenCode server (PID: {opencode_process.pid}) in {args.workdir}")
     return
 
+def maybe_mount_frontend_static():
+    """Serve packaged frontend static files if available."""
+    if not FRONTEND_STATIC_DIR:
+        return
+    if not os.path.isdir(FRONTEND_STATIC_DIR):
+        logger.warning("Configured RESEARCH_AGENT_FRONTEND_DIR does not exist: %s", FRONTEND_STATIC_DIR)
+        return
+    logger.info("Serving frontend static files from %s", FRONTEND_STATIC_DIR)
+    app.mount("/", StaticFiles(directory=FRONTEND_STATIC_DIR, html=True), name="frontend-static")
+
 def main():
     global SERVER_CALLBACK_URL
     global TMUX_SESSION_NAME
+
+    if "--run-sidecar" in sys.argv:
+        sidecar_index = sys.argv.index("--run-sidecar")
+        sidecar_argv = sys.argv[sidecar_index + 1 :]
+        import job_sidecar
+
+        job_sidecar.main(sidecar_argv)
+        return
+
     parser = argparse.ArgumentParser(description="Research Agent Server")
     parser.add_argument("--workdir", default=os.getcwd(), help="Working directory for runs and data")
     parser.add_argument("--port", type=int, default=10000, help="Server port")
@@ -1731,6 +1814,7 @@ def main():
     load_runs_state()
     load_alerts_state()
     load_settings_state()
+    maybe_mount_frontend_static()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
     logger.info(f"Working directory: {WORKDIR}")

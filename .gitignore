@@ -9,6 +9,7 @@
 
 # production
 /build
+/dist
 
 # debug
 npm-debug.log*
@@ -34,3 +35,9 @@ package-lock.json
 
 .mock_wandb
 .ruff_cache
+.ra-venv
+.npm-cache/
+server/.build-venv
+server/.uv-cache
+server/dist
+server/build

@@ -592,7 +592,7 @@ def monitor_job(
     logger.info("Sidecar exiting")
 
 
-def main():
+def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description="Job Sidecar")
     parser.add_argument("--job_id", required=True, help="Job ID")
     parser.add_argument("--server_url", required=True, help="Server URL")
@@ -604,7 +604,7 @@ def main():
         default=os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", ""),
         help="Optional X-Auth-Token for server callbacks",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     
     # Read command from file
     try:
