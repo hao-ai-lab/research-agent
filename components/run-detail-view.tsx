@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Clock,
   Terminal,
@@ -65,7 +65,8 @@ import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
 import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
 import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
-import type { Alert } from '@/lib/api-client'
+import { getSweep, type Alert } from '@/lib/api-client'
+import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
 
 interface RunDetailViewProps {
   run: ExperimentRun
@@ -233,10 +234,43 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
 
   const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
   const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
-  const linkedSweep = useMemo(
+  const linkedSweepFromList = useMemo(
     () => sweeps.find((sweep) => sweep.id === run.sweepId),
     [run.sweepId, sweeps]
   )
+  const [linkedSweepFromApi, setLinkedSweepFromApi] = useState<Sweep | null>(null)
+  const [isLoadingLinkedSweep, setIsLoadingLinkedSweep] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLinkedSweepFromApi(null)
+
+    if (!run.sweepId || linkedSweepFromList) {
+      setIsLoadingLinkedSweep(false)
+      return
+    }
+
+    setIsLoadingLinkedSweep(true)
+    getSweep(run.sweepId)
+      .then((apiSweep) => {
+        if (cancelled) return
+        setLinkedSweepFromApi(mapApiSweepToUiSweep(apiSweep))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setLinkedSweepFromApi(null)
+      })
+      .finally(() => {
+        if (cancelled) return
+        setIsLoadingLinkedSweep(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [linkedSweepFromList, run.sweepId])
+
+  const linkedSweep = linkedSweepFromList || linkedSweepFromApi
 
   const copyCommand = () => {
     navigator.clipboard.writeText(run.command)
@@ -377,6 +411,52 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
+  const getTerminalOutcome = (): {
+    state: 'finished' | 'failed' | 'canceled' | null
+    summary: string
+    detail: string | null
+    className: string
+  } => {
+    const exitCode = typeof run.exit_code === 'number' ? run.exit_code : null
+    const errorText = run.error?.trim()
+
+    if (run.status === 'failed') {
+      return {
+        state: 'failed',
+        summary: 'Failed',
+        detail: errorText || (exitCode !== null ? `Exit code ${exitCode}` : null),
+        className: 'border-destructive/40 bg-destructive/10 text-destructive',
+      }
+    }
+
+    if (run.status === 'completed') {
+      return {
+        state: 'finished',
+        summary: 'Finished',
+        detail: exitCode !== null ? `Exit code ${exitCode}` : null,
+        className: 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400',
+      }
+    }
+
+    if (run.status === 'canceled') {
+      return {
+        state: 'canceled',
+        summary: 'Stopped',
+        detail: errorText || null,
+        className: 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+      }
+    }
+
+    return {
+      state: null,
+      summary: '',
+      detail: null,
+      className: 'border-border bg-secondary/40 text-muted-foreground',
+    }
+  }
+
+  const terminalOutcome = getTerminalOutcome()
+
   const handleCheckAlerts = () => {
     setAlertsOpen(true)
     requestAnimationFrame(() => {
@@ -389,6 +469,30 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="p-3 space-y-3">
+            <div className="rounded-lg border border-border bg-card p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Status</span>
+                  <Badge variant="outline" className={`${getStatusBadgeClass(run.status)}`}>
+                    <span className="text-[10px]">{getStatusText(run.status)}</span>
+                  </Badge>
+                </div>
+                {run.endTime && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Ended: {formatTimestamp(run.endTime)}
+                  </span>
+                )}
+              </div>
+              {terminalOutcome.state && (
+                <div className={`mt-2 rounded-md border px-2 py-1.5 text-[11px] ${terminalOutcome.className}`}>
+                  <p className="font-medium">Outcome: {terminalOutcome.summary}</p>
+                  {terminalOutcome.detail && (
+                    <p className="mt-0.5 break-words">{terminalOutcome.detail}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Alias */}
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">Alias</span>
@@ -473,9 +577,12 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                               <span>Best: {sweep.bestMetricValue.toFixed(4)}</span>
                             )}
                           </div>
-                          {sweep.config.goal && (
-                            <p className="text-[10px] text-muted-foreground line-clamp-1">{sweep.config.goal}</p>
-                          )}
+                          <p className="text-[10px] text-muted-foreground line-clamp-1">
+                            Goal: {(sweep.creationContext.goal || sweep.config.goal || '').trim() || 'Not provided'}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground line-clamp-1">
+                            Description: {(sweep.creationContext.description || sweep.config.description || '').trim() || 'Not provided'}
+                          </p>
                         </div>
                       )
                     }
@@ -494,7 +601,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                 )}
               </div>
 
-              <div className="grid grid-cols-1 gap-1 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-1 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-4">
                 <div>
                   <p className="uppercase tracking-wide">Start</p>
                   <p className="text-foreground">
@@ -513,6 +620,12 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                     {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
                       ? formatDuration(run.startedAt || run.startTime, run.endTime)
                       : '--'}
+                  </p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide">Exit Code</p>
+                  <p className="text-foreground">
+                    {typeof run.exit_code === 'number' ? run.exit_code : '--'}
                   </p>
                 </div>
               </div>
@@ -550,7 +663,9 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                       <div className="px-3 py-5 text-center">
                         <p className="text-xs text-muted-foreground">
                           {run.sweepId
-                            ? `Sweep ${run.sweepId} was not found.`
+                            ? (isLoadingLinkedSweep
+                              ? `Loading sweep ${run.sweepId}...`
+                              : `Sweep ${run.sweepId} was not found.`)
                             : 'This run is not attached to a sweep object.'}
                         </p>
                       </div>

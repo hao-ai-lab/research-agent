@@ -76,6 +76,12 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         ? new Date(run.ended_at * 1000)
         : (run.stopped_at ? new Date(run.stopped_at * 1000) : undefined)
 
+    const mappedStatus = statusMap[run.status]
+    const normalizedExitCode = typeof run.exit_code === 'number' ? run.exit_code : null
+    const status = mappedStatus === 'completed' && ((normalizedExitCode !== null && normalizedExitCode !== 0) || Boolean(run.error))
+        ? 'failed'
+        : mappedStatus
+
     return {
         id: run.id,
         name: run.name,
@@ -83,8 +89,8 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         sweepParams: run.sweep_params ?? null,
         alias: metadata?.alias,
         command: run.command,
-        status: statusMap[run.status],
-        progress: run.progress ?? (run.status === 'running' ? 50 : run.status === 'finished' ? 100 : 0),
+        status,
+        progress: run.progress ?? (status === 'running' ? 50 : status === 'completed' ? 100 : 0),
         createdAt,
         queuedAt,
         launchedAt,
@@ -107,16 +113,9 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         tmux_window: run.tmux_window,
         tmux_pane: run.tmux_pane,
         run_dir: run.run_dir,
-        exit_code: run.exit_code,
+        exit_code: normalizedExitCode,
         error: run.error,
         wandb_dir: run.wandb_dir,
-    } as ExperimentRun & {
-        tmux_window?: string
-        tmux_pane?: string
-        run_dir?: string
-        exit_code?: number | null
-        error?: string | null
-        wandb_dir?: string | null
     }
 }
 

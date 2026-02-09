@@ -687,6 +687,22 @@ export interface Sweep {
     goal?: string
     is_wild?: boolean
     ui_config?: Record<string, unknown> | null
+    creation_context?: {
+        name?: string | null
+        goal?: string | null
+        description?: string | null
+        command?: string | null
+        notes?: string | null
+        max_runs?: number | null
+        parallel_runs?: number | null
+        early_stopping_enabled?: boolean | null
+        early_stopping_patience?: number | null
+        hyperparameter_count?: number | null
+        metric_count?: number | null
+        insight_count?: number | null
+        created_at?: number | null
+        ui_config_snapshot?: Record<string, unknown> | null
+    } | null
     progress: {
         total: number
         completed: number
@@ -729,8 +745,8 @@ export interface UpdateSweepRequest {
 /**
  * List all sweeps
  */
-export async function listSweeps(): Promise<Sweep[]> {
-    const response = await fetch(`${API_URL()}/sweeps`, {
+export async function listSweeps(limit: number = 200): Promise<Sweep[]> {
+    const response = await fetch(`${API_URL()}/sweeps?limit=${limit}`, {
         headers: getHeaders()
     })
     if (!response.ok) {

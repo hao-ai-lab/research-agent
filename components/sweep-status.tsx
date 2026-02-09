@@ -15,6 +15,9 @@ import {
   Loader2,
   ExternalLink,
   BarChart3,
+  Target,
+  FileText,
+  Terminal,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -124,6 +127,37 @@ export function SweepStatus({
     return `${minutes}m`
   }
 
+  const formatTimestamp = (value?: Date) => {
+    if (!value) return '--'
+    return value.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const creation = sweep.creationContext
+  const goal = (creation.goal || '').trim()
+  const description = (creation.description || '').trim()
+  const notes = (creation.notes || '').trim()
+  const commandPreview = (creation.command || '').trim()
+  const hyperparameterNames = sweep.config.hyperparameters
+    .map((param) => param.name.trim())
+    .filter(Boolean)
+  const maxRuns = creation.maxRuns ?? sweep.config.maxRuns ?? sweep.progress.total ?? null
+  const parallelRuns = creation.parallelRuns ?? sweep.config.parallelRuns ?? 1
+  const hyperparameterCount = creation.hyperparameterCount ?? sweep.config.hyperparameters.length
+  const metricCount = creation.metricCount ?? sweep.config.metrics.length
+  const insightCount = creation.insightCount ?? sweep.config.insights.length
+  const earlyStoppingText = creation.earlyStoppingEnabled === null
+    ? 'Not provided'
+    : creation.earlyStoppingEnabled
+    ? `Enabled${creation.earlyStoppingPatience ? ` (${creation.earlyStoppingPatience})` : ''}`
+    : 'Disabled'
+
+  const renderField = (value: string) => (value ? value : 'Not provided')
+
   const displayRuns = showAllRuns ? sweepRuns : sweepRuns.slice(0, 5)
 
   return (
@@ -161,6 +195,89 @@ export function SweepStatus({
       {/* Expanded Content */}
       {expanded && (
         <div className="px-3 pb-3 space-y-3 border-t border-border/50">
+          <div className="pt-3">
+            <div className="rounded-md border border-border bg-secondary/20 p-2.5">
+              <div className="mb-2 flex items-center gap-1.5">
+                <FileText className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Creation Context
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="rounded-sm bg-background/70 px-2 py-1">
+                  <p className="text-muted-foreground">Created</p>
+                  <p className="text-foreground">{formatTimestamp(creation.createdAt || sweep.createdAt)}</p>
+                </div>
+                <div className="rounded-sm bg-background/70 px-2 py-1">
+                  <p className="text-muted-foreground">Updated</p>
+                  <p className="text-foreground">{formatTimestamp(sweep.config.updatedAt || creation.createdAt || sweep.createdAt)}</p>
+                </div>
+                <div className="rounded-sm bg-background/70 px-2 py-1">
+                  <p className="text-muted-foreground">Max Runs</p>
+                  <p className="text-foreground">{maxRuns ?? 'Not provided'}</p>
+                </div>
+                <div className="rounded-sm bg-background/70 px-2 py-1">
+                  <p className="text-muted-foreground">Parallel Runs</p>
+                  <p className="text-foreground">{parallelRuns ?? 'Not provided'}</p>
+                </div>
+                <div className="rounded-sm bg-background/70 px-2 py-1">
+                  <p className="text-muted-foreground">Early Stopping</p>
+                  <p className="text-foreground">{earlyStoppingText}</p>
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <Target className="h-3 w-3" />
+                  <span>Goal</span>
+                </div>
+                <p className="text-xs text-foreground whitespace-pre-wrap break-words">{renderField(goal)}</p>
+              </div>
+
+              <div className="mt-2">
+                <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <FileText className="h-3 w-3" />
+                  <span>Description</span>
+                </div>
+                <p className="text-xs text-foreground whitespace-pre-wrap break-words">{renderField(description)}</p>
+              </div>
+
+              <div className="mt-2">
+                <p className="text-[10px] text-muted-foreground">Notes</p>
+                <p className="text-xs text-foreground whitespace-pre-wrap break-words">{renderField(notes)}</p>
+              </div>
+
+              <div className="mt-2">
+                <div className="mb-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <Terminal className="h-3 w-3" />
+                  <span>Command</span>
+                </div>
+                <p className="rounded-sm bg-background/70 px-2 py-1 font-mono text-[10px] text-foreground break-all whitespace-pre-wrap">
+                  {renderField(commandPreview)}
+                </p>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+                <span>{hyperparameterCount} hyperparameters</span>
+                <span>•</span>
+                <span>{metricCount} metrics</span>
+                <span>•</span>
+                <span>{insightCount} insight rules</span>
+              </div>
+              {hyperparameterNames.length > 0 && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Params: {hyperparameterNames.join(', ')}
+                </p>
+              )}
+              {hyperparameterNames.length === 0 && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Params: Not provided
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Progress Section */}
           <div className="pt-3">
             <div className="flex items-center justify-between text-[10px] mb-1.5">

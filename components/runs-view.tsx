@@ -148,12 +148,14 @@ export function RunsView({
   const { settings } = useAppSettings()
   const interactionMode = settings.appearance.runItemInteractionMode || 'detail-page'
   const useInlineDetails = interactionMode === 'inline-expand'
+  const showRunItemMetadata = settings.appearance.showRunItemMetadata !== false
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedSweepId, setSelectedSweepId] = useState<string | null>(null)
   const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(new Set())
   const [expandedSweepIds, setExpandedSweepIds] = useState<Set<string>>(new Set())
   const [collapsedRunSections, setCollapsedRunSections] = useState<Set<string>>(new Set())
+  const [collapsedTopSections, setCollapsedTopSections] = useState<Set<string>>(new Set())
   const [runActionBusy, setRunActionBusy] = useState<Record<string, 'starting' | 'stopping' | undefined>>({})
   const [clusterDraftType, setClusterDraftType] = useState<ClusterType>(cluster?.type || 'unknown')
   const [clusterActionBusy, setClusterActionBusy] = useState<'detecting' | 'saving' | null>(null)
@@ -472,6 +474,50 @@ export function RunsView({
     return `${seconds}s`
   }
 
+  const getTerminalOutcome = (run: ExperimentRun): {
+    state: 'finished' | 'failed' | 'canceled' | null
+    summary: string
+    detail: string | null
+    className: string
+  } => {
+    const exitCode = typeof run.exit_code === 'number' ? run.exit_code : null
+    const errorText = run.error?.trim()
+
+    if (run.status === 'failed') {
+      return {
+        state: 'failed',
+        summary: 'Failed',
+        detail: errorText || (exitCode !== null ? `Exit code ${exitCode}` : null),
+        className: 'text-destructive',
+      }
+    }
+
+    if (run.status === 'completed') {
+      return {
+        state: 'finished',
+        summary: 'Finished',
+        detail: exitCode !== null ? `Exit code ${exitCode}` : null,
+        className: 'text-green-600 dark:text-green-400',
+      }
+    }
+
+    if (run.status === 'canceled') {
+      return {
+        state: 'canceled',
+        summary: 'Stopped',
+        detail: errorText || null,
+        className: 'text-amber-600 dark:text-amber-400',
+      }
+    }
+
+    return {
+      state: null,
+      summary: '',
+      detail: null,
+      className: 'text-muted-foreground',
+    }
+  }
+
   const toggleRunExpansion = (runId: string) => {
     setExpandedRunIds((prev) => {
       const next = new Set(prev)
@@ -575,6 +621,20 @@ export function RunsView({
 
   const isRunSectionExpanded = (sectionKey: string) => !collapsedRunSections.has(sectionKey)
 
+  const toggleTopSection = (sectionKey: string) => {
+    setCollapsedTopSections((prev) => {
+      const next = new Set(prev)
+      if (next.has(sectionKey)) {
+        next.delete(sectionKey)
+      } else {
+        next.add(sectionKey)
+      }
+      return next
+    })
+  }
+
+  const isTopSectionExpanded = (sectionKey: string) => !collapsedTopSections.has(sectionKey)
+
   const getClusterHealthBadgeClass = (status?: ClusterState['status']) => {
     switch (status) {
       case 'healthy':
@@ -666,6 +726,7 @@ export function RunsView({
       || run.status === 'failed'
       || run.status === 'canceled'
     )
+    const terminalOutcome = getTerminalOutcome(run)
 
     return (
     <div
@@ -725,6 +786,51 @@ export function RunsView({
           {run.isFavorite && <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0" />}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {!isManageSelectionEnabled && (
+            <div className="flex items-center gap-1">
+              {(run.status === 'ready' || run.status === 'queued') && onStartRun && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(event) => { void handleStartRunFromCard(run, event) }}
+                  disabled={busyState === 'starting'}
+                  title="Start Run"
+                >
+                  {busyState === 'starting' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                </Button>
+              )}
+              {run.status === 'running' && onStopRun && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 text-destructive hover:text-destructive"
+                  onClick={(event) => { void handleStopRunFromCard(run, event) }}
+                  disabled={busyState === 'stopping'}
+                  title="Stop Run"
+                >
+                  {busyState === 'stopping' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                </Button>
+              )}
+              <Button
+                variant={hasPendingAlerts ? 'default' : 'outline'}
+                size="icon"
+                className="relative h-7 w-7"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleRunClick(run)
+                }}
+                title={hasPendingAlerts ? `Alerts (${pendingAlertCount})` : 'Alerts'}
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {hasPendingAlerts && (
+                  <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                    {pendingAlertCount}
+                  </span>
+                )}
+              </Button>
+            </div>
+          )}
           <Badge variant="outline" className={`${getStatusBadgeClass(run.status)}`}>
             {getStatusIcon(run.status)}
             <span className="ml-1 text-[10px]">{getStatusText(run.status)}</span>
@@ -741,9 +847,18 @@ export function RunsView({
         Run: {run.id}
         {run.sweepId ? ` • Sweep: ${run.sweepId}` : ' • No sweep'}
       </p>
-      <p className="mt-1 text-[10px] text-muted-foreground">
-        Start: {hasStarted ? formatTimestamp(run.startedAt || run.startTime) : '--'} • Created: {formatTimestamp(run.createdAt)} • Runtime: {formatRunningDuration(run)}
-      </p>
+      {showRunItemMetadata && (
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Start: {hasStarted ? formatTimestamp(run.startedAt || run.startTime) : '--'} • Created: {formatTimestamp(run.createdAt)} • Runtime: {formatRunningDuration(run)}
+        </p>
+      )}
+      {terminalOutcome.state && (
+        <p className={`mt-1 truncate text-[10px] ${terminalOutcome.className}`}>
+          {terminalOutcome.summary}
+          {run.endTime ? ` • Ended: ${formatTimestamp(run.endTime)}` : ''}
+          {terminalOutcome.detail ? ` • ${terminalOutcome.detail}` : ''}
+        </p>
+      )}
       {run.tags && run.tags.length > 0 && (
         <div className="flex gap-1 mt-2 flex-wrap">
           {run.tags.slice(0, 3).map((tagName) => {
@@ -766,47 +881,6 @@ export function RunsView({
               +{run.tags.length - 3}
             </span>
           )}
-        </div>
-      )}
-
-      {!isManageSelectionEnabled && (
-        <div className="mt-2 flex items-center gap-1.5">
-          {(run.status === 'ready' || run.status === 'queued') && onStartRun && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[10px]"
-              onClick={(event) => { void handleStartRunFromCard(run, event) }}
-              disabled={busyState === 'starting'}
-            >
-              {busyState === 'starting' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Play className="mr-1 h-3 w-3" />}
-              Start
-            </Button>
-          )}
-          {run.status === 'running' && onStopRun && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[10px] text-destructive hover:text-destructive"
-              onClick={(event) => { void handleStopRunFromCard(run, event) }}
-              disabled={busyState === 'stopping'}
-            >
-              {busyState === 'stopping' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Square className="mr-1 h-3 w-3" />}
-              Stop
-            </Button>
-          )}
-          <Button
-            variant={hasPendingAlerts ? 'default' : 'outline'}
-            size="sm"
-            className="h-6 px-2 text-[10px]"
-            onClick={(event) => {
-              event.stopPropagation()
-              handleRunClick(run)
-            }}
-          >
-            <AlertTriangle className="mr-1 h-3 w-3" />
-            Alerts{hasPendingAlerts ? ` (${pendingAlertCount})` : ''}
-          </Button>
         </div>
       )}
 
@@ -1111,57 +1185,76 @@ export function RunsView({
         <ScrollArea className="h-full" ref={scrollAreaRef} onScrollCapture={handleScroll}>
           <div className="p-4 space-y-5">
             {/* Overview Stats */}
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
-                  <Layers className="h-5 w-5 text-muted-foreground" />
+            <div className="rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('overview')}
+                className="flex w-full items-center justify-between gap-3 p-4 text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+                    <Layers className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">
+                      Experiments Overview
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      {overview.total} total runs
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-medium text-foreground">
-                    Experiments Overview
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {overview.total} total runs
-                  </p>
+                {isTopSectionExpanded('overview') ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
+              {isTopSectionExpanded('overview') && (
+                <div className="px-4 pb-4">
+                  <div className="grid grid-cols-5 gap-2">
+                    <div className="text-center p-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                      <p className="text-lg font-semibold text-blue-400">
+                        {overview.running}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Running</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-green-500/10 border border-green-500/30">
+                      <p className="text-lg font-semibold text-green-400">
+                        {overview.completed}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Finished</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-destructive/10 border border-destructive/30">
+                      <p className="text-lg font-semibold text-destructive">
+                        {overview.failed}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Failed</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-foreground/5 border border-foreground/20">
+                      <p className="text-lg font-semibold text-foreground">
+                        {overview.queued}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Queued</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-muted/50 border border-muted-foreground/20">
+                      <p className="text-lg font-semibold text-muted-foreground">
+                        {overview.canceled}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Canceled</p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="grid grid-cols-5 gap-2">
-                <div className="text-center p-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
-                  <p className="text-lg font-semibold text-blue-400">
-                    {overview.running}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Running</p>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-green-500/10 border border-green-500/30">
-                  <p className="text-lg font-semibold text-green-400">
-                    {overview.completed}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Finished</p>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-destructive/10 border border-destructive/30">
-                  <p className="text-lg font-semibold text-destructive">
-                    {overview.failed}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Failed</p>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-foreground/5 border border-foreground/20">
-                  <p className="text-lg font-semibold text-foreground">
-                    {overview.queued}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Queued</p>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-muted/50 border border-muted-foreground/20">
-                  <p className="text-lg font-semibold text-muted-foreground">
-                    {overview.canceled}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Canceled</p>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Cluster Section */}
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-start justify-between gap-3">
+            <div className="rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('cluster')}
+                className="flex w-full items-start justify-between gap-3 p-4 text-left"
+              >
                 <div className="flex min-w-0 items-start gap-2">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary">
                     <Server className="h-4 w-4 text-muted-foreground" />
@@ -1173,142 +1266,189 @@ export function RunsView({
                     </p>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5">
+                <div className="flex shrink-0 items-center gap-2">
                   <Badge variant="outline" className={`text-[10px] ${getClusterHealthBadgeClass(cluster?.status)}`}>
                     {cluster?.status || 'unknown'}
                   </Badge>
                   <Badge variant="secondary" className="text-[10px]">
                     {cluster?.label || 'Unknown'}
                   </Badge>
+                  {isTopSectionExpanded('cluster') ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
                 </div>
-              </div>
+              </button>
 
-              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-5">
-                <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
-                  <p className="text-muted-foreground">Source</p>
-                  <p className="font-medium text-foreground capitalize">{cluster?.source || 'unset'}</p>
-                </div>
-                <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
-                  <p className="text-muted-foreground">Nodes</p>
-                  <p className="font-medium text-foreground">{cluster?.node_count ?? '--'}</p>
-                </div>
-                <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
-                  <p className="text-muted-foreground">GPUs</p>
-                  <p className="font-medium text-foreground">{cluster?.gpu_count ?? '--'}</p>
-                </div>
-                <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
-                  <p className="text-muted-foreground">Head Node</p>
-                  <p className="truncate font-medium text-foreground">{cluster?.head_node || '--'}</p>
-                </div>
-                <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
-                  <p className="text-muted-foreground">Active Runs</p>
-                  <p className="font-medium text-foreground">
-                    {(effectiveClusterRunSummary.running || 0) + (effectiveClusterRunSummary.launching || 0)} running
-                  </p>
-                </div>
-              </div>
+              {isTopSectionExpanded('cluster') && (
+                <div className="space-y-3 px-4 pb-4">
+                  <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-5">
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Source</p>
+                      <p className="font-medium text-foreground capitalize">{cluster?.source || 'unset'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Nodes</p>
+                      <p className="font-medium text-foreground">{cluster?.node_count ?? '--'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">GPUs</p>
+                      <p className="font-medium text-foreground">{cluster?.gpu_count ?? '--'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Head Node</p>
+                      <p className="truncate font-medium text-foreground">{cluster?.head_node || '--'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Active Runs</p>
+                      <p className="font-medium text-foreground">
+                        {(effectiveClusterRunSummary.running || 0) + (effectiveClusterRunSummary.launching || 0)} running
+                      </p>
+                    </div>
+                  </div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Select value={clusterDraftType} onValueChange={(value) => setClusterDraftType(value as ClusterType)}>
-                  <SelectTrigger className="h-8 w-[220px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CLUSTER_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value} className="text-xs">
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select value={clusterDraftType} onValueChange={(value) => setClusterDraftType(value as ClusterType)}>
+                      <SelectTrigger className="h-8 w-[220px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CLUSTER_TYPE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value} className="text-xs">
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
-                <Button
-                  size="sm"
-                  className="h-8 px-3 text-xs"
-                  onClick={() => { void handleSaveClusterType() }}
-                  disabled={!onUpdateCluster || clusterActionBusy !== null || clusterDraftType === (cluster?.type || 'unknown')}
-                >
-                  {clusterActionBusy === 'saving' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                  Set Cluster Type
-                </Button>
+                    <Button
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      onClick={() => { void handleSaveClusterType() }}
+                      disabled={!onUpdateCluster || clusterActionBusy !== null || clusterDraftType === (cluster?.type || 'unknown')}
+                    >
+                      {clusterActionBusy === 'saving' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                      Set Cluster Type
+                    </Button>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-3 text-xs"
-                  onClick={() => { void handleDetectClusterSetup() }}
-                  disabled={!onDetectCluster || clusterActionBusy !== null}
-                >
-                  {clusterActionBusy === 'detecting' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
-                  Auto-detect
-                </Button>
-              </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      onClick={() => { void handleDetectClusterSetup() }}
+                      disabled={!onDetectCluster || clusterActionBusy !== null}
+                    >
+                      {clusterActionBusy === 'detecting' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+                      Auto-detect
+                    </Button>
+                  </div>
 
-              {clusterError && (
-                <p className="mt-2 text-xs text-destructive">{clusterError}</p>
-              )}
-              {clusterLoading && (
-                <p className="mt-2 text-xs text-muted-foreground">Refreshing cluster status...</p>
+                  {clusterError && (
+                    <p className="text-xs text-destructive">{clusterError}</p>
+                  )}
+                  {clusterLoading && (
+                    <p className="text-xs text-muted-foreground">Refreshing cluster status...</p>
+                  )}
+                </div>
               )}
             </div>
 
             {/* Charts Section */}
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Charts
-                </h3>
+            <div className="rounded-xl border border-border bg-card">
+              <div className="flex items-center justify-between p-3">
+                <button
+                  type="button"
+                  onClick={() => toggleTopSection('charts')}
+                  className="flex min-w-0 flex-1 items-center justify-between text-left"
+                >
+                  <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Charts
+                  </h3>
+                  {isTopSectionExpanded('charts') ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2 text-xs"
-                  onClick={onNavigateToCharts}
+                  onClick={() => onNavigateToCharts?.()}
                 >
                   &gt;
                 </Button>
               </div>
-              <AllRunsChart
-                runs={allActiveRuns}
-                visibleRunIds={visibleRunIds}
-                onToggleVisibility={toggleRunVisibility}
-                visibilityGroups={visibilityGroups}
-                activeGroupId={activeGroupId}
-                onSelectGroup={handleSelectGroup}
-                onOpenManage={() => handleShowVisibilityManage(true)}
-              />
+              {isTopSectionExpanded('charts') && (
+                <div className="border-t border-border p-3">
+                  <AllRunsChart
+                    runs={allActiveRuns}
+                    visibleRunIds={visibleRunIds}
+                    onToggleVisibility={toggleRunVisibility}
+                    visibilityGroups={visibilityGroups}
+                    activeGroupId={activeGroupId}
+                    onSelectGroup={handleSelectGroup}
+                    onOpenManage={() => handleShowVisibilityManage(true)}
+                  />
+                </div>
+              )}
             </div>
 
-            <div>
-              <div className="mb-3 flex items-center justify-between">
+            <div className="rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('sweeps')}
+                className="flex w-full items-center justify-between p-3 text-left"
+              >
                 <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Sweeps
                 </h3>
-                <Badge variant="secondary" className="text-[10px]">
-                  {sortedSweeps.length}
-                </Badge>
-              </div>
-              <div className="rounded-xl border border-border bg-card p-3">
-                {sortedSweeps.length > 0 ? (
-                  <div className="space-y-2">
-                    {sortedSweeps.map((sweep) => (
-                      <SweepItem key={sweep.id} sweep={sweep} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-xs text-muted-foreground">
-                    No sweep objects yet. Save a draft to create one.
-                  </div>
-                )}
-              </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[10px]">
+                    {sortedSweeps.length}
+                  </Badge>
+                  {isTopSectionExpanded('sweeps') ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </div>
+              </button>
+              {isTopSectionExpanded('sweeps') && (
+                <div className="border-t border-border p-3">
+                  {sortedSweeps.length > 0 ? (
+                    <div className="space-y-2">
+                      {sortedSweeps.map((sweep) => (
+                        <SweepItem key={sweep.id} sweep={sweep} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-xs text-muted-foreground">
+                      No sweep objects yet. Save a draft to create one.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* All Runs */}
             <div>
-              <div className="flex items-center justify-between mb-3">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('runs')}
+                className="mb-3 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+              >
                 <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Runs
                 </h3>
-              </div>
+                {isTopSectionExpanded('runs') ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
+              {isTopSectionExpanded('runs') && (
               <div className="rounded-xl border border-border bg-card">
                 <div className="border-b border-border px-4 py-3 space-y-2">
                   <div className="flex items-center gap-2">
@@ -1570,6 +1710,7 @@ export function RunsView({
                   )}
                 </div>
               </div>
+              )}
             </div>
           </div>
         </ScrollArea>
