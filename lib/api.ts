@@ -37,6 +37,18 @@ export interface ChatMessageData {
     timestamp: number
 }
 
+export interface ActiveSessionStream {
+    run_id: string
+    status: 'running' | 'completed' | 'failed' | 'stopped' | 'interrupted' | string
+    sequence: number
+    text: string
+    thinking: string
+    parts?: MessagePartData[] | null
+    error?: string | null
+    started_at: number
+    updated_at: number
+}
+
 export interface MessagePartData {
     id: string
     type: 'thinking' | 'tool' | 'text'
@@ -53,12 +65,15 @@ export interface MessagePartData {
 
 export interface SessionWithMessages extends ChatSession {
     messages: ChatMessageData[]
+    system_prompt?: string
+    active_stream?: ActiveSessionStream | null
 }
 
 export type StreamEventType = 'part_delta' | 'part_update' | 'session_status' | 'error'
 
 export interface StreamEvent {
     type: StreamEventType
+    seq?: number
     id?: string
     ptype?: 'text' | 'reasoning' | 'tool'
     delta?: string
@@ -192,6 +207,72 @@ export async function* streamChat(
                     } catch {
                         console.warn('Failed to parse line:', line)
                     }
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
+}
+
+/**
+ * Stream an existing in-flight session response with catch-up replay.
+ */
+export async function* streamSession(
+    sessionId: string,
+    fromSeq: number = 1,
+    signal?: AbortSignal,
+    runId?: string
+): AsyncGenerator<StreamEvent, void, unknown> {
+    const params = new URLSearchParams()
+    params.set('from_seq', String(Math.max(1, Math.floor(fromSeq))))
+    if (runId) {
+        params.set('run_id', runId)
+    }
+
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/stream?${params.toString()}`, {
+        method: 'GET',
+        headers: getHeaders(),
+        signal,
+    })
+
+    if (!response.ok) {
+        throw new Error(`Failed to stream session: ${response.statusText}`)
+    }
+
+    if (!response.body) {
+        throw new Error('Response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+
+            if (done) {
+                if (buffer.trim()) {
+                    try {
+                        yield JSON.parse(buffer.trim()) as StreamEvent
+                    } catch {
+                        console.warn('Failed to parse remaining buffer:', buffer)
+                    }
+                }
+                break
+            }
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+                if (!line.trim()) continue
+                try {
+                    yield JSON.parse(line) as StreamEvent
+                } catch {
+                    console.warn('Failed to parse line:', line)
                 }
             }
         }
@@ -505,6 +586,34 @@ export async function stopSession(sessionId: string): Promise<{ message: string 
     })
     if (!response.ok) {
         throw new Error(`Failed to stop session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get the system prompt for a chat session
+ */
+export async function getSystemPrompt(sessionId: string): Promise<{ system_prompt: string }> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get system prompt: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update the system prompt for a chat session
+ */
+export async function setSystemPrompt(sessionId: string, systemPrompt: string): Promise<{ system_prompt: string }> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify({ system_prompt: systemPrompt }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to set system prompt: ${response.statusText}`)
     }
     return response.json()
 }

@@ -16,6 +16,7 @@ import * as mockApi from './api-mock'
 export type {
     ChatSession,
     ChatMessageData,
+    ActiveSessionStream,
     SessionWithMessages,
     StreamEventType,
     StreamEvent,
@@ -65,6 +66,9 @@ export const deleteSession = (...args: Parameters<typeof realApi.deleteSession>)
 
 export const streamChat = (...args: Parameters<typeof realApi.streamChat>) =>
     getApi().streamChat(...args)
+
+export const streamSession = (...args: Parameters<typeof realApi.streamSession>) =>
+    getApi().streamSession(...args)
 
 export const checkApiHealth = async (): Promise<boolean> => {
     if (isUsingMock()) {
