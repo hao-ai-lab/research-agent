@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bell,
   FileText,
+  FolderTree,
   FlaskConical,
   Lightbulb,
   MessageSquare,
@@ -48,6 +49,11 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     tab: 'report',
     label: 'Report',
     icon: FileText,
+  },
+  {
+    tab: 'explorer',
+    label: 'Explorer',
+    icon: FolderTree,
   },
   {
     tab: 'contextual',

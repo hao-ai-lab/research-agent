@@ -11,6 +11,7 @@ import { InsightsView } from '@/components/insights-view'
 import { EventsView } from '@/components/events-view'
 import { JourneyView } from '@/components/journey-view'
 import { ReportView, type ReportToolbarState } from '@/components/report-view'
+import { FileExplorerView } from '@/components/file-explorer-view'
 import { SettingsPageContent } from '@/components/settings-page-content'
 import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { useRuns } from '@/hooks/use-runs'
@@ -698,6 +699,9 @@ export default function ResearchChat() {
             )}
             {activeTab === 'report' && (
               <ReportView runs={runs} onToolbarChange={setReportToolbar} />
+            )}
+            {activeTab === 'explorer' && (
+              <FileExplorerView />
             )}
             {activeTab === 'journey' && (
               <JourneyView
