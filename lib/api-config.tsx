@@ -9,7 +9,7 @@ const STORAGE_KEY_AUTH_TOKEN = 'research-agent-auth-token'
 
 // Default values
 const DEFAULT_API_URL = 'http://localhost:10000'
-const DEFAULT_USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === 'true'
+const DEFAULT_USE_MOCK = false
 const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
 function resolveEnvApiUrl(): string {
@@ -51,7 +51,7 @@ export function getApiUrl(): string {
 /**
  * Check if mock mode is enabled
  * This can be called outside of React components
- * Pure runtime behavior - defaults to demo mode (true)
+ * Pure runtime behavior - defaults to false (demo mode off)
  */
 export function isUsingMock(): boolean {
     if (typeof window === 'undefined') {
@@ -97,11 +97,11 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-        // Pure runtime: use localStorage value or default to true
+        // Use localStorage value or keep default (false)
         if (storedMock !== null) {
             setUseMockState(storedMock === 'true')
         }
-        // If no stored value, keep the default (true)
+        // If no stored value, keep the default (false - demo mode off)
 
         if (storedToken) {
             setAuthTokenState(storedToken)

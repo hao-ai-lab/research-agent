@@ -13,23 +13,36 @@ import {
     type ChatMessageData,
     type StreamEvent,
 } from '@/lib/api-client'
+import type { MessagePartData } from '@/lib/api'
 import type { ChatMode } from '@/components/chat-input'
 
 export interface ToolCallState {
     id: string
     name?: string
     description?: string
-    state: 'pending' | 'running' | 'completed' | 'error'
+    state: 'pending' | 'running' | 'completed' | 'error' | string
+    input?: string
+    output?: string
+    startedAt?: number
+    endedAt?: number
+    durationMs?: number
 }
 
 // Represents a single part during streaming (thinking, tool, or text)
 export interface StreamingPart {
     id: string
+    sourceId?: string
     type: 'thinking' | 'tool' | 'text'
     content: string
     toolName?: string
     toolDescription?: string
-    toolState?: 'pending' | 'running' | 'completed' | 'error'
+    toolState?: 'pending' | 'running' | 'completed' | 'error' | string
+    toolStateRaw?: unknown
+    toolInput?: string
+    toolOutput?: string
+    toolStartedAt?: number
+    toolEndedAt?: number
+    toolDurationMs?: number
 }
 
 export interface StreamingState {
@@ -110,6 +123,162 @@ function parseDevelopCommand(content: string): string | null {
         return 'Usage: /develop <text>'
     }
     return payload
+}
+
+type ToolStatus = 'pending' | 'running' | 'completed' | 'error'
+
+const TOOL_STATUS_SET = new Set<ToolStatus>(['pending', 'running', 'completed', 'error'])
+
+function normalizeToolStatus(value: unknown): ToolStatus {
+    if (typeof value === 'string') {
+        const normalized = value.toLowerCase() as ToolStatus
+        if (TOOL_STATUS_SET.has(normalized)) return normalized
+    }
+    if (value && typeof value === 'object' && 'status' in value) {
+        return normalizeToolStatus((value as { status?: unknown }).status)
+    }
+    return 'pending'
+}
+
+function stringifyToolPayload(value: unknown): string | undefined {
+    if (value == null) return undefined
+    if (typeof value === 'string') return value
+    try {
+        return JSON.stringify(value, null, 2)
+    } catch {
+        return String(value)
+    }
+}
+
+function normalizeTimestamp(value: unknown): number | undefined {
+    if (typeof value !== 'number' || Number.isNaN(value)) return undefined
+    return value
+}
+
+function extractToolDetails(source: {
+    state?: unknown
+    toolInput?: string
+    toolOutput?: string
+    toolStartedAt?: number
+    toolEndedAt?: number
+    toolDurationMs?: number
+}) {
+    const stateObj = source.state && typeof source.state === 'object'
+        ? source.state as Record<string, unknown>
+        : {}
+    const inputObj = stateObj.input && typeof stateObj.input === 'object'
+        ? stateObj.input as Record<string, unknown>
+        : {}
+    const metadataObj = stateObj.metadata && typeof stateObj.metadata === 'object'
+        ? stateObj.metadata as Record<string, unknown>
+        : {}
+    const timeObj = stateObj.time && typeof stateObj.time === 'object'
+        ? stateObj.time as Record<string, unknown>
+        : {}
+
+    const description = (
+        (typeof inputObj.description === 'string' && inputObj.description) ||
+        (typeof inputObj.title === 'string' && inputObj.title) ||
+        (typeof stateObj.title === 'string' && stateObj.title) ||
+        undefined
+    )
+
+    const toolInput = source.toolInput ?? stringifyToolPayload(Object.keys(inputObj).length > 0 ? inputObj : undefined)
+    const outputCandidate = source.toolOutput ?? stringifyToolPayload(stateObj.output ?? metadataObj.output)
+    const startedAt = source.toolStartedAt ?? normalizeTimestamp(timeObj.start)
+    const endedAt = source.toolEndedAt ?? normalizeTimestamp(timeObj.end)
+    const durationMs = source.toolDurationMs ?? (
+        startedAt != null && endedAt != null && endedAt >= startedAt
+            ? Math.round(endedAt - startedAt)
+            : undefined
+    )
+
+    return {
+        description,
+        toolInput: toolInput || undefined,
+        toolOutput: outputCandidate || undefined,
+        toolStartedAt: startedAt,
+        toolEndedAt: endedAt,
+        toolDurationMs: durationMs,
+    }
+}
+
+function normalizeToolPart(part: MessagePartData, index: number): MessagePartData {
+    const rawState = (part as { tool_state_raw?: unknown }).tool_state_raw ??
+        ((part as { tool_state?: unknown }).tool_state && typeof (part as { tool_state?: unknown }).tool_state === 'object'
+            ? (part as { tool_state?: unknown }).tool_state
+            : undefined)
+    const details = extractToolDetails({
+        state: rawState,
+        toolInput: part.tool_input,
+        toolOutput: part.tool_output,
+        toolStartedAt: part.tool_started_at,
+        toolEndedAt: part.tool_ended_at,
+        toolDurationMs: part.tool_duration_ms,
+    })
+
+    const id = typeof part.id === 'string' && part.id ? part.id : `tool-${index}`
+    return {
+        ...part,
+        id,
+        tool_state: normalizeToolStatus(part.tool_state ?? rawState),
+        tool_state_raw: rawState,
+        tool_input: details.toolInput,
+        tool_output: details.toolOutput,
+        tool_started_at: details.toolStartedAt,
+        tool_ended_at: details.toolEndedAt,
+        tool_duration_ms: details.toolDurationMs,
+    }
+}
+
+function normalizeMessage(message: ChatMessageData): ChatMessageData {
+    if (!message.parts || message.parts.length === 0) return message
+
+    const seenIds = new Map<string, number>()
+    const normalizedParts = message.parts.map((part: MessagePartData, index) => {
+        const basePart = part.type === 'tool' ? normalizeToolPart(part, index) : {
+            ...part,
+            id: typeof part.id === 'string' && part.id ? part.id : `${part.type}-${index}`,
+            content: part.content ?? '',
+        }
+        const count = seenIds.get(basePart.id) ?? 0
+        seenIds.set(basePart.id, count + 1)
+        if (count === 0) {
+            return basePart
+        }
+        return {
+            ...basePart,
+            id: `${basePart.id}#${count}`,
+        }
+    })
+
+    return {
+        ...message,
+        parts: normalizedParts,
+    }
+}
+
+function upsertStreamingDeltaPart(
+    parts: StreamingPart[],
+    partId: string | undefined,
+    type: 'thinking' | 'text',
+    delta: string
+): StreamingPart[] {
+    if (!delta) return parts
+    const sourceId = partId || `${type}-${parts.length}`
+    const last = parts[parts.length - 1]
+    if (last && last.type === type && (last.sourceId ?? last.id) === sourceId) {
+        const updated = [...parts]
+        updated[updated.length - 1] = {
+            ...last,
+            content: last.content + delta,
+        }
+        return updated
+    }
+
+    const segmentCount = parts.filter((p) => (p.sourceId ?? p.id) === sourceId && p.type === type).length
+    const id = segmentCount === 0 ? sourceId : `${sourceId}#${segmentCount}`
+    return [...parts, { id, sourceId, type, content: delta }]
 }
 
 export function useChatSession(): UseChatSessionResult {
@@ -213,7 +382,7 @@ export function useChatSession(): UseChatSessionResult {
 
             const sessionData = await getSession(sessionId)
             setCurrentSessionId(sessionId)
-            setMessages(sessionData.messages)
+            setMessages(sessionData.messages.map(normalizeMessage))
             setStreamingState(initialStreamingState)
         } catch (err) {
             console.error('Failed to select session:', err)
@@ -302,6 +471,7 @@ export function useChatSession(): UseChatSessionResult {
         // Track accumulated text/thinking outside try so catch can access them
         let finalText = ''
         let finalThinking = ''
+        let sawToolPart = false
 
         try {
             setError(null)
@@ -328,17 +498,6 @@ export function useChatSession(): UseChatSessionResult {
 
             // Stream the response
             const wildMode = mode === 'wild'
-
-            // Helper to parse tool state from event
-            const parseToolState = (state: unknown): 'pending' | 'running' | 'completed' | 'error' => {
-                if (typeof state === 'string') {
-                    return state as 'pending' | 'running' | 'completed' | 'error'
-                }
-                if (state && typeof state === 'object' && 'status' in state) {
-                    return (state as { status: string }).status as 'pending' | 'running' | 'completed' | 'error'
-                }
-                return 'pending'
-            }
 
             // Stream inactivity timeout: abort if no events for 60s (prevents stuck streams)
             // Note: OpenCode can take 30-40s to start responding, so 60s is the minimum safe value
@@ -380,86 +539,83 @@ export function useChatSession(): UseChatSessionResult {
                             ? { thinkingContent: prev.thinkingContent + delta }
                             : {}
 
-                        // Update parts array by ID
-                        if (!partId) {
-                            return { ...prev, ...legacyUpdate }
-                        }
-
-                        const existingIndex = prev.parts.findIndex(p => p.id === partId)
-                        if (existingIndex >= 0) {
-                            // Append to existing part
-                            const updatedParts = [...prev.parts]
-                            updatedParts[existingIndex] = {
-                                ...updatedParts[existingIndex],
-                                content: updatedParts[existingIndex].content + delta,
-                            }
-                            return { ...prev, ...legacyUpdate, parts: updatedParts }
-                        } else {
-                            // Create new part
-                            return {
-                                ...prev,
-                                ...legacyUpdate,
-                                parts: [...prev.parts, { id: partId, type: partType, content: delta }],
-                            }
+                        return {
+                            ...prev,
+                            ...legacyUpdate,
+                            parts: upsertStreamingDeltaPart(prev.parts, partId, partType, delta),
                         }
                     })
                 } else if (event.type === 'part_update' && event.ptype === 'tool') {
-                    const stateValue = parseToolState(event.state)
-                    
-                    // Extract description from event.state.input.description or event.state.title
-                    let toolDescription: string | undefined
-                    if (event.state && typeof event.state === 'object') {
-                        const state = event.state as Record<string, unknown>
-                        if (state.input && typeof state.input === 'object') {
-                            const input = state.input as Record<string, unknown>
-                            toolDescription = (input.description as string) || (input.title as string)
-                        }
-                        if (!toolDescription && state.title) {
-                            toolDescription = state.title as string
-                        }
-                    }
+                    sawToolPart = true
+                    const stateValue = normalizeToolStatus(event.tool_status ?? event.state)
+                    const details = extractToolDetails({
+                        state: event.state,
+                        toolInput: event.tool_input,
+                        toolOutput: event.tool_output,
+                        toolStartedAt: event.tool_started_at,
+                        toolEndedAt: event.tool_ended_at,
+                        toolDurationMs: event.tool_duration_ms,
+                    })
 
                     setStreamingState(prev => {
                         // Update legacy toolCalls
-                        const existingToolIndex = prev.toolCalls.findIndex(t => t.id === event.id)
+                        const toolId = event.id || `tool-${prev.toolCalls.length}`
+                        const existingToolIndex = prev.toolCalls.findIndex(t => t.id === toolId)
                         const toolState: ToolCallState = {
-                            id: event.id || '',
+                            id: toolId,
                             name: event.name,
-                            description: toolDescription,
+                            description: details.description,
                             state: stateValue,
+                            input: details.toolInput,
+                            output: details.toolOutput,
+                            startedAt: details.toolStartedAt,
+                            endedAt: details.toolEndedAt,
+                            durationMs: details.toolDurationMs,
                         }
                         const newToolCalls = existingToolIndex >= 0
                             ? prev.toolCalls.map((t, i) => i === existingToolIndex ? toolState : t)
                             : [...prev.toolCalls, toolState]
 
                         // Update parts array
-                        if (!partId) {
-                            return { ...prev, toolCalls: newToolCalls }
-                        }
-
-                        const existingPartIndex = prev.parts.findIndex(p => p.id === partId)
+                        const sourceId = partId || toolId
+                        const existingPartIndex = prev.parts.findIndex(p => p.type === 'tool' && (p.sourceId ?? p.id) === sourceId)
                         if (existingPartIndex >= 0) {
                             // Update existing tool part
                             const updatedParts = [...prev.parts]
                             updatedParts[existingPartIndex] = {
                                 ...updatedParts[existingPartIndex],
                                 toolState: stateValue,
+                                toolStateRaw: event.state,
                                 toolName: event.name || updatedParts[existingPartIndex].toolName,
-                                toolDescription: toolDescription || updatedParts[existingPartIndex].toolDescription,
+                                toolDescription: details.description || updatedParts[existingPartIndex].toolDescription,
+                                toolInput: details.toolInput,
+                                toolOutput: details.toolOutput,
+                                toolStartedAt: details.toolStartedAt,
+                                toolEndedAt: details.toolEndedAt,
+                                toolDurationMs: details.toolDurationMs,
                             }
                             return { ...prev, toolCalls: newToolCalls, parts: updatedParts }
                         } else {
                             // Create new tool part
+                            const segmentCount = prev.parts.filter((p) => (p.sourceId ?? p.id) === sourceId && p.type === 'tool').length
+                            const partSegmentId = segmentCount === 0 ? sourceId : `${sourceId}#${segmentCount}`
                             return {
                                 ...prev,
                                 toolCalls: newToolCalls,
                                 parts: [...prev.parts, {
-                                    id: partId,
+                                    id: partSegmentId,
+                                    sourceId,
                                     type: 'tool' as const,
                                     content: '',
                                     toolName: event.name,
-                                    toolDescription: toolDescription,
+                                    toolDescription: details.description,
                                     toolState: stateValue,
+                                    toolStateRaw: event.state,
+                                    toolInput: details.toolInput,
+                                    toolOutput: details.toolOutput,
+                                    toolStartedAt: details.toolStartedAt,
+                                    toolEndedAt: details.toolEndedAt,
+                                    toolDurationMs: details.toolDurationMs,
                                 }],
                             }
                         }
@@ -476,31 +632,21 @@ export function useChatSession(): UseChatSessionResult {
                 clearInterval(streamTimeoutId)
             }
 
-            // Add assistant message to history
-            if (finalText || finalThinking) {
-                const assistantMessage: ChatMessageData = {
-                    role: 'assistant',
-                    content: finalText.trim(),
-                    thinking: finalThinking.trim() || null,
-                    timestamp: Date.now() / 1000,
-                }
-                setMessages(prev => [...prev, assistantMessage])
-
-                // Update session in list (for message count, title may have changed)
+            // Sync from backend so persisted ordered parts are reflected exactly
+            if (finalText || finalThinking || sawToolPart) {
+                const sessionData = await getSession(targetSessionId)
+                setMessages(sessionData.messages.map(normalizeMessage))
                 await refreshSessions()
             }
 
         } catch (err) {
             if (err instanceof DOMException && err.name === 'AbortError') {
-                // User-initiated stop — still save any text we got
-                if (finalText || finalThinking) {
-                    const assistantMessage: ChatMessageData = {
-                        role: 'assistant',
-                        content: finalText.trim(),
-                        thinking: finalThinking.trim() || null,
-                        timestamp: Date.now() / 1000,
-                    }
-                    setMessages(prev => [...prev, assistantMessage])
+                // User-initiated stop: reload from backend to capture any partial persisted assistant message.
+                try {
+                    const sessionData = await getSession(targetSessionId)
+                    setMessages(sessionData.messages.map(normalizeMessage))
+                } catch (syncErr) {
+                    console.warn('Failed to sync session after abort:', syncErr)
                 }
             } else {
                 console.error('Failed to send message:', err)

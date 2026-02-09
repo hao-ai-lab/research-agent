@@ -120,6 +120,19 @@ export function ConnectedChatView({
             role: msg.role,
             content: msg.content,
             thinking: msg.thinking || undefined,
+            parts: msg.parts?.map((part, pIdx) => ({
+                id: part.id || `${part.type}-${pIdx}`,
+                type: part.type,
+                content: part.content ?? '',
+                toolName: part.tool_name,
+                toolState: part.tool_state,
+                toolStateRaw: part.tool_state_raw,
+                toolInput: part.tool_input,
+                toolOutput: part.tool_output,
+                toolStartedAt: part.tool_started_at,
+                toolEndedAt: part.tool_ended_at,
+                toolDurationMs: part.tool_duration_ms,
+            })),
             timestamp: new Date(msg.timestamp * 1000),
             source: wildMessageIndices.has(idx) ? ('agent_wild' as const) : undefined,
         }))
@@ -356,30 +369,26 @@ export function ConnectedChatView({
 
             {!hasConversation ? (
                 <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-                    <ScrollArea className="h-full">
-                        <div className="mx-auto w-full max-w-6xl px-3 pb-8 pt-4 lg:px-6 lg:pt-6">
-                            <div className="flex min-h-[45vh] items-center justify-center">
-                                <div className="w-full max-w-3xl">
-                                    {renderChatInput('centered')}
-                                </div>
-                            </div>
-                            {showStarterCards && (
-                                <div className="mt-4 lg:mt-5">
-                                    <ChatStarterCards
-                                        runs={runs}
-                                        sweeps={sweeps}
-                                        alerts={alerts}
-                                        onPromptSelect={(prompt) => {
-                                            setStarterDraftInsert({
-                                                id: Date.now(),
-                                                text: prompt,
-                                            })
-                                        }}
-                                    />
-                                </div>
-                            )}
+                    <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
+                        <div className="w-full max-w-3xl">
+                            {renderChatInput('centered')}
                         </div>
-                    </ScrollArea>
+                        {showStarterCards && (
+                            <div className="mt-4 lg:mt-5 w-full max-w-6xl">
+                                <ChatStarterCards
+                                    runs={runs}
+                                    sweeps={sweeps}
+                                    alerts={alerts}
+                                    onPromptSelect={(prompt) => {
+                                        setStarterDraftInsert({
+                                            id: Date.now(),
+                                            text: prompt,
+                                        })
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </div>
                 </div>
             ) : (
                 <>
