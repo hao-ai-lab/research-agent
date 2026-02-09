@@ -28,6 +28,7 @@ interface ChatViewProps {
   showArtifacts?: boolean
   collapseChats?: boolean
   collapseArtifactsInChat?: boolean
+  autoScrollEnabled?: boolean
 }
 
 export function ChatView({
@@ -44,14 +45,15 @@ export function ChatView({
   showArtifacts = false,
   collapseChats = false,
   collapseArtifactsInChat = false,
+  autoScrollEnabled = true,
 }: ChatViewProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    if (autoScrollEnabled) {
+      bottomRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' })
     }
-  }, [messages])
+  }, [messages, autoScrollEnabled])
 
   // Collect all artifacts from runs
   const allArtifacts = useMemo(() => {
@@ -98,7 +100,7 @@ export function ChatView({
 
         {/* Scrollable Chat Area */}
         <div className="flex-1 min-h-0 overflow-hidden">
-          <ScrollArea className="h-full" ref={scrollRef}>
+          <ScrollArea className="h-full">
             <div className="pb-4">
               <div className="mt-4 space-y-1">
                 {collapseChats ? (
@@ -131,6 +133,9 @@ export function ChatView({
                   ))
                 )}
               </div>
+
+              {/* Scroll anchor for auto-scroll */}
+              <div ref={bottomRef} />
 
               {messages.length === 0 && (
                 <div className="flex flex-col items-center justify-center px-4 py-12 text-center">

@@ -46,6 +46,7 @@ const STORAGE_KEY_JOURNEY_SUB_TAB = 'journeySubTab'
 const STORAGE_KEY_CHAT_SHOW_ARTIFACTS = 'chatShowArtifacts'
 const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
 const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
+const STORAGE_KEY_CHAT_AUTO_SCROLL = 'chatAutoScroll'
 
 export default function ResearchChat() {
   const router = useRouter()
@@ -100,6 +101,7 @@ export default function ResearchChat() {
   const [showArtifacts, setShowArtifacts] = useState(false)
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
@@ -141,6 +143,11 @@ export default function ResearchChat() {
     if (storedCollapseArtifacts != null) {
       setCollapseArtifactsInChat(storedCollapseArtifacts === 'true')
     }
+
+    const storedAutoScroll = window.localStorage.getItem(STORAGE_KEY_CHAT_AUTO_SCROLL)
+    if (storedAutoScroll != null) {
+      setAutoScrollEnabled(storedAutoScroll === 'true')
+    }
   }, [])
 
   useEffect(() => {
@@ -166,6 +173,10 @@ export default function ResearchChat() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS, String(collapseArtifactsInChat))
   }, [collapseArtifactsInChat])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_CHAT_AUTO_SCROLL, String(autoScrollEnabled))
+  }, [autoScrollEnabled])
 
   useEffect(() => {
     return () => {
@@ -618,6 +629,8 @@ export default function ResearchChat() {
             onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
             collapseArtifactsInChat={collapseArtifactsInChat}
             onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
+            autoScrollEnabled={autoScrollEnabled}
+            onToggleAutoScroll={() => setAutoScrollEnabled(prev => !prev)}
             reportIsPreviewMode={reportToolbar?.isPreviewMode ?? true}
             onReportPreviewModeChange={reportToolbar?.setPreviewMode}
             onReportAddCell={reportToolbar?.addCell}
@@ -637,6 +650,7 @@ export default function ResearchChat() {
                 alerts={alerts}
                 collapseArtifactsInChat={collapseArtifactsInChat}
                 collapseChats={collapseChats}
+                autoScrollEnabled={autoScrollEnabled}
                 chatSession={chatSession}
                 wildLoop={wildLoop}
                 webNotificationsEnabled={settings.notifications.webNotificationsEnabled}

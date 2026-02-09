@@ -34,6 +34,7 @@ interface ConnectedChatViewProps {
     onModeChange: (mode: ChatMode) => void
     collapseChats?: boolean
     collapseArtifactsInChat?: boolean
+    autoScrollEnabled?: boolean
     // Expose session state for sidebar integration
     onSessionChange?: (sessionId: string | null) => void
     // Optional: pass chat session state from parent (for shared state)
@@ -63,6 +64,7 @@ export function ConnectedChatView({
     onModeChange,
     collapseChats = false,
     collapseArtifactsInChat = false,
+    autoScrollEnabled = true,
     onSessionChange,
     chatSession: externalChatSession,
     wildLoop,
@@ -72,7 +74,7 @@ export function ConnectedChatView({
     injectedMessages = [],
     onUserMessage,
 }: ConnectedChatViewProps) {
-    const scrollRef = useRef<HTMLDivElement>(null)
+    const bottomRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
     const showStarterCards = useAppSettings().settings.appearance.showStarterCards !== false
@@ -107,11 +109,13 @@ export function ConnectedChatView({
     }, [currentSessionId, onSessionChange])
 
     // Auto-scroll when messages or streaming content changes
+    // When streaming (chat ongoing): always scroll to bottom
+    // When not streaming: only scroll if autoScrollEnabled is true
     useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        if (streamingState.isStreaming || autoScrollEnabled) {
+            bottomRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' })
         }
-    }, [messages, streamingState.textContent, streamingState.thinkingContent])
+    }, [messages, streamingState.textContent, streamingState.thinkingContent, streamingState.isStreaming, autoScrollEnabled])
 
     // Convert API messages to the ChatMessage type expected by components
     const apiDisplayMessages: ChatMessageType[] = useMemo(() => {
@@ -381,7 +385,7 @@ export function ConnectedChatView({
                 <>
                     {/* Scrollable Chat Area */}
                     <div className="flex-1 min-h-0 overflow-hidden">
-                        <ScrollArea className="h-full" ref={scrollRef}>
+                        <ScrollArea className="h-full">
                             <div className="pb-4">
                                 <div className="mt-4 space-y-1">
                                     {collapseChats
@@ -423,6 +427,8 @@ export function ConnectedChatView({
                                         <StreamingMessage streamingState={streamingState} />
                                     )}
                                 </div>
+                                {/* Scroll anchor for auto-scroll */}
+                                <div ref={bottomRef} />
                             </div>
                         </ScrollArea>
                     </div>

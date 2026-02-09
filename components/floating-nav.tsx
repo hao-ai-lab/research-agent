@@ -33,6 +33,8 @@ interface FloatingNavProps {
   onToggleCollapseChats?: () => void
   collapseArtifactsInChat?: boolean
   onToggleCollapseArtifactsInChat?: () => void
+  autoScrollEnabled?: boolean
+  onToggleAutoScroll?: () => void
   // Report-specific props
   reportIsPreviewMode?: boolean
   onReportPreviewModeChange?: (isPreviewMode: boolean) => void
@@ -54,6 +56,8 @@ export function FloatingNav({
   onToggleCollapseChats,
   collapseArtifactsInChat = false,
   onToggleCollapseArtifactsInChat,
+  autoScrollEnabled = true,
+  onToggleAutoScroll,
   reportIsPreviewMode = true,
   onReportPreviewModeChange,
   onReportAddCell,
@@ -200,6 +204,22 @@ export function FloatingNav({
                   id="collapse-artifacts"
                   checked={collapseArtifactsInChat}
                   onCheckedChange={onToggleCollapseArtifactsInChat}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="flex items-center justify-between cursor-pointer"
+                onSelect={(e) => {
+                  e.preventDefault()
+                  onToggleAutoScroll?.()
+                }}
+              >
+                <Label htmlFor="auto-scroll" className="cursor-pointer">Auto-scroll to bottom</Label>
+                <Switch
+                  id="auto-scroll"
+                  checked={autoScrollEnabled}
+                  onCheckedChange={onToggleAutoScroll}
                   onClick={(e) => e.stopPropagation()}
                 />
               </DropdownMenuItem>
