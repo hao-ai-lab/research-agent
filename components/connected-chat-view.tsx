@@ -355,35 +355,16 @@ export function ConnectedChatView({
             )}
 
             {!hasConversation ? (
-                <>
-                    {/* Centered composer for new chats on wide screens */}
-                    <div className="hidden flex-1 min-h-0 lg:flex lg:items-center lg:justify-center lg:px-6">
-                        <div className="w-full max-w-6xl space-y-4">
-                            {showStarterCards && (
-                            <ChatStarterCards
-                                runs={runs}
-                                sweeps={sweeps}
-                                alerts={alerts}
-                                onPromptSelect={(prompt) => {
-                                    setStarterDraftInsert({
-                                        id: Date.now(),
-                                        text: prompt,
-                                    })
-                                }}
-                            />
-                            )}
-                            <div className="mx-auto w-full max-w-3xl">
-                                {renderChatInput('centered')}
+                <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+                    <ScrollArea className="h-full">
+                        <div className="mx-auto w-full max-w-6xl px-3 pb-8 pt-4 lg:px-6 lg:pt-6">
+                            <div className="flex min-h-[45vh] items-center justify-center">
+                                <div className="w-full max-w-3xl">
+                                    {renderChatInput('centered')}
+                                </div>
                             </div>
-                        </div>
-                    </div>
-
-                    {/* Mobile/compact layout keeps docked composer */}
-                    <div className="flex flex-1 min-h-0 flex-col overflow-hidden lg:hidden">
-                        <div className="flex-1 min-h-0 overflow-hidden">
-                            <ScrollArea className="h-full">
-                                <div className="px-3 py-4">
-                                    {showStarterCards && (
+                            {showStarterCards && (
+                                <div className="mt-4 lg:mt-5">
                                     <ChatStarterCards
                                         runs={runs}
                                         sweeps={sweeps}
@@ -395,15 +376,11 @@ export function ConnectedChatView({
                                             })
                                         }}
                                     />
-                                    )}
                                 </div>
-                            </ScrollArea>
+                            )}
                         </div>
-                        <div className="shrink-0">
-                            {renderChatInput('docked')}
-                        </div>
-                    </div>
-                </>
+                    </ScrollArea>
+                </div>
             ) : (
                 <>
                     {/* Scrollable Chat Area */}
