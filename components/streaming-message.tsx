@@ -24,8 +24,8 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
     const hasParts = parts && parts.length > 0
 
     return (
-        <div className="px-0.5 py-2">
-            <div className="space-y-2">
+        <div className="px-0.5 py-2 min-w-0 overflow-hidden">
+            <div className="space-y-2 min-w-0">
                 {hasParts ? (
                     // NEW: Render parts in order for correct interleaving
                     parts.map((part) => (
@@ -60,7 +60,7 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
                             </div>
                         )}
                         {textContent && (
-                            <div className="px-1 py-1 text-base leading-relaxed">
+                            <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
                                 {renderStreamingText(textContent)}
                                 <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
                             </div>
@@ -111,7 +111,7 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
 
     if (part.type === 'text') {
         return (
-            <div className="px-1 py-1 text-base leading-relaxed">
+            <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
                 {renderStreamingText(part.content)}
                 <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
             </div>
@@ -150,13 +150,13 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                     {part.toolInput && (
                         <div>
                             <span className="font-medium text-foreground/70">Input:</span>
-                            <pre className="mt-1 overflow-x-auto">{part.toolInput}</pre>
+                            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
                         </div>
                     )}
                     {part.toolOutput && (
                         <div>
                             <span className="font-medium text-foreground/70">Output:</span>
-                            <pre className="mt-1 overflow-x-auto">{part.toolOutput}</pre>
+                            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
                         </div>
                     )}
                     {(part.toolStartedAt || part.toolEndedAt) && (

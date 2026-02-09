@@ -8,7 +8,6 @@ import { StreamingMessage } from './streaming-message'
 import { WildLoopBanner } from './wild-loop-banner'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff, Plus } from 'lucide-react'
-import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
 import { useAppSettings } from '@/lib/app-settings'
 import { useChatSession } from '@/hooks/use-chat-session'
@@ -476,7 +475,7 @@ export function ConnectedChatView({
                     <div className="flex-1 min-h-0 overflow-hidden">
                         <ScrollArea className="h-full" ref={scrollRef}>
                             <div className="pb-4">
-                                <div className="mt-4 space-y-1 px-2.5">
+                                <div className="mt-4 space-y-1 px-2.5 min-w-0">
                                     {collapseChats
                                         ? messagePairs.map((pair, index) => (
                                             <CollapsedChatPair

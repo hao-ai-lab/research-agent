@@ -194,7 +194,7 @@ export function ChatMessage({
           elements.push(
             <pre
               key={`code-${codeKey++}`}
-              className="my-2 overflow-x-auto rounded-lg bg-background p-3 text-sm"
+              className="my-2 overflow-hidden whitespace-pre-wrap break-all rounded-lg bg-background p-3 text-sm"
             >
               <code>{codeContent.trim()}</code>
             </pre>
@@ -279,17 +279,17 @@ export function ChatMessage({
 
   if (isUser) {
     return (
-      <div className="px-0.5 py-2">
+      <div className="px-0.5 py-2 min-w-0 overflow-hidden">
         <div className="border-l-4 border-primary px-3 py-1">
-          <p className="text-base leading-relaxed text-foreground">{renderInlineMarkdown(message.content)}</p>
+          <p className="text-base leading-relaxed text-foreground break-words">{renderInlineMarkdown(message.content)}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="px-0.5 py-2">
-      <div className="space-y-2">
+    <div className="px-0.5 py-2 min-w-0 overflow-hidden">
+      <div className="space-y-2 min-w-0">
           {/* Parts-based rendering (new) vs legacy thinking field */}
           {message.parts && message.parts.length > 0 ? (
             // NEW: Render each part in order for correct interleaving
@@ -377,7 +377,7 @@ export function ChatMessage({
             </div>
           )}
 
-          <div className="px-1 py-1 text-base leading-relaxed">
+          <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
             {renderMarkdown(message.content)}
           </div>
 
@@ -485,17 +485,17 @@ function SavedPartRenderer({
               {part.toolInput && (
                 <div>
                   <span className="font-medium text-foreground/70">Input:</span>
-                  <pre className="mt-1 overflow-x-auto">{part.toolInput}</pre>
+                  <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
                 </div>
               )}
               {part.toolOutput && (
                 <div>
                   <span className="font-medium text-foreground/70">Output:</span>
-                  <pre className="mt-1 overflow-x-auto">{part.toolOutput}</pre>
+                  <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
                 </div>
               )}
               {part.content && !part.toolInput && !part.toolOutput && (
-                <pre className="overflow-x-auto">{part.content}</pre>
+                <pre className="whitespace-pre-wrap break-all overflow-hidden">{part.content}</pre>
               )}
               {(part.toolStartedAt || part.toolEndedAt) && (
                 <div className="text-muted-foreground/80">
@@ -512,7 +512,7 @@ function SavedPartRenderer({
 
   if (part.type === 'text') {
     return (
-      <div className="px-1 py-1 text-base leading-relaxed">
+      <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
         {renderMarkdown(part.content)}
       </div>
     )
