@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import {
   AlertCircle,
   AlertTriangle,
@@ -8,13 +8,30 @@ import {
   CheckCircle2,
   Clock3,
   FlaskConical,
+  Pencil,
   Play,
+  RotateCcw,
   Server,
   Sparkles,
   XCircle,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -31,6 +48,8 @@ interface ChatStarterCardsProps {
   sweeps: Sweep[]
   alerts: Alert[]
   onPromptSelect: (prompt: string) => void
+  customTemplates?: Record<string, string>
+  onEditTemplate?: (cardId: string, template: string | null) => void
 }
 
 interface SelectorOption {
@@ -63,6 +82,41 @@ const CLUSTER_SETUP_LABELS: Record<string, string> = {
   shared_head_node: 'Shared head node SSH cluster',
 }
 
+/** Default prompt templates keyed by stable card identifiers. */
+export const DEFAULT_PROMPT_TEMPLATES: Record<string, string> = {
+  'observe-run':
+    '@run:{{runId}} summarize what just happened, key outcomes, and the safest next experiment.',
+  'observe-run-empty':
+    'Help me set up the first run and explain what signals to monitor first.',
+  'review-sweep':
+    '@sweep:{{sweepId}} rank current candidates, explain why the top configs win, and propose the next 3 runs.',
+  'review-sweep-empty':
+    'Draft a practical sweep plan with candidate ranges and stop criteria.',
+  'metric-check':
+    '@run:{{runId}} report the primary metric trend, recent movement, and a threshold that should trigger intervention.',
+  'metric-check-empty':
+    'I need a compact primary-metric tracking plan for this project.',
+  'resolve-alert':
+    '@alert:{{alertId}} diagnose this alert, evaluate allowed responses, and recommend the safest one.',
+  'resolve-alert-empty':
+    'No active alerts. Give me a preventive checklist for the next 3 runs.',
+  'schedule-jobs':
+    'Given {{runningJobs}} running jobs, {{queuedJobs}} queued jobs, and {{pendingAlerts}} pending alerts, propose a scheduling strategy that maximizes learning-per-hour.',
+  'cluster-setup-auto':
+    'Help me identify my cluster setup (Slurm, local GPU, Kubernetes, Ray, or shared head-node SSH). Ask the minimum questions, give verification commands, and tell me what to set in Runs > Cluster Status.',
+  'cluster-setup':
+    'My cluster setup is {{clusterLabel}}. Give me an onboarding checklist for runs/sweeps, command templates, scheduler assumptions, and failure checks.',
+}
+
+function resolveTemplate(
+  cardId: string,
+  customTemplates: Record<string, string> | undefined,
+  vars: Record<string, string>,
+): string {
+  const template = customTemplates?.[cardId] ?? DEFAULT_PROMPT_TEMPLATES[cardId] ?? ''
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? '')
+}
+
 interface StarterInteractiveCardProps {
   title: string
   hint?: string
@@ -71,7 +125,18 @@ interface StarterInteractiveCardProps {
   icon: ComponentType<{ className?: string }>
   toneClass: string
   onActivate: () => void
+  onContextEdit?: () => void
   selector?: CardSelectorProps
+}
+
+interface EditPromptDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  cardId: string
+  cardTitle: string
+  currentTemplate: string
+  defaultTemplate: string
+  onSave: (cardId: string, template: string | null) => void
 }
 
 function formatRelative(date: Date) {
@@ -242,6 +307,77 @@ function MiniMetricChart({ label, values, stroke }: MiniMetricChartProps) {
   )
 }
 
+function EditPromptDialog({
+  open,
+  onOpenChange,
+  cardId,
+  cardTitle,
+  currentTemplate,
+  defaultTemplate,
+  onSave,
+}: EditPromptDialogProps) {
+  const [draft, setDraft] = useState(currentTemplate)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Sync draft when dialog opens with a new template
+  useEffect(() => {
+    if (open) setDraft(currentTemplate)
+  }, [open, currentTemplate])
+
+  const isDefault = draft === defaultTemplate
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Edit prompt — {cardTitle}</DialogTitle>
+          <DialogDescription>
+            Customise the prompt template for this card. Use <code className="rounded bg-muted px-1 text-xs">{'{{variable}}'}</code> placeholders for dynamic values.
+          </DialogDescription>
+        </DialogHeader>
+
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={5}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/60"
+        />
+
+        <DialogFooter className="flex items-center justify-between sm:justify-between">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={isDefault}
+            onClick={() => setDraft(defaultTemplate)}
+            className="gap-1.5 text-xs text-muted-foreground"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Reset to default
+          </Button>
+
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                onSave(cardId, draft === defaultTemplate ? null : draft)
+                onOpenChange(false)
+              }}
+            >
+              Save
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function StarterInteractiveCard({
   title,
   hint,
@@ -250,9 +386,10 @@ function StarterInteractiveCard({
   icon: Icon,
   toneClass,
   onActivate,
+  onContextEdit,
   selector,
 }: StarterInteractiveCardProps) {
-  return (
+  const cardContent = (
     <Card
       role="button"
       tabIndex={0}
@@ -301,6 +438,20 @@ function StarterInteractiveCard({
       </CardContent>
     </Card>
   )
+
+  if (!onContextEdit) return cardContent
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{cardContent}</ContextMenuTrigger>
+      <ContextMenuContent className="w-40">
+        <ContextMenuItem onClick={onContextEdit} className="gap-2 text-xs">
+          <Pencil className="h-3.5 w-3.5" />
+          Edit prompt
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
 }
 
 function StarterCardSlide({ children }: { children: ReactNode }) {
@@ -316,7 +467,22 @@ export function ChatStarterCards({
   sweeps,
   alerts,
   onPromptSelect,
+  customTemplates,
+  onEditTemplate,
 }: ChatStarterCardsProps) {
+  // Edit-dialog state
+  const [editingCard, setEditingCard] = useState<{ id: string; title: string } | null>(null)
+
+  const openEdit = useCallback((id: string, title: string) => {
+    setEditingCard({ id, title })
+  }, [])
+
+  const handleSaveTemplate = useCallback(
+    (cardId: string, template: string | null) => {
+      onEditTemplate?.(cardId, template)
+    },
+    [onEditTemplate],
+  )
   const recentRuns = useMemo(
     () =>
       [...runs]
@@ -454,8 +620,8 @@ export function ChatStarterCards({
   return (
     <div className="space-y-2.5">
       <div className="text-center">
-        <h2 className="text-base font-semibold tracking-tight text-foreground">Context-first research chat</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">Pick a card to stage a contextual prompt.</p>
+        {/* <h2 className="text-base font-semibold tracking-tight text-foreground">Context-first research chat</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">Pick a card to stage a contextual prompt.</p> */}
       </div>
 
       <div className="w-full">
@@ -522,10 +688,14 @@ export function ChatStarterCards({
                   </div>
                 )
               }
+              onContextEdit={onEditTemplate ? () => openEdit(
+                selectedRun ? 'observe-run' : 'observe-run-empty',
+                'Observe latest run',
+              ) : undefined}
               onActivate={() => {
                 const prompt = selectedRun
-                  ? `@run:${selectedRun.id} summarize what just happened, key outcomes, and the safest next experiment.`
-                  : 'Help me set up the first run and explain what signals to monitor first.'
+                  ? resolveTemplate('observe-run', customTemplates, { runId: selectedRun.id })
+                  : resolveTemplate('observe-run-empty', customTemplates, {})
                 onPromptSelect(prompt)
               }}
             />
@@ -575,10 +745,14 @@ export function ChatStarterCards({
                   </div>
                 )
               }
+              onContextEdit={onEditTemplate ? () => openEdit(
+                selectedSweep ? 'review-sweep' : 'review-sweep-empty',
+                'Review recent sweep',
+              ) : undefined}
               onActivate={() => {
                 const prompt = selectedSweep
-                  ? `@sweep:${selectedSweep.id} rank current candidates, explain why the top configs win, and propose the next 3 runs.`
-                  : 'Draft a practical sweep plan with candidate ranges and stop criteria.'
+                  ? resolveTemplate('review-sweep', customTemplates, { sweepId: selectedSweep.id })
+                  : resolveTemplate('review-sweep-empty', customTemplates, {})
                 onPromptSelect(prompt)
               }}
             />
@@ -623,10 +797,14 @@ export function ChatStarterCards({
                   </div>
                 )
               }
+              onContextEdit={onEditTemplate ? () => openEdit(
+                selectedRun ? 'metric-check' : 'metric-check-empty',
+                'Primary metric check',
+              ) : undefined}
               onActivate={() => {
                 const prompt = selectedRun
-                  ? `@run:${selectedRun.id} report the primary metric trend, recent movement, and a threshold that should trigger intervention.`
-                  : 'I need a compact primary-metric tracking plan for this project.'
+                  ? resolveTemplate('metric-check', customTemplates, { runId: selectedRun.id })
+                  : resolveTemplate('metric-check-empty', customTemplates, {})
                 onPromptSelect(prompt)
               }}
             />
@@ -680,10 +858,14 @@ export function ChatStarterCards({
                   </div>
                 )
               }
+              onContextEdit={onEditTemplate ? () => openEdit(
+                selectedAlert ? 'resolve-alert' : 'resolve-alert-empty',
+                'Resolve recent alert',
+              ) : undefined}
               onActivate={() => {
                 const prompt = selectedAlert
-                  ? `@alert:${selectedAlert.id} diagnose this alert, evaluate allowed responses, and recommend the safest one.`
-                  : 'No active alerts. Give me a preventive checklist for the next 3 runs.'
+                  ? resolveTemplate('resolve-alert', customTemplates, { alertId: selectedAlert.id })
+                  : resolveTemplate('resolve-alert-empty', customTemplates, {})
                 onPromptSelect(prompt)
               }}
             />
@@ -716,9 +898,14 @@ export function ChatStarterCards({
                   </div>
                 </div>
               }
+              onContextEdit={onEditTemplate ? () => openEdit('schedule-jobs', 'Schedule jobs better') : undefined}
               onActivate={() => {
                 onPromptSelect(
-                  `Given ${runningJobs} running jobs, ${queuedJobs} queued jobs, and ${pendingAlerts.length} pending alerts, propose a scheduling strategy that maximizes learning-per-hour.`
+                  resolveTemplate('schedule-jobs', customTemplates, {
+                    runningJobs: String(runningJobs),
+                    queuedJobs: String(queuedJobs),
+                    pendingAlerts: String(pendingAlerts.length),
+                  })
                 )
               }}
             />
@@ -752,17 +939,34 @@ export function ChatStarterCards({
                   </div>
                 </div>
               }
+              onContextEdit={onEditTemplate ? () => openEdit(
+                selectedClusterSetup === 'auto' ? 'cluster-setup-auto' : 'cluster-setup',
+                'Identify cluster setup',
+              ) : undefined}
               onActivate={() => {
                 const selectedLabel = CLUSTER_SETUP_LABELS[selectedClusterSetup] || 'Auto detect'
                 const prompt = selectedClusterSetup === 'auto'
-                  ? 'Help me identify my cluster setup (Slurm, local GPU, Kubernetes, Ray, or shared head-node SSH). Ask the minimum questions, give verification commands, and tell me what to set in Runs > Cluster Status.'
-                  : `My cluster setup is ${selectedLabel}. Give me an onboarding checklist for runs/sweeps, command templates, scheduler assumptions, and failure checks.`
+                  ? resolveTemplate('cluster-setup-auto', customTemplates, {})
+                  : resolveTemplate('cluster-setup', customTemplates, { clusterLabel: selectedLabel })
                 onPromptSelect(prompt)
               }}
             />
           </StarterCardSlide>
         </div>
       </div>
+
+      {/* Edit prompt dialog */}
+      {editingCard && (
+        <EditPromptDialog
+          open={!!editingCard}
+          onOpenChange={(open) => { if (!open) setEditingCard(null) }}
+          cardId={editingCard.id}
+          cardTitle={editingCard.title}
+          currentTemplate={customTemplates?.[editingCard.id] ?? DEFAULT_PROMPT_TEMPLATES[editingCard.id] ?? ''}
+          defaultTemplate={DEFAULT_PROMPT_TEMPLATES[editingCard.id] ?? ''}
+          onSave={handleSaveTemplate}
+        />
+      )}
     </div>
   )
 }

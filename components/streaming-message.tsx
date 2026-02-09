@@ -37,12 +37,12 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
                         {thinkingContent && (
                             <>
                                 <div className="flex items-start gap-2">
-                                    <div className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                                    <div className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
                                         <Brain className="h-3 w-3 animate-pulse" />
                                         <span>Thinking...</span>
                                     </div>
                                 </div>
-                                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
                                     {thinkingContent.split('\n').map((line, i) => (
                                         <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                                             {line}
@@ -60,7 +60,7 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
                             </div>
                         )}
                         {textContent && (
-                            <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+                            <div className="px-1 py-1 text-base leading-relaxed">
                                 {renderStreamingText(textContent)}
                                 <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
                             </div>
@@ -88,12 +88,12 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
         return (
             <>
                 <div className="flex items-start gap-2">
-                    <div className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                    <div className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
                         <Brain className="h-3 w-3 animate-pulse" />
                         <span>Thinking...</span>
                     </div>
                 </div>
-                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
                     {part.content.split('\n').map((line, i) => (
                         <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                             {line}
@@ -111,7 +111,7 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
 
     if (part.type === 'text') {
         return (
-            <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+            <div className="px-1 py-1 text-base leading-relaxed">
                 {renderStreamingText(part.content)}
                 <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
             </div>
@@ -128,7 +128,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
 
     return (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-            <CollapsibleTrigger className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground w-fit transition-colors hover:bg-secondary hover:text-foreground">
+            <CollapsibleTrigger className="flex w-full items-center justify-start gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
                 {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 <ToolStateIcon state={state} />
                 <Wrench className="h-3 w-3" />
@@ -140,7 +140,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                 {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
-                <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl space-y-2">
+                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2">
                     {part.toolDescription && (
                         <div>
                             <span className="font-medium text-foreground/70">Description:</span>{' '}
@@ -175,7 +175,7 @@ function ToolCallIndicator({ tool }: { tool: ToolCallState }) {
     const durationLabel = formatDuration(tool.durationMs, tool.startedAt, tool.endedAt)
 
     return (
-        <div className="rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground w-fit max-w-md">
+        <div className="w-full rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
                 <ToolStateIcon state={tool.state} />
                 <Wrench className="h-3 w-3" />

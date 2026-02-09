@@ -75,7 +75,26 @@ export function ConnectedChatView({
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
-    const showStarterCards = useAppSettings().settings.appearance.showStarterCards !== false
+    const { settings, setSettings } = useAppSettings()
+    const showStarterCards = settings.appearance.showStarterCards !== false
+    const customTemplates = settings.appearance.starterCardTemplates ?? {}
+    const handleEditTemplate = useCallback((cardId: string, template: string | null) => {
+        setSettings({
+            ...settings,
+            appearance: {
+                ...settings.appearance,
+                starterCardTemplates: (() => {
+                    const next = { ...settings.appearance.starterCardTemplates }
+                    if (template === null) {
+                        delete next[cardId]
+                    } else {
+                        next[cardId] = template
+                    }
+                    return next
+                })(),
+            },
+        })
+    }, [settings, setSettings])
     // Track which messages were auto-sent by wild loop
     const [wildMessageIndices, setWildMessageIndices] = useState<Set<number>>(new Set())
     // Track the previous streaming state to detect when streaming finishes
@@ -379,6 +398,8 @@ export function ConnectedChatView({
                                     runs={runs}
                                     sweeps={sweeps}
                                     alerts={alerts}
+                                    customTemplates={customTemplates}
+                                    onEditTemplate={handleEditTemplate}
                                     onPromptSelect={(prompt) => {
                                         setStarterDraftInsert({
                                             id: Date.now(),
@@ -396,7 +417,7 @@ export function ConnectedChatView({
                     <div className="flex-1 min-h-0 overflow-hidden">
                         <ScrollArea className="h-full" ref={scrollRef}>
                             <div className="pb-4">
-                                <div className="mt-4 space-y-1">
+                                <div className="mt-4 space-y-1 px-2.5">
                                     {collapseChats
                                         ? messagePairs.map((pair, index) => (
                                             <CollapsedChatPair
