@@ -59,7 +59,7 @@ import {
 import { TagsDialog } from './tags-dialog'
 import { LogViewer } from './log-viewer'
 import { TmuxTerminalPanel } from './tmux-terminal-panel'
-import type { ExperimentRun, TagDefinition, MetricVisualization } from '@/lib/types'
+import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
 import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
 import type { Alert } from '@/lib/api-client'
 
@@ -74,6 +74,7 @@ interface RunDetailViewProps {
   onRefresh?: () => void
   onStartRun?: (runId: string) => Promise<void>
   onStopRun?: (runId: string) => Promise<void>
+  sweeps?: Sweep[]
 }
 
 // Generate mock metric data based on run's loss history
@@ -196,7 +197,7 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun }: RunDetailViewProps) {
+export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun, sweeps = [] }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [copiedRunId, setCopiedRunId] = useState(false)
   const [copiedSweepId, setCopiedSweepId] = useState(false)
@@ -425,9 +426,35 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
-                  <p className="text-xs font-mono text-foreground truncate">
-                    {run.sweepId || 'No sweep'}
-                  </p>
+                  {(() => {
+                    const sweep = sweeps.find(s => s.id === run.sweepId)
+                    if (sweep) {
+                      return (
+                        <div className="mt-1 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-foreground truncate">{sweep.config.name}</span>
+                            <Badge variant="outline" className={`text-[9px] h-4 ${
+                              sweep.status === 'running' ? 'border-blue-400/50 bg-blue-400/10 text-blue-400' :
+                              sweep.status === 'completed' ? 'border-green-400/50 bg-green-400/10 text-green-400' :
+                              sweep.status === 'failed' ? 'border-destructive/50 bg-destructive/10 text-destructive' :
+                              'border-muted-foreground/50 bg-muted/10 text-muted-foreground'
+                            }`}>{sweep.status}</Badge>
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                            <span>{sweep.progress.completed}/{sweep.progress.total} runs</span>
+                            {sweep.progress.failed > 0 && <span className="text-destructive">{sweep.progress.failed} failed</span>}
+                            {sweep.bestMetricValue !== undefined && (
+                              <span>Best: {sweep.bestMetricValue.toFixed(4)}</span>
+                            )}
+                          </div>
+                          {sweep.config.goal && (
+                            <p className="text-[10px] text-muted-foreground line-clamp-1">{sweep.config.goal}</p>
+                          )}
+                        </div>
+                      )
+                    }
+                    return <p className="text-xs font-mono text-foreground truncate">{run.sweepId || 'No sweep'}</p>
+                  })()}
                 </div>
                 {run.sweepId && (
                   <Button

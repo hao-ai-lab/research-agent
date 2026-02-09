@@ -51,7 +51,7 @@ import { VisibilityManageView } from './visibility-manage-view'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
-import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
+import { DEFAULT_RUN_COLORS, getRunsOverview, mockSweeps } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 
 
@@ -547,6 +547,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
             onRefresh={onRefresh}
             onStartRun={onStartRun}
             onStopRun={onStopRun}
+            sweeps={mockSweeps}
           />
         </div>
       </div>
@@ -1002,7 +1003,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
     </div>
 
       <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-        <DialogContent showCloseButton={false} className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col p-0 gap-0">
+        <DialogContent showCloseButton={false} className="w-[95vw] h-[90vh] max-w-[900px] max-h-[800px] flex flex-col p-0 gap-0">
           <SweepForm
             onSave={() => { setSweepDialogOpen(false); onRefresh?.() }}
             onCancel={() => setSweepDialogOpen(false)}

@@ -31,7 +31,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { SweepFormPopover } from '@/components/sweep-form-popover'
+import { SweepForm } from '@/components/sweep-form'
 
 const DESKTOP_SIDEBAR_MIN_WIDTH = 240
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
@@ -798,16 +798,13 @@ export default function AssistantPage() {
       </Dialog>
 
       <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-        <DialogContent className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Create Sweep</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <SweepFormPopover
-              onClose={() => setSweepDialogOpen(false)}
-              onRefresh={fetchSweeps}
-            />
-          </div>
+        <DialogContent showCloseButton={false} className="w-[95vw] h-[90vh] max-w-[900px] max-h-[800px] flex flex-col p-0 gap-0">
+          <SweepForm
+            onSave={() => { setSweepDialogOpen(false); fetchSweeps() }}
+            onCancel={() => setSweepDialogOpen(false)}
+            onLaunch={() => { setSweepDialogOpen(false); fetchSweeps() }}
+            previousSweeps={uiSweeps}
+          />
         </DialogContent>
       </Dialog>
     </div>

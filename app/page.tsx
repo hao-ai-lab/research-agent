@@ -691,9 +691,10 @@ export default function ResearchChat() {
       <Dialog open={showSweepForm} onOpenChange={(open) => {
         if (!open) { setShowSweepForm(false); setEditingSweepConfig(null) }
       }}>
-        <DialogContent showCloseButton={false} className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col p-0 gap-0">
+        <DialogContent showCloseButton={false} className="w-[95vw] h-[90vh] max-w-[900px] max-h-[800px] flex flex-col p-0 gap-0">
           <SweepForm
             initialConfig={editingSweepConfig || undefined}
+            previousSweeps={sweeps}
             onSave={handleSaveSweep}
             onCancel={() => {
               setShowSweepForm(false)

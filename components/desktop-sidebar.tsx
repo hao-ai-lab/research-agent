@@ -324,7 +324,7 @@ export function DesktopSidebar({
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Recent Chats
+                  Chats
                 </p>
                 <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
               </div>
@@ -350,7 +350,7 @@ export function DesktopSidebar({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 shrink-0 px-2 text-[10px]"
+                      className="h-6 shrink-0 px-2 text-[16px]"
                       onClick={() => onInsertReference(`@chat:${session.id} `)}
                     >
                       @
@@ -368,7 +368,7 @@ export function DesktopSidebar({
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Recent Runs
+                  Runs
                 </p>
                 <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
               </div>
@@ -389,7 +389,7 @@ export function DesktopSidebar({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 px-2 text-[10px]"
+                      className="h-6 px-2 text-[16px]"
                       onClick={() => onInsertReference(`@run:${run.id} `)}
                     >
                       @
@@ -407,7 +407,7 @@ export function DesktopSidebar({
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Recent Sweeps
+                  Sweeps
                 </p>
                 <span className="text-[10px] text-muted-foreground">Click to reference</span>
               </div>
