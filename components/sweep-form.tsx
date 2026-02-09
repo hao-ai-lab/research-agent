@@ -1150,6 +1150,26 @@ export function SweepForm({
               Launch
             </Button>
           )}
+
+          <div className="border-l border-border mx-1" />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-3 text-[11px] text-muted-foreground"
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+
+          <Button
+            size="sm"
+            className="h-7 px-4 text-[11px]"
+            onClick={() => onSave(prepareConfig())}
+          >
+            <Save className="h-3 w-3 mr-1" />
+            Save
+          </Button>
         </div>
       </div>
     </div>

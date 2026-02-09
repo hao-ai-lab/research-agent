@@ -1376,6 +1376,25 @@ export function RunsView({
   return (
     <>
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Top Nav Bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/80 backdrop-blur-sm shrink-0">
+        <h2 className="text-sm font-medium text-foreground">Runs</h2>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs gap-1.5"
+              onClick={() => setSweepDialogOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Create Sweep
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Create a new sweep</TooltipContent>
+        </Tooltip>
+      </div>
+
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full" ref={scrollAreaRef} onScrollCapture={handleScroll}>
           <div className="p-4 space-y-5">
