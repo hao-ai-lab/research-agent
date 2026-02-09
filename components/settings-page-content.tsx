@@ -9,6 +9,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  LayoutGrid,
   Monitor,
   Moon,
   RotateCcw,
@@ -159,6 +160,14 @@ export function SettingsPageContent({
           type: 'select' as const,
           options: ['compact', 'default', 'large'],
           value: settings.appearance.buttonSize,
+        },
+        {
+          id: 'showStarterCards',
+          label: 'Starter Cards',
+          description: 'Show contextual prompt cards on new chats',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.showStarterCards !== false,
         },
         {
           id: 'appearanceAdvanced',
@@ -420,6 +429,7 @@ export function SettingsPageContent({
               onCheckedChange={(checked) => {
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
+                if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
               }}
             />
           </div>

@@ -53,6 +53,7 @@ export interface UseChatSessionResult {
     currentSession: ChatSession | null
     createNewSession: () => Promise<string | null>
     selectSession: (sessionId: string) => Promise<void>
+    archiveSession: (sessionId: string) => Promise<void>
     removeSession: (sessionId: string) => Promise<void>
     refreshSessions: () => Promise<void>
 
@@ -81,6 +82,24 @@ const initialStreamingState: StreamingState = {
     toolCalls: [],
 }
 
+const STORAGE_KEY_ARCHIVED_CHAT_SESSIONS = 'archivedChatSessionIds'
+
+function readArchivedSessionIds(): string[] {
+    if (typeof window === 'undefined') return []
+
+    try {
+        const raw = window.localStorage.getItem(STORAGE_KEY_ARCHIVED_CHAT_SESSIONS)
+        if (!raw) return []
+
+        const parsed = JSON.parse(raw)
+        if (!Array.isArray(parsed)) return []
+
+        return parsed.filter((id): id is string => typeof id === 'string')
+    } catch {
+        return []
+    }
+}
+
 function parseDevelopCommand(content: string): string | null {
     const trimmed = content.trim()
     const match = trimmed.match(/^\/develop(?:ment)?(?:\s+([\s\S]*))?$/i)
@@ -101,6 +120,7 @@ export function useChatSession(): UseChatSessionResult {
 
     // Session state
     const [sessions, setSessions] = useState<ChatSession[]>([])
+    const [archivedSessionIds, setArchivedSessionIds] = useState<string[]>(() => readArchivedSessionIds())
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
     const [messages, setMessages] = useState<ChatMessageData[]>([])
 
@@ -134,12 +154,13 @@ export function useChatSession(): UseChatSessionResult {
     const refreshSessions = useCallback(async () => {
         try {
             const sessionList = await listSessions()
-            setSessions(sessionList)
+            const archivedSet = new Set(archivedSessionIds)
+            setSessions(sessionList.filter((session) => !archivedSet.has(session.id)))
         } catch (err) {
             console.error('Failed to refresh sessions:', err)
             setError(err instanceof Error ? err.message : 'Failed to load sessions')
         }
-    }, [])
+    }, [archivedSessionIds])
 
     // Load sessions on mount (after connection check)
     useEffect(() => {
@@ -148,12 +169,21 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [isConnected, refreshSessions])
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(
+            STORAGE_KEY_ARCHIVED_CHAT_SESSIONS,
+            JSON.stringify(archivedSessionIds)
+        )
+    }, [archivedSessionIds])
+
     // Create new session - returns the new session ID
     const createNewSession = useCallback(async (): Promise<string | null> => {
         try {
             setError(null)
             const newSession = await createSession()
-            setSessions(prev => [newSession, ...prev])
+            setArchivedSessionIds((prev) => prev.filter((id) => id !== newSession.id))
+            setSessions(prev => [newSession, ...prev.filter((session) => session.id !== newSession.id)])
             setCurrentSessionId(newSession.id)
             setMessages([])
             setStreamingState(initialStreamingState)
@@ -167,6 +197,11 @@ export function useChatSession(): UseChatSessionResult {
 
     // Select a session
     const selectSession = useCallback(async (sessionId: string) => {
+        if (archivedSessionIds.includes(sessionId)) {
+            setError('This chat is archived.')
+            return
+        }
+
         try {
             setError(null)
             setIsLoading(true)
@@ -186,7 +221,7 @@ export function useChatSession(): UseChatSessionResult {
         } finally {
             setIsLoading(false)
         }
-    }, [])
+    }, [archivedSessionIds])
 
     // Delete a session
     const removeSession = useCallback(async (sessionId: string) => {
@@ -204,6 +239,27 @@ export function useChatSession(): UseChatSessionResult {
         } catch (err) {
             console.error('Failed to delete session:', err)
             setError(err instanceof Error ? err.message : 'Failed to delete session')
+        }
+    }, [currentSessionId])
+
+    // Archive a session client-side (keeps backend data intact)
+    const archiveSession = useCallback(async (sessionId: string) => {
+        setError(null)
+
+        if (sessionId === currentSessionId && abortControllerRef.current) {
+            abortControllerRef.current.abort()
+            abortControllerRef.current = null
+        }
+
+        setArchivedSessionIds((prev) => (
+            prev.includes(sessionId) ? prev : [...prev, sessionId]
+        ))
+        setSessions((prev) => prev.filter((session) => session.id !== sessionId))
+
+        if (sessionId === currentSessionId) {
+            setCurrentSessionId(null)
+            setMessages([])
+            setStreamingState(initialStreamingState)
         }
     }, [currentSessionId])
 
@@ -504,6 +560,7 @@ export function useChatSession(): UseChatSessionResult {
         currentSession,
         createNewSession,
         selectSession,
+        archiveSession,
         removeSession,
         refreshSessions,
         messages,

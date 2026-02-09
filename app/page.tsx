@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { FloatingNav } from '@/components/floating-nav'
-import { NavPage, type JourneySubTab } from '@/components/nav-page'
+import { NavPage } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
 import { RunsView } from '@/components/runs-view'
 import { ChartsView } from '@/components/charts-view'
@@ -27,8 +27,13 @@ import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
 import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
-
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
+import {
+  buildHomeSearchParams,
+  isJourneySubTab,
+  parseHomeTab,
+  type HomeTab,
+  type JourneySubTab,
+} from '@/lib/navigation'
 const DESKTOP_SIDEBAR_MIN_WIDTH = 72
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
@@ -40,9 +45,10 @@ const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
 const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
 
 export default function ResearchChat() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const { settings, setSettings } = useAppSettings()
-  const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
+  const [activeTab, setActiveTab] = useState<HomeTab>('chat')
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [desktopSidebarHidden, setDesktopSidebarHidden] = useState(false)
@@ -153,16 +159,9 @@ export default function ResearchChat() {
   }, [])
 
   useEffect(() => {
-    const tab = searchParams.get('tab')
+    setActiveTab(parseHomeTab(searchParams, 'chat'))
     const journeySubTabParam = searchParams.get('journeySubTab')
-
-    if (tab === 'journey') {
-      setActiveTab('journey')
-    }
-    if (tab === 'settings') {
-      setActiveTab('settings')
-    }
-    if (journeySubTabParam === 'story' || journeySubTabParam === 'devnotes') {
+    if (isJourneySubTab(journeySubTabParam)) {
       setJourneySubTab(journeySubTabParam)
     }
     setFocusAuthTokenInApp(searchParams.get('focusAuthToken') === '1')
@@ -176,6 +175,7 @@ export default function ResearchChat() {
       // Check if auth token is missing
       if (!authToken) {
         setActiveTab('settings')
+        router.replace('/?tab=settings&focusAuthToken=1', { scroll: false })
         setFocusAuthTokenInApp(true)
         return
       }
@@ -184,6 +184,7 @@ export default function ResearchChat() {
       const isConnected = await testConnection()
       if (!isConnected) {
         setActiveTab('settings')
+        router.replace('/?tab=settings', { scroll: false })
         setFocusAuthTokenInApp(false)
       } else {
         setFocusAuthTokenInApp(false)
@@ -191,11 +192,11 @@ export default function ResearchChat() {
     }
 
     checkConnection()
-  }, [useMock, authToken, testConnection])
+  }, [useMock, authToken, testConnection, router])
 
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
-  const { createNewSession, sessions, selectSession } = chatSession
+  const { createNewSession, sessions, selectSession, archiveSession } = chatSession
   const { sendMessage } = chatSession
 
   // Wild loop hook
@@ -300,21 +301,43 @@ export default function ResearchChat() {
     })
   }, [alerts])
 
-  const handleRunClick = useCallback((run: ExperimentRun) => {
-    setActiveTab('runs')
-  }, [])
+  const handleTabChange = useCallback((tab: HomeTab | 'contextual') => {
+    if (tab === 'contextual') {
+      router.push('/contextual')
+      return
+    }
+
+    setActiveTab(tab)
+    setSelectedRun(null)
+    setShowVisibilityManage(false)
+
+    const params = buildHomeSearchParams(tab, journeySubTab)
+    const query = params.toString()
+    router.replace(query ? `/?${query}` : '/', { scroll: false })
+  }, [journeySubTab, router])
+
+  useEffect(() => {
+    if (activeTab !== 'journey') return
+    const params = buildHomeSearchParams('journey', journeySubTab)
+    const query = params.toString()
+    router.replace(query ? `/?${query}` : '/', { scroll: false })
+  }, [activeTab, journeySubTab, router])
+
+  const handleRunClick = useCallback((_run: ExperimentRun) => {
+    handleTabChange('runs')
+  }, [handleTabChange])
 
   const handleNavigateToRun = useCallback((runId: string) => {
     const run = runs.find(r => r.id === runId)
     if (run) {
-      setActiveTab('runs')
+      handleTabChange('runs')
       setSelectedRun(run)
     }
-  }, [runs])
+  }, [runs, handleTabChange])
 
   const handleNavigateToEvents = useCallback(() => {
-    setActiveTab('events')
-  }, [])
+    handleTabChange('events')
+  }, [handleTabChange])
 
   const handleUpdateEventStatus = useCallback(async (eventId: string, status: EventStatus) => {
     setEventStatusOverrides(prev => ({ ...prev, [eventId]: status }))
@@ -362,7 +385,7 @@ export default function ResearchChat() {
     if (!sessionId) return
 
     await selectSession(sessionId)
-    setActiveTab('chat')
+    handleTabChange('chat')
 
     if (!existingSessionId) {
       const prompt = [
@@ -379,7 +402,7 @@ export default function ResearchChat() {
       ].filter(Boolean).join('\n')
       await sendMessage(prompt, chatMode, sessionId)
     }
-  }, [alerts, runs, createNewSession, selectSession, sendMessage, chatMode])
+  }, [alerts, runs, createNewSession, selectSession, sendMessage, chatMode, handleTabChange])
 
   const handleUpdateRun = useCallback((updatedRun: ExperimentRun) => {
     apiUpdateRun(updatedRun)
@@ -512,13 +535,6 @@ export default function ResearchChat() {
     setEditingSweepConfig(null)
   }, [upsertSweepFromConfig])
 
-  // Clear run selection when changing tabs
-  const handleTabChange = useCallback((tab: ActiveTab) => {
-    setActiveTab(tab)
-    setSelectedRun(null)
-    setShowVisibilityManage(false)
-  }, [])
-
   const handleChatModeChange = useCallback(async (mode: ChatMode) => {
     setChatMode(mode)
     try {
@@ -529,18 +545,18 @@ export default function ResearchChat() {
   }, [])
 
   const handleOpenSweepCreator = useCallback(() => {
-    setActiveTab('chat')
+    handleTabChange('chat')
     setEditingSweepConfig(null)
     setShowSweepForm(true)
-  }, [])
+  }, [handleTabChange])
 
   const handleInsertChatReference = useCallback((text: string) => {
-    setActiveTab('chat')
+    handleTabChange('chat')
     setChatDraftInsert({
       id: Date.now(),
       text,
     })
-  }, [])
+  }, [handleTabChange])
 
   const handleSidebarWidthChange = useCallback((nextWidth: number) => {
     pendingSidebarWidthRef.current = nextWidth
@@ -577,23 +593,25 @@ export default function ResearchChat() {
           width={desktopSidebarWidth}
           minWidth={DESKTOP_SIDEBAR_MIN_WIDTH}
           maxWidth={DESKTOP_SIDEBAR_MAX_WIDTH}
-          journeySubTab={journeySubTab}
           sessions={sessions}
           runs={runs}
           sweeps={sweeps}
+          pendingAlertsByRun={pendingAlertsByRun}
           onTabChange={handleTabChange}
-          onJourneySubTabChange={setJourneySubTab}
           onNewChat={async () => {
             await createNewSession()
-            setActiveTab('chat')
+            handleTabChange('chat')
           }}
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
-            setActiveTab('chat')
+            handleTabChange('chat')
+          }}
+          onArchiveSession={async (sessionId) => {
+            await archiveSession(sessionId)
           }}
           onNavigateToRun={handleNavigateToRun}
           onInsertReference={handleInsertChatReference}
-          onSettingsClick={() => setActiveTab('settings')}
+          onSettingsClick={() => handleTabChange('settings')}
           onToggleCollapse={() => setDesktopSidebarHidden(true)}
           onWidthChange={handleSidebarWidthChange}
           onResizeEnd={handleSidebarResizeEnd}
@@ -608,6 +626,7 @@ export default function ResearchChat() {
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
             onCreateSweepClick={handleOpenSweepCreator}
+            onOpenContextualClick={() => router.push('/contextual')}
             showArtifacts={showArtifacts}
             onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
             collapseChats={collapseChats}
@@ -632,10 +651,11 @@ export default function ResearchChat() {
                 onModeChange={handleChatModeChange}
                 alerts={alerts}
                 collapseArtifactsInChat={collapseArtifactsInChat}
+                collapseChats={collapseChats}
                 chatSession={chatSession}
                 wildLoop={wildLoop}
                 webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
-                onOpenSettings={() => setActiveTab('settings')}
+                onOpenSettings={() => handleTabChange('settings')}
                 insertDraft={chatDraftInsert}
               />
             )}
@@ -690,7 +710,7 @@ export default function ResearchChat() {
             )}
             {activeTab === 'journey' && (
               <JourneyView
-                onBack={() => setActiveTab('chat')}
+                onBack={() => handleTabChange('chat')}
                 subTab={journeySubTab}
               />
             )}
@@ -701,7 +721,7 @@ export default function ResearchChat() {
                 focusAuthToken={focusAuthTokenInApp}
                 onNavigateToJourney={(subTab) => {
                   setJourneySubTab(subTab)
-                  setActiveTab('journey')
+                  handleTabChange('journey')
                 }}
               />
             )}
@@ -710,19 +730,19 @@ export default function ResearchChat() {
           <NavPage
             open={leftPanelOpen}
             onOpenChange={setLeftPanelOpen}
-            onSettingsClick={() => setActiveTab('settings')}
-            activeTab={activeTab === 'settings' ? 'chat' : activeTab}
+            onSettingsClick={() => handleTabChange('settings')}
+            activeTab={activeTab}
             journeySubTab={journeySubTab}
             onTabChange={handleTabChange}
             onJourneySubTabChange={setJourneySubTab}
             onNewChat={async () => {
               await createNewSession()
-              setActiveTab('chat')
+              handleTabChange('chat')
             }}
             sessions={sessions}
             onSelectSession={async (sessionId) => {
               await selectSession(sessionId)
-              setActiveTab('chat')
+              handleTabChange('chat')
             }}
           />
         </section>

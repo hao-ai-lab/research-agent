@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen } from 'lucide-react'
+import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Orbit } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -25,6 +25,7 @@ interface FloatingNavProps {
   eventCount?: number
   onAlertClick?: () => void
   onCreateSweepClick?: () => void
+  onOpenContextualClick?: () => void
   showArtifacts?: boolean
   onToggleArtifacts?: () => void
   collapseChats?: boolean
@@ -45,6 +46,7 @@ export function FloatingNav({
   eventCount = 0,
   onAlertClick,
   onCreateSweepClick,
+  onOpenContextualClick,
   showArtifacts = false,
   onToggleArtifacts,
   collapseChats = false,
@@ -127,6 +129,17 @@ export function FloatingNav({
           >
             <PlugZap className="h-4 w-4" />
             <span className="sr-only">Create sweep</span>
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onOpenContextualClick}
+            className="h-8 w-8"
+            title="Open contextual chat"
+          >
+            <Orbit className="h-4 w-4" />
+            <span className="sr-only">Open contextual chat</span>
           </Button>
 
           {/* Settings Dropdown */}

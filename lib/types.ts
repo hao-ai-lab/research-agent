@@ -77,6 +77,7 @@ export interface AppSettings {
     customFontSizePx?: number | null;
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
+    showStarterCards?: boolean;
   };
   integrations: {
     slack?: {
