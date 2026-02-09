@@ -60,7 +60,16 @@ export function VisibilityManageView({
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupColor, setNewGroupColor] = useState(DEFAULT_RUN_COLORS[0])
 
-  const activeRuns = runs.filter((r) => !r.isArchived && r.lossHistory && r.lossHistory.length > 0)
+  const hasChartData = (run: ExperimentRun) => {
+    const hasLossHistory = !!(run.lossHistory && run.lossHistory.length > 0)
+    const hasMetricSeries = !!(
+      run.metricSeries &&
+      Object.values(run.metricSeries).some((points) => points && points.length > 0)
+    )
+    return hasLossHistory || hasMetricSeries
+  }
+
+  const activeRuns = runs.filter((r) => !r.isArchived && hasChartData(r))
 
   const filteredRuns = useMemo(() => {
     if (!searchQuery.trim()) return activeRuns

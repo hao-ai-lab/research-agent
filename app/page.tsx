@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { FloatingNav } from '@/components/floating-nav'
-import { NavPage, type JourneySubTab } from '@/components/nav-page'
+import { NavPage } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
 import { RunsView } from '@/components/runs-view'
 import { ChartsView } from '@/components/charts-view'
@@ -11,13 +11,14 @@ import { InsightsView } from '@/components/insights-view'
 import { EventsView } from '@/components/events-view'
 import { JourneyView } from '@/components/journey-view'
 import { ReportView, type ReportToolbarState } from '@/components/report-view'
+import { FileExplorerView } from '@/components/file-explorer-view'
 import { SettingsPageContent } from '@/components/settings-page-content'
 import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
 import type { ChatMode } from '@/components/chat-input'
-import { mockMemoryRules, mockInsightCharts, defaultTags, mockSweeps } from '@/lib/mock-data'
-import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, Sweep, SweepConfig } from '@/lib/types'
+import { mockMemoryRules, mockInsightCharts, defaultTags } from '@/lib/mock-data'
+import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
 import {
   Dialog,
@@ -27,8 +28,15 @@ import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
 import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
-
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
+import { useSweeps } from '@/hooks/use-sweeps'
+import { useCluster } from '@/hooks/use-cluster'
+import {
+  buildHomeSearchParams,
+  isJourneySubTab,
+  parseHomeTab,
+  type HomeTab,
+  type JourneySubTab,
+} from '@/lib/navigation'
 const DESKTOP_SIDEBAR_MIN_WIDTH = 72
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
@@ -40,9 +48,10 @@ const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
 const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
 
 export default function ResearchChat() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const { settings, setSettings } = useAppSettings()
-  const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
+  const [activeTab, setActiveTab] = useState<HomeTab>('chat')
   const [journeySubTab, setJourneySubTab] = useState<JourneySubTab>('story')
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [desktopSidebarHidden, setDesktopSidebarHidden] = useState(false)
@@ -53,7 +62,22 @@ export default function ResearchChat() {
   const sidebarRafRef = useRef<number | null>(null)
 
   // Use real API data via useRuns hook
-  const { runs, updateRun: apiUpdateRun, refetch, startExistingRun, stopExistingRun } = useRuns()
+  const { runs, updateRun: apiUpdateRun, refetch: refetchRuns, startExistingRun, stopExistingRun } = useRuns()
+  const {
+    sweeps,
+    refetch: refetchSweeps,
+    saveDraftSweep,
+    launchSweepFromConfig,
+  } = useSweeps()
+  const {
+    cluster,
+    runSummary: clusterRunSummary,
+    isLoading: clusterLoading,
+    error: clusterError,
+    autoDetect: detectClusterSetup,
+    saveCluster: updateClusterSetup,
+    refetch: refetchCluster,
+  } = useCluster()
   const { alerts, respond: respondAlert } = useAlerts()
 
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
@@ -69,7 +93,6 @@ export default function ResearchChat() {
   const [eventStatusOverrides, setEventStatusOverrides] = useState<Record<string, EventStatus>>({})
 
   // Sweeps state
-  const [sweeps, setSweeps] = useState<Sweep[]>(mockSweeps)
   const [showSweepForm, setShowSweepForm] = useState(false)
   const [editingSweepConfig, setEditingSweepConfig] = useState<SweepConfig | null>(null)
 
@@ -81,7 +104,7 @@ export default function ResearchChat() {
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
   // API configuration for auth/connection check
-  const { useMock, authToken, testConnection } = useApiConfig()
+  const { useMock, apiUrl, authToken, testConnection } = useApiConfig()
 
   useEffect(() => {
     const storedWidth = window.localStorage.getItem(STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH)
@@ -153,16 +176,9 @@ export default function ResearchChat() {
   }, [])
 
   useEffect(() => {
-    const tab = searchParams.get('tab')
+    setActiveTab(parseHomeTab(searchParams, 'chat'))
     const journeySubTabParam = searchParams.get('journeySubTab')
-
-    if (tab === 'journey') {
-      setActiveTab('journey')
-    }
-    if (tab === 'settings') {
-      setActiveTab('settings')
-    }
-    if (journeySubTabParam === 'story' || journeySubTabParam === 'devnotes') {
+    if (isJourneySubTab(journeySubTabParam)) {
       setJourneySubTab(journeySubTabParam)
     }
     setFocusAuthTokenInApp(searchParams.get('focusAuthToken') === '1')
@@ -176,6 +192,7 @@ export default function ResearchChat() {
       // Check if auth token is missing
       if (!authToken) {
         setActiveTab('settings')
+        router.replace('/?tab=settings&focusAuthToken=1', { scroll: false })
         setFocusAuthTokenInApp(true)
         return
       }
@@ -184,6 +201,7 @@ export default function ResearchChat() {
       const isConnected = await testConnection()
       if (!isConnected) {
         setActiveTab('settings')
+        router.replace('/?tab=settings', { scroll: false })
         setFocusAuthTokenInApp(false)
       } else {
         setFocusAuthTokenInApp(false)
@@ -191,11 +209,11 @@ export default function ResearchChat() {
     }
 
     checkConnection()
-  }, [useMock, authToken, testConnection])
+  }, [useMock, authToken, testConnection, router])
 
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
-  const { createNewSession, sessions, selectSession } = chatSession
+  const { createNewSession, sessions, selectSession, archiveSession } = chatSession
   const { sendMessage } = chatSession
 
   // Wild loop hook
@@ -300,21 +318,43 @@ export default function ResearchChat() {
     })
   }, [alerts])
 
-  const handleRunClick = useCallback((run: ExperimentRun) => {
-    setActiveTab('runs')
-  }, [])
+  const handleTabChange = useCallback((tab: HomeTab | 'contextual') => {
+    if (tab === 'contextual') {
+      router.push('/contextual')
+      return
+    }
+
+    setActiveTab(tab)
+    setSelectedRun(null)
+    setShowVisibilityManage(false)
+
+    const params = buildHomeSearchParams(tab, journeySubTab)
+    const query = params.toString()
+    router.replace(query ? `/?${query}` : '/', { scroll: false })
+  }, [journeySubTab, router])
+
+  useEffect(() => {
+    if (activeTab !== 'journey') return
+    const params = buildHomeSearchParams('journey', journeySubTab)
+    const query = params.toString()
+    router.replace(query ? `/?${query}` : '/', { scroll: false })
+  }, [activeTab, journeySubTab, router])
+
+  const handleRunClick = useCallback((_run: ExperimentRun) => {
+    handleTabChange('runs')
+  }, [handleTabChange])
 
   const handleNavigateToRun = useCallback((runId: string) => {
     const run = runs.find(r => r.id === runId)
     if (run) {
-      setActiveTab('runs')
+      handleTabChange('runs')
       setSelectedRun(run)
     }
-  }, [runs])
+  }, [runs, handleTabChange])
 
   const handleNavigateToEvents = useCallback(() => {
-    setActiveTab('events')
-  }, [])
+    handleTabChange('events')
+  }, [handleTabChange])
 
   const handleUpdateEventStatus = useCallback(async (eventId: string, status: EventStatus) => {
     setEventStatusOverrides(prev => ({ ...prev, [eventId]: status }))
@@ -362,7 +402,7 @@ export default function ResearchChat() {
     if (!sessionId) return
 
     await selectSession(sessionId)
-    setActiveTab('chat')
+    handleTabChange('chat')
 
     if (!existingSessionId) {
       const prompt = [
@@ -379,7 +419,7 @@ export default function ResearchChat() {
       ].filter(Boolean).join('\n')
       await sendMessage(prompt, chatMode, sessionId)
     }
-  }, [alerts, runs, createNewSession, selectSession, sendMessage, chatMode])
+  }, [alerts, runs, createNewSession, selectSession, sendMessage, chatMode, handleTabChange])
 
   const handleUpdateRun = useCallback((updatedRun: ExperimentRun) => {
     apiUpdateRun(updatedRun)
@@ -423,65 +463,62 @@ export default function ResearchChat() {
 
   const handleToggleChartOverview = useCallback((chartId: string) => {
     setInsightCharts(prev =>
-      prev.map(chart =>
-        chart.id === chartId ? { ...chart, isInOverview: !chart.isInOverview } : chart
-      )
+      prev.map(chart => {
+        if (chart.id !== chartId) return chart
+        const nextFavorite = !(chart.isInOverview || chart.isFavorite)
+        return {
+          ...chart,
+          isFavorite: nextFavorite,
+          isInOverview: nextFavorite,
+        }
+      })
     )
   }, [])
 
-  // Sweep handlers
   const handleEditSweep = useCallback((config: SweepConfig) => {
     setEditingSweepConfig(config)
     setShowSweepForm(true)
   }, [])
 
-  const handleSaveSweep = useCallback((config: SweepConfig) => {
-    // Check if this is an edit or new sweep
-    const existingSweepIndex = sweeps.findIndex(s => s.config.id === config.id)
-    if (existingSweepIndex >= 0) {
-      // Update existing sweep's config
-      setSweeps(prev => prev.map(s =>
-        s.config.id === config.id
-          ? { ...s, config: { ...config, updatedAt: new Date() } }
-          : s
-      ))
+  const handleSaveSweep = useCallback(async (config: SweepConfig) => {
+    try {
+      await saveDraftSweep(config)
+      setShowSweepForm(false)
+      setEditingSweepConfig(null)
+    } catch (error) {
+      console.error('Failed to save draft sweep:', error)
     }
-    // Sweep saved - would normally trigger a toast notification
-    // Messages are now handled by the backend
-    setShowSweepForm(false)
-    setEditingSweepConfig(null)
-  }, [sweeps])
+  }, [saveDraftSweep])
 
-  const handleLaunchSweep = useCallback((config: SweepConfig) => {
-    // Create a new sweep from the config
-    const newSweep: Sweep = {
-      id: `sweep-${Date.now()}`,
-      config,
-      status: 'running',
-      runIds: [], // Will be populated as runs are created
-      startedAt: new Date(),
-      createdAt: new Date(),
-      progress: {
-        completed: 0,
-        total: config.maxRuns || 10,
-        failed: 0,
-        running: Math.min(config.parallelRuns || 2, config.maxRuns || 10),
-      },
+  const handleCreateSweep = useCallback(async (config: SweepConfig) => {
+    try {
+      const draftSweep = await saveDraftSweep(config)
+      setActiveTab('chat')
+      setChatDraftInsert({
+        id: Date.now(),
+        text: `@sweep:${draftSweep.id} You goal is to improve this sweep before we launch it. Optimize search space, metrics, and stop conditions. Do not change the name of the sweep. Use the \`/sweeps\` endpoint to get and edit the sweep information and \`/runs\` endpoint to create runs. The server base url is ${apiUrl}. IMPORTANT: All API endpoints require authentication. You MUST include the header \`X-Auth-Token\` in every request. The token should be taken from environment variable \`RESEARCH_AGENT_USER_AUTH_TOKEN\`.`,
+      })
+      setShowSweepForm(false)
+      setEditingSweepConfig(null)
+    } catch (error) {
+      console.error('Failed to create draft sweep:', error)
     }
-    setSweeps(prev => [...prev, newSweep])
+  }, [saveDraftSweep])
 
-    // Sweep launched - would normally trigger a toast notification
-    // Messages are now handled by the backend
-    setShowSweepForm(false)
-    setEditingSweepConfig(null)
-  }, [])
+  const handleLaunchSweep = useCallback(async (config: SweepConfig) => {
+    try {
+      await launchSweepFromConfig(config)
+      await refetchRuns()
+      setShowSweepForm(false)
+      setEditingSweepConfig(null)
+    } catch (error) {
+      console.error('Failed to launch sweep:', error)
+    }
+  }, [launchSweepFromConfig, refetchRuns])
 
-  // Clear run selection when changing tabs
-  const handleTabChange = useCallback((tab: ActiveTab) => {
-    setActiveTab(tab)
-    setSelectedRun(null)
-    setShowVisibilityManage(false)
-  }, [])
+  const handleRefreshExperimentState = useCallback(async () => {
+    await Promise.all([refetchRuns(), refetchSweeps(), refetchCluster()])
+  }, [refetchRuns, refetchSweeps, refetchCluster])
 
   const handleChatModeChange = useCallback(async (mode: ChatMode) => {
     setChatMode(mode)
@@ -493,18 +530,18 @@ export default function ResearchChat() {
   }, [])
 
   const handleOpenSweepCreator = useCallback(() => {
-    setActiveTab('chat')
+    handleTabChange('chat')
     setEditingSweepConfig(null)
     setShowSweepForm(true)
-  }, [])
+  }, [handleTabChange])
 
   const handleInsertChatReference = useCallback((text: string) => {
-    setActiveTab('chat')
+    handleTabChange('chat')
     setChatDraftInsert({
       id: Date.now(),
       text,
     })
-  }, [])
+  }, [handleTabChange])
 
   const handleSidebarWidthChange = useCallback((nextWidth: number) => {
     pendingSidebarWidthRef.current = nextWidth
@@ -541,23 +578,25 @@ export default function ResearchChat() {
           width={desktopSidebarWidth}
           minWidth={DESKTOP_SIDEBAR_MIN_WIDTH}
           maxWidth={DESKTOP_SIDEBAR_MAX_WIDTH}
-          journeySubTab={journeySubTab}
           sessions={sessions}
           runs={runs}
           sweeps={sweeps}
+          pendingAlertsByRun={pendingAlertsByRun}
           onTabChange={handleTabChange}
-          onJourneySubTabChange={setJourneySubTab}
           onNewChat={async () => {
             await createNewSession()
-            setActiveTab('chat')
+            handleTabChange('chat')
           }}
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
-            setActiveTab('chat')
+            handleTabChange('chat')
+          }}
+          onArchiveSession={async (sessionId) => {
+            await archiveSession(sessionId)
           }}
           onNavigateToRun={handleNavigateToRun}
           onInsertReference={handleInsertChatReference}
-          onSettingsClick={() => setActiveTab('settings')}
+          onSettingsClick={() => handleTabChange('settings')}
           onToggleCollapse={() => setDesktopSidebarHidden(true)}
           onWidthChange={handleSidebarWidthChange}
           onResizeEnd={handleSidebarResizeEnd}
@@ -572,6 +611,7 @@ export default function ResearchChat() {
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
             onCreateSweepClick={handleOpenSweepCreator}
+            onOpenContextualClick={() => router.push('/contextual')}
             showArtifacts={showArtifacts}
             onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
             collapseChats={collapseChats}
@@ -596,16 +636,18 @@ export default function ResearchChat() {
                 onModeChange={handleChatModeChange}
                 alerts={alerts}
                 collapseArtifactsInChat={collapseArtifactsInChat}
+                collapseChats={collapseChats}
                 chatSession={chatSession}
                 wildLoop={wildLoop}
                 webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
-                onOpenSettings={() => setActiveTab('settings')}
+                onOpenSettings={() => handleTabChange('settings')}
                 insertDraft={chatDraftInsert}
               />
             )}
             {activeTab === 'runs' && (
               <RunsView
                 runs={runs}
+                sweeps={sweeps}
                 onRunClick={handleRunClick}
                 onUpdateRun={handleUpdateRun}
                 pendingAlertsByRun={pendingAlertsByRun}
@@ -614,9 +656,20 @@ export default function ResearchChat() {
                 onCreateTag={handleCreateTag}
                 onSelectedRunChange={setSelectedRun}
                 onShowVisibilityManageChange={setShowVisibilityManage}
-                onRefresh={refetch}
+                onRefresh={handleRefreshExperimentState}
                 onStartRun={startExistingRun}
                 onStopRun={stopExistingRun}
+                onSaveSweep={handleSaveSweep}
+                onCreateSweep={handleCreateSweep}
+                onLaunchSweep={handleLaunchSweep}
+                cluster={cluster}
+                clusterRunSummary={clusterRunSummary}
+                clusterLoading={clusterLoading}
+                clusterError={clusterError}
+                onDetectCluster={detectClusterSetup}
+                onUpdateCluster={updateClusterSetup}
+                onNavigateToCharts={() => handleTabChange('charts')}
+                onRespondToAlert={async (alertId, choice) => { await respondAlert(alertId, choice) }}
               />
             )}
             {activeTab === 'events' && (
@@ -648,9 +701,12 @@ export default function ResearchChat() {
             {activeTab === 'report' && (
               <ReportView runs={runs} onToolbarChange={setReportToolbar} />
             )}
+            {activeTab === 'explorer' && (
+              <FileExplorerView />
+            )}
             {activeTab === 'journey' && (
               <JourneyView
-                onBack={() => setActiveTab('chat')}
+                onBack={() => handleTabChange('chat')}
                 subTab={journeySubTab}
               />
             )}
@@ -661,7 +717,7 @@ export default function ResearchChat() {
                 focusAuthToken={focusAuthTokenInApp}
                 onNavigateToJourney={(subTab) => {
                   setJourneySubTab(subTab)
-                  setActiveTab('journey')
+                  handleTabChange('journey')
                 }}
               />
             )}
@@ -670,19 +726,19 @@ export default function ResearchChat() {
           <NavPage
             open={leftPanelOpen}
             onOpenChange={setLeftPanelOpen}
-            onSettingsClick={() => setActiveTab('settings')}
-            activeTab={activeTab === 'settings' ? 'chat' : activeTab}
+            onSettingsClick={() => handleTabChange('settings')}
+            activeTab={activeTab}
             journeySubTab={journeySubTab}
             onTabChange={handleTabChange}
             onJourneySubTabChange={setJourneySubTab}
             onNewChat={async () => {
               await createNewSession()
-              setActiveTab('chat')
+              handleTabChange('chat')
             }}
             sessions={sessions}
             onSelectSession={async (sessionId) => {
               await selectSession(sessionId)
-              setActiveTab('chat')
+              handleTabChange('chat')
             }}
           />
         </section>
@@ -691,10 +747,12 @@ export default function ResearchChat() {
       <Dialog open={showSweepForm} onOpenChange={(open) => {
         if (!open) { setShowSweepForm(false); setEditingSweepConfig(null) }
       }}>
-        <DialogContent showCloseButton={false} className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col p-0 gap-0">
+        <DialogContent showCloseButton={false} className="w-[95vw] h-[90vh] max-w-[900px] max-h-[800px] flex flex-col p-0 gap-0">
           <SweepForm
             initialConfig={editingSweepConfig || undefined}
+            previousSweeps={sweeps}
             onSave={handleSaveSweep}
+            onCreate={handleCreateSweep}
             onCancel={() => {
               setShowSweepForm(false)
               setEditingSweepConfig(null)

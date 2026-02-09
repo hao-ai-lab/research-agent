@@ -7,6 +7,7 @@ const STORAGE_KEY_APP_SETTINGS = 'research-agent-app-settings'
 const STORAGE_KEY_APPEARANCE_THEME = 'research-agent-appearance-theme'
 const STORAGE_KEY_APPEARANCE_FONT_SIZE = 'research-agent-appearance-font-size'
 const STORAGE_KEY_APPEARANCE_BUTTON_SIZE = 'research-agent-appearance-button-size'
+const STORAGE_KEY_APPEARANCE_RUN_ITEM_INTERACTION = 'research-agent-appearance-run-item-interaction-mode'
 const STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX = 'research-agent-appearance-custom-font-size-px'
 const STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT = 'research-agent-appearance-custom-button-scale-percent'
 const STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX = 'research-agent-appearance-chat-toolbar-button-size-px'
@@ -16,9 +17,12 @@ export const defaultAppSettings: AppSettings = {
     theme: 'light',
     fontSize: 'medium',
     buttonSize: 'default',
+    runItemInteractionMode: 'detail-page',
+    showRunItemMetadata: true,
     customFontSizePx: null,
     customButtonScalePercent: null,
     chatToolbarButtonSizePx: null,
+    showStarterCards: false,
   },
   integrations: {},
   notifications: {
@@ -55,6 +59,12 @@ function isValidButtonSize(value: unknown): value is AppSettings['appearance']['
   return value === 'compact' || value === 'default' || value === 'large'
 }
 
+function isValidRunItemInteractionMode(
+  value: unknown,
+): value is NonNullable<AppSettings['appearance']['runItemInteractionMode']> {
+  return value === 'detail-page' || value === 'inline-expand'
+}
+
 function parseStoredNumber(value: string | null): number | null {
   if (value === null || value.trim() === '') return null
   const parsed = Number(value)
@@ -72,6 +82,10 @@ function writeSettingsToStorage(nextSettings: AppSettings) {
   localStorage.setItem(STORAGE_KEY_APPEARANCE_THEME, nextSettings.appearance.theme)
   localStorage.setItem(STORAGE_KEY_APPEARANCE_FONT_SIZE, nextSettings.appearance.fontSize)
   localStorage.setItem(STORAGE_KEY_APPEARANCE_BUTTON_SIZE, nextSettings.appearance.buttonSize)
+  localStorage.setItem(
+    STORAGE_KEY_APPEARANCE_RUN_ITEM_INTERACTION,
+    nextSettings.appearance.runItemInteractionMode || defaultAppSettings.appearance.runItemInteractionMode || 'detail-page'
+  )
 
   const customFontSizePx = sanitizePositiveNumber(nextSettings.appearance.customFontSizePx)
   if (customFontSizePx === null) {
@@ -114,6 +128,7 @@ function readStoredSettings(): AppSettings {
     const themeFromBlob = parsed?.appearance?.theme
     const fontSizeFromBlob = parsed?.appearance?.fontSize
     const buttonSizeFromBlob = parsed?.appearance?.buttonSize
+    const runItemInteractionModeFromBlob = parsed?.appearance?.runItemInteractionMode
     const customFontSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.customFontSizePx)
     const customButtonScalePercentFromBlob = sanitizePositiveNumber(parsed?.appearance?.customButtonScalePercent)
     const chatToolbarButtonSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.chatToolbarButtonSizePx)
@@ -121,6 +136,7 @@ function readStoredSettings(): AppSettings {
     const storedTheme = localStorage.getItem(STORAGE_KEY_APPEARANCE_THEME)
     const storedFontSize = localStorage.getItem(STORAGE_KEY_APPEARANCE_FONT_SIZE)
     const storedButtonSize = localStorage.getItem(STORAGE_KEY_APPEARANCE_BUTTON_SIZE)
+    const storedRunItemInteractionMode = localStorage.getItem(STORAGE_KEY_APPEARANCE_RUN_ITEM_INTERACTION)
     const storedCustomFontSizePx = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX))
     const storedCustomButtonScalePercent = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT))
     const storedChatToolbarButtonSizePx = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX))
@@ -137,14 +153,24 @@ function readStoredSettings(): AppSettings {
       ? storedButtonSize
       : (isValidButtonSize(buttonSizeFromBlob) ? buttonSizeFromBlob : defaultAppSettings.appearance.buttonSize)
 
+    const resolvedRunItemInteractionMode = isValidRunItemInteractionMode(storedRunItemInteractionMode)
+      ? storedRunItemInteractionMode
+      : (isValidRunItemInteractionMode(runItemInteractionModeFromBlob)
+        ? runItemInteractionModeFromBlob
+        : defaultAppSettings.appearance.runItemInteractionMode)
+
     return {
       appearance: {
         theme: resolvedTheme,
         fontSize: resolvedFontSize,
         buttonSize: resolvedButtonSize,
+        runItemInteractionMode: resolvedRunItemInteractionMode,
+        showRunItemMetadata: parsed?.appearance?.showRunItemMetadata ?? defaultAppSettings.appearance.showRunItemMetadata,
         customFontSizePx: sanitizePositiveNumber(storedCustomFontSizePx) ?? customFontSizePxFromBlob ?? defaultAppSettings.appearance.customFontSizePx,
         customButtonScalePercent: sanitizePositiveNumber(storedCustomButtonScalePercent) ?? customButtonScalePercentFromBlob ?? defaultAppSettings.appearance.customButtonScalePercent,
         chatToolbarButtonSizePx: sanitizePositiveNumber(storedChatToolbarButtonSizePx) ?? chatToolbarButtonSizePxFromBlob ?? defaultAppSettings.appearance.chatToolbarButtonSizePx,
+        showStarterCards: parsed?.appearance?.showStarterCards ?? defaultAppSettings.appearance.showStarterCards,
+        starterCardTemplates: parsed?.appearance?.starterCardTemplates ?? {},
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,
       notifications: {

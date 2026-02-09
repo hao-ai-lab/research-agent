@@ -9,6 +9,18 @@ const STORAGE_KEY_AUTH_TOKEN = 'research-agent-auth-token'
 
 // Default values
 const DEFAULT_API_URL = 'http://localhost:10000'
+const DEFAULT_USE_MOCK = false
+const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL || ''
+
+function resolveEnvApiUrl(): string {
+    if (ENV_API_URL === 'auto') {
+        if (typeof window === 'undefined') {
+            return ''
+        }
+        return window.location.origin
+    }
+    return ENV_API_URL
+}
 
 interface ApiConfig {
     apiUrl: string
@@ -29,30 +41,28 @@ const ApiConfigContext = createContext<ApiConfig | null>(null)
  */
 export function getApiUrl(): string {
     if (typeof window === 'undefined') {
-        return process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL
+        return resolveEnvApiUrl() || DEFAULT_API_URL
     }
 
     const stored = localStorage.getItem(STORAGE_KEY_API_URL)
-    return stored || process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL
+    return stored || resolveEnvApiUrl() || DEFAULT_API_URL
 }
 
 /**
  * Check if mock mode is enabled
  * This can be called outside of React components
- * Pure runtime behavior - defaults to demo mode (true)
+ * Pure runtime behavior - defaults to false (demo mode off)
  */
 export function isUsingMock(): boolean {
     if (typeof window === 'undefined') {
-        // Server-side: default to demo mode
-        return true
+        return DEFAULT_USE_MOCK
     }
 
     const stored = localStorage.getItem(STORAGE_KEY_USE_MOCK)
     if (stored !== null) {
         return stored === 'true'
     }
-    // Default to demo mode if not explicitly set
-    return true
+    return DEFAULT_USE_MOCK
 }
 
 /**
@@ -68,7 +78,7 @@ export function getAuthToken(): string {
 
 export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
     const [apiUrl, setApiUrlState] = useState<string>(DEFAULT_API_URL)
-    const [useMock, setUseMockState] = useState<boolean>(true) // Default to demo mode
+    const [useMock, setUseMockState] = useState<boolean>(DEFAULT_USE_MOCK)
     const [authToken, setAuthTokenState] = useState<string>('')
     const [isHydrated, setIsHydrated] = useState(false)
 
@@ -80,15 +90,18 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
 
         if (storedUrl) {
             setApiUrlState(storedUrl)
-        } else if (process.env.NEXT_PUBLIC_API_URL) {
-            setApiUrlState(process.env.NEXT_PUBLIC_API_URL)
+        } else {
+            const envApiUrl = resolveEnvApiUrl()
+            if (envApiUrl) {
+                setApiUrlState(envApiUrl)
+            }
         }
 
-        // Pure runtime: use localStorage value or default to true
+        // Use localStorage value or keep default (false)
         if (storedMock !== null) {
             setUseMockState(storedMock === 'true')
         }
-        // If no stored value, keep the default (true)
+        // If no stored value, keep the default (false - demo mode off)
 
         if (storedToken) {
             setAuthTokenState(storedToken)
@@ -120,8 +133,8 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem(STORAGE_KEY_API_URL)
         localStorage.removeItem(STORAGE_KEY_USE_MOCK)
         localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN)
-        setApiUrlState(process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL)
-        setUseMockState(process.env.NEXT_PUBLIC_USE_MOCK === 'true')
+        setApiUrlState(resolveEnvApiUrl() || DEFAULT_API_URL)
+        setUseMockState(DEFAULT_USE_MOCK)
         setAuthTokenState('')
     }, [])
 

@@ -5,6 +5,7 @@
 
 import type {
     ChatSession,
+    ActiveSessionStream,
     SessionWithMessages,
     StreamEvent,
     Run,
@@ -16,11 +17,23 @@ import type {
     Alert,
     Sweep,
     CreateSweepRequest,
+    UpdateSweepRequest,
     WildModeState,
+    ClusterType,
+    ClusterState,
+    ClusterStatusResponse,
+    ClusterUpdateRequest,
+    ClusterDetectRequest,
+    RepoDiffFileStatus,
+    RepoDiffLine,
+    RepoDiffFile,
+    RepoDiffResponse,
+    RepoFilesResponse,
+    RepoFileResponse,
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, WildModeState }
+export type { ChatSession, ActiveSessionStream, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -233,6 +246,22 @@ const mockSweeps: Map<string, Sweep> = new Map([
         run_ids: ['run-qwen-001', 'run-qwen-002', 'run-qwen-003', 'run-qwen-004', 'run-qwen-005', 'run-qwen-006', 'run-qwen-007', 'run-qwen-008', 'run-qwen-009'],
         status: 'running',
         created_at: Date.now() / 1000 - 7200,
+        creation_context: {
+            name: 'Qwen8B Hyperparameter Search',
+            goal: 'Find stable lr/batch_size settings for qwen-8b fine-tuning.',
+            description: 'Initial sweep created from the run panel to explore 3x3 parameter combinations.',
+            command: 'python train.py --model qwen-8b --epochs 3 --warmup_steps 100',
+            notes: null,
+            max_runs: 9,
+            parallel_runs: 2,
+            early_stopping_enabled: null,
+            early_stopping_patience: null,
+            hyperparameter_count: 2,
+            metric_count: null,
+            insight_count: null,
+            created_at: Date.now() / 1000 - 7200,
+            ui_config_snapshot: null,
+        },
         progress: { total: 9, completed: 4, failed: 0, running: 2, ready: 2, queued: 1 },
     }],
 ])
@@ -268,6 +297,82 @@ const mockAlerts: Map<string, Alert> = new Map([
 
 let wildModeEnabled = false
 
+const CLUSTER_TYPE_LABELS: Record<ClusterType, string> = {
+    unknown: 'Unknown',
+    slurm: 'Slurm',
+    local_gpu: 'Local GPU',
+    kubernetes: 'Kubernetes',
+    ray: 'Ray',
+    shared_head_node: 'Shared GPU Head Node',
+}
+
+let mockCluster: ClusterState = {
+    type: 'local_gpu',
+    status: 'healthy',
+    source: 'detected',
+    label: CLUSTER_TYPE_LABELS.local_gpu,
+    description: 'Single-host GPU workstation/cluster detected.',
+    head_node: 'local-host',
+    node_count: 1,
+    gpu_count: 4,
+    confidence: 0.84,
+    details: {
+        signals: ['nvidia-smi'],
+    },
+    last_detected_at: Date.now() / 1000 - 120,
+    updated_at: Date.now() / 1000 - 120,
+}
+
+const mockRepoDiff: RepoDiffResponse = {
+    repo_path: '/workspace/research-agent',
+    head: 'mock-head',
+    files: [
+        {
+            path: 'app/contextual/page.tsx',
+            status: 'modified',
+            additions: 8,
+            deletions: 2,
+            lines: [
+                { type: 'hunk', text: '@@ -64,6 +64,7 @@', oldLine: null, newLine: null },
+                { type: 'context', text: '  const [showOpsPanel, setShowOpsPanel] = useState(true)', oldLine: 64, newLine: 64 },
+                { type: 'add', text: '  const [diffExplorerOpen, setDiffExplorerOpen] = useState(false)', oldLine: null, newLine: 65 },
+            ],
+        },
+        {
+            path: 'components/contextual-diff-explorer.tsx',
+            status: 'added',
+            additions: 36,
+            deletions: 0,
+            lines: [
+                { type: 'hunk', text: '@@ -0,0 +1,36 @@', oldLine: null, newLine: null },
+                { type: 'add', text: '\'use client\'', oldLine: null, newLine: 1 },
+                { type: 'add', text: 'export function ContextualDiffExplorer() {', oldLine: null, newLine: 10 },
+            ],
+        },
+    ],
+}
+
+const mockRepoFiles: RepoFilesResponse = {
+    repo_path: '/workspace/research-agent',
+    files: [
+        'README.md',
+        'app/contextual/page.tsx',
+        'components/contextual-diff-explorer.tsx',
+        'lib/api.ts',
+        'lib/api-client.ts',
+        'server/server.py',
+    ],
+}
+
+const mockRepoFileContents: Record<string, string> = {
+    'README.md': '# Research Agent\n\nMock file explorer content.\n',
+    'app/contextual/page.tsx': '\'use client\'\n\nexport default function ContextualChatPage() {\n  return null\n}\n',
+    'components/contextual-diff-explorer.tsx': '\'use client\'\n\nexport function ContextualDiffExplorer() {\n  return null\n}\n',
+    'lib/api.ts': 'export async function getRepoDiff() {\n  return { files: [] }\n}\n',
+    'lib/api-client.ts': 'export const getRepoDiff = () => Promise.resolve({ files: [] })\n',
+    'server/server.py': 'def get_repo_diff():\n    return {"files": []}\n',
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -278,6 +383,66 @@ function delay(ms: number): Promise<void> {
 
 function generateId(): string {
     return Math.random().toString(36).substring(2, 14)
+}
+
+function nowSeconds() {
+    return Date.now() / 1000
+}
+
+function normalizeClusterType(input?: string | null): ClusterType {
+    if (!input) return 'unknown'
+    const normalized = input.trim().toLowerCase().replace('-', '_')
+    if (normalized === 'k8s') return 'kubernetes'
+    if (normalized === 'shared_gpu') return 'shared_head_node'
+    if (normalized === 'head_node') return 'shared_head_node'
+    if (
+        normalized === 'unknown' ||
+        normalized === 'slurm' ||
+        normalized === 'local_gpu' ||
+        normalized === 'kubernetes' ||
+        normalized === 'ray' ||
+        normalized === 'shared_head_node'
+    ) {
+        return normalized
+    }
+    return 'unknown'
+}
+
+function getRunSummary() {
+    const activeRuns = Array.from(mockRuns.values()).filter((run) => !run.is_archived)
+    return {
+        total: activeRuns.length,
+        running: activeRuns.filter((run) => run.status === 'running').length,
+        launching: activeRuns.filter((run) => run.status === 'launching').length,
+        queued: activeRuns.filter((run) => run.status === 'queued').length,
+        ready: activeRuns.filter((run) => run.status === 'ready').length,
+        failed: activeRuns.filter((run) => run.status === 'failed').length,
+        finished: activeRuns.filter((run) => run.status === 'finished').length,
+    }
+}
+
+function getClusterDescription(type: ClusterType): string {
+    switch (type) {
+        case 'slurm':
+            return 'Slurm-managed cluster scheduler detected.'
+        case 'local_gpu':
+            return 'Single-host GPU workstation/cluster detected.'
+        case 'kubernetes':
+            return 'Kubernetes cluster control plane detected.'
+        case 'ray':
+            return 'Ray cluster runtime detected.'
+        case 'shared_head_node':
+            return 'Head node with SSH fan-out to worker nodes.'
+        default:
+            return 'Cluster has not been configured yet.'
+    }
+}
+
+function buildClusterResponse(): ClusterStatusResponse {
+    return {
+        cluster: mockCluster,
+        run_summary: getRunSummary(),
+    }
 }
 
 // =============================================================================
@@ -380,6 +545,19 @@ export async function* streamChat(
     })
     session.message_count++
 
+    yield { type: 'session_status', status: 'idle' }
+}
+
+export async function* streamSession(
+    _sessionId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _fromSeq: number = 1,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _signal?: AbortSignal,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _runId?: string
+): AsyncGenerator<StreamEvent, void, unknown> {
+    await delay(50)
     yield { type: 'session_status', status: 'idle' }
 }
 
@@ -630,6 +808,34 @@ export async function queueRun(runId: string): Promise<Run> {
     return run
 }
 
+export async function getRepoDiff(): Promise<RepoDiffResponse> {
+    await delay(80)
+    return mockRepoDiff
+}
+
+export async function getRepoFiles(limit: number = 5000): Promise<RepoFilesResponse> {
+    await delay(80)
+    return {
+        repo_path: mockRepoFiles.repo_path,
+        files: mockRepoFiles.files.slice(0, limit),
+    }
+}
+
+export async function getRepoFile(path: string, maxBytes: number = 120000): Promise<RepoFileResponse> {
+    await delay(80)
+    const content = mockRepoFileContents[path]
+    if (content === undefined) {
+        throw new Error('File not found')
+    }
+    const sliced = content.slice(0, maxBytes)
+    return {
+        path,
+        content: sliced,
+        binary: false,
+        truncated: content.length > sliced.length,
+    }
+}
+
 // =============================================================================
 // Sweep Management Functions
 // =============================================================================
@@ -642,6 +848,57 @@ export async function listSweeps(): Promise<Sweep[]> {
 export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
     await delay(300)
     const sweepId = `sweep-${generateId()}`
+    const requestedStatus = request.status || (request.auto_start ? 'running' : 'pending')
+    const shouldCreateDraft = requestedStatus === 'draft'
+    const createdAt = Date.now() / 1000
+    const uiConfig = request.ui_config || {}
+    const creationContext = {
+        name: typeof uiConfig.name === 'string' ? uiConfig.name : request.name,
+        goal: typeof uiConfig.goal === 'string' ? uiConfig.goal : (request.goal || null),
+        description: typeof uiConfig.description === 'string' ? uiConfig.description : null,
+        command: typeof uiConfig.command === 'string' ? uiConfig.command : request.base_command,
+        notes: typeof uiConfig.notes === 'string' ? uiConfig.notes : null,
+        max_runs: typeof uiConfig.maxRuns === 'number' ? uiConfig.maxRuns : (request.max_runs ?? null),
+        parallel_runs: typeof uiConfig.parallelRuns === 'number' ? uiConfig.parallelRuns : null,
+        early_stopping_enabled: typeof uiConfig.earlyStoppingEnabled === 'boolean' ? uiConfig.earlyStoppingEnabled : null,
+        early_stopping_patience: typeof uiConfig.earlyStoppingPatience === 'number' ? uiConfig.earlyStoppingPatience : null,
+        hyperparameter_count: Array.isArray(uiConfig.hyperparameters)
+            ? uiConfig.hyperparameters.length
+            : Object.keys(request.parameters || {}).length,
+        metric_count: Array.isArray(uiConfig.metrics) ? uiConfig.metrics.length : null,
+        insight_count: Array.isArray(uiConfig.insights) ? uiConfig.insights.length : null,
+        created_at: createdAt,
+        ui_config_snapshot: uiConfig,
+    }
+
+    if (shouldCreateDraft) {
+        const sweep: Sweep = {
+            id: sweepId,
+            name: request.name,
+            base_command: request.base_command,
+            workdir: request.workdir,
+            parameters: request.parameters,
+            run_ids: [],
+            status: 'draft',
+            created_at: createdAt,
+            goal: request.goal,
+            max_runs: request.max_runs,
+            ui_config: request.ui_config,
+            creation_context: creationContext,
+            progress: {
+                total: 0,
+                completed: 0,
+                failed: 0,
+                running: 0,
+                launching: 0,
+                ready: 0,
+                queued: 0,
+                canceled: 0,
+            },
+        }
+        mockSweeps.set(sweepId, sweep)
+        return sweep
+    }
 
     // Create runs for each parameter combination
     const runIds: string[] = []
@@ -675,7 +932,7 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
             name: `${request.name} #${i + 1}`,
             command: `${request.base_command} ${paramStr}`,
             workdir: request.workdir || '/workspace',
-            status: request.auto_start ? 'queued' : 'ready',
+            status: requestedStatus === 'running' ? 'queued' : 'ready',
             is_archived: false,
             created_at: Date.now() / 1000,
             sweep_id: sweepId,
@@ -692,15 +949,21 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
         workdir: request.workdir,
         parameters: request.parameters,
         run_ids: runIds,
-        status: request.auto_start ? 'running' : 'ready',
-        created_at: Date.now() / 1000,
+        status: requestedStatus === 'running' ? 'running' : 'pending',
+        created_at: createdAt,
+        goal: request.goal,
+        max_runs: request.max_runs,
+        ui_config: request.ui_config,
+        creation_context: creationContext,
         progress: {
             total: runIds.length,
             completed: 0,
             failed: 0,
             running: 0,
-            ready: request.auto_start ? 0 : runIds.length,
-            queued: request.auto_start ? runIds.length : 0,
+            launching: 0,
+            ready: requestedStatus === 'running' ? 0 : runIds.length,
+            queued: requestedStatus === 'running' ? runIds.length : 0,
+            canceled: 0,
         },
     }
     mockSweeps.set(sweepId, sweep)
@@ -716,6 +979,26 @@ export async function getSweep(sweepId: string): Promise<Sweep> {
     return sweep
 }
 
+export async function updateSweep(sweepId: string, request: UpdateSweepRequest): Promise<Sweep> {
+    await delay(150)
+    const sweep = mockSweeps.get(sweepId)
+    if (!sweep) {
+        throw new Error('Sweep not found')
+    }
+
+    if (request.base_command !== undefined) sweep.base_command = request.base_command
+    if (request.workdir !== undefined) sweep.workdir = request.workdir
+    if (request.parameters !== undefined) sweep.parameters = request.parameters
+    if (request.max_runs !== undefined) sweep.max_runs = request.max_runs
+    if (request.goal !== undefined) sweep.goal = request.goal
+    if (request.status !== undefined) sweep.status = request.status
+    if (request.name !== undefined) sweep.name = request.name
+    if (request.ui_config !== undefined) sweep.ui_config = request.ui_config
+
+    mockSweeps.set(sweepId, sweep)
+    return sweep
+}
+
 export async function startSweep(sweepId: string, parallel: number = 1): Promise<{ message: string }> {
     await delay(200)
     const sweep = mockSweeps.get(sweepId)
@@ -723,5 +1006,67 @@ export async function startSweep(sweepId: string, parallel: number = 1): Promise
         throw new Error('Sweep not found')
     }
     sweep.status = 'running'
+    sweep.started_at = sweep.started_at || Date.now() / 1000
+    if (sweep.progress) {
+        sweep.progress.queued = Math.max(0, (sweep.progress.queued || 0) - Math.min(parallel, sweep.run_ids.length))
+        sweep.progress.running = Math.min(parallel, sweep.run_ids.length)
+    }
     return { message: `Started ${Math.min(parallel, sweep.run_ids.length)} runs (mock)` }
+}
+
+// =============================================================================
+// Cluster Management Functions
+// =============================================================================
+
+export async function getClusterStatus(): Promise<ClusterStatusResponse> {
+    await delay(120)
+    return buildClusterResponse()
+}
+
+export async function detectCluster(request?: ClusterDetectRequest): Promise<ClusterStatusResponse> {
+    await delay(180)
+    const preferredType = normalizeClusterType(request?.preferred_type)
+    const detectedType: ClusterType = preferredType !== 'unknown'
+        ? preferredType
+        : (mockCluster.type === 'unknown' ? 'local_gpu' : mockCluster.type)
+
+    const now = nowSeconds()
+    mockCluster = {
+        ...mockCluster,
+        type: detectedType,
+        status: 'healthy',
+        source: preferredType !== 'unknown' ? 'manual' : 'detected',
+        label: CLUSTER_TYPE_LABELS[detectedType],
+        description: getClusterDescription(detectedType),
+        confidence: preferredType !== 'unknown' ? 1 : 0.85,
+        head_node: detectedType === 'shared_head_node' ? 'gpu-head-01' : (detectedType === 'local_gpu' ? 'local-host' : mockCluster.head_node),
+        node_count: detectedType === 'local_gpu' ? 1 : (detectedType === 'slurm' ? 6 : detectedType === 'kubernetes' ? 4 : detectedType === 'shared_head_node' ? 5 : mockCluster.node_count),
+        gpu_count: detectedType === 'kubernetes' ? 16 : detectedType === 'shared_head_node' ? 12 : detectedType === 'slurm' ? 32 : 4,
+        details: {
+            detected_by: preferredType !== 'unknown' ? 'user-selection' : 'mock-auto-detect',
+            ...(mockCluster.details || {}),
+        },
+        last_detected_at: now,
+        updated_at: now,
+    }
+
+    return buildClusterResponse()
+}
+
+export async function updateCluster(request: ClusterUpdateRequest): Promise<ClusterStatusResponse> {
+    await delay(150)
+    const now = nowSeconds()
+    const nextType = request.type ? normalizeClusterType(request.type) : mockCluster.type
+
+    mockCluster = {
+        ...mockCluster,
+        ...request,
+        type: nextType,
+        label: CLUSTER_TYPE_LABELS[nextType],
+        description: getClusterDescription(nextType),
+        source: request.source || 'manual',
+        updated_at: now,
+    }
+
+    return buildClusterResponse()
 }

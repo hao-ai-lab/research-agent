@@ -9,10 +9,13 @@ import {
   Copy,
   Eye,
   EyeOff,
+  LayoutGrid,
   Monitor,
   Moon,
+  Rows3,
   RotateCcw,
   Server,
+  Clock,
   Slack,
   Sparkles,
   Square,
@@ -161,6 +164,31 @@ export function SettingsPageContent({
           value: settings.appearance.buttonSize,
         },
         {
+          id: 'runItemInteractionMode',
+          label: 'Runs/Sweeps Click Mode',
+          description: 'Open detail page or expand inline details',
+          icon: Rows3,
+          type: 'select' as const,
+          options: ['detail-page', 'inline-expand'],
+          value: settings.appearance.runItemInteractionMode || 'detail-page',
+        },
+        {
+          id: 'showRunItemMetadata',
+          label: 'Run Item Metadata',
+          description: 'Show Start, Created, and Runtime under each run name',
+          icon: Clock,
+          type: 'toggle' as const,
+          value: settings.appearance.showRunItemMetadata !== false,
+        },
+        {
+          id: 'showStarterCards',
+          label: 'Starter Cards',
+          description: 'Show contextual prompt cards on new chats',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.showStarterCards !== false,
+        },
+        {
           id: 'appearanceAdvanced',
           label: 'Advanced Appearance',
           description: 'Set exact numeric sizes',
@@ -233,6 +261,13 @@ export function SettingsPageContent({
     onSettingsChange({
       ...settings,
       appearance: { ...settings.appearance, buttonSize },
+    })
+  }
+
+  const handleRunItemInteractionModeChange = (mode: 'detail-page' | 'inline-expand') => {
+    onSettingsChange({
+      ...settings,
+      appearance: { ...settings.appearance, runItemInteractionMode: mode },
     })
   }
 
@@ -392,12 +427,13 @@ export function SettingsPageContent({
                     if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                     if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                     if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
+                    if (item.id === 'runItemInteractionMode') handleRunItemInteractionModeChange(option as 'detail-page' | 'inline-expand')
                   }}
                   className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize transition-colors ${item.value === option
                     ? 'bg-accent text-accent-foreground'
                     : 'bg-background text-muted-foreground hover:text-foreground'}`}
                 >
-                  {option}
+                  {option.replace('-', ' ')}
                 </button>
               ))}
             </div>
@@ -420,6 +456,8 @@ export function SettingsPageContent({
               onCheckedChange={(checked) => {
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
+                if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
+                if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
               }}
             />
           </div>

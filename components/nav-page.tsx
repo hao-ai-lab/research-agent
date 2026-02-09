@@ -1,41 +1,39 @@
 'use client'
 
 import { useState } from 'react'
-import {
-  MessageSquare,
-  FlaskConical,
-  Settings,
-  BarChart3,
-  Lightbulb,
-  Plus,
-  X,
-  Bell,
-  Sparkles,
-  Clock,
-  Code,
-  LayoutDashboard,
-  Search,
-  FileText,
-} from 'lucide-react'
+import { Clock, FlaskConical, Search, Settings, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import type { ChatSession } from '@/lib/api'
-
-export type JourneySubTab = 'story' | 'devnotes'
+import type { AppTab, HomeTab, JourneySubTab } from '@/lib/navigation'
+import { NavTabButton } from '@/components/navigation/nav-tab-button'
+import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
 
 interface NavPageProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSettingsClick: () => void
-  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report'
+  activeTab: AppTab
   journeySubTab: JourneySubTab
-  onTabChange: (tab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report') => void
+  onTabChange: (tab: HomeTab | 'contextual') => void
   onJourneySubTabChange: (subTab: JourneySubTab) => void
   onNewChat?: () => void
-  // Real sessions from backend
   sessions?: ChatSession[]
   onSelectSession?: (sessionId: string) => void
+}
+
+function formatRelativeTime(date: Date) {
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (diffMins < 60) return `${Math.max(diffMins, 0)}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
 export function NavPage({
@@ -52,33 +50,16 @@ export function NavPage({
 }: NavPageProps) {
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Filter sessions based on search query
-  const filteredSessions = sessions.filter(session =>
+  const filteredSessions = sessions.filter((session) =>
     session.title.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const handleNavClick = (
-    tab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report',
-    subTab?: JourneySubTab
-  ) => {
+  const handleNavClick = (tab: HomeTab | 'contextual') => {
     onTabChange(tab)
-    if (tab === 'journey' && subTab) {
-      onJourneySubTabChange(subTab as JourneySubTab)
+    if (tab === 'journey') {
+      onJourneySubTabChange(journeySubTab)
     }
     onOpenChange(false)
-  }
-
-  const formatRelativeTime = (date: Date) => {
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMins = Math.floor(diffMs / (1000 * 60))
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
-    if (diffMins < 60) return `${diffMins}m ago`
-    if (diffHours < 24) return `${diffHours}h ago`
-    if (diffDays < 7) return `${diffDays}d ago`
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
   }
 
   if (!open) return null
@@ -121,88 +102,29 @@ export function NavPage({
                   onOpenChange(false)
                 }}
               >
-                <Plus className="h-3.5 w-3.5" />
                 New Chat
               </Button>
 
               <div className="space-y-1">
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('chat')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'chat'
-                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <MessageSquare className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Chat</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('runs')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'runs'
-                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <LayoutDashboard className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Runs</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('events')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'events'
-                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <Bell className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Events</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('charts')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'charts'
-                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <BarChart3 className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Charts</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('memory')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'memory'
-                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <Lightbulb className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Memory</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('report')}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left ${activeTab === 'report'
-                    ? 'bg-card text-foreground border border-border/80 shadow-xs'
-                    : 'text-foreground hover:bg-secondary'
-                    }`}
-                >
-                  <FileText className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Report</span>
-                </button>
-                <button
-                  type="button"
+                {PRIMARY_NAV_ITEMS.map((item) => (
+                  <NavTabButton
+                    key={item.tab}
+                    label={item.label}
+                    icon={item.icon}
+                    active={activeTab === item.tab}
+                    onClick={() => handleNavClick(item.tab)}
+                  />
+                ))}
+
+                <NavTabButton
+                  label="Settings"
+                  icon={Settings}
+                  active={activeTab === 'settings'}
                   onClick={() => {
                     onOpenChange(false)
                     onSettingsClick()
                   }}
-                  className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm transition-colors text-left text-foreground hover:bg-secondary"
-                >
-                  <Settings className="h-4 w-4 shrink-0" />
-                  <span className="font-medium min-w-0 truncate">Settings</span>
-                </button>
+                />
               </div>
             </section>
 
@@ -215,7 +137,7 @@ export function NavPage({
                   type="text"
                   placeholder="Search chats..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(event) => setSearchQuery(event.target.value)}
                   className="h-8 pl-8 text-xs"
                 />
               </div>
@@ -231,25 +153,22 @@ export function NavPage({
                       key={session.id}
                       type="button"
                       onClick={() => {
-                        if (onSelectSession) {
-                          onSelectSession(session.id)
-                        }
+                        onSelectSession?.(session.id)
                         onOpenChange(false)
                       }}
                       className="w-full rounded-lg p-2.5 text-left transition-colors hover:bg-secondary"
                     >
                       <div className="mb-0.5 flex items-start justify-between gap-2">
-                        <h3 className="truncate text-sm font-medium text-foreground">
-                          {session.title}
-                        </h3>
-                        <span className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground" suppressHydrationWarning>
+                        <h3 className="truncate text-sm font-medium text-foreground">{session.title}</h3>
+                        <span
+                          className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground"
+                          suppressHydrationWarning
+                        >
                           <Clock className="h-3 w-3" />
                           {formatRelativeTime(new Date(session.created_at * 1000))}
                         </span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground/70">
-                        {session.message_count} messages
-                      </span>
+                      <span className="text-[10px] text-muted-foreground/70">{session.message_count} messages</span>
                     </button>
                   ))
                 )}
@@ -261,3 +180,5 @@ export function NavPage({
     </div>
   )
 }
+
+export type { JourneySubTab }

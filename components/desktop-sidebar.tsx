@@ -2,17 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
-  BarChart3,
-  Bell,
+  AlertCircle,
+  AlertTriangle,
+  Archive,
+  CheckCircle2,
+  Clock3,
   ChevronsUpDown,
-  FileText,
   FlaskConical,
-  Lightbulb,
-  MessageSquare,
   PanelLeftClose,
+  Play,
   Plus,
   Settings,
-  Sparkles,
+  XCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -28,27 +29,28 @@ import {
 import { useApiConfig } from '@/lib/api-config'
 import type { ChatSession } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
-import { getStatusText } from '@/lib/status-utils'
-import type { JourneySubTab } from './nav-page'
+import { getStatusBadgeClass as getStatusBadgeClassUtil } from '@/lib/status-utils'
+import type { AppTab, HomeTab } from '@/lib/navigation'
+import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
+import { NavTabButton } from '@/components/navigation/nav-tab-button'
 
-type ActiveTab = 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
 const ICON_RAIL_WIDTH = 72
 const ICON_RAIL_TRIGGER_WIDTH = 136
 
 interface DesktopSidebarProps {
-  activeTab: ActiveTab
+  activeTab: AppTab
   hidden?: boolean
   width?: number
   minWidth?: number
   maxWidth?: number
-  journeySubTab: JourneySubTab
   sessions: ChatSession[]
   runs: ExperimentRun[]
   sweeps: Sweep[]
-  onTabChange: (tab: ActiveTab) => void
-  onJourneySubTabChange: (subTab: JourneySubTab) => void
+  pendingAlertsByRun?: Record<string, number>
+  onTabChange: (tab: HomeTab | 'contextual') => void
   onNewChat: () => Promise<void> | void
   onSelectSession: (sessionId: string) => Promise<void> | void
+  onArchiveSession?: (sessionId: string) => Promise<void> | void
   onNavigateToRun: (runId: string) => void
   onInsertReference: (text: string) => void
   onSettingsClick: () => void
@@ -74,6 +76,8 @@ function formatRelativeTime(date: Date) {
 
 function getSweepStatusClass(status: Sweep['status']) {
   switch (status) {
+    case 'draft':
+      return 'bg-violet-500/15 text-violet-500 border-violet-500/30'
     case 'running':
       return 'bg-blue-500/15 text-blue-500 border-blue-500/30'
     case 'completed':
@@ -95,14 +99,14 @@ export function DesktopSidebar({
   width = 300,
   minWidth = 240,
   maxWidth = 520,
-  journeySubTab,
   sessions,
   runs,
   sweeps,
+  pendingAlertsByRun = {},
   onTabChange,
-  onJourneySubTabChange,
   onNewChat,
   onSelectSession,
+  onArchiveSession,
   onNavigateToRun,
   onInsertReference,
   onSettingsClick,
@@ -111,6 +115,25 @@ export function DesktopSidebar({
   onResizeStart,
   onResizeEnd,
 }: DesktopSidebarProps) {
+  const getRunStatusIcon = useCallback((status: ExperimentRun['status']) => {
+    switch (status) {
+      case 'running':
+        return <Play className="h-3 w-3" />
+      case 'failed':
+        return <AlertCircle className="h-3 w-3" />
+      case 'completed':
+        return <CheckCircle2 className="h-3 w-3" />
+      case 'canceled':
+        return <XCircle className="h-3 w-3" />
+      default:
+        return <Clock3 className="h-3 w-3" />
+    }
+  }, [])
+
+  const getRunStatusBadgeClass = useCallback((status: ExperimentRun['status']) => {
+    return getStatusBadgeClassUtil(status)
+  }, [])
+
   const isIconRail = !hidden && width <= ICON_RAIL_TRIGGER_WIDTH
   const recentRuns = useMemo(
     () =>
@@ -134,6 +157,7 @@ export function DesktopSidebar({
   )
   const { useMock: isDemoMode } = useApiConfig()
   const [isResizing, setIsResizing] = useState(false)
+  const [chatEditEnabled, setChatEditEnabled] = useState(false)
   const resizeStartXRef = useRef(0)
   const resizeStartWidthRef = useRef(width)
 
@@ -173,6 +197,11 @@ export function DesktopSidebar({
       document.body.style.userSelect = ''
     }
   }, [isResizing, maxWidth, minWidth, onResizeEnd, onWidthChange])
+
+  useEffect(() => {
+    if (!isIconRail) return
+    setChatEditEnabled(false)
+  }, [isIconRail])
 
   return (
     <aside
@@ -218,105 +247,30 @@ export function DesktopSidebar({
                 </p>
               )}
               <div className="space-y-1">
-                <button
+                <Button
                   type="button"
                   title="New Chat"
+                  variant="ghost"
+                  size={isIconRail ? 'icon-sm' : 'sm'}
                   onClick={() => {
                     void onNewChat()
                   }}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    isIconRail
-                      ? 'justify-center px-2 text-foreground hover:bg-secondary/50'
-                      : 'gap-2 px-2 text-foreground hover:bg-secondary/50'
-                  }`}
+                  className={isIconRail ? 'h-[var(--app-btn-icon-sm)] w-full' : 'h-[var(--app-btn-h-sm)] w-full justify-start px-2.5'}
                 >
-                  <Plus className="h-4 w-4 shrink-0" />
+                  <Plus className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
                   {!isIconRail && 'New Chat'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Chat"
-                  onClick={() => onTabChange('chat')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'chat'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <MessageSquare className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Chat'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Runs"
-                  onClick={() => onTabChange('runs')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'runs'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <FlaskConical className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Runs'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Events"
-                  onClick={() => onTabChange('events')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'events'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <Bell className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Events'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Charts"
-                  onClick={() => onTabChange('charts')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'charts'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <BarChart3 className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Charts'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Memory"
-                  onClick={() => onTabChange('memory')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'memory'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <Lightbulb className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Memory'}
-                </button>
-
-                <button
-                  type="button"
-                  title="Report"
-                  onClick={() => onTabChange('report')}
-                  className={`flex w-full items-center rounded-md py-2 text-sm transition-colors ${isIconRail ? 'justify-center px-2' : 'px-2'} ${
-                    activeTab === 'report'
-                      ? 'border border-border/80 bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                  }`}
-                >
-                  <FileText className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'Report'}
-                </button>
+                  <span className="sr-only">New Chat</span>
+                </Button>
+                {PRIMARY_NAV_ITEMS.map((item) => (
+                  <NavTabButton
+                    key={item.tab}
+                    compact={isIconRail}
+                    label={item.label}
+                    icon={item.icon}
+                    active={activeTab === item.tab}
+                    onClick={() => onTabChange(item.tab)}
+                  />
+                ))}
               </div>
             </section>
 
@@ -324,9 +278,19 @@ export function DesktopSidebar({
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Recent Chats
+                  Chats
                 </p>
-                <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
+                {onArchiveSession ? (
+                  <button
+                    type="button"
+                    onClick={() => setChatEditEnabled((prev) => !prev)}
+                    className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {chatEditEnabled ? 'Done' : 'Edit'}
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">Edit</span>
+                )}
               </div>
               <div className="space-y-1">
                 {sessions.slice(0, 10).map((session) => (
@@ -347,14 +311,28 @@ export function DesktopSidebar({
                         {formatRelativeTime(new Date(session.created_at * 1000))}
                       </span>
                     </button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 shrink-0 px-2 text-[10px]"
-                      onClick={() => onInsertReference(`@chat:${session.id} `)}
-                    >
-                      @
-                    </Button>
+                    {chatEditEnabled && onArchiveSession ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 shrink-0 px-0.5 text-[10px] text-muted-foreground"
+                        onClick={() => {
+                          void onArchiveSession(session.id)
+                        }}
+                      >
+                        <Archive className="mr-1 h-3.5 w-1.5" />
+                        
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 shrink-0 px-2 text-[16px]"
+                        onClick={() => onInsertReference(`@chat:${session.id} `)}
+                      >
+                        @
+                      </Button>
+                    )}
                   </div>
                 ))}
                 {sessions.length === 0 && (
@@ -368,34 +346,59 @@ export function DesktopSidebar({
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Recent Runs
+                  Runs
                 </p>
                 <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
               </div>
               <div className="space-y-1">
-                {recentRuns.map((run) => (
-                  <div
-                    key={run.id}
-                    className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onNavigateToRun(run.id)}
-                      className="min-w-0 flex-1 text-left"
+                {recentRuns.map((run) => {
+                  const pendingAlertCount = pendingAlertsByRun[run.id] || run.alerts?.length || 0
+                  const hasPendingAlerts = pendingAlertCount > 0
+
+                  return (
+                    <div
+                      key={run.id}
+                      className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                     >
-                      <p className="truncate text-foreground">{run.alias || run.name}</p>
-                      <p className="truncate text-[10px] text-muted-foreground">{getStatusText(run.status)}</p>
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[10px]"
-                      onClick={() => onInsertReference(`@run:${run.id} `)}
-                    >
-                      @
-                    </Button>
-                  </div>
-                ))}
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToRun(run.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <p className="min-w-0 truncate text-foreground">{run.alias || run.name}</p>
+                          <span
+                            className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${getRunStatusBadgeClass(run.status)}`}
+                            title={run.status}
+                          >
+                            {getRunStatusIcon(run.status)}
+                          </span>
+                          {hasPendingAlerts && (
+                            <div
+                              className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
+                              title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+                              {pendingAlertCount > 1 && (
+                                <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                                  {pendingAlertCount}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[16px]"
+                        onClick={() => onInsertReference(`@run:${run.id} `)}
+                      >
+                        @
+                      </Button>
+                    </div>
+                  )
+                })}
                 {recentRuns.length === 0 && (
                   <p className="px-2 py-1 text-xs text-muted-foreground">No recent runs yet.</p>
                 )}
@@ -407,26 +410,32 @@ export function DesktopSidebar({
               <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Recent Sweeps
+                  Sweeps
                 </p>
-                <span className="text-[10px] text-muted-foreground">Click to reference</span>
+                <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
               </div>
               <div className="space-y-1">
                 {recentSweeps.map((sweep) => (
-                  <button
+                  <div
                     key={sweep.id}
-                    type="button"
-                    onClick={() => onInsertReference(`/sweep ${sweep.id} `)}
-                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-secondary/50"
+                    className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1 text-left">
                       <p className="truncate text-sm text-foreground">{sweep.config.name}</p>
                       <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
                     </div>
-                    <Badge variant="outline" className={`text-[10px] ${getSweepStatusClass(sweep.status)}`}>
+                    <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusClass(sweep.status)}`}>
                       {sweep.status}
                     </Badge>
-                  </button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[16px]"
+                      onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
+                    >
+                      @
+                    </Button>
+                  </div>
                 ))}
                 {recentSweeps.length === 0 && (
                   <p className="px-2 py-1 text-xs text-muted-foreground">No sweeps yet.</p>

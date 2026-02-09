@@ -67,6 +67,21 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         'stopped': 'canceled',
     }
 
+    const createdAt = new Date(run.created_at * 1000)
+    const queuedAt = run.queued_at ? new Date(run.queued_at * 1000) : undefined
+    const launchedAt = run.launched_at ? new Date(run.launched_at * 1000) : undefined
+    const startedAt = run.started_at ? new Date(run.started_at * 1000) : undefined
+    const stoppedAt = run.stopped_at ? new Date(run.stopped_at * 1000) : undefined
+    const endTime = run.ended_at
+        ? new Date(run.ended_at * 1000)
+        : (run.stopped_at ? new Date(run.stopped_at * 1000) : undefined)
+
+    const mappedStatus = statusMap[run.status]
+    const normalizedExitCode = typeof run.exit_code === 'number' ? run.exit_code : null
+    const status = mappedStatus === 'completed' && ((normalizedExitCode !== null && normalizedExitCode !== 0) || Boolean(run.error))
+        ? 'failed'
+        : mappedStatus
+
     return {
         id: run.id,
         name: run.name,
@@ -74,10 +89,15 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         sweepParams: run.sweep_params ?? null,
         alias: metadata?.alias,
         command: run.command,
-        status: statusMap[run.status],
-        progress: run.progress ?? (run.status === 'running' ? 50 : run.status === 'finished' ? 100 : 0),
-        startTime: new Date(run.created_at * 1000),
-        endTime: run.ended_at ? new Date(run.ended_at * 1000) : undefined,
+        status,
+        progress: run.progress ?? (status === 'running' ? 50 : status === 'completed' ? 100 : 0),
+        createdAt,
+        queuedAt,
+        launchedAt,
+        startedAt,
+        stoppedAt,
+        startTime: startedAt || launchedAt || createdAt,
+        endTime,
         isArchived: run.is_archived,
         parentRunId: run.parent_run_id || undefined,
         originAlertId: run.origin_alert_id || undefined,
@@ -87,22 +107,17 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         color: metadata?.color || run.color || '#4ade80',
         // Pass through metrics/charts from API (mock or real)
         lossHistory: run.lossHistory,
+        metricSeries: run.metricSeries,
+        metricKeys: run.metricKeys,
         metrics: run.metrics,
         config: run.config as ExperimentRun['config'],
         // Include API-specific fields for terminal panel
         tmux_window: run.tmux_window,
         tmux_pane: run.tmux_pane,
         run_dir: run.run_dir,
-        exit_code: run.exit_code,
+        exit_code: normalizedExitCode,
         error: run.error,
         wandb_dir: run.wandb_dir,
-    } as ExperimentRun & {
-        tmux_window?: string
-        tmux_pane?: string
-        run_dir?: string
-        exit_code?: number | null
-        error?: string | null
-        wandb_dir?: string | null
     }
 }
 

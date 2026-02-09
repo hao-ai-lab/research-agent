@@ -37,29 +37,54 @@ export interface ChatMessageData {
     timestamp: number
 }
 
+export interface ActiveSessionStream {
+    run_id: string
+    status: 'running' | 'completed' | 'failed' | 'stopped' | 'interrupted' | string
+    sequence: number
+    text: string
+    thinking: string
+    parts?: MessagePartData[] | null
+    error?: string | null
+    started_at: number
+    updated_at: number
+}
+
 export interface MessagePartData {
     id: string
     type: 'thinking' | 'tool' | 'text'
     content: string
     tool_name?: string
-    tool_state?: 'pending' | 'running' | 'completed' | 'error'
+    tool_state?: 'pending' | 'running' | 'completed' | 'error' | string
+    tool_state_raw?: unknown
     tool_input?: string
     tool_output?: string
+    tool_started_at?: number
+    tool_ended_at?: number
+    tool_duration_ms?: number
 }
 
 export interface SessionWithMessages extends ChatSession {
     messages: ChatMessageData[]
+    system_prompt?: string
+    active_stream?: ActiveSessionStream | null
 }
 
 export type StreamEventType = 'part_delta' | 'part_update' | 'session_status' | 'error'
 
 export interface StreamEvent {
     type: StreamEventType
+    seq?: number
     id?: string
     ptype?: 'text' | 'reasoning' | 'tool'
     delta?: string
-    state?: string
+    state?: unknown
     name?: string
+    tool_status?: 'pending' | 'running' | 'completed' | 'error' | string
+    tool_input?: string
+    tool_output?: string
+    tool_started_at?: number
+    tool_ended_at?: number
+    tool_duration_ms?: number
     status?: string
     message?: string
 }
@@ -191,6 +216,72 @@ export async function* streamChat(
 }
 
 /**
+ * Stream an existing in-flight session response with catch-up replay.
+ */
+export async function* streamSession(
+    sessionId: string,
+    fromSeq: number = 1,
+    signal?: AbortSignal,
+    runId?: string
+): AsyncGenerator<StreamEvent, void, unknown> {
+    const params = new URLSearchParams()
+    params.set('from_seq', String(Math.max(1, Math.floor(fromSeq))))
+    if (runId) {
+        params.set('run_id', runId)
+    }
+
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/stream?${params.toString()}`, {
+        method: 'GET',
+        headers: getHeaders(),
+        signal,
+    })
+
+    if (!response.ok) {
+        throw new Error(`Failed to stream session: ${response.statusText}`)
+    }
+
+    if (!response.body) {
+        throw new Error('Response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+
+            if (done) {
+                if (buffer.trim()) {
+                    try {
+                        yield JSON.parse(buffer.trim()) as StreamEvent
+                    } catch {
+                        console.warn('Failed to parse remaining buffer:', buffer)
+                    }
+                }
+                break
+            }
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+                if (!line.trim()) continue
+                try {
+                    yield JSON.parse(line) as StreamEvent
+                } catch {
+                    console.warn('Failed to parse line:', line)
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
+}
+
+/**
  * Helper to check if API is available
  */
 export async function checkApiHealth(): Promise<boolean> {
@@ -239,6 +330,8 @@ export interface Run {
     config?: Record<string, unknown>
     metrics?: { loss: number; accuracy: number; epoch: number }
     lossHistory?: { step: number; trainLoss: number; valLoss?: number }[]
+    metricSeries?: Record<string, { step: number; value: number }[]>
+    metricKeys?: string[]
     color?: string
 }
 
@@ -303,6 +396,42 @@ export interface Artifact {
     name: string
     path: string
     type: 'checkpoint' | 'metrics' | 'wandb' | 'other'
+}
+
+export type RepoDiffFileStatus = 'modified' | 'added' | 'deleted'
+export type RepoDiffLineType = 'context' | 'add' | 'remove' | 'hunk'
+
+export interface RepoDiffLine {
+    type: RepoDiffLineType
+    text: string
+    oldLine: number | null
+    newLine: number | null
+}
+
+export interface RepoDiffFile {
+    path: string
+    status: RepoDiffFileStatus
+    additions: number
+    deletions: number
+    lines: RepoDiffLine[]
+}
+
+export interface RepoDiffResponse {
+    repo_path: string
+    head: string | null
+    files: RepoDiffFile[]
+}
+
+export interface RepoFilesResponse {
+    repo_path: string
+    files: string[]
+}
+
+export interface RepoFileResponse {
+    path: string
+    content: string
+    binary: boolean
+    truncated: boolean
 }
 
 // =============================================================================
@@ -459,6 +588,34 @@ export async function stopSession(sessionId: string): Promise<{ message: string 
     })
     if (!response.ok) {
         throw new Error(`Failed to stop session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get the system prompt for a chat session
+ */
+export async function getSystemPrompt(sessionId: string): Promise<{ system_prompt: string }> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get system prompt: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update the system prompt for a chat session
+ */
+export async function setSystemPrompt(sessionId: string, systemPrompt: string): Promise<{ system_prompt: string }> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify({ system_prompt: systemPrompt }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to set system prompt: ${response.statusText}`)
     }
     return response.json()
 }
@@ -668,6 +825,49 @@ export async function queueRun(runId: string): Promise<Run> {
     return response.json()
 }
 
+/**
+ * Get repository diff for changed files in the active workdir
+ */
+export async function getRepoDiff(unified: number = 3): Promise<RepoDiffResponse> {
+    const response = await fetch(`${API_URL()}/git/diff?unified=${unified}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get repository diff: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get repository file list for file explorer mode
+ */
+export async function getRepoFiles(limit: number = 5000): Promise<RepoFilesResponse> {
+    const response = await fetch(`${API_URL()}/git/files?limit=${limit}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get repository files: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Read a repository file for file explorer mode
+ */
+export async function getRepoFile(path: string, maxBytes: number = 120000): Promise<RepoFileResponse> {
+    const params = new URLSearchParams({
+        path,
+        max_bytes: String(maxBytes),
+    })
+    const response = await fetch(`${API_URL()}/git/file?${params.toString()}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to read repository file: ${response.statusText}`)
+    }
+    return response.json()
+}
+
 // =============================================================================
 // Sweep Management Types
 // =============================================================================
@@ -679,17 +879,39 @@ export interface Sweep {
     workdir?: string
     parameters: Record<string, unknown[]>
     run_ids: string[]
-    status: 'ready' | 'running' | 'completed' | 'failed'
+    status: 'draft' | 'pending' | 'ready' | 'running' | 'completed' | 'failed' | 'canceled'
     created_at: number
+    started_at?: number
+    completed_at?: number
+    max_runs?: number
     goal?: string
     is_wild?: boolean
+    ui_config?: Record<string, unknown> | null
+    creation_context?: {
+        name?: string | null
+        goal?: string | null
+        description?: string | null
+        command?: string | null
+        notes?: string | null
+        max_runs?: number | null
+        parallel_runs?: number | null
+        early_stopping_enabled?: boolean | null
+        early_stopping_patience?: number | null
+        hyperparameter_count?: number | null
+        metric_count?: number | null
+        insight_count?: number | null
+        created_at?: number | null
+        ui_config_snapshot?: Record<string, unknown> | null
+    } | null
     progress: {
         total: number
         completed: number
         failed: number
         running: number
+        launching?: number
         ready?: number
         queued?: number
+        canceled?: number
     }
 }
 
@@ -700,6 +922,20 @@ export interface CreateSweepRequest {
     parameters: Record<string, unknown[]>
     max_runs?: number
     auto_start?: boolean
+    goal?: string
+    status?: 'draft' | 'pending' | 'running'
+    ui_config?: Record<string, unknown>
+}
+
+export interface UpdateSweepRequest {
+    name?: string
+    base_command?: string
+    workdir?: string
+    parameters?: Record<string, unknown[]>
+    max_runs?: number
+    goal?: string
+    status?: 'draft' | 'pending' | 'running' | 'completed' | 'failed' | 'canceled'
+    ui_config?: Record<string, unknown>
 }
 
 // =============================================================================
@@ -709,8 +945,8 @@ export interface CreateSweepRequest {
 /**
  * List all sweeps
  */
-export async function listSweeps(): Promise<Sweep[]> {
-    const response = await fetch(`${API_URL()}/sweeps`, {
+export async function listSweeps(limit: number = 200): Promise<Sweep[]> {
+    const response = await fetch(`${API_URL()}/sweeps?limit=${limit}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -730,6 +966,22 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
     })
     if (!response.ok) {
         throw new Error(`Failed to create sweep: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update an existing sweep
+ */
+export async function updateSweep(sweepId: string, request: UpdateSweepRequest): Promise<Sweep> {
+    const response = await fetch(`${API_URL()}/sweeps/${sweepId}`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to update sweep: ${error}`)
     }
     return response.json()
 }
@@ -772,6 +1024,96 @@ export async function createWildSweep(name: string, goal: string): Promise<Sweep
     })
     if (!response.ok) {
         throw new Error(`Failed to create wild sweep: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+// =============================================================================
+// Cluster Management Types
+// =============================================================================
+
+export type ClusterType = 'unknown' | 'slurm' | 'local_gpu' | 'kubernetes' | 'ray' | 'shared_head_node'
+export type ClusterHealthStatus = 'unknown' | 'healthy' | 'degraded' | 'offline'
+export type ClusterSource = 'unset' | 'manual' | 'detected'
+
+export interface ClusterState {
+    type: ClusterType
+    status: ClusterHealthStatus
+    source: ClusterSource
+    label: string
+    description: string
+    head_node?: string | null
+    node_count?: number | null
+    gpu_count?: number | null
+    notes?: string | null
+    confidence?: number | null
+    details?: Record<string, unknown>
+    last_detected_at?: number | null
+    updated_at?: number | null
+}
+
+export interface ClusterStatusResponse {
+    cluster: ClusterState
+    run_summary: {
+        total: number
+        running: number
+        launching: number
+        queued: number
+        ready: number
+        failed: number
+        finished: number
+    }
+}
+
+export interface ClusterUpdateRequest {
+    type?: ClusterType
+    status?: ClusterHealthStatus
+    source?: ClusterSource
+    head_node?: string | null
+    node_count?: number | null
+    gpu_count?: number | null
+    notes?: string | null
+    details?: Record<string, unknown>
+}
+
+export interface ClusterDetectRequest {
+    preferred_type?: ClusterType
+}
+
+// =============================================================================
+// Cluster Management Functions
+// =============================================================================
+
+export async function getClusterStatus(): Promise<ClusterStatusResponse> {
+    const response = await fetch(`${API_URL()}/cluster`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get cluster status: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function detectCluster(request?: ClusterDetectRequest): Promise<ClusterStatusResponse> {
+    const response = await fetch(`${API_URL()}/cluster/detect`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request || {}),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to detect cluster: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function updateCluster(request: ClusterUpdateRequest): Promise<ClusterStatusResponse> {
+    const response = await fetch(`${API_URL()}/cluster`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to update cluster: ${response.statusText}`)
     }
     return response.json()
 }

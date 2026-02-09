@@ -2,27 +2,43 @@
 
 import React from "react"
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2 } from 'lucide-react'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { LossChart } from './loss-chart'
 import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } from '@/lib/types'
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
 import type { ExperimentRun } from '@/lib/types'
+import type { Alert } from '@/lib/api-client'
+import {
+  REFERENCE_TYPE_BACKGROUND_MAP,
+  REFERENCE_TYPE_COLOR_MAP,
+  type ReferenceTokenType,
+} from '@/lib/reference-token-colors'
+import { extractContextReferences } from '@/lib/extract-context-references'
+import { ContextReferencesBar } from './context-references-bar'
 
 interface ChatMessageProps {
   message: ChatMessageType
   collapseArtifacts?: boolean
   sweeps?: Sweep[]
   runs?: ExperimentRun[]
+  alerts?: Alert[]
   onEditSweep?: (config: SweepConfig) => void
   onLaunchSweep?: (config: SweepConfig) => void
   onRunClick?: (run: ExperimentRun) => void
+  /** Content of the user message that prompted this assistant response (for context extraction) */
+  previousUserContent?: string
 }
 
 export function ChatMessage({ 
@@ -30,18 +46,136 @@ export function ChatMessage({
   collapseArtifacts = false,
   sweeps = [],
   runs = [],
+  alerts = [],
   onEditSweep,
   onLaunchSweep,
   onRunClick,
+  previousUserContent,
 }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
   const isUser = message.role === 'user'
 
+  // Extract context references from the current round (user question + assistant answer)
+  const contextReferences = useMemo(() => {
+    if (isUser) return []
+    // Gather text from all parts, plus the main content
+    const partTexts = (message.parts || []).filter(p => p.type === 'text').map(p => p.content)
+    return extractContextReferences(
+      previousUserContent,
+      message.content,
+      ...partTexts,
+    )
+  }, [isUser, message.content, message.parts, previousUserContent])
+
   const formatDateTime = (date: Date) => {
     const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
     const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return `${dateStr}, ${timeStr}`
+  }
+
+  const renderReferenceToken = (reference: string, key: string) => {
+    const [type, ...idParts] = reference.split(':')
+    const itemId = idParts.join(':')
+    const tokenType = (type in REFERENCE_TYPE_COLOR_MAP ? type : 'chat') as ReferenceTokenType
+    const color = REFERENCE_TYPE_COLOR_MAP[tokenType]
+    const backgroundColor = REFERENCE_TYPE_BACKGROUND_MAP[tokenType]
+    const tokenStyle = {
+      color,
+      backgroundColor,
+      ['--reference-border' as string]: `${color}66`,
+    } as React.CSSProperties
+
+    if (type === 'sweep') {
+      const sweep = sweeps.find((candidate) => candidate.id === itemId)
+
+      if (sweep) {
+        return (
+          <Popover key={key}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="mx-0.5 inline-flex items-center align-middle rounded-sm border border-[color:var(--reference-border)] px-2.5 py-1.5 text-base leading-none outline-none transition-colors hover:border-transparent focus:outline-none focus-visible:ring-0 focus-visible:outline-none"
+                style={tokenStyle}
+              >
+                @{reference}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" className="w-[min(94vw,430px)] p-0">
+              <div className="p-2">
+                {sweep.status === 'draft' ? (
+                  <SweepArtifact
+                    config={sweep.config}
+                    sweep={sweep}
+                    onEdit={onEditSweep}
+                    onLaunch={onLaunchSweep}
+                    isCollapsed={false}
+                  />
+                ) : (
+                  <SweepStatus
+                    sweep={sweep}
+                    runs={runs}
+                    onRunClick={onRunClick}
+                    isCollapsed={false}
+                  />
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )
+      }
+    }
+
+    return (
+      <span
+        key={key}
+        className="mx-0.5 inline-flex items-center align-middle rounded-sm border border-[color:var(--reference-border)] px-2.5 py-1.5 text-base leading-none"
+        style={tokenStyle}
+      >
+        @{reference}
+      </span>
+    )
+  }
+
+  const renderReferences = (text: string, keyPrefix: string) => {
+    const output: React.ReactNode[] = []
+    const referenceRegex = /@((?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+)(?=$|[\s,.;!?)\]])/g
+    let cursor = 0
+    let match: RegExpExecArray | null
+    let partIndex = 0
+
+    while ((match = referenceRegex.exec(text)) !== null) {
+      const tokenStart = match.index
+      const tokenEnd = tokenStart + match[0].length
+      if (tokenStart > cursor) {
+        output.push(
+          <span key={`${keyPrefix}-txt-${partIndex++}`}>
+            {text.slice(cursor, tokenStart)}
+          </span>
+        )
+      }
+
+      output.push(renderReferenceToken(match[1], `${keyPrefix}-ref-${tokenStart}`))
+      cursor = tokenEnd
+    }
+
+    if (cursor < text.length) {
+      output.push(
+        <span key={`${keyPrefix}-txt-${partIndex++}`}>
+          {text.slice(cursor)}
+        </span>
+      )
+    }
+
+    if (output.length === 0) {
+      output.push(
+        <span key={`${keyPrefix}-txt-empty`}>
+          {text}
+        </span>
+      )
+    }
+
+    return output
   }
 
   const renderMarkdown = (content: string) => {
@@ -60,7 +194,7 @@ export function ChatMessage({
           elements.push(
             <pre
               key={`code-${codeKey++}`}
-              className="my-2 overflow-x-auto rounded-lg bg-background p-3 text-xs"
+              className="my-2 overflow-x-auto rounded-lg bg-background p-3 text-sm"
             >
               <code>{codeContent.trim()}</code>
             </pre>
@@ -118,7 +252,7 @@ export function ChatMessage({
         return (
           <code
             key={i}
-            className="rounded bg-background px-1.5 py-0.5 text-xs text-accent"
+            className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
           >
             {part.slice(1, -1)}
           </code>
@@ -130,11 +264,15 @@ export function ChatMessage({
         if (bp.startsWith('**') && bp.endsWith('**')) {
           return (
             <strong key={`${i}-${j}`} className="font-semibold">
-              {bp.slice(2, -2)}
+              {renderReferences(bp.slice(2, -2), `bold-${i}-${j}`)}
             </strong>
           )
         }
-        return <span key={`${i}-${j}`}>{bp}</span>
+        return (
+          <React.Fragment key={`${i}-${j}`}>
+            {renderReferences(bp, `text-${i}-${j}`)}
+          </React.Fragment>
+        )
       })
     })
   }
@@ -142,8 +280,8 @@ export function ChatMessage({
   if (isUser) {
     return (
       <div className="px-0.5 py-2">
-        <div className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-white">
-          <p className="text-sm leading-relaxed">{message.content}</p>
+        <div className="border-l-4 border-primary px-3 py-1">
+          <p className="text-base leading-relaxed text-foreground">{renderInlineMarkdown(message.content)}</p>
         </div>
       </div>
     )
@@ -166,7 +304,7 @@ export function ChatMessage({
             // Legacy: single thinking block
             message.thinking && (
               <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
-                <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
                   {isThinkingOpen ? (
                     <ChevronDown className="h-3 w-3" />
                   ) : (
@@ -176,7 +314,7 @@ export function ChatMessage({
                   <span>Thinking process</span>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-2">
-                  <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+                  <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
                     {message.thinking.split('\n').map((line, i) => (
                       <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                         {line}
@@ -239,9 +377,22 @@ export function ChatMessage({
             </div>
           )}
 
-          <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+          <div className="px-1 py-1 text-base leading-relaxed">
             {renderMarkdown(message.content)}
           </div>
+
+          {/* Context references bar */}
+          {contextReferences.length > 0 && (
+            <ContextReferencesBar
+              references={contextReferences}
+              sweeps={sweeps}
+              runs={runs}
+              alerts={alerts}
+              onEditSweep={onEditSweep}
+              onLaunchSweep={onLaunchSweep}
+              onRunClick={onRunClick}
+            />
+          )}
 
           <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
             {formatDateTime(message.timestamp)}
@@ -266,7 +417,7 @@ function SavedPartRenderer({
   if (part.type === 'thinking') {
     return (
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+        <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
           {isOpen ? (
             <ChevronDown className="h-3 w-3" />
           ) : (
@@ -276,7 +427,7 @@ function SavedPartRenderer({
           <span>Thinking process</span>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
-          <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl">
+          <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
             {part.content.split('\n').map((line, i) => (
               <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                 {line}
@@ -289,6 +440,8 @@ function SavedPartRenderer({
   }
 
   if (part.type === 'tool') {
+    const durationLabel = formatToolDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
+
     const getStatusIcon = () => {
       switch (part.toolState) {
         case 'pending':
@@ -315,7 +468,7 @@ function SavedPartRenderer({
 
     return (
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground w-fit transition-colors hover:bg-secondary hover:text-foreground">
+        <CollapsibleTrigger className="flex w-full items-center justify-start gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
           {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           {getStatusIcon()}
           <Wrench className="h-3 w-3" />
@@ -324,10 +477,11 @@ function SavedPartRenderer({
           <span className={part.toolState === 'completed' ? 'text-green-500' : part.toolState === 'error' ? 'text-red-500' : ''}>
             {getStatusText()}
           </span>
+          {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
           {(part.toolInput || part.toolOutput || part.content) && (
-            <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-w-2xl space-y-2">
+            <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2">
               {part.toolInput && (
                 <div>
                   <span className="font-medium text-foreground/70">Input:</span>
@@ -343,6 +497,12 @@ function SavedPartRenderer({
               {part.content && !part.toolInput && !part.toolOutput && (
                 <pre className="overflow-x-auto">{part.content}</pre>
               )}
+              {(part.toolStartedAt || part.toolEndedAt) && (
+                <div className="text-muted-foreground/80">
+                  {part.toolStartedAt && <div>Start: {formatToolTimestamp(part.toolStartedAt)}</div>}
+                  {part.toolEndedAt && <div>End: {formatToolTimestamp(part.toolEndedAt)}</div>}
+                </div>
+              )}
             </div>
           )}
         </CollapsibleContent>
@@ -352,11 +512,27 @@ function SavedPartRenderer({
 
   if (part.type === 'text') {
     return (
-      <div className="rounded-2xl bg-secondary px-4 py-3 text-sm leading-relaxed">
+      <div className="px-1 py-1 text-base leading-relaxed">
         {renderMarkdown(part.content)}
       </div>
     )
   }
 
   return null
+}
+
+function formatToolTimestamp(value: number): string {
+  const ms = value > 1e12 ? value : value * 1000
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function formatToolDuration(durationMs?: number, startedAt?: number, endedAt?: number): string | null {
+  const derived = durationMs ?? (
+    startedAt != null && endedAt != null
+      ? Math.max(0, Math.round((endedAt > 1e12 ? endedAt : endedAt * 1000) - (startedAt > 1e12 ? startedAt : startedAt * 1000)))
+      : undefined
+  )
+  if (derived == null) return null
+  if (derived < 1000) return `${derived}ms`
+  return `${(derived / 1000).toFixed(2)}s`
 }

@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument("--model", default="gpt2", help="Model name")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
-    parser.add_argument("--steps", type=int, default=12, help="Total training steps")
+    parser.add_argument("--steps", type=int, default=10000, help="Total training steps")
     parser.add_argument("--sleep-seconds", type=float, default=1.5, help="Seconds between metric writes")
     parser.add_argument(
         "--profile",

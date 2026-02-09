@@ -22,6 +22,7 @@ import {
   WifiOff,
   RotateCcw,
   LayoutDashboard,
+  LayoutGrid,
 } from 'lucide-react'
 import {
   Dialog,
@@ -181,6 +182,14 @@ export function SettingsDialog({
           type: 'select' as const,
           options: ['compact', 'default', 'large'],
           value: settings.appearance.buttonSize,
+        },
+        {
+          id: 'showStarterCards',
+          label: 'Starter Cards',
+          description: 'Show contextual prompt cards on new chats',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.showStarterCards !== false,
         },
         {
           id: 'appearanceAdvanced',
@@ -461,6 +470,7 @@ export function SettingsDialog({
               onCheckedChange={(checked) => {
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
+                if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
               }}
             />
           </div>

@@ -51,7 +51,12 @@ export function SweepArtifact({
   }
 
   const primaryMetric = config.metrics.find(m => m.isPrimary)
-  const statusColor = sweep?.status === 'running' 
+  const goal = config.goal?.trim()
+  const description = config.description?.trim()
+  const renderField = (value?: string) => (value && value.length > 0 ? value : 'Not provided')
+  const statusColor = sweep?.status === 'draft'
+    ? 'bg-violet-500'
+    : sweep?.status === 'running' 
     ? 'bg-accent' 
     : sweep?.status === 'completed' 
     ? 'bg-emerald-500' 
@@ -94,15 +99,21 @@ export function SweepArtifact({
       {expanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-border/50">
           {/* Goal */}
-          {config.goal && (
-            <div className="pt-2">
-              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
-                <Target className="h-3 w-3" />
-                <span>Goal</span>
-              </div>
-              <p className="text-xs text-foreground/90">{config.goal}</p>
+          <div className="pt-2">
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
+              <Target className="h-3 w-3" />
+              <span>Goal</span>
             </div>
-          )}
+            <p className="text-xs text-foreground/90 whitespace-pre-wrap break-words">{renderField(goal)}</p>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
+              <FileJson className="h-3 w-3" />
+              <span>Description</span>
+            </div>
+            <p className="text-xs text-foreground/90 whitespace-pre-wrap break-words">{renderField(description)}</p>
+          </div>
 
           {/* Quick Summary */}
           <div className="flex flex-wrap gap-1.5 pt-1">

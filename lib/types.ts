@@ -32,6 +32,11 @@ export interface ExperimentRun {
   alias?: string;
   status: RunStatus;
   progress: number;
+  createdAt?: Date;
+  queuedAt?: Date;
+  launchedAt?: Date;
+  startedAt?: Date;
+  stoppedAt?: Date;
   startTime: Date;
   endTime?: Date;
   command: string;
@@ -42,6 +47,8 @@ export interface ExperimentRun {
     accuracy: number;
     epoch: number;
   };
+  metricSeries?: Record<string, { step: number; value: number }[]>;
+  metricKeys?: string[];
   config?: {
     model: string;
     learningRate: number;
@@ -66,6 +73,12 @@ export interface ExperimentRun {
   notes?: string;
   color?: string;
   isArchived?: boolean;
+  tmux_window?: string;
+  tmux_pane?: string;
+  run_dir?: string;
+  exit_code?: number | null;
+  error?: string | null;
+  wandb_dir?: string | null;
 }
 
 
@@ -74,9 +87,13 @@ export interface AppSettings {
     theme: "dark" | "light" | "system";
     fontSize: "small" | "medium" | "large";
     buttonSize: "compact" | "default" | "large";
+    runItemInteractionMode?: "detail-page" | "inline-expand";
+    showRunItemMetadata?: boolean;
     customFontSizePx?: number | null;
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
+    showStarterCards?: boolean;
+    starterCardTemplates?: Record<string, string>;
   };
   integrations: {
     slack?: {
@@ -138,9 +155,13 @@ export interface MessagePart {
   content: string;
   // For tool parts
   toolName?: string;
-  toolState?: ToolState;
+  toolState?: ToolState | string;
+  toolStateRaw?: unknown;
   toolInput?: string; // Tool arguments/input
   toolOutput?: string; // Tool result/output
+  toolStartedAt?: number;
+  toolEndedAt?: number;
+  toolDurationMs?: number;
 }
 
 // Wild Loop types
@@ -230,6 +251,7 @@ export interface InsightChart {
   createdAt: Date;
   source: "coding" | "chat";
   metric?: string;
+  isFavorite?: boolean;
   isPinned?: boolean;
   isInOverview?: boolean;
 }
@@ -245,6 +267,7 @@ export interface MetricVisualization {
   path: string;
   category: "primary" | "secondary";
   type: "line" | "bar" | "area";
+  isFavorite?: boolean;
   isPinned?: boolean;
   isInOverview?: boolean;
   layerSelector?: boolean;
@@ -305,13 +328,31 @@ export interface SweepConfig {
   parallelRuns?: number;
   earlyStoppingEnabled?: boolean;
   earlyStoppingPatience?: number;
+  notes?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface SweepCreationContext {
+  name: string | null;
+  goal: string | null;
+  description: string | null;
+  command: string | null;
+  notes: string | null;
+  maxRuns: number | null;
+  parallelRuns: number | null;
+  earlyStoppingEnabled: boolean | null;
+  earlyStoppingPatience: number | null;
+  hyperparameterCount: number | null;
+  metricCount: number | null;
+  insightCount: number | null;
+  createdAt: Date;
 }
 
 export interface Sweep {
   id: string;
   config: SweepConfig;
+  creationContext: SweepCreationContext;
   status: SweepStatus;
   runIds: string[];
   bestRunId?: string;

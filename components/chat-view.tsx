@@ -100,11 +100,20 @@ export function ChatView({
         <div className="flex-1 min-h-0 overflow-hidden">
           <ScrollArea className="h-full" ref={scrollRef}>
             <div className="pb-4">
-              <div className="mt-4 space-y-1">
+              <div className="mt-4 space-y-1 px-2.5">
                 {collapseChats ? (
                   // Collapsed view - show pairs
                   messagePairs.map((pair, index) => (
-                    <CollapsibleChatPair key={pair.user.id || index} pair={pair} collapseArtifacts={collapseArtifactsInChat} />
+                    <CollapsibleChatPair
+                      key={pair.user.id || index}
+                      pair={pair}
+                      collapseArtifacts={collapseArtifactsInChat}
+                      sweeps={sweeps}
+                      runs={runs}
+                      onEditSweep={onEditSweep}
+                      onLaunchSweep={onLaunchSweep}
+                      onRunClick={onRunClick}
+                    />
                   ))
                 ) : (
                   // Normal view
@@ -176,7 +185,23 @@ export function ChatView({
 }
 
 // Collapsible chat pair component
-function CollapsibleChatPair({ pair, collapseArtifacts = false }: { pair: { user: ChatMessageType; assistant?: ChatMessageType }; collapseArtifacts?: boolean }) {
+function CollapsibleChatPair({
+  pair,
+  collapseArtifacts = false,
+  sweeps = [],
+  runs = [],
+  onEditSweep,
+  onLaunchSweep,
+  onRunClick,
+}: {
+  pair: { user: ChatMessageType; assistant?: ChatMessageType }
+  collapseArtifacts?: boolean
+  sweeps?: Sweep[]
+  runs?: ExperimentRun[]
+  onEditSweep?: (config: SweepConfig) => void
+  onLaunchSweep?: (config: SweepConfig) => void
+  onRunClick?: (run: ExperimentRun) => void
+}) {
   const [expanded, setExpanded] = useState(false)
   
   // Don't render if user message is empty (system placeholder)
@@ -205,8 +230,26 @@ function CollapsibleChatPair({ pair, collapseArtifacts = false }: { pair: { user
       </button>
       {expanded && (
         <div className="pb-2">
-          <ChatMessage message={pair.user} collapseArtifacts={collapseArtifacts} />
-          {pair.assistant && <ChatMessage message={pair.assistant} collapseArtifacts={collapseArtifacts} />}
+          <ChatMessage
+            message={pair.user}
+            collapseArtifacts={collapseArtifacts}
+            sweeps={sweeps}
+            runs={runs}
+            onEditSweep={onEditSweep}
+            onLaunchSweep={onLaunchSweep}
+            onRunClick={onRunClick}
+          />
+          {pair.assistant && (
+            <ChatMessage
+              message={pair.assistant}
+              collapseArtifacts={collapseArtifacts}
+              sweeps={sweeps}
+              runs={runs}
+              onEditSweep={onEditSweep}
+              onLaunchSweep={onLaunchSweep}
+              onRunClick={onRunClick}
+            />
+          )}
         </div>
       )}
     </div>

@@ -21,89 +21,48 @@ An AI-powered research assistant for ML experiment tracking. Provides a mobile-f
 
 ## Prerequisites
 
-- **Node.js** 18+ and **pnpm** (package manager)
+- **Node.js** 18+ and **npm**
 - **Python** 3.10+
 - **tmux** (for background job execution)
-- **OpenCode** CLI (`npm install -g opencode` or `bun install -g opencode`)
+- **OpenCode** CLI (`npm install -g opencode`), auto-attempted by installer
+- **ngrok** (optional, for public tunnel URLs)
+- **uv** (optional, preferred for isolated backend environment)
 
 ## Quick Start
 
-### 1. Clone and install frontend dependencies
+### 1. YOLO install
+
+Don't do YOLO install if you are a developer since you will get staled code. Go to manual setup below if you are a developer.
+
+```bash
+curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLGDb_PWNIwGS" | bash
+```
+
+## Manual Setup (Advanced)
 
 ```bash
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 cd v0-research-agent-mobile
-pnpm install
-```
-
-### 2. Install server dependencies
-
-```bash
-cd server
-pip install -r requirements.txt
-```
-
-### 3. Set environment variables
-
-```bash
-# Required: Auth token for the frontend ↔ server connection
-# Generate one with: source server/generate_auth_token.sh
-export RESEARCH_AGENT_USER_AUTH_TOKEN="your-auth-token"
-
-# Optional: API key for the Anthropic gateway (needed for LLM calls)
-# For testing, if we use opencode free models, this should be fine.
-export RESEARCH_AGENT_KEY="your-gateway-token"
-```
-
-### 4. Start OpenCode
-
-In a terminal, navigate to your research project directory and start OpenCode with the custom config. For a quick demo, use the included `tests/story/alert` directory:
-
-```bash
-# Demo: use the bundled test project
-cd tests/story/alert
-export OPENCODE_CONFIG=$(pwd)/../../server/opencode.json
-opencode serve
-
-# Or: use your own research project
-cd /path/to/your/research/project
-export OPENCODE_CONFIG=/path/to/v0-research-agent-mobile/server/opencode.json
+npm install
+uv venv .ra-venv
+uv pip install --python .ra-venv/bin/python -r server/requirements.txt
+export RESEARCH_AGENT_USER_AUTH_TOKEN="$(openssl rand -hex 16)"
+export OPENCODE_CONFIG="$(pwd)/server/opencode.json"
 opencode serve
 ```
 
-This starts OpenCode on port `4096` (default).
-
-### 5. Start the backend server
-
-In another terminal:
+Then in another terminal:
 
 ```bash
-# Demo: use the bundled test project
 cd server
-export MODEL_PROVIDER="opencode"
-export MODEL_ID="kimi-k2.5-free"
-python server.py --workdir ../tests/story/alert
-
-# Or: use your own research project
-python server.py --workdir /path/to/your/research/project
+../.ra-venv/bin/python server.py --workdir /path/to/your/research/project --port 10000
 ```
 
-The server starts on port `10000` by default.
-
-| Flag        | Description                         | Default           |
-| ----------- | ----------------------------------- | ----------------- |
-| `--workdir` | Working directory for job execution | Current directory |
-| `--port`    | Server port                         | `10000`           |
-
-### 6. Start the frontend
-
-In another terminal, from the project root:
+Then in another terminal:
 
 ```bash
-pnpm dev
+NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000
 ```
-
-Open http://localhost:3000 in your browser.
 
 ## Environment Variables
 
@@ -126,6 +85,8 @@ Open http://localhost:3000 in your browser.
 │   └── *.tsx               # Feature components (chat, runs, sweeps, etc.)
 ├── hooks/                  # Custom React hooks
 ├── lib/                    # Utilities and type definitions
+├── install.sh              # curl|bash installer entrypoint
+├── scripts/research-agent  # Master CLI (install/onboard/start/tunnel/status/stop)
 ├── server/                 # Python FastAPI backend
 │   ├── server.py           # Main server
 │   ├── job_sidecar.py      # tmux job execution sidecar
@@ -143,15 +104,15 @@ Open http://localhost:3000 in your browser.
 | Backend         | FastAPI, Uvicorn                             |
 | AI Layer        | OpenCode CLI → Modal Gateway → Anthropic API |
 | Job Execution   | tmux + libtmux                               |
-| Package Manager | pnpm                                         |
+| Package Manager | npm + uv                                     |
 
 ## Development
 
 ```bash
-pnpm dev          # Start dev server (frontend)
-pnpm build        # Production build
-pnpm start        # Start production server
-pnpm lint         # Run ESLint
+npm run dev       # Start dev server (frontend)
+npm run build     # Production build
+npm run start     # Start production server
+npm run lint      # Run ESLint
 ```
 
 ## Troubleshooting

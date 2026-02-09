@@ -24,6 +24,11 @@ import {
   PlugZap,
   Filter,
   Plus,
+  Sparkles,
+  Loader2,
+  RefreshCw,
+  Server,
+  Bell,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -49,10 +54,21 @@ import { AllRunsChart } from './all-runs-chart'
 import { RunDetailView } from './run-detail-view'
 import { VisibilityManageView } from './visibility-manage-view'
 import { RunName } from './run-name'
-import type { ExperimentRun, TagDefinition, VisibilityGroup } from '@/lib/types'
-import type { Alert } from '@/lib/api-client'
+import type { ExperimentRun, TagDefinition, VisibilityGroup, Sweep, SweepConfig } from '@/lib/types'
+import type {
+  Alert,
+  ClusterState,
+  ClusterStatusResponse,
+  ClusterType,
+  ClusterUpdateRequest,
+} from '@/lib/api-client'
+import { startSweep as apiStartSweep } from '@/lib/api-client'
 import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
+import { Progress } from '@/components/ui/progress'
+import { SweepArtifact } from '@/components/sweep-artifact'
+import { SweepStatus } from '@/components/sweep-status'
+import { useAppSettings } from '@/lib/app-settings'
 
 
 type DetailsView = 'time' | 'priority'
@@ -68,11 +84,21 @@ const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
   'canceled',
 ]
 
+const CLUSTER_TYPE_OPTIONS: Array<{ value: ClusterType; label: string }> = [
+  { value: 'unknown', label: 'Unknown' },
+  { value: 'slurm', label: 'Slurm Cluster' },
+  { value: 'local_gpu', label: 'Local GPU Cluster' },
+  { value: 'kubernetes', label: 'Kubernetes Cluster' },
+  { value: 'ray', label: 'Ray Cluster' },
+  { value: 'shared_head_node', label: 'Shared GPU Head Node' },
+]
+
 // Rich sweep form
 import { SweepForm } from '@/components/sweep-form'
 
 interface RunsViewProps {
   runs: ExperimentRun[]
+  sweeps?: Sweep[]
   onRunClick?: (run: ExperimentRun) => void
   onUpdateRun?: (run: ExperimentRun) => void
   pendingAlertsByRun?: Record<string, number>
@@ -84,10 +110,60 @@ interface RunsViewProps {
   onRefresh?: () => Promise<void>
   onStartRun?: (runId: string) => Promise<void>
   onStopRun?: (runId: string) => Promise<void>
+  onSaveSweep?: (config: SweepConfig) => Promise<void> | void
+  onCreateSweep?: (config: SweepConfig) => Promise<void> | void
+  onLaunchSweep?: (config: SweepConfig) => Promise<void> | void
+  cluster?: ClusterState | null
+  clusterRunSummary?: ClusterStatusResponse['run_summary'] | null
+  clusterLoading?: boolean
+  clusterError?: string | null
+  onDetectCluster?: (preferredType?: ClusterType) => Promise<void>
+  onUpdateCluster?: (request: ClusterUpdateRequest) => Promise<void>
+  onNavigateToCharts?: () => void
+  onRespondToAlert?: (alertId: string, choice: string) => Promise<void>
 }
 
-export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {}, alerts = [], allTags, onCreateTag, onSelectedRunChange, onShowVisibilityManageChange, onRefresh, onStartRun, onStopRun }: RunsViewProps) {
+export function RunsView({
+  runs,
+  sweeps = [],
+  onRunClick,
+  onUpdateRun,
+  pendingAlertsByRun = {},
+  alerts = [],
+  allTags,
+  onCreateTag,
+  onSelectedRunChange,
+  onShowVisibilityManageChange,
+  onRefresh,
+  onStartRun,
+  onStopRun,
+  onSaveSweep,
+  onCreateSweep,
+  onLaunchSweep,
+  cluster = null,
+  clusterRunSummary = null,
+  clusterLoading = false,
+  clusterError = null,
+  onDetectCluster,
+  onUpdateCluster,
+  onNavigateToCharts,
+  onRespondToAlert,
+}: RunsViewProps) {
+  const { settings } = useAppSettings()
+  const interactionMode = settings.appearance.runItemInteractionMode || 'detail-page'
+  const useInlineDetails = interactionMode === 'inline-expand'
+  const showRunItemMetadata = settings.appearance.showRunItemMetadata !== false
+
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedSweepId, setSelectedSweepId] = useState<string | null>(null)
+  const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(new Set())
+  const [expandedSweepIds, setExpandedSweepIds] = useState<Set<string>>(new Set())
+  const [collapsedRunSections, setCollapsedRunSections] = useState<Set<string>>(new Set())
+  const [collapsedTopSections, setCollapsedTopSections] = useState<Set<string>>(new Set())
+  const [runActionBusy, setRunActionBusy] = useState<Record<string, 'starting' | 'stopping' | undefined>>({})
+  const [sweepActionBusy, setSweepActionBusy] = useState<string | null>(null)
+  const [clusterDraftType, setClusterDraftType] = useState<ClusterType>(cluster?.type || 'unknown')
+  const [clusterActionBusy, setClusterActionBusy] = useState<'detecting' | 'saving' | null>(null)
   const [detailsView, setDetailsView] = useState<DetailsView>('time')
   const [manageMode, setManageMode] = useState(false)
   const [selectedManageRunIds, setSelectedManageRunIds] = useState<Set<string>>(new Set())
@@ -109,14 +185,41 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   const allActiveRuns = runs.filter((r) => !r.isArchived)
   const overview = getRunsOverview(allActiveRuns)
   const selectedRun = selectedRunId ? runs.find(r => r.id === selectedRunId) : null
+  const selectedSweep = selectedSweepId ? sweeps.find((sweep) => sweep.id === selectedSweepId) : null
   const selectedRunAlerts = selectedRun ? alerts.filter(alert => alert.run_id === selectedRun.id) : []
+  const sweepById = useMemo(
+    () => new Map(sweeps.map((sweep) => [sweep.id, sweep])),
+    [sweeps]
+  )
+  const sortedSweeps = useMemo(
+    () =>
+      [...sweeps].sort(
+        (a, b) =>
+          (b.startedAt?.getTime() || b.createdAt.getTime()) -
+          (a.startedAt?.getTime() || a.createdAt.getTime())
+      ),
+    [sweeps]
+  )
   const sweepOptions = useMemo(
     () =>
-      Array.from(new Set(runs.map((run) => run.sweepId).filter(Boolean) as string[])).sort((a, b) =>
-        a.localeCompare(b)
-      ),
-    [runs]
+      Array.from(
+        new Set([
+          ...runs.map((run) => run.sweepId).filter(Boolean) as string[],
+          ...sweeps.map((sweep) => sweep.id),
+        ])
+      ).sort((a, b) => a.localeCompare(b)),
+    [runs, sweeps]
   )
+
+  useEffect(() => {
+    if (!useInlineDetails) return
+    setSelectedRunId(null)
+    setSelectedSweepId(null)
+  }, [useInlineDetails])
+
+  useEffect(() => {
+    setClusterDraftType(cluster?.type || 'unknown')
+  }, [cluster?.type])
 
   useEffect(() => {
     const raw = window.localStorage.getItem(STORAGE_KEY_RUNS_VIEW_PREFERENCES)
@@ -195,11 +298,11 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   // Sort runs for details view
   const sortedRuns = useMemo(() => {
     if (detailsView === 'time') {
-      return [...filteredRuns].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+      return [...filteredActiveRuns].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
     }
     // Priority view - group by category
-    return filteredRuns
-  }, [filteredRuns, detailsView])
+    return filteredActiveRuns
+  }, [filteredActiveRuns, detailsView])
 
   const groupedRunsBySweep = useMemo(() => {
     const groups = new Map<string, ExperimentRun[]>()
@@ -235,6 +338,25 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   }
 
   const getStatusBadgeClass = (status: string) => getStatusBadgeClassUtil(status as any)
+
+  const getSweepStatusBadgeClass = (status: Sweep['status']) => {
+    switch (status) {
+      case 'draft':
+        return 'border-violet-500/35 bg-violet-500/12 text-violet-600 dark:border-violet-400/45 dark:bg-violet-500/20 dark:text-violet-300'
+      case 'running':
+        return 'border-blue-500/35 bg-blue-500/12 text-blue-600 dark:border-blue-400/45 dark:bg-blue-500/20 dark:text-blue-300'
+      case 'completed':
+        return 'border-emerald-500/35 bg-emerald-500/12 text-emerald-600 dark:border-emerald-400/45 dark:bg-emerald-500/20 dark:text-emerald-300'
+      case 'failed':
+        return 'border-destructive/35 bg-destructive/12 text-destructive'
+      case 'pending':
+        return 'border-amber-500/35 bg-amber-500/12 text-amber-600 dark:border-amber-400/45 dark:bg-amber-500/20 dark:text-amber-300'
+      case 'canceled':
+        return 'border-muted-foreground/30 bg-muted/40 text-muted-foreground'
+      default:
+        return 'border-border bg-secondary text-muted-foreground'
+    }
+  }
 
   const toggleRunVisibility = (runId: string) => {
     setVisibleRunIds((prev) => {
@@ -338,14 +460,141 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
     scrollPositionRef.current = target.scrollTop
   }, [])
 
+  const formatTimestamp = (date?: Date) => {
+    if (!date) return '--'
+    return new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  const formatRunningDuration = (run: ExperimentRun) => {
+    const canUseFallbackStart = run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled'
+    const start = run.startedAt || (canUseFallbackStart ? run.startTime : undefined)
+    if (!start) return '--'
+    const end = run.endTime || new Date()
+    const diffMs = Math.max(0, end.getTime() - start.getTime())
+    const hours = Math.floor(diffMs / (1000 * 60 * 60))
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    const seconds = Math.floor((diffMs % (1000 * 60)) / 1000)
+    if (hours > 0) return `${hours}h ${minutes}m`
+    if (minutes > 0) return `${minutes}m ${seconds}s`
+    return `${seconds}s`
+  }
+
+  const getTerminalOutcome = (run: ExperimentRun): {
+    state: 'finished' | 'failed' | 'canceled' | null
+    summary: string
+    detail: string | null
+    className: string
+  } => {
+    const exitCode = typeof run.exit_code === 'number' ? run.exit_code : null
+    const errorText = run.error?.trim()
+
+    if (run.status === 'failed') {
+      return {
+        state: 'failed',
+        summary: 'Failed',
+        detail: errorText || (exitCode !== null ? `Exit code ${exitCode}` : null),
+        className: 'text-destructive',
+      }
+    }
+
+    if (run.status === 'completed') {
+      return {
+        state: 'finished',
+        summary: 'Finished',
+        detail: exitCode !== null ? `Exit code ${exitCode}` : null,
+        className: 'text-green-600 dark:text-green-400',
+      }
+    }
+
+    if (run.status === 'canceled') {
+      return {
+        state: 'canceled',
+        summary: 'Stopped',
+        detail: errorText || null,
+        className: 'text-amber-600 dark:text-amber-400',
+      }
+    }
+
+    return {
+      state: null,
+      summary: '',
+      detail: null,
+      className: 'text-muted-foreground',
+    }
+  }
+
+  const toggleRunExpansion = (runId: string) => {
+    setExpandedRunIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(runId)) {
+        next.delete(runId)
+      } else {
+        next.add(runId)
+      }
+      return next
+    })
+  }
+
+  const toggleSweepExpansion = (sweepId: string) => {
+    setExpandedSweepIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sweepId)) {
+        next.delete(sweepId)
+      } else {
+        next.add(sweepId)
+      }
+      return next
+    })
+  }
+
+  const handleStartRunFromCard = async (run: ExperimentRun, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (!onStartRun) return
+    setRunActionBusy((prev) => ({ ...prev, [run.id]: 'starting' }))
+    try {
+      await onStartRun(run.id)
+      await onRefresh?.()
+    } finally {
+      setRunActionBusy((prev) => ({ ...prev, [run.id]: undefined }))
+    }
+  }
+
+  const handleStopRunFromCard = async (run: ExperimentRun, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (!onStopRun) return
+    setRunActionBusy((prev) => ({ ...prev, [run.id]: 'stopping' }))
+    try {
+      await onStopRun(run.id)
+      await onRefresh?.()
+    } finally {
+      setRunActionBusy((prev) => ({ ...prev, [run.id]: undefined }))
+    }
+  }
+
   const handleRunClick = (run: ExperimentRun) => {
+    if (useInlineDetails) {
+      toggleRunExpansion(run.id)
+      return
+    }
     setSelectedRunId(run.id)
+    setSelectedSweepId(null)
     onSelectedRunChange?.(run)
     onRunClick?.(run)
   }
 
+  const handleSweepClick = (sweep: Sweep) => {
+    if (useInlineDetails) {
+      toggleSweepExpansion(sweep.id)
+      return
+    }
+    setSelectedSweepId(sweep.id)
+    setSelectedRunId(null)
+    onSelectedRunChange?.(null)
+  }
+
   const handleBack = () => {
     setSelectedRunId(null)
+    setSelectedSweepId(null)
     onSelectedRunChange?.(null)
     // Restore scroll position after state update
     requestAnimationFrame(() => {
@@ -363,21 +612,147 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
     onShowVisibilityManageChange?.(show)
   }
 
+  const toggleRunSection = (sectionKey: string) => {
+    setCollapsedRunSections((prev) => {
+      const next = new Set(prev)
+      if (next.has(sectionKey)) {
+        next.delete(sectionKey)
+      } else {
+        next.add(sectionKey)
+      }
+      return next
+    })
+  }
+
+  const isRunSectionExpanded = (sectionKey: string) => !collapsedRunSections.has(sectionKey)
+
+  const toggleTopSection = (sectionKey: string) => {
+    setCollapsedTopSections((prev) => {
+      const next = new Set(prev)
+      if (next.has(sectionKey)) {
+        next.delete(sectionKey)
+      } else {
+        next.add(sectionKey)
+      }
+      return next
+    })
+  }
+
+  const isTopSectionExpanded = (sectionKey: string) => !collapsedTopSections.has(sectionKey)
+
+  const getClusterHealthBadgeClass = (status?: ClusterState['status']) => {
+    switch (status) {
+      case 'healthy':
+        return 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400'
+      case 'degraded':
+        return 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+      case 'offline':
+        return 'border-destructive/40 bg-destructive/10 text-destructive'
+      default:
+        return 'border-border bg-secondary text-muted-foreground'
+    }
+  }
+
+  const handleDetectClusterSetup = async () => {
+    if (!onDetectCluster) return
+    setClusterActionBusy('detecting')
+    try {
+      await onDetectCluster()
+    } finally {
+      setClusterActionBusy(null)
+    }
+  }
+
+  const handleSaveClusterType = async () => {
+    if (!onUpdateCluster) return
+    setClusterActionBusy('saving')
+    try {
+      await onUpdateCluster({
+        type: clusterDraftType,
+        source: 'manual',
+      })
+    } finally {
+      setClusterActionBusy(null)
+    }
+  }
+
+  const renderRunSubsection = (
+    sectionKey: string,
+    title: string,
+    icon: React.ReactNode,
+    sectionRuns: ExperimentRun[],
+    options?: { dimmed?: boolean }
+  ) => {
+    if (sectionRuns.length === 0) return null
+    const isExpanded = isRunSectionExpanded(sectionKey)
+
+    return (
+      <div key={sectionKey}>
+        <button
+          type="button"
+          onClick={() => toggleRunSection(sectionKey)}
+          className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+        >
+          <div className="flex items-center gap-2">
+            {icon}
+            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h4>
+            <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+              {sectionRuns.length}
+            </Badge>
+          </div>
+          {isExpanded ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </button>
+
+        {isExpanded && (
+          <div className={`space-y-2 ${options?.dimmed ? 'opacity-60' : ''}`}>
+            {sectionRuns.map((run) => <RunItem key={run.id} run={run} />)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const RunItem = ({ run, showChevron = true }: { run: ExperimentRun; showChevron?: boolean }) => {
     const pendingAlertCount = pendingAlertsByRun[run.id] || 0
     const hasPendingAlerts = pendingAlertCount > 0
+    const runAlerts = alerts.filter((alert) => alert.run_id === run.id)
     const isManageSelectionEnabled = manageMode
     const isSelectedForManage = selectedManageRunIds.has(run.id)
+    const isExpanded = expandedRunIds.has(run.id)
+    const busyState = runActionBusy[run.id]
+    const hasStarted = Boolean(
+      run.startedAt
+      || run.status === 'running'
+      || run.status === 'completed'
+      || run.status === 'failed'
+      || run.status === 'canceled'
+    )
+    const terminalOutcome = getTerminalOutcome(run)
 
     return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => {
         if (isManageSelectionEnabled) {
           toggleManageRunSelection(run.id)
           return
         }
         handleRunClick(run)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          if (isManageSelectionEnabled) {
+            toggleManageRunSelection(run.id)
+            return
+          }
+          handleRunClick(run)
+        }
       }}
       className={`w-full rounded-xl border bg-card p-3 text-left transition-colors active:scale-[0.99] ${
         isSelectedForManage
@@ -416,17 +791,79 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
           {run.isFavorite && <Star className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0" />}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {!isManageSelectionEnabled && (
+            <div className="flex items-center gap-1">
+              {(run.status === 'ready' || run.status === 'queued') && onStartRun && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(event) => { void handleStartRunFromCard(run, event) }}
+                  disabled={busyState === 'starting'}
+                  title="Start Run"
+                >
+                  {busyState === 'starting' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                </Button>
+              )}
+              {run.status === 'running' && onStopRun && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 text-destructive hover:text-destructive"
+                  onClick={(event) => { void handleStopRunFromCard(run, event) }}
+                  disabled={busyState === 'stopping'}
+                  title="Stop Run"
+                >
+                  {busyState === 'stopping' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                </Button>
+              )}
+              <Button
+                variant={hasPendingAlerts ? 'default' : 'outline'}
+                size="icon"
+                className="relative h-7 w-7"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleRunClick(run)
+                }}
+                title={hasPendingAlerts ? `Alerts (${pendingAlertCount})` : 'Alerts'}
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {hasPendingAlerts && (
+                  <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                    {pendingAlertCount}
+                  </span>
+                )}
+              </Button>
+            </div>
+          )}
           <Badge variant="outline" className={`${getStatusBadgeClass(run.status)}`}>
             {getStatusIcon(run.status)}
             <span className="ml-1 text-[10px]">{getStatusText(run.status)}</span>
           </Badge>
-          {showChevron && !isManageSelectionEnabled && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+          {showChevron && !isManageSelectionEnabled && !useInlineDetails && (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+          {showChevron && !isManageSelectionEnabled && useInlineDetails && (
+            isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
         </div>
       </div>
       <p className="mt-1 text-[10px] text-muted-foreground truncate">
         Run: {run.id}
         {run.sweepId ? ` • Sweep: ${run.sweepId}` : ' • No sweep'}
       </p>
+      {showRunItemMetadata && (
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Start: {hasStarted ? formatTimestamp(run.startedAt || run.startTime) : '--'} • Created: {formatTimestamp(run.createdAt)} • Runtime: {formatRunningDuration(run)}
+        </p>
+      )}
+      {terminalOutcome.state && (
+        <p className={`mt-1 truncate text-[10px] ${terminalOutcome.className}`}>
+          {terminalOutcome.summary}
+          {run.endTime ? ` • Ended: ${formatTimestamp(run.endTime)}` : ''}
+          {terminalOutcome.detail ? ` • ${terminalOutcome.detail}` : ''}
+        </p>
+      )}
       {run.tags && run.tags.length > 0 && (
         <div className="flex gap-1 mt-2 flex-wrap">
           {run.tags.slice(0, 3).map((tagName) => {
@@ -451,7 +888,172 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
           )}
         </div>
       )}
-    </button>
+
+      {useInlineDetails && isExpanded && !isManageSelectionEnabled && (
+        <div className="mt-3 border-t border-border/60 pt-3 space-y-2">
+          <div className="rounded-lg bg-secondary/35 px-2 py-1.5 text-[11px]">
+            <p className="font-medium text-foreground">Command</p>
+            <p className="font-mono text-muted-foreground break-all">{run.command}</p>
+          </div>
+          {run.status === 'running' && (
+            <div>
+              <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>Progress</span>
+                <span>{run.progress}%</span>
+              </div>
+              <Progress value={run.progress} className="h-1.5" />
+            </div>
+          )}
+          {run.notes && (
+            <div className="rounded-lg bg-secondary/35 px-2 py-1.5 text-[11px] text-muted-foreground">
+              {run.notes}
+            </div>
+          )}
+          <div className="rounded-lg bg-secondary/35 px-2 py-1.5 text-[11px]">
+            <p className="font-medium text-foreground">Alerts</p>
+            {runAlerts.length > 0 ? (
+              <div className="mt-1 space-y-1">
+                {runAlerts.slice(0, 2).map((alert) => (
+                  <p key={alert.id} className="line-clamp-2 text-muted-foreground">
+                    [{alert.severity}] {alert.message}
+                  </p>
+                ))}
+                {runAlerts.length > 2 && (
+                  <p className="text-muted-foreground">+{runAlerts.length - 2} more alerts</p>
+                )}
+              </div>
+            ) : (
+              <p className="mt-1 text-muted-foreground">No alerts</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+    )
+  }
+
+  const SweepItem = ({ sweep }: { sweep: Sweep }) => {
+    const isDraft = sweep.status === 'draft'
+    const isExpanded = expandedSweepIds.has(sweep.id)
+    const canStart = sweep.status === 'draft' || sweep.status === 'pending'
+    const canStop = sweep.status === 'running'
+    const isBusy = sweepActionBusy === sweep.id
+    const sweepRunningRuns = canStop ? runs.filter(r => sweep.runIds.includes(r.id) && r.status === 'running') : []
+
+    const handleStartSweepItem = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      setSweepActionBusy(sweep.id)
+      try {
+        const parallel = Math.max(1, sweep.config.parallelRuns || 1)
+        await apiStartSweep(sweep.id, parallel)
+        await onRefresh?.()
+      } catch (err) {
+        console.error('Failed to start sweep:', err)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
+
+    const handleStopSweepItem = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!onStopRun) return
+      setSweepActionBusy(sweep.id)
+      try {
+        await Promise.allSettled(sweepRunningRuns.map(r => onStopRun(r.id)))
+        await onRefresh?.()
+      } catch (err) {
+        console.error('Failed to stop sweep runs:', err)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
+
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => handleSweepClick(sweep)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            handleSweepClick(sweep)
+          }
+        }}
+        className={`rounded-lg border p-2.5 text-left transition-colors ${
+          isDraft
+            ? 'border-violet-500/35 bg-violet-500/8 hover:bg-violet-500/12'
+            : 'border-border bg-secondary/35 hover:bg-secondary/55'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <Sparkles className={`h-3.5 w-3.5 shrink-0 ${isDraft ? 'text-violet-500' : 'text-violet-400'}`} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-foreground">
+              {sweep.config.name || sweep.id}
+            </p>
+            <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
+          </div>
+          {canStart && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-6 w-6 shrink-0 text-green-600 border-green-500/40 hover:bg-green-500/10 dark:text-green-400"
+              onClick={(e) => { void handleStartSweepItem(e) }}
+              disabled={isBusy}
+            >
+              {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            </Button>
+          )}
+          {canStop && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-6 w-6 shrink-0 text-destructive border-destructive/40 hover:bg-destructive/10"
+              onClick={(e) => { void handleStopSweepItem(e) }}
+              disabled={isBusy}
+            >
+              {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+            </Button>
+          )}
+          <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusBadgeClass(sweep.status)}`}>
+            {sweep.status}
+          </Badge>
+          {useInlineDetails ? (
+            isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+          <span className="truncate">
+            {isDraft
+              ? 'Draft sweep ready for AI refinement'
+              : `${sweep.progress.completed}/${sweep.progress.total} runs`}
+          </span>
+          {sweep.progress.failed > 0 && (
+            <span className="shrink-0 text-destructive">{sweep.progress.failed} failed</span>
+          )}
+        </div>
+
+        {useInlineDetails && isExpanded && (
+          <div
+            className="mt-3 border-t border-border/60 pt-3"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            {sweep.status === 'draft' ? (
+              <SweepArtifact config={sweep.config} sweep={sweep} isCollapsed={false} />
+            ) : (
+              <SweepStatus
+                sweep={sweep}
+                runs={runs}
+                onRunClick={(run) => handleRunClick(run)}
+                isCollapsed={false}
+              />
+            )}
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -473,7 +1075,7 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   }
 
   // If a run is selected, show the detail view with slide animation
-  if (selectedRun) {
+  if (!useInlineDetails && selectedRun) {
     return (
       <div className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-5 duration-200">
         <div className="shrink-0 flex items-center gap-3 border-b border-border px-4 py-3">
@@ -547,7 +1149,203 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
             onRefresh={onRefresh}
             onStartRun={onStartRun}
             onStopRun={onStopRun}
+            sweeps={sweeps}
           />
+        </div>
+      </div>
+    )
+  }
+
+  if (!useInlineDetails && selectedSweep) {
+    const sweepRuns = runs.filter((run) => selectedSweep.runIds.includes(run.id))
+    const sweepAlerts = alerts.filter((alert) => selectedSweep.runIds.includes(alert.run_id))
+    const pendingSweepAlerts = sweepAlerts.filter((alert) => alert.status === 'pending')
+    const canStartSweep = selectedSweep.status === 'draft' || selectedSweep.status === 'pending'
+    const canStopSweep = selectedSweep.status === 'running'
+    const runningInSweep = sweepRuns.filter((r) => r.status === 'running')
+    const isSweepBusy = sweepActionBusy === selectedSweep.id
+
+    const handleStartSweep = async () => {
+      setSweepActionBusy(selectedSweep.id)
+      try {
+        const parallel = Math.max(1, selectedSweep.config.parallelRuns || 1)
+        await apiStartSweep(selectedSweep.id, parallel)
+        await onRefresh?.()
+      } catch (e) {
+        console.error('Failed to start sweep:', e)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
+
+    const handleStopSweep = async () => {
+      if (!onStopRun) return
+      setSweepActionBusy(selectedSweep.id)
+      try {
+        await Promise.allSettled(runningInSweep.map(r => onStopRun(r.id)))
+        await onRefresh?.()
+      } catch (e) {
+        console.error('Failed to stop sweep runs:', e)
+      } finally {
+        setSweepActionBusy(null)
+      }
+    }
+
+    return (
+      <div className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-5 duration-200">
+        <div className="shrink-0 flex items-center gap-3 border-b border-border px-4 py-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleBack}
+            className="h-9 w-9 shrink-0"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-foreground">{selectedSweep.config.name || selectedSweep.id}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {selectedSweep.id} • {selectedSweep.progress.completed}/{selectedSweep.progress.total} runs
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {canStartSweep && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-green-600 border-green-500/40 hover:bg-green-500/10 dark:text-green-400"
+                onClick={() => { void handleStartSweep() }}
+                disabled={isSweepBusy}
+              >
+                {isSweepBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                <span className="text-xs">Start</span>
+              </Button>
+            )}
+            {canStopSweep && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
+                onClick={() => { void handleStopSweep() }}
+                disabled={isSweepBusy}
+              >
+                {isSweepBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                <span className="text-xs">Stop</span>
+              </Button>
+            )}
+            <Badge variant="outline" className={`capitalize ${getSweepStatusBadgeClass(selectedSweep.status)}`}>
+              {selectedSweep.status}
+            </Badge>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ScrollArea className="h-full">
+            <div className="p-4 space-y-3">
+              {/* Aggregated Alerts */}
+              {sweepAlerts.length > 0 && (
+                <div className="rounded-xl border border-border bg-card p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Bell className="h-4 w-4 text-muted-foreground" />
+                    <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Sweep Alerts</h4>
+                    {pendingSweepAlerts.length > 0 && (
+                      <Badge variant="outline" className="border-destructive/50 bg-destructive/10 text-destructive text-[9px] px-1.5 py-0 h-4">
+                        {pendingSweepAlerts.length} pending
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {sweepAlerts.slice(0, 10).map((alert) => {
+                      const alertRun = runs.find(r => r.id === alert.run_id)
+                      return (
+                        <div
+                          key={alert.id}
+                          className={`rounded-lg px-2.5 py-2 text-[11px] ${
+                            alert.status === 'pending'
+                              ? 'bg-secondary/50 border border-border'
+                              : 'bg-secondary/25 opacity-60'
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            {alert.severity === 'critical' ? (
+                              <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                            ) : alert.severity === 'warning' ? (
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                            ) : (
+                              <Bell className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-foreground line-clamp-2">{alert.message}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
+                                {alertRun?.alias || alertRun?.name || alert.run_id}
+                                {alert.status === 'resolved' && alert.response && ` • Response: ${alert.response}`}
+                              </p>
+                              {alert.status === 'pending' && alert.choices.length > 0 && onRespondToAlert && (
+                                <div className="flex gap-1 mt-1.5 flex-wrap">
+                                  {alert.choices.map((choice) => (
+                                    <Button
+                                      key={choice}
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-5 px-2 text-[10px]"
+                                      onClick={() => { void onRespondToAlert(alert.id, choice) }}
+                                    >
+                                      {choice}
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={`shrink-0 text-[8px] h-4 px-1 ${
+                                alert.severity === 'critical' ? 'border-destructive/50 text-destructive' :
+                                alert.severity === 'warning' ? 'border-amber-500/50 text-amber-500' :
+                                'border-blue-400/50 text-blue-400'
+                              }`}
+                            >
+                              {alert.severity}
+                            </Badge>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {sweepAlerts.length > 10 && (
+                      <p className="text-center text-[10px] text-muted-foreground py-1">
+                        +{sweepAlerts.length - 10} more alerts
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedSweep.status === 'draft' ? (
+                <SweepArtifact config={selectedSweep.config} sweep={selectedSweep} isCollapsed={false} />
+              ) : (
+                <SweepStatus
+                  sweep={selectedSweep}
+                  runs={runs}
+                  onRunClick={(run) => handleRunClick(run)}
+                  isCollapsed={false}
+                />
+              )}
+
+              <div className="rounded-xl border border-border bg-card p-3">
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Runs In Sweep</h4>
+                <div className="space-y-2">
+                  {sweepRuns.length > 0 ? (
+                    sweepRuns.map((run) => (
+                      <RunItem key={run.id} run={run} showChevron />
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-xs text-muted-foreground">
+                      No runs are attached to this sweep yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </ScrollArea>
         </div>
       </div>
     )
@@ -564,6 +1362,15 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
   const isAllStatusSelected = statusFilter.size === RUN_STATUS_OPTIONS.length
   const canArchiveSelection = selectedManageRuns.some((run) => !run.isArchived)
   const canUnarchiveSelection = selectedManageRuns.some((run) => run.isArchived)
+  const effectiveClusterRunSummary = clusterRunSummary || {
+    total: overview.total,
+    running: overview.running,
+    launching: 0,
+    queued: overview.queued,
+    ready: runs.filter((run) => run.status === 'ready' && !run.isArchived).length,
+    failed: overview.failed,
+    finished: overview.completed,
+  }
 
   // Overview view (default)
   return (
@@ -573,77 +1380,270 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
         <ScrollArea className="h-full" ref={scrollAreaRef} onScrollCapture={handleScroll}>
           <div className="p-4 space-y-5">
             {/* Overview Stats */}
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
-                  <Layers className="h-5 w-5 text-muted-foreground" />
+            <div className="rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('overview')}
+                className="flex w-full items-center justify-between gap-3 p-4 text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+                    <Layers className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">
+                      Experiments Overview
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      {overview.total} total runs
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-medium text-foreground">
-                    Experiments Overview
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {overview.total} total runs
-                  </p>
+                {isTopSectionExpanded('overview') ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
+              {isTopSectionExpanded('overview') && (
+                <div className="px-4 pb-4">
+                  <div className="grid grid-cols-5 gap-2">
+                    <div className="text-center p-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                      <p className="text-lg font-semibold text-blue-400">
+                        {overview.running}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Running</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-green-500/10 border border-green-500/30">
+                      <p className="text-lg font-semibold text-green-400">
+                        {overview.completed}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Finished</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-destructive/10 border border-destructive/30">
+                      <p className="text-lg font-semibold text-destructive">
+                        {overview.failed}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Failed</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-foreground/5 border border-foreground/20">
+                      <p className="text-lg font-semibold text-foreground">
+                        {overview.queued}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Queued</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-muted/50 border border-muted-foreground/20">
+                      <p className="text-lg font-semibold text-muted-foreground">
+                        {overview.canceled}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">Canceled</p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="grid grid-cols-5 gap-2">
-                <div className="text-center p-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
-                  <p className="text-lg font-semibold text-blue-400">
-                    {overview.running}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Running</p>
+              )}
+            </div>
+
+            {/* Cluster Section */}
+            <div className="rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('cluster')}
+                className="flex w-full items-start justify-between gap-3 p-4 text-left"
+              >
+                <div className="flex min-w-0 items-start gap-2">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary">
+                    <Server className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-medium text-foreground">Cluster Status</h3>
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
+                      {cluster?.description || 'Detect your cluster and keep run scheduling context-aware.'}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-center p-2 rounded-lg bg-green-500/10 border border-green-500/30">
-                  <p className="text-lg font-semibold text-green-400">
-                    {overview.completed}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Finished</p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge variant="outline" className={`text-[10px] ${getClusterHealthBadgeClass(cluster?.status)}`}>
+                    {cluster?.status || 'unknown'}
+                  </Badge>
+                  <Badge variant="secondary" className="text-[10px]">
+                    {cluster?.label || 'Unknown'}
+                  </Badge>
+                  {isTopSectionExpanded('cluster') ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
                 </div>
-                <div className="text-center p-2 rounded-lg bg-destructive/10 border border-destructive/30">
-                  <p className="text-lg font-semibold text-destructive">
-                    {overview.failed}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Failed</p>
+              </button>
+
+              {isTopSectionExpanded('cluster') && (
+                <div className="space-y-3 px-4 pb-4">
+                  <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-5">
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Source</p>
+                      <p className="font-medium text-foreground capitalize">{cluster?.source || 'unset'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Nodes</p>
+                      <p className="font-medium text-foreground">{cluster?.node_count ?? '--'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">GPUs</p>
+                      <p className="font-medium text-foreground">{cluster?.gpu_count ?? '--'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Head Node</p>
+                      <p className="truncate font-medium text-foreground">{cluster?.head_node || '--'}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-secondary/30 px-2 py-1.5">
+                      <p className="text-muted-foreground">Active Runs</p>
+                      <p className="font-medium text-foreground">
+                        {(effectiveClusterRunSummary.running || 0) + (effectiveClusterRunSummary.launching || 0)} running
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select value={clusterDraftType} onValueChange={(value) => setClusterDraftType(value as ClusterType)}>
+                      <SelectTrigger className="h-8 w-[220px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CLUSTER_TYPE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value} className="text-xs">
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      onClick={() => { void handleSaveClusterType() }}
+                      disabled={!onUpdateCluster || clusterActionBusy !== null || clusterDraftType === (cluster?.type || 'unknown')}
+                    >
+                      {clusterActionBusy === 'saving' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                      Set Cluster Type
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      onClick={() => { void handleDetectClusterSetup() }}
+                      disabled={!onDetectCluster || clusterActionBusy !== null}
+                    >
+                      {clusterActionBusy === 'detecting' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+                      Auto-detect
+                    </Button>
+                  </div>
+
+                  {clusterError && (
+                    <p className="text-xs text-destructive">{clusterError}</p>
+                  )}
+                  {clusterLoading && (
+                    <p className="text-xs text-muted-foreground">Refreshing cluster status...</p>
+                  )}
                 </div>
-                <div className="text-center p-2 rounded-lg bg-foreground/5 border border-foreground/20">
-                  <p className="text-lg font-semibold text-foreground">
-                    {overview.queued}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Queued</p>
-                </div>
-                <div className="text-center p-2 rounded-lg bg-muted/50 border border-muted-foreground/20">
-                  <p className="text-lg font-semibold text-muted-foreground">
-                    {overview.canceled}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">Canceled</p>
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Charts Section */}
-            <div>
-              <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
-                Charts
-              </h3>
-              <AllRunsChart
-                runs={allActiveRuns}
-                visibleRunIds={visibleRunIds}
-                onToggleVisibility={toggleRunVisibility}
-                visibilityGroups={visibilityGroups}
-                activeGroupId={activeGroupId}
-                onSelectGroup={handleSelectGroup}
-                onOpenManage={() => handleShowVisibilityManage(true)}
-              />
+            <div className="rounded-xl border border-border bg-card">
+              <div className="flex items-center justify-between p-3">
+                <button
+                  type="button"
+                  onClick={() => toggleTopSection('charts')}
+                  className="flex min-w-0 flex-1 items-center justify-between text-left"
+                >
+                  <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Charts
+                  </h3>
+                  {isTopSectionExpanded('charts') ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => onNavigateToCharts?.()}
+                >
+                  &gt;
+                </Button>
+              </div>
+              {isTopSectionExpanded('charts') && (
+                <div className="border-t border-border p-3">
+                  <AllRunsChart
+                    runs={allActiveRuns}
+                    visibleRunIds={visibleRunIds}
+                    onToggleVisibility={toggleRunVisibility}
+                    visibilityGroups={visibilityGroups}
+                    activeGroupId={activeGroupId}
+                    onSelectGroup={handleSelectGroup}
+                    onOpenManage={() => handleShowVisibilityManage(true)}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('sweeps')}
+                className="flex w-full items-center justify-between p-3 text-left"
+              >
+                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Sweeps
+                </h3>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[10px]">
+                    {sortedSweeps.length}
+                  </Badge>
+                  {isTopSectionExpanded('sweeps') ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </div>
+              </button>
+              {isTopSectionExpanded('sweeps') && (
+                <div className="border-t border-border p-3">
+                  {sortedSweeps.length > 0 ? (
+                    <div className="space-y-2">
+                      {sortedSweeps.map((sweep) => (
+                        <SweepItem key={sweep.id} sweep={sweep} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-xs text-muted-foreground">
+                      No sweep objects yet. Save a draft to create one.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* All Runs */}
             <div>
-              <div className="flex items-center justify-between mb-3">
+              <button
+                type="button"
+                onClick={() => toggleTopSection('runs')}
+                className="mb-3 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+              >
                 <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Runs
                 </h3>
-              </div>
+                {isTopSectionExpanded('runs') ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
+              {isTopSectionExpanded('runs') && (
               <div className="rounded-xl border border-border bg-card">
                 <div className="border-b border-border px-4 py-3 space-y-2">
                   <div className="flex items-center gap-2">
@@ -854,105 +1854,15 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                 <div className="p-4 space-y-5">
                   {detailsView === 'priority' ? (
                     <>
-                      {favoriteRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Star className="h-4 w-4 text-yellow-500" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Favorites</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {favoriteRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {alertRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <AlertTriangle className="h-4 w-4 text-warning" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Has Alerts</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {alertRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {runningRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Play className="h-4 w-4 text-accent" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Running</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {runningRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {readyRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Clock className="h-4 w-4 text-amber-400" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Ready</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {readyRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {queuedRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Clock className="h-4 w-4 text-foreground" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Queued</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {queuedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {failedRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <AlertCircle className="h-4 w-4 text-destructive" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Failed</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {failedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {completedRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <CheckCircle2 className="h-4 w-4 text-green-400" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Finished</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {completedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {canceledRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <XCircle className="h-4 w-4 text-muted-foreground" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Canceled</h4>
-                          </div>
-                          <div className="space-y-2">
-                            {canceledRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
-                      {filteredArchivedRuns.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Archive className="h-4 w-4 text-muted-foreground" />
-                            <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Archived</h4>
-                          </div>
-                          <div className="space-y-2 opacity-60">
-                            {filteredArchivedRuns.map((run) => <RunItem key={run.id} run={run} />)}
-                          </div>
-                        </div>
-                      )}
+                      {renderRunSubsection('priority:favorites', 'Favorites', <Star className="h-4 w-4 text-yellow-500" />, favoriteRuns)}
+                      {renderRunSubsection('priority:alerts', 'Has Alerts', <AlertTriangle className="h-4 w-4 text-warning" />, alertRuns)}
+                      {renderRunSubsection('priority:running', 'Running', <Play className="h-4 w-4 text-accent" />, runningRuns)}
+                      {renderRunSubsection('priority:ready', 'Ready', <Clock className="h-4 w-4 text-amber-400" />, readyRuns)}
+                      {renderRunSubsection('priority:queued', 'Queued', <Clock className="h-4 w-4 text-foreground" />, queuedRuns)}
+                      {renderRunSubsection('priority:failed', 'Failed', <AlertCircle className="h-4 w-4 text-destructive" />, failedRuns)}
+                      {renderRunSubsection('priority:finished', 'Finished', <CheckCircle2 className="h-4 w-4 text-green-400" />, completedRuns)}
+                      {renderRunSubsection('priority:canceled', 'Canceled', <XCircle className="h-4 w-4 text-muted-foreground" />, canceledRuns)}
+                      {renderRunSubsection('priority:archived', 'Archived', <Archive className="h-4 w-4 text-muted-foreground" />, filteredArchivedRuns, { dimmed: true })}
                       {filteredRuns.length === 0 && (
                         <div className="py-10 text-center text-sm text-muted-foreground">
                           No runs match the current filters.
@@ -962,39 +1872,40 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
                   ) : (
                     <>
                       {groupByMode === 'sweep' ? (
-                        groupedRunsBySweep.length > 0 ? (
-                          groupedRunsBySweep.map((group) => (
-                            <div key={group.sweepId}>
-                              <div className="flex items-center gap-2 mb-3">
-                                <PlugZap className="h-4 w-4 text-muted-foreground" />
-                                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                                  {group.sweepId === 'no-sweep' ? 'No Sweep' : `Sweep ${group.sweepId}`}
-                                </h4>
-                              </div>
-                              <div className="space-y-2">
-                                {group.runs.map((run) => <RunItem key={run.id} run={run} />)}
-                              </div>
+                        <div className="space-y-5">
+                          {groupedRunsBySweep.length > 0 ? (
+                            groupedRunsBySweep.map((group) => renderRunSubsection(
+                              `time:group:${group.sweepId}`,
+                              group.sweepId === 'no-sweep'
+                                ? 'No Sweep'
+                                : sweepById.get(group.sweepId)?.config.name || `Sweep ${group.sweepId}`,
+                              <PlugZap className="h-4 w-4 text-muted-foreground" />,
+                              group.runs
+                            ))
+                          ) : (
+                            <div className="py-10 text-center text-sm text-muted-foreground">
+                              No runs match the current filters.
                             </div>
-                          ))
-                        ) : (
-                          <div className="py-10 text-center text-sm text-muted-foreground">
-                            No runs match the current filters.
-                          </div>
-                        )
+                          )}
+
+                          {renderRunSubsection('time:archived', 'Archived', <Archive className="h-4 w-4 text-muted-foreground" />, filteredArchivedRuns, { dimmed: true })}
+                        </div>
                       ) : (
-                        <div className="space-y-2">
-                          {sortedRuns.map((run) => <RunItem key={run.id} run={run} />)}
+                        <div className="space-y-4">
+                          {renderRunSubsection('time:all-active', 'All Active Runs', <Layers className="h-4 w-4 text-muted-foreground" />, sortedRuns)}
                           {sortedRuns.length === 0 && (
                             <div className="py-10 text-center text-sm text-muted-foreground">
                               No runs match the current filters.
                             </div>
                           )}
+                          {renderRunSubsection('time:archived', 'Archived', <Archive className="h-4 w-4 text-muted-foreground" />, filteredArchivedRuns, { dimmed: true })}
                         </div>
                       )}
                     </>
                   )}
                 </div>
               </div>
+              )}
             </div>
           </div>
         </ScrollArea>
@@ -1002,11 +1913,13 @@ export function RunsView({ runs, onRunClick, onUpdateRun, pendingAlertsByRun = {
     </div>
 
       <Dialog open={sweepDialogOpen} onOpenChange={setSweepDialogOpen}>
-        <DialogContent showCloseButton={false} className="w-[90vw] h-[80vh] max-w-[720px] max-h-[640px] flex flex-col p-0 gap-0">
+        <DialogContent showCloseButton={false} className="w-[95vw] h-[90vh] max-w-[900px] max-h-[800px] flex flex-col p-0 gap-0">
           <SweepForm
-            onSave={() => { setSweepDialogOpen(false); onRefresh?.() }}
+            previousSweeps={sweeps}
+            onSave={async (config) => { await onSaveSweep?.(config); setSweepDialogOpen(false); await onRefresh?.() }}
+            onCreate={async (config) => { await onCreateSweep?.(config); setSweepDialogOpen(false); await onRefresh?.() }}
             onCancel={() => setSweepDialogOpen(false)}
-            onLaunch={() => { setSweepDialogOpen(false); onRefresh?.() }}
+            onLaunch={async (config) => { await onLaunchSweep?.(config); setSweepDialogOpen(false); await onRefresh?.() }}
           />
         </DialogContent>
       </Dialog>

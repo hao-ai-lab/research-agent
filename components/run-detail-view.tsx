@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Clock,
   Terminal,
@@ -25,6 +25,8 @@ import {
   Square,
   BarChart3,
   AlertTriangle,
+  Sparkles,
+  Bell,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -59,9 +61,12 @@ import {
 import { TagsDialog } from './tags-dialog'
 import { LogViewer } from './log-viewer'
 import { TmuxTerminalPanel } from './tmux-terminal-panel'
-import type { ExperimentRun, TagDefinition, MetricVisualization } from '@/lib/types'
+import { SweepArtifact } from './sweep-artifact'
+import { SweepStatus } from './sweep-status'
+import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
 import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
-import type { Alert } from '@/lib/api-client'
+import { getSweep, type Alert } from '@/lib/api-client'
+import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
 
 interface RunDetailViewProps {
   run: ExperimentRun
@@ -74,6 +79,7 @@ interface RunDetailViewProps {
   onRefresh?: () => void
   onStartRun?: (runId: string) => Promise<void>
   onStopRun?: (runId: string) => Promise<void>
+  sweeps?: Sweep[]
 }
 
 // Generate mock metric data based on run's loss history
@@ -196,7 +202,7 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun }: RunDetailViewProps) {
+export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun, sweeps = [] }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [copiedRunId, setCopiedRunId] = useState(false)
   const [copiedSweepId, setCopiedSweepId] = useState(false)
@@ -223,9 +229,48 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [logsFullPage, setLogsFullPage] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(true)
+  const [sweepObjectOpen, setSweepObjectOpen] = useState(true)
+  const alertsSectionRef = useRef<HTMLDivElement | null>(null)
 
   const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
   const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
+  const linkedSweepFromList = useMemo(
+    () => sweeps.find((sweep) => sweep.id === run.sweepId),
+    [run.sweepId, sweeps]
+  )
+  const [linkedSweepFromApi, setLinkedSweepFromApi] = useState<Sweep | null>(null)
+  const [isLoadingLinkedSweep, setIsLoadingLinkedSweep] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLinkedSweepFromApi(null)
+
+    if (!run.sweepId || linkedSweepFromList) {
+      setIsLoadingLinkedSweep(false)
+      return
+    }
+
+    setIsLoadingLinkedSweep(true)
+    getSweep(run.sweepId)
+      .then((apiSweep) => {
+        if (cancelled) return
+        setLinkedSweepFromApi(mapApiSweepToUiSweep(apiSweep))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setLinkedSweepFromApi(null)
+      })
+      .finally(() => {
+        if (cancelled) return
+        setIsLoadingLinkedSweep(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [linkedSweepFromList, run.sweepId])
+
+  const linkedSweep = linkedSweepFromList || linkedSweepFromApi
 
   const copyCommand = () => {
     navigator.clipboard.writeText(run.command)
@@ -292,6 +337,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     setIsStarting(true)
     try {
       await onStartRun(run.id)
+      onRefresh?.()
     } finally {
       setIsStarting(false)
     }
@@ -302,6 +348,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     setIsStopping(true)
     try {
       await onStopRun(run.id)
+      onRefresh?.()
     } finally {
       setIsStopping(false)
     }
@@ -352,10 +399,69 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const allSecondaryExpanded = secondaryMetrics.every(m => expandedCharts.has(m.id))
 
   const runAlerts = alerts
+  const pendingAlertCount = runAlerts.filter((alert) => alert.status === 'pending').length
+
+  const formatTimestamp = (value?: Date) => {
+    if (!value) return '--'
+    return value.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
 
   const formatAlertTime = (timestamp: number) => {
     const date = new Date(timestamp * 1000)
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const getTerminalOutcome = (): {
+    state: 'finished' | 'failed' | 'canceled' | null
+    summary: string
+    detail: string | null
+    className: string
+  } => {
+    const exitCode = typeof run.exit_code === 'number' ? run.exit_code : null
+    const errorText = run.error?.trim()
+
+    if (run.status === 'failed') {
+      return {
+        state: 'failed',
+        summary: 'Failed',
+        detail: errorText || (exitCode !== null ? `Exit code ${exitCode}` : null),
+        className: 'border-destructive/40 bg-destructive/10 text-destructive',
+      }
+    }
+
+    if (run.status === 'completed') {
+      return {
+        state: 'finished',
+        summary: 'Finished',
+        detail: exitCode !== null ? `Exit code ${exitCode}` : null,
+        className: 'border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400',
+      }
+    }
+
+    if (run.status === 'canceled') {
+      return {
+        state: 'canceled',
+        summary: 'Stopped',
+        detail: errorText || null,
+        className: 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+      }
+    }
+
+    return {
+      state: null,
+      summary: '',
+      detail: null,
+      className: 'border-border bg-secondary/40 text-muted-foreground',
+    }
+  }
+
+  const terminalOutcome = getTerminalOutcome()
+
+  const handleCheckAlerts = () => {
+    setAlertsOpen(true)
+    requestAnimationFrame(() => {
+      alertsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
 
   return (
@@ -363,6 +469,30 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="p-3 space-y-3">
+            <div className="rounded-lg border border-border bg-card p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Status</span>
+                  <Badge variant="outline" className={`${getStatusBadgeClass(run.status)}`}>
+                    <span className="text-[10px]">{getStatusText(run.status)}</span>
+                  </Badge>
+                </div>
+                {run.endTime && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Ended: {formatTimestamp(run.endTime)}
+                  </span>
+                )}
+              </div>
+              {terminalOutcome.state && (
+                <div className={`mt-2 rounded-md border px-2 py-1.5 text-[11px] ${terminalOutcome.className}`}>
+                  <p className="font-medium">Outcome: {terminalOutcome.summary}</p>
+                  {terminalOutcome.detail && (
+                    <p className="mt-0.5 break-words">{terminalOutcome.detail}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Alias */}
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">Alias</span>
@@ -425,9 +555,39 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
-                  <p className="text-xs font-mono text-foreground truncate">
-                    {run.sweepId || 'No sweep'}
-                  </p>
+                  {(() => {
+                    const sweep = linkedSweep
+                    if (sweep) {
+                      return (
+                        <div className="mt-1 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-foreground truncate">{sweep.config.name}</span>
+                            <Badge variant="outline" className={`text-[9px] h-4 ${
+                              sweep.status === 'draft' ? 'border-violet-500/50 bg-violet-500/10 text-violet-500' :
+                              sweep.status === 'running' ? 'border-blue-400/50 bg-blue-400/10 text-blue-400' :
+                              sweep.status === 'completed' ? 'border-green-400/50 bg-green-400/10 text-green-400' :
+                              sweep.status === 'failed' ? 'border-destructive/50 bg-destructive/10 text-destructive' :
+                              'border-muted-foreground/50 bg-muted/10 text-muted-foreground'
+                            }`}>{sweep.status}</Badge>
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                            <span>{sweep.progress.completed}/{sweep.progress.total} runs</span>
+                            {sweep.progress.failed > 0 && <span className="text-destructive">{sweep.progress.failed} failed</span>}
+                            {sweep.bestMetricValue !== undefined && (
+                              <span>Best: {sweep.bestMetricValue.toFixed(4)}</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground line-clamp-1">
+                            Goal: {(sweep.creationContext.goal || sweep.config.goal || '').trim() || 'Not provided'}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground line-clamp-1">
+                            Description: {(sweep.creationContext.description || sweep.config.description || '').trim() || 'Not provided'}
+                          </p>
+                        </div>
+                      )
+                    }
+                    return <p className="text-xs font-mono text-foreground truncate">{run.sweepId || 'No sweep'}</p>
+                  })()}
                 </div>
                 {run.sweepId && (
                   <Button
@@ -440,7 +600,80 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                   </Button>
                 )}
               </div>
+
+              <div className="grid grid-cols-1 gap-1 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-4">
+                <div>
+                  <p className="uppercase tracking-wide">Start</p>
+                  <p className="text-foreground">
+                    {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
+                      ? formatTimestamp(run.startedAt || run.startTime)
+                      : '--'}
+                  </p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide">Created</p>
+                  <p className="text-foreground">{formatTimestamp(run.createdAt)}</p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide">Running Time</p>
+                  <p className="text-foreground">
+                    {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
+                      ? formatDuration(run.startedAt || run.startTime, run.endTime)
+                      : '--'}
+                  </p>
+                </div>
+                <div>
+                  <p className="uppercase tracking-wide">Exit Code</p>
+                  <p className="text-foreground">
+                    {typeof run.exit_code === 'number' ? run.exit_code : '--'}
+                  </p>
+                </div>
+              </div>
             </div>
+
+            {/* Sweep Object */}
+            <Collapsible open={sweepObjectOpen} onOpenChange={setSweepObjectOpen}>
+              <div className={`rounded-lg border overflow-hidden ${linkedSweep ? 'border-border bg-card' : 'border-border border-dashed bg-card'}`}>
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-violet-500" />
+                      <span className={`text-xs font-medium ${linkedSweep ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        Sweep Object
+                      </span>
+                    </div>
+                    {sweepObjectOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border px-2 pb-2">
+                    {linkedSweep ? (
+                      <div className="pt-2">
+                        {linkedSweep.status === 'draft' ? (
+                          <SweepArtifact config={linkedSweep.config} sweep={linkedSweep} isCollapsed={false} />
+                        ) : (
+                          <SweepStatus sweep={linkedSweep} runs={runs} onRunClick={onRunSelect} isCollapsed={false} />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-5 text-center">
+                        <p className="text-xs text-muted-foreground">
+                          {run.sweepId
+                            ? (isLoadingLinkedSweep
+                              ? `Loading sweep ${run.sweepId}...`
+                              : `Sweep ${run.sweepId} was not found.`)
+                            : 'This run is not attached to a sweep object.'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
 
             {/* Tags + Quick Actions Row */}
             <div className="flex items-center gap-2">
@@ -514,6 +747,16 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                     <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                   </Button>
                 )}
+
+                <Button
+                  variant={pendingAlertCount > 0 ? 'default' : 'ghost'}
+                  size="icon"
+                  onClick={handleCheckAlerts}
+                  className={`h-7 w-7 ${pendingAlertCount > 0 ? '' : 'text-muted-foreground'}`}
+                  title={pendingAlertCount > 0 ? `Check alerts (${pendingAlertCount} pending)` : 'Check alerts'}
+                >
+                  <Bell className="h-4 w-4" />
+                </Button>
 
                 <Button
                   variant="ghost"
@@ -638,8 +881,9 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
             </Collapsible>
 
             {/* Alerts */}
-            <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
-              <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
+            <div ref={alertsSectionRef}>
+              <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
+                <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
                 <CollapsibleTrigger asChild>
                   <button type="button" className="flex w-full items-center justify-between p-3">
                     <div className="flex items-center gap-2">
@@ -701,8 +945,9 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                     )}
                   </div>
                 </CollapsibleContent>
-              </div>
-            </Collapsible>
+                </div>
+              </Collapsible>
+            </div>
 
             {/* Charts Section - Primary */}
             {run.lossHistory && run.lossHistory.length > 0 && (

@@ -16,6 +16,7 @@ import * as mockApi from './api-mock'
 export type {
     ChatSession,
     ChatMessageData,
+    ActiveSessionStream,
     SessionWithMessages,
     StreamEventType,
     StreamEvent,
@@ -28,7 +29,21 @@ export type {
     Alert,
     Sweep,
     CreateSweepRequest,
+    UpdateSweepRequest,
     WildModeState,
+    ClusterType,
+    ClusterState,
+    ClusterHealthStatus,
+    ClusterSource,
+    ClusterStatusResponse,
+    ClusterUpdateRequest,
+    ClusterDetectRequest,
+    RepoDiffFileStatus,
+    RepoDiffLine,
+    RepoDiffFile,
+    RepoDiffResponse,
+    RepoFilesResponse,
+    RepoFileResponse,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -51,6 +66,9 @@ export const deleteSession = (...args: Parameters<typeof realApi.deleteSession>)
 
 export const streamChat = (...args: Parameters<typeof realApi.streamChat>) =>
     getApi().streamChat(...args)
+
+export const streamSession = (...args: Parameters<typeof realApi.streamSession>) =>
+    getApi().streamSession(...args)
 
 export const checkApiHealth = async (): Promise<boolean> => {
     if (isUsingMock()) {
@@ -118,14 +136,35 @@ export const getRunArtifacts = (...args: Parameters<typeof realApi.getRunArtifac
 export const queueRun = (...args: Parameters<typeof realApi.queueRun>) =>
     getApi().queueRun(...args)
 
+export const getRepoDiff = (...args: Parameters<typeof realApi.getRepoDiff>) =>
+    getApi().getRepoDiff(...args)
+
+export const getRepoFiles = (...args: Parameters<typeof realApi.getRepoFiles>) =>
+    getApi().getRepoFiles(...args)
+
+export const getRepoFile = (...args: Parameters<typeof realApi.getRepoFile>) =>
+    getApi().getRepoFile(...args)
+
 export const listSweeps = (...args: Parameters<typeof realApi.listSweeps>) =>
     getApi().listSweeps(...args)
 
 export const createSweep = (...args: Parameters<typeof realApi.createSweep>) =>
     getApi().createSweep(...args)
 
+export const updateSweep = (...args: Parameters<typeof realApi.updateSweep>) =>
+    getApi().updateSweep(...args)
+
 export const getSweep = (...args: Parameters<typeof realApi.getSweep>) =>
     getApi().getSweep(...args)
 
 export const startSweep = (...args: Parameters<typeof realApi.startSweep>) =>
     getApi().startSweep(...args)
+
+export const getClusterStatus = (...args: Parameters<typeof realApi.getClusterStatus>) =>
+    getApi().getClusterStatus(...args)
+
+export const detectCluster = (...args: Parameters<typeof realApi.detectCluster>) =>
+    getApi().detectCluster(...args)
+
+export const updateCluster = (...args: Parameters<typeof realApi.updateCluster>) =>
+    getApi().updateCluster(...args)
