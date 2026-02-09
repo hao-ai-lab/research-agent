@@ -15,9 +15,10 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { useApiConfig } from '@/lib/api-config'
 import type { ReportCellType } from './report-view'
+import type { HomeTab } from '@/lib/navigation'
 
 interface FloatingNavProps {
-  activeTab: 'chat' | 'runs' | 'charts' | 'memory' | 'events' | 'journey' | 'report' | 'settings'
+  activeTab: HomeTab
   onMenuClick: () => void
   showDesktopSidebarToggle?: boolean
   onDesktopSidebarToggle?: () => void
