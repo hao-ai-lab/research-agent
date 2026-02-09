@@ -42,9 +42,13 @@ export interface MessagePartData {
     type: 'thinking' | 'tool' | 'text'
     content: string
     tool_name?: string
-    tool_state?: 'pending' | 'running' | 'completed' | 'error'
+    tool_state?: 'pending' | 'running' | 'completed' | 'error' | string
+    tool_state_raw?: unknown
     tool_input?: string
     tool_output?: string
+    tool_started_at?: number
+    tool_ended_at?: number
+    tool_duration_ms?: number
 }
 
 export interface SessionWithMessages extends ChatSession {
@@ -58,8 +62,14 @@ export interface StreamEvent {
     id?: string
     ptype?: 'text' | 'reasoning' | 'tool'
     delta?: string
-    state?: string
+    state?: unknown
     name?: string
+    tool_status?: 'pending' | 'running' | 'completed' | 'error' | string
+    tool_input?: string
+    tool_output?: string
+    tool_started_at?: number
+    tool_ended_at?: number
+    tool_duration_ms?: number
     status?: string
     message?: string
 }

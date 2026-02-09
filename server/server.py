@@ -1192,73 +1192,245 @@ def should_stop_session(session_id: str) -> bool:
     return session_stop_flags.get(session_id, False)
 
 
+def _extract_tool_name(part: dict) -> Optional[str]:
+    """Best-effort extraction for tool part names across OpenCode versions."""
+    state = part.get("state") if isinstance(part, dict) else {}
+    if not isinstance(state, dict):
+        state = {}
+    state_input = state.get("input")
+    if not isinstance(state_input, dict):
+        state_input = {}
+
+    for candidate in (
+        part.get("name"),
+        part.get("tool"),
+        state.get("title"),
+        state_input.get("description"),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    return None
+
+
+def _coerce_tool_text(value: Any) -> Optional[str]:
+    """Convert tool input/output payloads to readable text."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(value)
+
+
+def _extract_tool_data(part: dict) -> dict[str, Any]:
+    """Extract normalized tool fields used for streaming and persistence."""
+    state = part.get("state")
+    if not isinstance(state, dict):
+        state = {}
+
+    state_input = state.get("input")
+    if not isinstance(state_input, dict):
+        state_input = {}
+
+    metadata = state.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    time_data = state.get("time")
+    if not isinstance(time_data, dict):
+        time_data = {}
+
+    status = state.get("status")
+    if not isinstance(status, str):
+        status = None
+
+    tool_input = _coerce_tool_text(state_input) if state_input else None
+    output_value = state.get("output")
+    if output_value is None:
+        output_value = metadata.get("output")
+    tool_output = _coerce_tool_text(output_value)
+
+    started_at = time_data.get("start") if isinstance(time_data.get("start"), (int, float)) else None
+    ended_at = time_data.get("end") if isinstance(time_data.get("end"), (int, float)) else None
+    duration_ms = None
+    if isinstance(started_at, (int, float)) and isinstance(ended_at, (int, float)) and ended_at >= started_at:
+        duration_ms = int(ended_at - started_at)
+
+    return {
+        "tool_status": status,
+        "tool_input": tool_input,
+        "tool_output": tool_output,
+        "tool_started_at": started_at,
+        "tool_ended_at": ended_at,
+        "tool_duration_ms": duration_ms,
+    }
+
+
+class StreamPartsAccumulator:
+    """
+    Collect ordered message parts while preserving type transitions.
+
+    Text/reasoning are buffered and flushed whenever we switch type/part ID or
+    encounter a tool event. Tool parts are keyed by ID so state updates amend
+    the original tool part.
+    """
+
+    def __init__(self):
+        self._parts: list[dict[str, Any]] = []
+        self._text_buffer: Optional[dict[str, Any]] = None
+        self._tool_index_by_id: dict[str, int] = {}
+        self._text_segment_counts: dict[str, int] = {}
+
+    def consume(self, event: dict):
+        ptype = event.get("ptype")
+        if ptype in ("text", "reasoning"):
+            self._consume_text_or_reasoning(event)
+            return
+        if ptype == "tool":
+            self._flush_text_buffer()
+            self._consume_tool_update(event)
+            return
+        if event.get("type") == "session_status":
+            self._flush_text_buffer()
+
+    def finalize(self) -> list[dict[str, Any]]:
+        self._flush_text_buffer()
+        return list(self._parts)
+
+    def _consume_text_or_reasoning(self, event: dict):
+        delta = event.get("delta")
+        if not isinstance(delta, str) or delta == "":
+            return
+
+        part_id = event.get("id")
+        part_type = "thinking" if event.get("ptype") == "reasoning" else "text"
+        if self._text_buffer and self._text_buffer.get("source_id") == part_id and self._text_buffer.get("type") == part_type:
+            self._text_buffer["content"] += delta
+            return
+
+        self._flush_text_buffer()
+        base_id = part_id if isinstance(part_id, str) and part_id else f"part_{uuid.uuid4().hex[:12]}"
+        segment_index = self._text_segment_counts.get(base_id, 0)
+        self._text_segment_counts[base_id] = segment_index + 1
+        stored_id = base_id if segment_index == 0 else f"{base_id}#{segment_index}"
+        self._text_buffer = {
+            "id": stored_id,
+            "source_id": base_id,
+            "type": part_type,
+            "content": delta,
+        }
+
+    def _consume_tool_update(self, event: dict):
+        part_id = event.get("id")
+        if not isinstance(part_id, str) or not part_id:
+            return
+
+        existing_index = self._tool_index_by_id.get(part_id)
+        tool_name = event.get("name")
+        if existing_index is None:
+            self._parts.append(
+                {
+                    "id": part_id,
+                    "type": "tool",
+                    "content": "",
+                    "tool_name": tool_name,
+                    "tool_state": event.get("tool_status"),
+                    "tool_state_raw": event.get("state"),
+                    "tool_input": event.get("tool_input"),
+                    "tool_output": event.get("tool_output"),
+                    "tool_started_at": event.get("tool_started_at"),
+                    "tool_ended_at": event.get("tool_ended_at"),
+                    "tool_duration_ms": event.get("tool_duration_ms"),
+                }
+            )
+            self._tool_index_by_id[part_id] = len(self._parts) - 1
+            return
+
+        existing_part = self._parts[existing_index]
+        existing_part["tool_state"] = event.get("tool_status")
+        existing_part["tool_state_raw"] = event.get("state")
+        existing_part["tool_input"] = event.get("tool_input")
+        existing_part["tool_output"] = event.get("tool_output")
+        existing_part["tool_started_at"] = event.get("tool_started_at")
+        existing_part["tool_ended_at"] = event.get("tool_ended_at")
+        existing_part["tool_duration_ms"] = event.get("tool_duration_ms")
+        if tool_name:
+            existing_part["tool_name"] = tool_name
+
+    def _flush_text_buffer(self):
+        if not self._text_buffer:
+            return
+        if self._text_buffer.get("content"):
+            flushed_part = {k: v for k, v in self._text_buffer.items() if k != "source_id"}
+            self._parts.append(flushed_part)
+        self._text_buffer = None
+
+
 async def run_opencode_session(chat_session_id: str, opencode_session_id: str, content: str) -> tuple[str, str, list]:
     """Run a prompt and return full text, thinking, and ordered parts."""
     full_text = ""
     full_thinking = ""
-    parts = []
+    parts_accumulator = StreamPartsAccumulator()
     async with httpx.AsyncClient(timeout=None) as client:
         await send_prompt_to_opencode(client, opencode_session_id, content)
-        async for event, text_delta, thinking_delta in stream_opencode_events(client, opencode_session_id):
+        async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
             if should_stop_session(chat_session_id):
                 break
             full_text += text_delta
             full_thinking += thinking_delta
+            parts_accumulator.consume(event)
 
-            part_id = event.get("id")
-            ptype = event.get("ptype")
-
-            if part_id and ptype:
-                existing_part = next((p for p in parts if p["id"] == part_id), None)
-                if ptype in ("text", "reasoning"):
-                    part_type = "thinking" if ptype == "reasoning" else "text"
-                    delta = event.get("delta", "")
-                    if existing_part:
-                        existing_part["content"] += delta
-                    else:
-                        parts.append({
-                            "id": part_id,
-                            "type": part_type,
-                            "content": delta
-                        })
-                elif ptype == "tool":
-                    if existing_part:
-                        existing_part["tool_state"] = event.get("state")
-                        if event.get("name"):
-                            existing_part["tool_name"] = event.get("name")
-                    else:
-                        parts.append({
-                            "id": part_id,
-                            "type": "tool",
-                            "content": "",
-                            "tool_name": event.get("name"),
-                            "tool_state": event.get("state")
-                        })
-
-    return full_text, full_thinking, parts
+    return full_text, full_thinking, parts_accumulator.finalize()
 
 
 def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[dict]:
     """Parse an OpenCode SSE event and translate it to our protocol."""
     payload = event_data.get("payload", {})
+    if not isinstance(payload, dict):
+        return None
+
     etype = payload.get("type", "")
     props = payload.get("properties", {})
+    if not isinstance(props, dict):
+        return None
     part = props.get("part", {})
+    if not isinstance(part, dict):
+        part = {}
     
-    event_sid = props.get("sessionID") or part.get("sessionID")
+    session_props = props.get("session")
+    if not isinstance(session_props, dict):
+        session_props = {}
+
+    event_sid = props.get("sessionID") or part.get("sessionID") or session_props.get("id")
     if event_sid != target_session_id:
         return None
     
     if etype == "message.part.updated":
         ptype = part.get("type")
-        delta = props.get("delta", "")
-        
+        part_id = part.get("id")
+
         if ptype == "text":
-            return {"type": "part_delta", "id": part.get("id"), "ptype": "text", "delta": delta}
+            delta = props.get("delta")
+            if not isinstance(delta, str) or delta == "":
+                return None
+            return {"type": "part_delta", "id": part_id, "ptype": "text", "delta": delta}
         elif ptype == "reasoning":
-            return {"type": "part_delta", "id": part.get("id"), "ptype": "reasoning", "delta": delta}
+            delta = props.get("delta")
+            if not isinstance(delta, str) or delta == "":
+                return None
+            return {"type": "part_delta", "id": part_id, "ptype": "reasoning", "delta": delta}
         elif ptype == "tool":
-            return {"type": "part_update", "id": part.get("id"), "ptype": "tool", "state": part.get("state"), "name": part.get("name")}
+            tool_data = _extract_tool_data(part)
+            return {
+                "type": "part_update",
+                "id": part_id,
+                "ptype": "tool",
+                "state": part.get("state"),
+                "name": _extract_tool_name(part),
+                **tool_data,
+            }
     
     elif etype == "session.status":
         if props.get("status", {}).get("type") == "idle":
@@ -1267,8 +1439,10 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
     return None
 
 
-async def stream_opencode_events(client: httpx.AsyncClient, session_id: str) -> AsyncIterator[tuple]:
-    """Stream events from OpenCode and yield parsed events."""
+async def stream_opencode_events(
+    client: httpx.AsyncClient, session_id: str
+) -> AsyncIterator[tuple[dict, str, str, Optional[dict]]]:
+    """Stream parsed OpenCode events with text/thinking deltas and tool updates."""
     url = f"{OPENCODE_URL}/global/event"
     headers = {"Accept": "text/event-stream"}
     
@@ -1292,12 +1466,16 @@ async def stream_opencode_events(client: httpx.AsyncClient, session_id: str) -> 
                 
                 text_delta = ""
                 thinking_delta = ""
-                if translated.get("ptype") == "text":
+                tool_update = None
+                ptype = translated.get("ptype")
+                if ptype == "text":
                     text_delta = translated.get("delta", "")
-                elif translated.get("ptype") == "reasoning":
+                elif ptype == "reasoning":
                     thinking_delta = translated.get("delta", "")
+                elif ptype == "tool":
+                    tool_update = translated
                 
-                yield translated, text_delta, thinking_delta
+                yield translated, text_delta, thinking_delta, tool_update
                 
                 if translated.get("_done"):
                     break
@@ -1807,54 +1985,22 @@ async def chat_endpoint(req: ChatRequest):
                 
                 full_text = ""
                 full_thinking = ""
-                parts = []  # Track ordered parts by ID
+                parts_accumulator = StreamPartsAccumulator()
                 
                 logger.debug("Start streaming events from OpenCode session")
-                async for event, text_delta, thinking_delta in stream_opencode_events(client, opencode_session_id):
+                async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
                     if should_stop_session(session_id):
                         break
                     full_text += text_delta
                     full_thinking += thinking_delta
-                    
-                    # Track parts by ID
-                    part_id = event.get("id")
-                    ptype = event.get("ptype")
-                    
-                    if part_id and ptype:
-                        # Find existing part or create new one
-                        existing_part = next((p for p in parts if p["id"] == part_id), None)
-                        
-                        if ptype in ("text", "reasoning"):
-                            part_type = "thinking" if ptype == "reasoning" else "text"
-                            delta = event.get("delta", "")
-                            if existing_part:
-                                existing_part["content"] += delta
-                            else:
-                                parts.append({
-                                    "id": part_id,
-                                    "type": part_type,
-                                    "content": delta
-                                })
-                        elif ptype == "tool":
-                            if existing_part:
-                                # Update tool state
-                                existing_part["tool_state"] = event.get("state")
-                                if event.get("name"):
-                                    existing_part["tool_name"] = event.get("name")
-                            else:
-                                parts.append({
-                                    "id": part_id,
-                                    "type": "tool",
-                                    "content": "",
-                                    "tool_name": event.get("name"),
-                                    "tool_state": event.get("state")
-                                })
+                    parts_accumulator.consume(event)
                     
                     event_to_send = {k: v for k, v in event.items() if not k.startswith("_")}
                     logger.debug("Event: %s", event_to_send)
                     yield json.dumps(event_to_send) + "\n"
 
                 logger.debug("End streaming events from OpenCode session")
+                parts = parts_accumulator.finalize()
                 if full_text or full_thinking or parts:
                     assistant_msg = {
                         "role": "assistant",

@@ -412,6 +412,8 @@ function SavedPartRenderer({
   }
 
   if (part.type === 'tool') {
+    const durationLabel = formatToolDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
+
     const getStatusIcon = () => {
       switch (part.toolState) {
         case 'pending':
@@ -447,6 +449,7 @@ function SavedPartRenderer({
           <span className={part.toolState === 'completed' ? 'text-green-500' : part.toolState === 'error' ? 'text-red-500' : ''}>
             {getStatusText()}
           </span>
+          {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
           {(part.toolInput || part.toolOutput || part.content) && (
@@ -466,6 +469,12 @@ function SavedPartRenderer({
               {part.content && !part.toolInput && !part.toolOutput && (
                 <pre className="overflow-x-auto">{part.content}</pre>
               )}
+              {(part.toolStartedAt || part.toolEndedAt) && (
+                <div className="text-muted-foreground/80">
+                  {part.toolStartedAt && <div>Start: {formatToolTimestamp(part.toolStartedAt)}</div>}
+                  {part.toolEndedAt && <div>End: {formatToolTimestamp(part.toolEndedAt)}</div>}
+                </div>
+              )}
             </div>
           )}
         </CollapsibleContent>
@@ -482,4 +491,20 @@ function SavedPartRenderer({
   }
 
   return null
+}
+
+function formatToolTimestamp(value: number): string {
+  const ms = value > 1e12 ? value : value * 1000
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function formatToolDuration(durationMs?: number, startedAt?: number, endedAt?: number): string | null {
+  const derived = durationMs ?? (
+    startedAt != null && endedAt != null
+      ? Math.max(0, Math.round((endedAt > 1e12 ? endedAt : endedAt * 1000) - (startedAt > 1e12 ? startedAt : startedAt * 1000)))
+      : undefined
+  )
+  if (derived == null) return null
+  if (derived < 1000) return `${derived}ms`
+  return `${(derived / 1000).toFixed(2)}s`
 }

@@ -152,9 +152,13 @@ export interface MessagePart {
   content: string;
   // For tool parts
   toolName?: string;
-  toolState?: ToolState;
+  toolState?: ToolState | string;
+  toolStateRaw?: unknown;
   toolInput?: string; // Tool arguments/input
   toolOutput?: string; // Tool result/output
+  toolStartedAt?: number;
+  toolEndedAt?: number;
+  toolDurationMs?: number;
 }
 
 // Wild Loop types
