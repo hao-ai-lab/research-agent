@@ -1,9 +1,20 @@
 {
-  "name": "my-v0-project",
+  "name": "research-agent-cli",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "research-agent": "./cli/research-agent.mjs"
+  },
+  "files": [
+    "cli",
+    "scripts/research-agent",
+    "server/build-backend-binary.sh",
+    "README.md",
+    "install.sh"
+  ],
   "scripts": {
     "build": "next build",
+    "build:static": "bash scripts/build-frontend-static.sh",
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",

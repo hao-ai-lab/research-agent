@@ -2,6 +2,14 @@
 
 A FastAPI-based chat server that connects to OpenCode for AI-powered conversations with streaming support.
 
+## Recommended Onboarding
+
+From your research project root:
+
+```bash
+research-agent start --project-root "$PWD"
+```
+
 ## Quick Setup
 
 ```
