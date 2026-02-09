@@ -26,8 +26,17 @@ export function RunVisibilitySelector({
   onOpenManage,
   compact = false,
 }: RunVisibilitySelectorProps) {
+  const hasChartData = (run: ExperimentRun) => {
+    const hasLossHistory = !!(run.lossHistory && run.lossHistory.length > 0)
+    const hasMetricSeries = !!(
+      run.metricSeries &&
+      Object.values(run.metricSeries).some((points) => points && points.length > 0)
+    )
+    return hasLossHistory || hasMetricSeries
+  }
+
   const runsWithHistory = runs.filter(
-    (run) => run.lossHistory && run.lossHistory.length > 0 && !run.isArchived
+    (run) => hasChartData(run) && !run.isArchived
   )
 
   const handleGroupClick = (groupId: string) => {
