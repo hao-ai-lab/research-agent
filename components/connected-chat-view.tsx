@@ -417,7 +417,7 @@ export function ConnectedChatView({
                     <div className="flex-1 min-h-0 overflow-hidden">
                         <ScrollArea className="h-full" ref={scrollRef}>
                             <div className="pb-4">
-                                <div className="mt-4 space-y-1 px-2.5">
+                                <div className="mt-4 space-y-1 px-2.5 min-w-0">
                                     {collapseChats
                                         ? messagePairs.map((pair, index) => (
                                             <CollapsedChatPair
