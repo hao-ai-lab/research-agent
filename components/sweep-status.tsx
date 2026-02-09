@@ -70,8 +70,9 @@ export function SweepStatus({
       case 'failed':
         return <XCircle className="h-3 w-3 text-destructive" />
       case 'pending':
-      case 'draft':
         return <Clock className="h-3 w-3 text-muted-foreground" />
+      case 'draft':
+        return <Sparkles className="h-3 w-3 text-violet-500" />
       case 'canceled':
         return <Square className="h-3 w-3 text-muted-foreground" />
       default:
@@ -81,6 +82,8 @@ export function SweepStatus({
 
   const getStatusColor = (status: SweepStatusType) => {
     switch (status) {
+      case 'draft':
+        return 'bg-violet-500/18 text-violet-500 border-violet-500/35'
       case 'running':
         return 'bg-accent/20 text-accent border-accent/30'
       case 'completed':

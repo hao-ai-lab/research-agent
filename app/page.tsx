@@ -430,51 +430,87 @@ export default function ResearchChat() {
   }, [])
 
   // Sweep handlers
+  const upsertSweepFromConfig = useCallback((config: SweepConfig, status: 'draft' | 'running') => {
+    const now = new Date()
+    const existingSweep = sweeps.find((sweep) => sweep.config.id === config.id)
+    const normalizedConfig: SweepConfig = {
+      ...config,
+      createdAt: existingSweep?.config.createdAt || config.createdAt || now,
+      updatedAt: now,
+    }
+    const sweepId = existingSweep?.id || `sweep-${Date.now()}`
+    const createdAt = existingSweep?.createdAt || now
+
+    const nextSweep: Sweep =
+      status === 'draft'
+        ? {
+            id: sweepId,
+            config: normalizedConfig,
+            status: 'draft',
+            runIds: [],
+            createdAt,
+            progress: {
+              completed: 0,
+              total: normalizedConfig.maxRuns || 0,
+              failed: 0,
+              running: 0,
+            },
+          }
+        : {
+            id: sweepId,
+            config: normalizedConfig,
+            status: 'running',
+            runIds: existingSweep?.runIds || [],
+            startedAt: now,
+            createdAt,
+            progress: {
+              completed: 0,
+              total: normalizedConfig.maxRuns || 10,
+              failed: 0,
+              running: Math.min(
+                normalizedConfig.parallelRuns || 2,
+                normalizedConfig.maxRuns || 10,
+              ),
+            },
+          }
+
+    setSweeps((prev) => {
+      if (existingSweep) {
+        return prev.map((sweep) => (sweep.id === existingSweep.id ? nextSweep : sweep))
+      }
+      return [nextSweep, ...prev]
+    })
+
+    return nextSweep
+  }, [sweeps])
+
   const handleEditSweep = useCallback((config: SweepConfig) => {
     setEditingSweepConfig(config)
     setShowSweepForm(true)
   }, [])
 
   const handleSaveSweep = useCallback((config: SweepConfig) => {
-    // Check if this is an edit or new sweep
-    const existingSweepIndex = sweeps.findIndex(s => s.config.id === config.id)
-    if (existingSweepIndex >= 0) {
-      // Update existing sweep's config
-      setSweeps(prev => prev.map(s =>
-        s.config.id === config.id
-          ? { ...s, config: { ...config, updatedAt: new Date() } }
-          : s
-      ))
-    }
-    // Sweep saved - would normally trigger a toast notification
-    // Messages are now handled by the backend
+    upsertSweepFromConfig(config, 'draft')
     setShowSweepForm(false)
     setEditingSweepConfig(null)
-  }, [sweeps])
+  }, [upsertSweepFromConfig])
+
+  const handleCreateSweep = useCallback((config: SweepConfig) => {
+    const draftSweep = upsertSweepFromConfig(config, 'draft')
+    setActiveTab('chat')
+    setChatDraftInsert({
+      id: Date.now(),
+      text: `@sweep:${draftSweep.id} Improve this sweep before launch. Optimize search space, metrics, and stop conditions.`,
+    })
+    setShowSweepForm(false)
+    setEditingSweepConfig(null)
+  }, [upsertSweepFromConfig])
 
   const handleLaunchSweep = useCallback((config: SweepConfig) => {
-    // Create a new sweep from the config
-    const newSweep: Sweep = {
-      id: `sweep-${Date.now()}`,
-      config,
-      status: 'running',
-      runIds: [], // Will be populated as runs are created
-      startedAt: new Date(),
-      createdAt: new Date(),
-      progress: {
-        completed: 0,
-        total: config.maxRuns || 10,
-        failed: 0,
-        running: Math.min(config.parallelRuns || 2, config.maxRuns || 10),
-      },
-    }
-    setSweeps(prev => [...prev, newSweep])
-
-    // Sweep launched - would normally trigger a toast notification
-    // Messages are now handled by the backend
+    upsertSweepFromConfig(config, 'running')
     setShowSweepForm(false)
     setEditingSweepConfig(null)
-  }, [])
+  }, [upsertSweepFromConfig])
 
   // Clear run selection when changing tabs
   const handleTabChange = useCallback((tab: ActiveTab) => {
@@ -606,6 +642,7 @@ export default function ResearchChat() {
             {activeTab === 'runs' && (
               <RunsView
                 runs={runs}
+                sweeps={sweeps}
                 onRunClick={handleRunClick}
                 onUpdateRun={handleUpdateRun}
                 pendingAlertsByRun={pendingAlertsByRun}
@@ -617,6 +654,9 @@ export default function ResearchChat() {
                 onRefresh={refetch}
                 onStartRun={startExistingRun}
                 onStopRun={stopExistingRun}
+                onSaveSweep={handleSaveSweep}
+                onCreateSweep={handleCreateSweep}
+                onLaunchSweep={handleLaunchSweep}
               />
             )}
             {activeTab === 'events' && (
@@ -696,6 +736,7 @@ export default function ResearchChat() {
             initialConfig={editingSweepConfig || undefined}
             previousSweeps={sweeps}
             onSave={handleSaveSweep}
+            onCreate={handleCreateSweep}
             onCancel={() => {
               setShowSweepForm(false)
               setEditingSweepConfig(null)

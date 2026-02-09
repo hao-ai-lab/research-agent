@@ -58,6 +58,7 @@ interface SweepFormProps {
   initialConfig?: SweepConfig
   previousSweeps?: Sweep[]
   onSave: (config: SweepConfig) => void
+  onCreate?: (config: SweepConfig) => void
   onCancel: () => void
   onLaunch?: (config: SweepConfig) => void
   onGenerate?: (prompt: string) => void
@@ -118,6 +119,7 @@ export function SweepForm({
   initialConfig,
   previousSweeps = [],
   onSave,
+  onCreate,
   onCancel,
   onLaunch,
   onGenerate,
@@ -1082,7 +1084,7 @@ export function SweepForm({
             onClick={() => onSave(prepareConfig())}
           >
             <Save className="h-3 w-3 mr-1" />
-            Draft
+            Save Draft
           </Button>
 
           {mode === 'simple' && onGenerate ? (
@@ -1113,6 +1115,17 @@ export function SweepForm({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+          ) : onCreate ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1 h-7 text-[11px] bg-violet-500 text-white hover:bg-violet-600"
+              onClick={() => onCreate(prepareConfig())}
+              disabled={!isValid}
+            >
+              <Wand2 className="h-3 w-3 mr-1" />
+              Create (AI)
+            </Button>
           ) : (
             <Button
               variant="secondary"
