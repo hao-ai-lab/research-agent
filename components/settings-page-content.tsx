@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react'
 import {
   Bell,
+  AlertTriangle,
   Check,
   ChevronRight,
   Code,
@@ -58,7 +59,7 @@ export function SettingsPageContent({
   const [authTokenInput, setAuthTokenInput] = useState(authToken)
   const [showAuthToken, setShowAuthToken] = useState(false)
   const [authTokenCopied, setAuthTokenCopied] = useState(false)
-  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'failed' | 'alert'>('idle')
   const [appearanceAdvancedOpen, setAppearanceAdvancedOpen] = useState(false)
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -80,8 +81,8 @@ export function SettingsPageContent({
 
   const handleTestConnection = async () => {
     setConnectionStatus('testing')
-    const isConnected = await testConnection()
-    setConnectionStatus(isConnected ? 'connected' : 'failed')
+    const result = await testConnection()
+    setConnectionStatus(result.status)
     setTimeout(() => setConnectionStatus('idle'), 3000)
   }
 
@@ -661,8 +662,10 @@ export function SettingsPageContent({
                   >
                     {connectionStatus === 'testing' ? (
                       <><RotateCcw className="mr-2 h-3 w-3 animate-spin" />Testing...</>
-                    ) : connectionStatus === 'connected' ? (
-                      <><Wifi className="mr-2 h-3 w-3 text-green-500" />Connected</>
+                    ) : connectionStatus === 'success' ? (
+                      <><Wifi className="mr-2 h-3 w-3 text-green-500" />Success</>
+                    ) : connectionStatus === 'alert' ? (
+                      <><AlertTriangle className="mr-2 h-3 w-3 text-amber-500" />Auth Alert</>
                     ) : connectionStatus === 'failed' ? (
                       <><WifiOff className="mr-2 h-3 w-3 text-red-500" />Failed</>
                     ) : (
@@ -684,6 +687,11 @@ export function SettingsPageContent({
                 {connectionStatus === 'failed' && (
                   <p className="text-xs text-amber-500">
                     Tip: Enable Demo Mode above to use the app without a server.
+                  </p>
+                )}
+                {connectionStatus === 'alert' && (
+                  <p className="text-xs text-amber-500">
+                    Server is reachable, but auth failed. Save a valid token and test again.
                   </p>
                 )}
               </>

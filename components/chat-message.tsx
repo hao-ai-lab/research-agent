@@ -267,13 +267,17 @@ export function ChatMessage({
     )
   }
 
+  const parts = message.parts ?? []
+  const hasParts = parts.length > 0
+  const hasTextParts = parts.some((part) => part.type === 'text')
+
   return (
     <div className="px-0.5 py-2">
       <div className="space-y-2">
           {/* Parts-based rendering (new) vs legacy thinking field */}
-          {message.parts && message.parts.length > 0 ? (
+          {hasParts ? (
             // NEW: Render each part in order for correct interleaving
-            message.parts.map((part) => (
+            parts.map((part) => (
               <SavedPartRenderer 
                 key={part.id} 
                 part={part} 
@@ -357,9 +361,11 @@ export function ChatMessage({
             </div>
           )}
 
-          <div className="px-1 py-1 text-base leading-relaxed">
-            {renderMarkdown(message.content)}
-          </div>
+          {!hasTextParts && (
+            <div className="px-1 py-1 text-base leading-relaxed">
+              {renderMarkdown(message.content)}
+            </div>
+          )}
 
           <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
             {formatDateTime(message.timestamp)}

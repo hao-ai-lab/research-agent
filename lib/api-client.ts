@@ -19,6 +19,8 @@ export type {
     SessionWithMessages,
     StreamEventType,
     StreamEvent,
+    ChatStreamSummary,
+    ChatStreamStatusResponse,
     RunStatus,
     Run,
     CreateRunRequest,
@@ -65,6 +67,12 @@ export const deleteSession = (...args: Parameters<typeof realApi.deleteSession>)
 
 export const streamChat = (...args: Parameters<typeof realApi.streamChat>) =>
     getApi().streamChat(...args)
+
+export const getSessionStreamStatus = (...args: Parameters<typeof realApi.getSessionStreamStatus>) =>
+    getApi().getSessionStreamStatus(...args)
+
+export const streamSessionChat = (...args: Parameters<typeof realApi.streamSessionChat>) =>
+    getApi().streamSessionChat(...args)
 
 export const checkApiHealth = async (): Promise<boolean> => {
     if (isUsingMock()) {

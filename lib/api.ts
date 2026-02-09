@@ -53,6 +53,8 @@ export interface MessagePartData {
 
 export interface SessionWithMessages extends ChatSession {
     messages: ChatMessageData[]
+    active_stream?: ChatStreamSummary | null
+    latest_stream?: ChatStreamSummary | null
 }
 
 export type StreamEventType = 'part_delta' | 'part_update' | 'session_status' | 'error'
@@ -72,6 +74,66 @@ export interface StreamEvent {
     tool_duration_ms?: number
     status?: string
     message?: string
+}
+
+export interface ChatStreamSummary {
+    id: string
+    session_id: string
+    status: string
+    created_at: number
+    started_at?: number | null
+    completed_at?: number | null
+    updated_at?: number
+    error?: string | null
+    last_event_seq?: number
+    assistant_committed?: boolean
+}
+
+export interface ChatStreamStatusResponse {
+    active_stream: ChatStreamSummary | null
+    latest_stream: ChatStreamSummary | null
+}
+
+async function* streamNdjsonResponse(response: Response): AsyncGenerator<StreamEvent, void, unknown> {
+    if (!response.body) {
+        throw new Error('Response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+
+            if (done) {
+                if (buffer.trim()) {
+                    try {
+                        yield JSON.parse(buffer.trim()) as StreamEvent
+                    } catch {
+                        console.warn('Failed to parse remaining buffer:', buffer)
+                    }
+                }
+                break
+            }
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+                if (!line.trim()) continue
+                try {
+                    yield JSON.parse(line) as StreamEvent
+                } catch {
+                    console.warn('Failed to parse line:', line)
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
 }
 
 // API Functions
@@ -155,48 +217,51 @@ export async function* streamChat(
         throw new Error(`Failed to send message: ${response.statusText}`)
     }
 
-    if (!response.body) {
-        throw new Error('Response body is null')
+    for await (const event of streamNdjsonResponse(response)) {
+        yield event
     }
+}
 
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+/**
+ * Get active/latest persisted stream state for a chat session.
+ */
+export async function getSessionStreamStatus(sessionId: string): Promise<ChatStreamStatusResponse> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/stream/status`, {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get stream status: ${response.statusText}`)
+    }
+    return response.json()
+}
 
-    try {
-        while (true) {
-            const { done, value } = await reader.read()
+/**
+ * Attach to a persisted stream log for reconnect catch-up.
+ */
+export async function* streamSessionChat(
+    sessionId: string,
+    options?: {
+        streamId?: string
+        cursor?: number
+        follow?: boolean
+        signal?: AbortSignal
+    }
+): AsyncGenerator<StreamEvent, void, unknown> {
+    const search = new URLSearchParams()
+    if (options?.streamId) search.set('stream_id', options.streamId)
+    if (typeof options?.cursor === 'number') search.set('cursor', String(Math.max(0, options.cursor)))
+    if (typeof options?.follow === 'boolean') search.set('follow', options.follow ? 'true' : 'false')
 
-            if (done) {
-                // Process any remaining buffer
-                if (buffer.trim()) {
-                    try {
-                        yield JSON.parse(buffer.trim()) as StreamEvent
-                    } catch {
-                        console.warn('Failed to parse remaining buffer:', buffer)
-                    }
-                }
-                break
-            }
-
-            buffer += decoder.decode(value, { stream: true })
-
-            // Process complete lines (NDJSON format)
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || '' // Keep incomplete line in buffer
-
-            for (const line of lines) {
-                if (line.trim()) {
-                    try {
-                        yield JSON.parse(line) as StreamEvent
-                    } catch {
-                        console.warn('Failed to parse line:', line)
-                    }
-                }
-            }
-        }
-    } finally {
-        reader.releaseLock()
+    const url = `${API_URL()}/sessions/${sessionId}/stream${search.toString() ? `?${search}` : ''}`
+    const response = await fetch(url, {
+        headers: getHeaders(),
+        signal: options?.signal,
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to stream session chat: ${response.statusText}`)
+    }
+    for await (const event of streamNdjsonResponse(response)) {
+        yield event
     }
 }
 
@@ -498,7 +563,7 @@ export async function respondToAlert(alertId: string, choice: string): Promise<{
 /**
  * Stop a chat session stream (including auto-alert sessions)
  */
-export async function stopSession(sessionId: string): Promise<{ message: string }> {
+export async function stopSession(sessionId: string): Promise<{ message: string; stream_id?: string | null }> {
     const response = await fetch(`${API_URL()}/sessions/${sessionId}/stop`, {
         method: 'POST',
         headers: getHeaders()

@@ -7,6 +7,8 @@ import type {
     ChatSession,
     SessionWithMessages,
     StreamEvent,
+    ChatStreamSummary,
+    ChatStreamStatusResponse,
     Run,
     RunStatus,
     CreateRunRequest,
@@ -32,7 +34,7 @@ import type {
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
+export type { ChatSession, SessionWithMessages, StreamEvent, ChatStreamSummary, ChatStreamStatusResponse, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -547,6 +549,34 @@ export async function* streamChat(
     yield { type: 'session_status', status: 'idle' }
 }
 
+export async function getSessionStreamStatus(sessionId: string): Promise<ChatStreamStatusResponse> {
+    await delay(60)
+    if (!mockSessions.has(sessionId)) {
+        throw new Error('Session not found')
+    }
+    return {
+        active_stream: null,
+        latest_stream: null,
+    }
+}
+
+export async function* streamSessionChat(
+    sessionId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _options?: {
+        streamId?: string
+        cursor?: number
+        follow?: boolean
+        signal?: AbortSignal
+    }
+): AsyncGenerator<StreamEvent, void, unknown> {
+    await delay(60)
+    if (!mockSessions.has(sessionId)) {
+        throw new Error('Session not found')
+    }
+    yield { type: 'session_status', status: 'idle' }
+}
+
 export async function checkApiHealth(): Promise<boolean> {
     await delay(50)
     return true // Mock always healthy
@@ -682,7 +712,7 @@ export async function respondToAlert(alertId: string, choice: string): Promise<{
     return { message: 'Response recorded (mock)' }
 }
 
-export async function stopSession(sessionId: string): Promise<{ message: string }> {
+export async function stopSession(sessionId: string): Promise<{ message: string; stream_id?: string | null }> {
     await delay(50)
     if (!mockSessions.has(sessionId)) {
         throw new Error('Session not found')

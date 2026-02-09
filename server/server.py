@@ -87,12 +87,17 @@ USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
 WORKDIR = os.getcwd()
 DATA_DIR = ""
 CHAT_DATA_FILE = ""
+CHAT_STREAMS_DIR = ""
+CHAT_STREAMS_STATE_FILE = ""
 JOBS_DATA_FILE = ""
 ALERTS_DATA_FILE = ""
 SETTINGS_DATA_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
+
+CHAT_STREAM_ACTIVE_STATUSES = {"queued", "running", "stopping"}
+CHAT_STREAM_TERMINAL_STATUSES = {"completed", "error", "stopped", "interrupted"}
 
 AUTH_PROTECTED_PREFIXES = (
     "/sessions",
@@ -116,15 +121,18 @@ def requires_api_auth(path: str) -> bool:
 
 def init_paths(workdir: str):
     """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE
+    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, CHAT_STREAMS_DIR, CHAT_STREAMS_STATE_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE
     WORKDIR = os.path.abspath(workdir)
     DATA_DIR = os.path.join(WORKDIR, ".agents")
     CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
+    CHAT_STREAMS_DIR = os.path.join(DATA_DIR, "chat_streams")
+    CHAT_STREAMS_STATE_FILE = os.path.join(DATA_DIR, "chat_streams_state.json")
     JOBS_DATA_FILE = os.path.join(DATA_DIR, "jobs.json")
     ALERTS_DATA_FILE = os.path.join(DATA_DIR, "alerts.json")
     SETTINGS_DATA_FILE = os.path.join(DATA_DIR, "settings.json")
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
+    os.makedirs(CHAT_STREAMS_DIR, exist_ok=True)
     logger.info(f"Initialized with workdir: {WORKDIR}")
     # Change the current working directory to the workdir
     os.chdir(WORKDIR)
@@ -310,6 +318,8 @@ class ClusterDetectRequest(BaseModel):
 # =============================================================================
 
 chat_sessions: Dict[str, dict] = {}
+chat_streams: Dict[str, dict] = {}
+active_chat_stream_by_session: Dict[str, str] = {}
 runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
@@ -385,6 +395,180 @@ def load_chat_state():
                 chat_sessions = data.get("chat_sessions", {})
         except Exception as e:
             logger.error(f"Error loading chat state: {e}")
+
+
+def _chat_stream_log_path(stream_id: str) -> str:
+    return os.path.join(CHAT_STREAMS_DIR, f"{stream_id}.ndjson")
+
+
+def _chat_stream_status_is_active(status: Any) -> bool:
+    return isinstance(status, str) and status in CHAT_STREAM_ACTIVE_STATUSES
+
+
+def _chat_stream_status_is_terminal(status: Any) -> bool:
+    return isinstance(status, str) and status in CHAT_STREAM_TERMINAL_STATUSES
+
+
+def save_chat_streams_state():
+    """Persist chat stream metadata to disk."""
+    try:
+        with open(CHAT_STREAMS_STATE_FILE, "w") as f:
+            json.dump({"chat_streams": chat_streams}, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving chat stream state: {e}")
+
+
+def load_chat_streams_state():
+    """Load chat stream metadata and normalize interrupted stream statuses."""
+    global chat_streams, active_chat_stream_by_session
+    chat_streams = {}
+    active_chat_stream_by_session = {}
+    if os.path.exists(CHAT_STREAMS_STATE_FILE):
+        try:
+            with open(CHAT_STREAMS_STATE_FILE, "r") as f:
+                data = json.load(f)
+                loaded = data.get("chat_streams", {})
+                if isinstance(loaded, dict):
+                    chat_streams = loaded
+        except Exception as e:
+            logger.error(f"Error loading chat stream state: {e}")
+            chat_streams = {}
+
+    now = time.time()
+    changed = False
+    interrupted_count = 0
+    for stream_id, stream in list(chat_streams.items()):
+        if not isinstance(stream, dict):
+            del chat_streams[stream_id]
+            changed = True
+            continue
+
+        stream["id"] = stream_id
+        stream_file = stream.get("stream_file")
+        if not isinstance(stream_file, str) or not stream_file:
+            stream["stream_file"] = _chat_stream_log_path(stream_id)
+            changed = True
+        elif not os.path.isabs(stream_file):
+            stream["stream_file"] = os.path.join(DATA_DIR, stream_file)
+            changed = True
+
+        status = stream.get("status")
+        if _chat_stream_status_is_active(status):
+            # Any active stream in persisted state means the server stopped before
+            # finishing the request lifecycle.
+            stream["status"] = "interrupted"
+            stream["updated_at"] = now
+            stream["interrupted_at"] = now
+            interrupted_count += 1
+            changed = True
+
+    if changed:
+        save_chat_streams_state()
+    if interrupted_count:
+        logger.warning("Marked %d chat stream(s) as interrupted after restart", interrupted_count)
+
+
+def _append_chat_stream_event(stream_id: str, event: dict, *, persist_state: bool = False):
+    """Append one stream event to the session log file."""
+    stream = chat_streams.get(stream_id)
+    if not stream:
+        return
+
+    stream_file = stream.get("stream_file") or _chat_stream_log_path(stream_id)
+    stream["stream_file"] = stream_file
+    os.makedirs(os.path.dirname(stream_file), exist_ok=True)
+
+    seq = int(stream.get("last_event_seq", 0)) + 1
+    event_record = dict(event)
+    event_record.setdefault("_seq", seq)
+    event_record.setdefault("_ts", time.time())
+
+    with open(stream_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(event_record, ensure_ascii=False) + "\n")
+
+    stream["last_event_seq"] = seq
+    stream["updated_at"] = time.time()
+    if persist_state or seq % 20 == 0:
+        save_chat_streams_state()
+
+
+def _iter_chat_stream_events(stream_file: str):
+    if not os.path.exists(stream_file):
+        return
+    try:
+        with open(stream_file, "r", encoding="utf-8", errors="replace") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(event, dict):
+                    yield event
+    except Exception as e:
+        logger.warning(f"Failed to read chat stream log {stream_file}: {e}")
+
+
+def _find_active_stream_for_session(session_id: str) -> Optional[dict]:
+    stream_id = active_chat_stream_by_session.get(session_id)
+    if stream_id:
+        stream = chat_streams.get(stream_id)
+        if stream and _chat_stream_status_is_active(stream.get("status")):
+            return stream
+        active_chat_stream_by_session.pop(session_id, None)
+
+    # Fallback scan if in-memory index is stale.
+    candidates = [
+        stream
+        for stream in chat_streams.values()
+        if isinstance(stream, dict)
+        and stream.get("session_id") == session_id
+        and _chat_stream_status_is_active(stream.get("status"))
+    ]
+    if not candidates:
+        return None
+    latest = max(candidates, key=_stream_created_at)
+    latest_id = latest.get("id")
+    if isinstance(latest_id, str) and latest_id:
+        active_chat_stream_by_session[session_id] = latest_id
+    return latest
+
+
+def _stream_created_at(stream: dict) -> float:
+    try:
+        return float(stream.get("created_at", 0))
+    except Exception:
+        return 0.0
+
+
+def _find_latest_stream_for_session(session_id: str) -> Optional[dict]:
+    candidates = [
+        stream
+        for stream in chat_streams.values()
+        if isinstance(stream, dict) and stream.get("session_id") == session_id
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=_stream_created_at)
+
+
+def _serialize_chat_stream_summary(stream: Optional[dict]) -> Optional[dict]:
+    if not stream:
+        return None
+    return {
+        "id": stream.get("id"),
+        "session_id": stream.get("session_id"),
+        "status": stream.get("status"),
+        "created_at": stream.get("created_at"),
+        "started_at": stream.get("started_at"),
+        "completed_at": stream.get("completed_at"),
+        "updated_at": stream.get("updated_at"),
+        "error": stream.get("error"),
+        "last_event_seq": stream.get("last_event_seq", 0),
+        "assistant_committed": bool(stream.get("assistant_committed")),
+    }
 
 
 def save_runs_state():
@@ -1840,6 +2024,371 @@ async def get_repo_file(
     }
 
 
+def _build_chat_content(req: ChatRequest) -> str:
+    wild_mode_note = ""
+    if req.wild_mode:
+        # Build Ralph-style loop prompt
+        iteration = wild_loop_state.get("iteration", 0) + 1
+        goal = wild_loop_state.get("goal") or "No specific goal set"
+        max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+        custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
+
+        # Build experiment state summary
+        experiment_context = _build_experiment_context()
+
+        iter_display = f"{iteration}"
+        if max_iter:
+            iter_display += f" / {max_iter}"
+        else:
+            iter_display += " (unlimited)"
+
+        # Include sweep_id so the agent associates runs with this wild loop
+        sweep_id = wild_loop_state.get("sweep_id")
+        sweep_note = ""
+        if sweep_id:
+            sweep_note = (
+                f"\n## Active Wild Sweep\n"
+                f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
+                f"so they are tracked as part of this wild loop session.\n"
+            )
+
+        wild_mode_note = (
+            f"# Wild Loop — Iteration {iter_display}\n\n"
+            f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
+            f"## Your Goal\n{goal}\n\n"
+            f"{experiment_context}\n"
+            f"{sweep_note}"
+            f"## Instructions\n"
+            f"1. Read the current state of runs, sweeps, and alerts above\n"
+            f"2. Plan what work remains to achieve the goal\n"
+            f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
+            f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
+            f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
+            f"6. At the END of your response, output exactly ONE promise tag:\n"
+            f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
+            f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
+            f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
+            f"## Critical Rules\n"
+            f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
+            f"- Creating or launching runs is NOT completion — you must check their results\n"
+            f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
+            f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
+            f"- If stuck, try a different approach\n"
+            f"- The loop will continue until you succeed or are stopped\n"
+        )
+        if custom_cond:
+            wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
+        wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
+    return f"{wild_mode_note}[USER] {req.message}"
+
+
+def _append_assistant_message(
+    session_id: str,
+    stream_id: str,
+    *,
+    full_text: str,
+    full_thinking: str,
+    parts: list[dict[str, Any]],
+) -> bool:
+    if session_id not in chat_sessions:
+        return False
+
+    has_payload = bool(full_text or full_thinking or parts)
+    if not has_payload:
+        return False
+
+    session = chat_sessions[session_id]
+    messages = session.setdefault("messages", [])
+    for existing in messages:
+        if isinstance(existing, dict) and existing.get("stream_id") == stream_id:
+            return True
+
+    assistant_msg = {
+        "role": "assistant",
+        "content": full_text.strip(),
+        "thinking": full_thinking.strip() if full_thinking else None,
+        "parts": parts if parts else None,
+        "timestamp": time.time(),
+        "stream_id": stream_id,
+    }
+    messages.append(assistant_msg)
+    save_chat_state()
+    return True
+
+
+def _rebuild_output_from_stream_log(stream_file: str) -> tuple[str, str, list[dict[str, Any]], Optional[str]]:
+    full_text = ""
+    full_thinking = ""
+    terminal_status: Optional[str] = None
+    parts_accumulator = StreamPartsAccumulator()
+    for event in _iter_chat_stream_events(stream_file) or []:
+        etype = event.get("type")
+        ptype = event.get("ptype")
+
+        if etype == "part_delta":
+            delta = event.get("delta", "")
+            if ptype == "text":
+                full_text += delta
+            elif ptype == "reasoning":
+                full_thinking += delta
+        parts_accumulator.consume(event)
+
+        if etype == "session_status" and event.get("status") == "idle":
+            terminal_status = "completed"
+        elif etype == "error":
+            terminal_status = "error"
+        elif etype == "session_status" and event.get("status") == "stopped":
+            terminal_status = "stopped"
+
+    return full_text, full_thinking, parts_accumulator.finalize(), terminal_status
+
+
+def recover_uncommitted_chat_streams():
+    """Recover persisted stream logs after server restart."""
+    changed_stream_state = False
+    for stream_id, stream in chat_streams.items():
+        if not isinstance(stream, dict):
+            continue
+        if stream.get("assistant_committed"):
+            continue
+
+        stream_file = stream.get("stream_file")
+        session_id = stream.get("session_id")
+        if not isinstance(stream_file, str) or not stream_file:
+            continue
+        if not isinstance(session_id, str) or session_id not in chat_sessions:
+            continue
+        if not os.path.exists(stream_file):
+            continue
+
+        full_text, full_thinking, parts, terminal_status = _rebuild_output_from_stream_log(stream_file)
+        if terminal_status == "completed":
+            committed = _append_assistant_message(
+                session_id,
+                stream_id,
+                full_text=full_text,
+                full_thinking=full_thinking,
+                parts=parts,
+            )
+            stream["assistant_committed"] = bool(committed) or stream.get("assistant_committed", False)
+            stream["status"] = "completed"
+            stream["completed_at"] = stream.get("completed_at") or time.time()
+            stream["updated_at"] = time.time()
+            changed_stream_state = True
+        elif terminal_status == "error":
+            stream["status"] = "error"
+            stream["completed_at"] = stream.get("completed_at") or time.time()
+            stream["updated_at"] = time.time()
+            changed_stream_state = True
+        elif terminal_status == "stopped":
+            stream["status"] = "stopped"
+            stream["completed_at"] = stream.get("completed_at") or time.time()
+            stream["updated_at"] = time.time()
+            changed_stream_state = True
+
+    if changed_stream_state:
+        save_chat_streams_state()
+
+
+def _set_chat_stream_status(
+    stream_id: str,
+    *,
+    status: str,
+    error: Optional[str] = None,
+    started_at: Optional[float] = None,
+    completed_at: Optional[float] = None,
+    assistant_committed: Optional[bool] = None,
+    opencode_session_id: Optional[str] = None,
+):
+    stream = chat_streams.get(stream_id)
+    if not stream:
+        return
+    stream["status"] = status
+    stream["updated_at"] = time.time()
+    if started_at is not None:
+        stream["started_at"] = started_at
+    if completed_at is not None:
+        stream["completed_at"] = completed_at
+    if error is not None:
+        stream["error"] = error
+    if assistant_committed is not None:
+        stream["assistant_committed"] = assistant_committed
+    if opencode_session_id is not None:
+        stream["opencode_session_id"] = opencode_session_id
+    save_chat_streams_state()
+
+
+async def _run_chat_stream(stream_id: str, session_id: str, content: str):
+    """Background task that runs OpenCode and appends events to disk."""
+    session_stop_flags.pop(session_id, None)
+    started_at = time.time()
+    _set_chat_stream_status(stream_id, status="running", started_at=started_at)
+
+    full_text = ""
+    full_thinking = ""
+    stopped = False
+    parts_accumulator = StreamPartsAccumulator()
+
+    try:
+        opencode_session_id = await get_opencode_session_for_chat(session_id)
+        _set_chat_stream_status(stream_id, status="running", opencode_session_id=opencode_session_id)
+
+        async with httpx.AsyncClient(timeout=None) as client:
+            logger.debug("Sending prompt to OpenCode session %s", opencode_session_id)
+            logger.debug("Content: %s", content)
+            await send_prompt_to_opencode(client, opencode_session_id, content)
+            logger.debug("Sent prompt to OpenCode session")
+
+            logger.debug("Start streaming events from OpenCode session")
+            async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
+                if should_stop_session(session_id):
+                    stopped = True
+                    break
+
+                full_text += text_delta
+                full_thinking += thinking_delta
+                parts_accumulator.consume(event)
+
+                event_to_persist = {k: v for k, v in event.items() if not k.startswith("_")}
+                _append_chat_stream_event(stream_id, event_to_persist)
+
+            logger.debug("End streaming events from OpenCode session")
+
+        if stopped:
+            # Emit a terminal status so reconnecting clients stop tailing cleanly.
+            _append_chat_stream_event(stream_id, {"type": "session_status", "status": "stopped"}, persist_state=True)
+
+        parts = parts_accumulator.finalize()
+        committed = _append_assistant_message(
+            session_id,
+            stream_id,
+            full_text=full_text,
+            full_thinking=full_thinking,
+            parts=parts,
+        )
+
+        final_status = "stopped" if stopped else "completed"
+        _set_chat_stream_status(
+            stream_id,
+            status=final_status,
+            completed_at=time.time(),
+            assistant_committed=committed,
+        )
+    except asyncio.CancelledError:
+        logger.info("Chat stream cancelled for session %s", session_id)
+        _append_chat_stream_event(stream_id, {"type": "session_status", "status": "stopped"}, persist_state=True)
+        parts = parts_accumulator.finalize()
+        committed = _append_assistant_message(
+            session_id,
+            stream_id,
+            full_text=full_text,
+            full_thinking=full_thinking,
+            parts=parts,
+        )
+        _set_chat_stream_status(
+            stream_id,
+            status="stopped",
+            completed_at=time.time(),
+            assistant_committed=committed,
+        )
+    except Exception as e:
+        logger.error(f"Chat error: {e}", exc_info=True)
+        _append_chat_stream_event(stream_id, {"type": "error", "message": str(e)}, persist_state=True)
+        _set_chat_stream_status(
+            stream_id,
+            status="error",
+            error=str(e),
+            completed_at=time.time(),
+            assistant_committed=False,
+        )
+    finally:
+        # Keep auto-alert behavior intact: only clear this slot if this is still
+        # the tracked task for the session.
+        tracked_task = active_chat_tasks.get(session_id)
+        if tracked_task is asyncio.current_task():
+            active_chat_tasks.pop(session_id, None)
+        if active_chat_stream_by_session.get(session_id) == stream_id:
+            active_chat_stream_by_session.pop(session_id, None)
+        session_stop_flags.pop(session_id, None)
+
+
+def _create_chat_stream_task(session_id: str, content: str) -> str:
+    stream_id = uuid.uuid4().hex[:12]
+    stream_file = _chat_stream_log_path(stream_id)
+    created_at = time.time()
+    stream = {
+        "id": stream_id,
+        "session_id": session_id,
+        "status": "queued",
+        "stream_file": stream_file,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "started_at": None,
+        "completed_at": None,
+        "error": None,
+        "last_event_seq": 0,
+        "assistant_committed": False,
+        "opencode_session_id": None,
+    }
+    chat_streams[stream_id] = stream
+    active_chat_stream_by_session[session_id] = stream_id
+    os.makedirs(os.path.dirname(stream_file), exist_ok=True)
+    with open(stream_file, "a", encoding="utf-8"):
+        pass
+    save_chat_streams_state()
+
+    task = asyncio.create_task(_run_chat_stream(stream_id, session_id, content))
+    active_chat_tasks[session_id] = task
+    return stream_id
+
+
+def _resolve_stream_for_session(session_id: str, stream_id: Optional[str] = None) -> Optional[dict]:
+    if stream_id:
+        stream = chat_streams.get(stream_id)
+        if not stream or stream.get("session_id") != session_id:
+            return None
+        return stream
+
+    active_stream = _find_active_stream_for_session(session_id)
+    if active_stream:
+        return active_stream
+    return _find_latest_stream_for_session(session_id)
+
+
+async def _chat_stream_log_generator(stream_id: str, cursor: int = 0, follow: bool = True):
+    stream = chat_streams.get(stream_id)
+    if not stream:
+        yield json.dumps({"type": "error", "message": "Stream not found"}) + "\n"
+        return
+
+    stream_file = stream.get("stream_file")
+    if not isinstance(stream_file, str) or not os.path.exists(stream_file):
+        yield json.dumps({"type": "error", "message": "Stream log not found"}) + "\n"
+        return
+
+    try:
+        total_size = os.path.getsize(stream_file)
+    except Exception:
+        total_size = 0
+    cursor = max(0, min(cursor, total_size))
+
+    with open(stream_file, "r", encoding="utf-8", errors="replace") as f:
+        f.seek(cursor)
+        while True:
+            line = f.readline()
+            if line:
+                if line.endswith("\n"):
+                    yield line
+                else:
+                    yield line + "\n"
+                continue
+
+            current_status = chat_streams.get(stream_id, {}).get("status")
+            if not follow or _chat_stream_status_is_terminal(current_status):
+                break
+            await asyncio.sleep(0.2)
+
+
 @app.get("/sessions")
 async def list_sessions():
     """List all chat sessions."""
@@ -1877,11 +2426,15 @@ async def get_session(session_id: str):
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     session = chat_sessions[session_id]
+    active_stream = _find_active_stream_for_session(session_id)
+    latest_stream = _find_latest_stream_for_session(session_id)
     return {
         "id": session_id,
         "title": session.get("title", "New Chat"),
         "created_at": session.get("created_at"),
-        "messages": session.get("messages", [])
+        "messages": session.get("messages", []),
+        "active_stream": _serialize_chat_stream_summary(active_stream),
+        "latest_stream": _serialize_chat_stream_summary(latest_stream),
     }
 
 
@@ -1890,138 +2443,101 @@ async def delete_session(session_id: str):
     """Delete a chat session."""
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Stop any active stream first.
+    session_stop_flags[session_id] = True
+    active_task = active_chat_tasks.get(session_id)
+    if active_task and not active_task.done():
+        active_task.cancel()
+
+    # Remove stream metadata/logs for this session.
+    for stream_id, stream in list(chat_streams.items()):
+        if not isinstance(stream, dict) or stream.get("session_id") != session_id:
+            continue
+        stream_file = stream.get("stream_file")
+        if isinstance(stream_file, str) and os.path.exists(stream_file):
+            try:
+                os.remove(stream_file)
+            except Exception as e:
+                logger.warning(f"Failed to remove stream log {stream_file}: {e}")
+        chat_streams.pop(stream_id, None)
+    active_chat_stream_by_session.pop(session_id, None)
+    save_chat_streams_state()
+
     del chat_sessions[session_id]
     save_chat_state()
     return {"message": "Session deleted"}
 
 
-@app.post("/chat")
-async def chat_endpoint(req: ChatRequest):
-    """Send a message and receive streaming response."""
-    session_id = req.session_id
-    
+@app.get("/sessions/{session_id}/stream/status")
+async def get_chat_stream_status(session_id: str):
+    """Return active/latest stream metadata for reconnecting clients."""
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
+    active_stream = _find_active_stream_for_session(session_id)
+    latest_stream = _find_latest_stream_for_session(session_id)
+    return {
+        "active_stream": _serialize_chat_stream_summary(active_stream),
+        "latest_stream": _serialize_chat_stream_summary(latest_stream),
+    }
+
+
+@app.get("/sessions/{session_id}/stream")
+async def stream_session_chat(
+    session_id: str,
+    stream_id: Optional[str] = Query(None, description="Specific stream ID to attach to"),
+    cursor: int = Query(0, ge=0, description="Byte offset in the NDJSON stream log"),
+    follow: bool = Query(True, description="Keep tailing while stream is active"),
+):
+    """Replay/tail a persisted chat stream log for reconnection catch-up."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    stream = _resolve_stream_for_session(session_id, stream_id=stream_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="No stream found for this session")
+
+    resolved_stream_id = stream.get("id")
+    if not isinstance(resolved_stream_id, str) or not resolved_stream_id:
+        raise HTTPException(status_code=500, detail="Stream metadata is invalid")
+
+    return StreamingResponse(
+        _chat_stream_log_generator(resolved_stream_id, cursor=cursor, follow=follow),
+        media_type="application/x-ndjson",
+    )
+
+
+@app.post("/chat")
+async def chat_endpoint(req: ChatRequest):
+    """Send a message and attach the client to a persisted chat stream log."""
+    session_id = req.session_id
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    active_stream = _find_active_stream_for_session(session_id)
+    if active_stream:
+        active_id = active_stream.get("id")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session already has an active stream ({active_id})",
+        )
+
     session = chat_sessions[session_id]
     messages = session.get("messages", [])
-    
     user_msg = {"role": "user", "content": req.message, "timestamp": time.time()}
     messages.append(user_msg)
     session["messages"] = messages
-    
     if session.get("title") == "New Chat" and len(messages) == 1:
         session["title"] = req.message[:50] + ("..." if len(req.message) > 50 else "")
-    
     save_chat_state()
 
-    async def response_generator():
-        session_stop_flags.pop(session_id, None)
-        active_chat_tasks[session_id] = asyncio.current_task()
-        try:
-            opencode_session_id = await get_opencode_session_for_chat(session_id)
-            
-            wild_mode_note = ""
-            if req.wild_mode:
-                # Build Ralph-style loop prompt
-                iteration = wild_loop_state.get("iteration", 0) + 1
-                goal = wild_loop_state.get("goal") or "No specific goal set"
-                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
-                custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
-                
-                # Build experiment state summary
-                experiment_context = _build_experiment_context()
-                
-                iter_display = f"{iteration}"
-                if max_iter:
-                    iter_display += f" / {max_iter}"
-                else:
-                    iter_display += " (unlimited)"
-                
-                # Include sweep_id so the agent associates runs with this wild loop
-                sweep_id = wild_loop_state.get("sweep_id")
-                sweep_note = ""
-                if sweep_id:
-                    sweep_note = (
-                        f"\n## Active Wild Sweep\n"
-                        f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
-                        f"so they are tracked as part of this wild loop session.\n"
-                    )
-
-                wild_mode_note = (
-                    f"# Wild Loop — Iteration {iter_display}\n\n"
-                    f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
-                    f"## Your Goal\n{goal}\n\n"
-                    f"{experiment_context}\n"
-                    f"{sweep_note}"
-                    f"## Instructions\n"
-                    f"1. Read the current state of runs, sweeps, and alerts above\n"
-                    f"2. Plan what work remains to achieve the goal\n"
-                    f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
-                    f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
-                    f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
-                    f"6. At the END of your response, output exactly ONE promise tag:\n"
-                    f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
-                    f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
-                    f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
-                    f"## Critical Rules\n"
-                    f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
-                    f"- Creating or launching runs is NOT completion — you must check their results\n"
-                    f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
-                    f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
-                    f"- If stuck, try a different approach\n"
-                    f"- The loop will continue until you succeed or are stopped\n"
-                )
-                if custom_cond:
-                    wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
-                wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
-            content = f"{wild_mode_note}[USER] {req.message}"
-
-            async with httpx.AsyncClient(timeout=None) as client:
-                logger.debug("Sending prompt to OpenCode session %s", opencode_session_id)
-                logger.debug("Content: %s", content)
-                await send_prompt_to_opencode(client, opencode_session_id, content)
-                logger.debug("Sent prompt to OpenCode session")
-                
-                full_text = ""
-                full_thinking = ""
-                parts_accumulator = StreamPartsAccumulator()
-                
-                logger.debug("Start streaming events from OpenCode session")
-                async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
-                    if should_stop_session(session_id):
-                        break
-                    full_text += text_delta
-                    full_thinking += thinking_delta
-                    parts_accumulator.consume(event)
-                    
-                    event_to_send = {k: v for k, v in event.items() if not k.startswith("_")}
-                    logger.debug("Event: %s", event_to_send)
-                    yield json.dumps(event_to_send) + "\n"
-
-                logger.debug("End streaming events from OpenCode session")
-                parts = parts_accumulator.finalize()
-                if full_text or full_thinking or parts:
-                    assistant_msg = {
-                        "role": "assistant",
-                        "content": full_text.strip(),
-                        "thinking": full_thinking.strip() if full_thinking else None,
-                        "parts": parts if parts else None,  # NEW: store ordered parts
-                        "timestamp": time.time()
-                    }
-                    session["messages"].append(assistant_msg)
-                    save_chat_state()
-
-        except asyncio.CancelledError:
-            logger.info("Chat stream cancelled for session %s", session_id)
-        except Exception as e:
-            logger.error(f"Chat error: {e}", exc_info=True)
-            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
-        finally:
-            active_chat_tasks.pop(session_id, None)
-            session_stop_flags.pop(session_id, None)
-
-    return StreamingResponse(response_generator(), media_type="application/x-ndjson")
+    content = _build_chat_content(req)
+    stream_id = _create_chat_stream_task(session_id, content)
+    return StreamingResponse(
+        _chat_stream_log_generator(stream_id, cursor=0, follow=True),
+        media_type="application/x-ndjson",
+    )
 
 
 @app.post("/sessions/{session_id}/stop")
@@ -2031,6 +2547,12 @@ async def stop_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     session_stop_flags[session_id] = True
+    active_stream = _find_active_stream_for_session(session_id)
+    if active_stream:
+        active_stream_id = active_stream.get("id")
+        if isinstance(active_stream_id, str) and active_stream_id:
+            _set_chat_stream_status(active_stream_id, status="stopping")
+
     task = active_chat_tasks.get(session_id)
     if task and not task.done():
         task.cancel()
@@ -2048,7 +2570,10 @@ async def stop_session(session_id: str):
         except Exception as e:
             logger.warning(f"Failed to abort OpenCode session {opencode_session_id}: {e}")
 
-    return {"message": "Stop signal sent"}
+    return {
+        "message": "Stop signal sent",
+        "stream_id": active_stream.get("id") if active_stream else None,
+    }
 
 
 # =============================================================================
@@ -3218,6 +3743,8 @@ def main():
     
     # Load state
     load_chat_state()
+    load_chat_streams_state()
+    recover_uncommitted_chat_streams()
     load_runs_state()
     load_alerts_state()
     load_settings_state()

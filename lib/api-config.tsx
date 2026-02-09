@@ -30,10 +30,21 @@ interface ApiConfig {
     setUseMock: (useMock: boolean) => void
     setAuthToken: (token: string) => void
     resetToDefaults: () => void
-    testConnection: () => Promise<boolean>
+    testConnection: () => Promise<ConnectionTestResult>
 }
 
 const ApiConfigContext = createContext<ApiConfig | null>(null)
+
+export type ConnectionTestStatus = 'success' | 'alert' | 'failed'
+
+export interface ConnectionTestResult {
+    status: ConnectionTestStatus
+    healthOk: boolean
+    authOk: boolean
+    healthStatus?: number
+    authStatus?: number
+    error?: string
+}
 
 /**
  * Get the current API URL from localStorage or default
@@ -138,21 +149,78 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         setAuthTokenState('')
     }, [])
 
-    const testConnection = useCallback(async (): Promise<boolean> => {
+    const testConnection = useCallback(async (): Promise<ConnectionTestResult> => {
         if (useMock) {
-            return true // Mock is always "connected"
+            return {
+                status: 'success',
+                healthOk: true,
+                authOk: true,
+            }
         }
 
+        const baseUrl = apiUrl.trim().replace(/\/+$/, '')
         try {
-            const response = await fetch(`${apiUrl}/`, {
+            const healthResponse = await fetch(`${baseUrl}/health`, {
                 method: 'GET',
                 signal: AbortSignal.timeout(5000)
             })
-            return response.ok
-        } catch {
-            return false
+
+            if (!healthResponse.ok) {
+                return {
+                    status: 'failed',
+                    healthOk: false,
+                    authOk: false,
+                    healthStatus: healthResponse.status,
+                }
+            }
+
+            const headers: HeadersInit = {}
+            if (authToken) {
+                headers['X-Auth-Token'] = authToken
+            }
+
+            const authResponse = await fetch(`${baseUrl}/sessions`, {
+                method: 'GET',
+                headers,
+                signal: AbortSignal.timeout(5000),
+            })
+
+            if (authResponse.ok) {
+                return {
+                    status: 'success',
+                    healthOk: true,
+                    authOk: true,
+                    healthStatus: healthResponse.status,
+                    authStatus: authResponse.status,
+                }
+            }
+
+            if (authResponse.status === 401 || authResponse.status === 403) {
+                return {
+                    status: 'alert',
+                    healthOk: true,
+                    authOk: false,
+                    healthStatus: healthResponse.status,
+                    authStatus: authResponse.status,
+                }
+            }
+
+            return {
+                status: 'failed',
+                healthOk: true,
+                authOk: false,
+                healthStatus: healthResponse.status,
+                authStatus: authResponse.status,
+            }
+        } catch (error) {
+            return {
+                status: 'failed',
+                healthOk: false,
+                authOk: false,
+                error: error instanceof Error ? error.message : 'Connection failed',
+            }
         }
-    }, [apiUrl, useMock])
+    }, [apiUrl, authToken, useMock])
 
     // Don't render children until hydrated to avoid hydration mismatch
     if (!isHydrated) {

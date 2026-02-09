@@ -184,7 +184,7 @@ export default function ResearchChat() {
     setFocusAuthTokenInApp(searchParams.get('focusAuthToken') === '1')
   }, [searchParams])
 
-  // Auto-open settings if auth token is missing or connection fails (when not in mock mode)
+  // Auto-open settings if auth token is missing or connection/auth checks fail.
   useEffect(() => {
     if (useMock) return // Skip check in demo mode
 
@@ -197,12 +197,16 @@ export default function ResearchChat() {
         return
       }
 
-      // Check if connection works
-      const isConnected = await testConnection()
-      if (!isConnected) {
+      // Run combined health + auth check.
+      const result = await testConnection()
+      if (result.status === 'failed') {
         setActiveTab('settings')
         router.replace('/?tab=settings', { scroll: false })
         setFocusAuthTokenInApp(false)
+      } else if (result.status === 'alert') {
+        setActiveTab('settings')
+        router.replace('/?tab=settings&focusAuthToken=1', { scroll: false })
+        setFocusAuthTokenInApp(true)
       } else {
         setFocusAuthTokenInApp(false)
       }

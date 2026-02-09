@@ -7,6 +7,8 @@ import {
     getSession,
     deleteSession,
     streamChat,
+    getSessionStreamStatus,
+    streamSessionChat,
     checkApiHealth,
     stopSession,
     type ChatSession,
@@ -364,6 +366,179 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [])
 
+    const resumeActiveStream = useCallback(async (sessionId: string): Promise<boolean> => {
+        if (streamingState.isStreaming) return false
+
+        try {
+            const status = await getSessionStreamStatus(sessionId)
+            const candidateStream = status.active_stream
+                ?? (
+                    status.latest_stream &&
+                    status.latest_stream.status === 'interrupted' &&
+                    !status.latest_stream.assistant_committed
+                        ? status.latest_stream
+                        : null
+                )
+            if (!candidateStream || !candidateStream.id) return false
+
+            const followStream = ['queued', 'running', 'stopping'].includes(candidateStream.status)
+
+            setError(null)
+            setStreamingState({
+                isStreaming: true,
+                parts: [],
+                thinkingContent: '',
+                textContent: '',
+                toolCalls: [],
+            })
+
+            abortControllerRef.current = new AbortController()
+            let sawToolPart = false
+            let lastEventTime = Date.now()
+            const streamTimeoutId = setInterval(() => {
+                const elapsed = Date.now() - lastEventTime
+                if (elapsed > 60_000) {
+                    console.warn(`[chat-session] Resume stream inactivity timeout (${Math.round(elapsed / 1000)}s), aborting`)
+                    abortControllerRef.current?.abort()
+                }
+            }, 5_000)
+
+            try {
+                for await (const event of streamSessionChat(sessionId, {
+                    streamId: candidateStream.id,
+                    cursor: 0,
+                    follow: followStream,
+                    signal: abortControllerRef.current.signal,
+                })) {
+                    lastEventTime = Date.now()
+                    const partId = event.id
+
+                    if (event.type === 'session_status' || event.type === 'error') {
+                        console.log(`[chat-session] Resume event: ${event.type}`, event)
+                    }
+
+                    if (event.type === 'part_delta') {
+                        const delta = event.delta || ''
+                        const partType = event.ptype === 'reasoning' ? 'thinking' : 'text'
+                        setStreamingState(prev => {
+                            const legacyUpdate = event.ptype === 'text'
+                                ? { textContent: prev.textContent + delta }
+                                : event.ptype === 'reasoning'
+                                    ? { thinkingContent: prev.thinkingContent + delta }
+                                    : {}
+
+                            return {
+                                ...prev,
+                                ...legacyUpdate,
+                                parts: upsertStreamingDeltaPart(prev.parts, partId, partType, delta),
+                            }
+                        })
+                    } else if (event.type === 'part_update' && event.ptype === 'tool') {
+                        sawToolPart = true
+                        const stateValue = normalizeToolStatus(event.tool_status ?? event.state)
+                        const details = extractToolDetails({
+                            state: event.state,
+                            toolInput: event.tool_input,
+                            toolOutput: event.tool_output,
+                            toolStartedAt: event.tool_started_at,
+                            toolEndedAt: event.tool_ended_at,
+                            toolDurationMs: event.tool_duration_ms,
+                        })
+
+                        setStreamingState(prev => {
+                            const toolId = event.id || `tool-${prev.toolCalls.length}`
+                            const existingToolIndex = prev.toolCalls.findIndex(t => t.id === toolId)
+                            const toolState: ToolCallState = {
+                                id: toolId,
+                                name: event.name,
+                                description: details.description,
+                                state: stateValue,
+                                input: details.toolInput,
+                                output: details.toolOutput,
+                                startedAt: details.toolStartedAt,
+                                endedAt: details.toolEndedAt,
+                                durationMs: details.toolDurationMs,
+                            }
+                            const newToolCalls = existingToolIndex >= 0
+                                ? prev.toolCalls.map((t, i) => i === existingToolIndex ? toolState : t)
+                                : [...prev.toolCalls, toolState]
+
+                            const sourceId = partId || toolId
+                            const existingPartIndex = prev.parts.findIndex(p => p.type === 'tool' && (p.sourceId ?? p.id) === sourceId)
+                            if (existingPartIndex >= 0) {
+                                const updatedParts = [...prev.parts]
+                                updatedParts[existingPartIndex] = {
+                                    ...updatedParts[existingPartIndex],
+                                    toolState: stateValue,
+                                    toolStateRaw: event.state,
+                                    toolName: event.name || updatedParts[existingPartIndex].toolName,
+                                    toolDescription: details.description || updatedParts[existingPartIndex].toolDescription,
+                                    toolInput: details.toolInput,
+                                    toolOutput: details.toolOutput,
+                                    toolStartedAt: details.toolStartedAt,
+                                    toolEndedAt: details.toolEndedAt,
+                                    toolDurationMs: details.toolDurationMs,
+                                }
+                                return { ...prev, toolCalls: newToolCalls, parts: updatedParts }
+                            } else {
+                                const segmentCount = prev.parts.filter((p) => (p.sourceId ?? p.id) === sourceId && p.type === 'tool').length
+                                const partSegmentId = segmentCount === 0 ? sourceId : `${sourceId}#${segmentCount}`
+                                return {
+                                    ...prev,
+                                    toolCalls: newToolCalls,
+                                    parts: [...prev.parts, {
+                                        id: partSegmentId,
+                                        sourceId,
+                                        type: 'tool' as const,
+                                        content: '',
+                                        toolName: event.name,
+                                        toolDescription: details.description,
+                                        toolState: stateValue,
+                                        toolStateRaw: event.state,
+                                        toolInput: details.toolInput,
+                                        toolOutput: details.toolOutput,
+                                        toolStartedAt: details.toolStartedAt,
+                                        toolEndedAt: details.toolEndedAt,
+                                        toolDurationMs: details.toolDurationMs,
+                                    }],
+                                }
+                            }
+                        })
+                    } else if (event.type === 'session_status' && (event.status === 'idle' || event.status === 'stopped')) {
+                        break
+                    } else if (event.type === 'error') {
+                        setError(event.message || 'Stream error')
+                        break
+                    }
+                }
+            } finally {
+                clearInterval(streamTimeoutId)
+            }
+
+            if (sawToolPart || followStream || candidateStream.status === 'interrupted') {
+                const sessionData = await getSession(sessionId)
+                setMessages(sessionData.messages.map(normalizeMessage))
+                await refreshSessions()
+            }
+            return true
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                try {
+                    const sessionData = await getSession(sessionId)
+                    setMessages(sessionData.messages.map(normalizeMessage))
+                } catch (syncErr) {
+                    console.warn('Failed to sync session after resume abort:', syncErr)
+                }
+            } else {
+                console.error('Failed to resume stream:', err)
+            }
+            return false
+        } finally {
+            setStreamingState(initialStreamingState)
+            abortControllerRef.current = null
+        }
+    }, [refreshSessions, streamingState.isStreaming])
+
     // Select a session
     const selectSession = useCallback(async (sessionId: string) => {
         if (archivedSessionIds.includes(sessionId)) {
@@ -384,13 +559,14 @@ export function useChatSession(): UseChatSessionResult {
             setCurrentSessionId(sessionId)
             setMessages(sessionData.messages.map(normalizeMessage))
             setStreamingState(initialStreamingState)
+            void resumeActiveStream(sessionId)
         } catch (err) {
             console.error('Failed to select session:', err)
             setError(err instanceof Error ? err.message : 'Failed to load session')
         } finally {
             setIsLoading(false)
         }
-    }, [archivedSessionIds])
+    }, [archivedSessionIds, resumeActiveStream])
 
     // Delete a session
     const removeSession = useCallback(async (sessionId: string) => {
@@ -620,7 +796,7 @@ export function useChatSession(): UseChatSessionResult {
                             }
                         }
                     })
-                } else if (event.type === 'session_status' && event.status === 'idle') {
+                } else if (event.type === 'session_status' && (event.status === 'idle' || event.status === 'stopped')) {
                     // Stream complete
                     break
                 } else if (event.type === 'error') {
@@ -648,7 +824,16 @@ export function useChatSession(): UseChatSessionResult {
                 } catch (syncErr) {
                     console.warn('Failed to sync session after abort:', syncErr)
                 }
+            } else if (err instanceof Error && err.message.includes('Conflict')) {
+                // Backend reports an existing in-flight stream for this session.
+                await resumeActiveStream(targetSessionId)
             } else {
+                // Transport can drop when the tab goes background/offline. Try to
+                // re-attach before surfacing a hard failure.
+                const resumed = await resumeActiveStream(targetSessionId)
+                if (resumed) {
+                    return
+                }
                 console.error('Failed to send message:', err)
                 setError(err instanceof Error ? err.message : 'Failed to send message')
             }
@@ -656,7 +841,7 @@ export function useChatSession(): UseChatSessionResult {
             setStreamingState(initialStreamingState)
             abortControllerRef.current = null
         }
-    }, [currentSessionId, streamingState.isStreaming, refreshSessions])
+    }, [currentSessionId, streamingState.isStreaming, refreshSessions, resumeActiveStream])
 
     const stopStreaming = useCallback(async () => {
         if (abortControllerRef.current) {
@@ -671,6 +856,30 @@ export function useChatSession(): UseChatSessionResult {
         }
         setStreamingState(initialStreamingState)
     }, [currentSessionId])
+
+    // While a session is selected, periodically probe for backend-active streams
+    // and re-attach if the frontend stream dropped unexpectedly.
+    useEffect(() => {
+        if (!currentSessionId || streamingState.isStreaming) {
+            return
+        }
+
+        let cancelled = false
+        const probe = async () => {
+            if (cancelled) return
+            await resumeActiveStream(currentSessionId)
+        }
+
+        void probe()
+        const intervalId = setInterval(() => {
+            void probe()
+        }, 5000)
+
+        return () => {
+            cancelled = true
+            clearInterval(intervalId)
+        }
+    }, [currentSessionId, streamingState.isStreaming, resumeActiveStream])
 
     // Queue functions
     const queueMessage = useCallback((content: string) => {
