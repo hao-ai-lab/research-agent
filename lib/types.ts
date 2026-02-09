@@ -47,6 +47,8 @@ export interface ExperimentRun {
     accuracy: number;
     epoch: number;
   };
+  metricSeries?: Record<string, { step: number; value: number }[]>;
+  metricKeys?: string[];
   config?: {
     model: string;
     learningRate: number;

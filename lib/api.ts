@@ -249,6 +249,8 @@ export interface Run {
     config?: Record<string, unknown>
     metrics?: { loss: number; accuracy: number; epoch: number }
     lossHistory?: { step: number; trainLoss: number; valLoss?: number }[]
+    metricSeries?: Record<string, { step: number; value: number }[]>
+    metricKeys?: string[]
     color?: string
 }
 
