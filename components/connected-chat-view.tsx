@@ -356,30 +356,26 @@ export function ConnectedChatView({
 
             {!hasConversation ? (
                 <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-                    <ScrollArea className="h-full">
-                        <div className="mx-auto w-full max-w-6xl px-3 pb-8 pt-4 lg:px-6 lg:pt-6">
-                            <div className="flex min-h-[45vh] items-center justify-center">
-                                <div className="w-full max-w-3xl">
-                                    {renderChatInput('centered')}
-                                </div>
-                            </div>
-                            {showStarterCards && (
-                                <div className="mt-4 lg:mt-5">
-                                    <ChatStarterCards
-                                        runs={runs}
-                                        sweeps={sweeps}
-                                        alerts={alerts}
-                                        onPromptSelect={(prompt) => {
-                                            setStarterDraftInsert({
-                                                id: Date.now(),
-                                                text: prompt,
-                                            })
-                                        }}
-                                    />
-                                </div>
-                            )}
+                    <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
+                        <div className="w-full max-w-3xl">
+                            {renderChatInput('centered')}
                         </div>
-                    </ScrollArea>
+                        {showStarterCards && (
+                            <div className="mt-4 lg:mt-5 w-full max-w-6xl">
+                                <ChatStarterCards
+                                    runs={runs}
+                                    sweeps={sweeps}
+                                    alerts={alerts}
+                                    onPromptSelect={(prompt) => {
+                                        setStarterDraftInsert({
+                                            id: Date.now(),
+                                            text: prompt,
+                                        })
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </div>
                 </div>
             ) : (
                 <>

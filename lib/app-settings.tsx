@@ -22,7 +22,7 @@ export const defaultAppSettings: AppSettings = {
     customFontSizePx: null,
     customButtonScalePercent: null,
     chatToolbarButtonSizePx: null,
-    showStarterCards: true,
+    showStarterCards: false,
   },
   integrations: {},
   notifications: {
