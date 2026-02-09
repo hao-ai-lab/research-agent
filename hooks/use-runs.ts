@@ -107,6 +107,8 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         color: metadata?.color || run.color || '#4ade80',
         // Pass through metrics/charts from API (mock or real)
         lossHistory: run.lossHistory,
+        metricSeries: run.metricSeries,
+        metricKeys: run.metricKeys,
         metrics: run.metrics,
         config: run.config as ExperimentRun['config'],
         // Include API-specific fields for terminal panel

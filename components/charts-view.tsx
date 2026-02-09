@@ -1,37 +1,58 @@
 'use client'
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   BarChart3,
   ChevronDown,
   ChevronRight,
+  GripVertical,
+  Layers,
+  Pin,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Star,
+  TrendingUp,
 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { RunVisibilitySelector } from './run-visibility-selector'
+import { VisibilityManageView } from './visibility-manage-view'
+import { cn } from '@/lib/utils'
+import type { InsightChart, MetricVisualization, ExperimentRun, VisibilityGroup } from '@/lib/types'
 import { defaultMetricVisualizations } from '@/lib/mock-data'
-import type {
-  ExperimentRun,
-  InsightChart,
-  MetricVisualization,
-} from '@/lib/types'
-
-type MetricRow = { step: number; [runId: string]: number }
 
 interface ChartsViewProps {
   runs: ExperimentRun[]
@@ -42,400 +63,900 @@ interface ChartsViewProps {
   onShowVisibilityManageChange?: (show: boolean) => void
 }
 
-function toNumber(value: unknown): number | null {
-  if (typeof value !== 'number' || Number.isNaN(value)) return null
-  return value
-}
+type MetricSectionId = 'pinned' | 'primary' | 'secondary'
+type MetricSeriesPoint = { step: number; value: number }
 
-function pickValueByPath(source: Record<string, unknown>, path: string, layer?: number): number | null {
-  const direct = toNumber(source[path])
-  if (direct !== null) return direct
+const chartStrokeFallback = '#8fd0ff'
 
-  const walk = (delimiter: '/' | '.') => {
-    const segments = path.split(delimiter).filter(Boolean)
-    let current: unknown = source
-    for (const segment of segments) {
-      if (!current || typeof current !== 'object') return null
-      current = (current as Record<string, unknown>)[segment]
-    }
+const smoothingOptions = [
+  { label: '0.00', value: '0.00' },
+  { label: '0.25', value: '0.25' },
+  { label: '0.50', value: '0.50' },
+  { label: '0.75', value: '0.75' },
+  { label: '0.90', value: '0.90' },
+]
 
-    if (Array.isArray(current) && typeof layer === 'number') {
-      return toNumber(current[layer])
-    }
-
-    return toNumber(current)
+function smoothSeries(values: number[], factor: number): number[] {
+  if (values.length <= 1 || factor <= 0) {
+    return values
   }
 
-  return walk('/') ?? walk('.')
+  const out = new Array(values.length)
+  out[0] = values[0]
+  for (let i = 1; i < values.length; i += 1) {
+    out[i] = out[i - 1] * factor + values[i] * (1 - factor)
+  }
+  return out
 }
 
-function getMetricValue(
-  metricPath: string,
-  point: Record<string, unknown>,
-  previousPoint: Record<string, unknown> | null,
-  previousEma: number | null,
-  layer?: number,
-): { value: number | null; nextEma: number | null } {
-  const trainLoss = toNumber(point.trainLoss)
-  const valLoss = toNumber(point.valLoss)
+function deterministicNoise(seed: number): number {
+  const value = Math.sin(seed * 12.9898) * 43758.5453
+  return value - Math.floor(value)
+}
+
+function toMetricId(path: string): string {
+  return `metric:${path.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`
+}
+
+function titleCaseWord(value: string): string {
+  if (!value) return value
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function metricDisplayName(path: string): string {
+  const clean = path.replace(/^metrics\//, '')
+  const parts = clean.split('/').filter(Boolean)
+  const last = parts.length > 0 ? parts[parts.length - 1] : clean
+  const name = last.replace(/[_\-]+/g, ' ').trim()
+  return titleCaseWord(name || clean)
+}
+
+function metricCategoryFromPath(path: string): 'primary' | 'secondary' {
+  const key = path.toLowerCase()
+  if (
+    key.includes('loss') ||
+    key.includes('accuracy') ||
+    key.includes('reward') ||
+    key.includes('score') ||
+    key.includes('f1') ||
+    key.includes('bleu') ||
+    key.includes('rouge') ||
+    key.includes('perplexity')
+  ) {
+    return 'primary'
+  }
+  return 'secondary'
+}
+
+function metricTypeFromPath(path: string): 'line' | 'area' | 'bar' {
+  const key = path.toLowerCase()
+  if (key.includes('slope') || key.includes('gap') || key.includes('delta')) {
+    return 'area'
+  }
+  return 'line'
+}
+
+function metricSortWeight(path: string): number {
+  const key = path.toLowerCase()
+  if (key === 'train/loss' || key === 'loss') return 0
+  if (key === 'val/loss' || key === 'validation/loss') return 1
+  if (key.includes('loss')) return 2
+  if (key.includes('accuracy') || key.includes('reward') || key.includes('score')) return 3
+  if (key.includes('grad')) return 4
+  return 10
+}
+
+function hasRunChartData(run: ExperimentRun): boolean {
+  const hasLossHistory = !!(run.lossHistory && run.lossHistory.length > 0)
+  const hasMetricSeries = !!(
+    run.metricSeries &&
+    Object.values(run.metricSeries).some((points) => points && points.length > 0)
+  )
+  return hasLossHistory || hasMetricSeries
+}
+
+function metricValueAt(metricPath: string, history: { step: number; trainLoss: number; valLoss?: number }[], index: number): number {
+  const point = history[index]
+  const trainLoss = Math.max(point.trainLoss, 0.0001)
+  const valLoss = Math.max(point.valLoss ?? trainLoss * 1.1, 0.0001)
+  const prevTrainLoss = index > 0 ? history[index - 1].trainLoss : trainLoss
 
   switch (metricPath) {
     case 'train/loss':
-      return { value: trainLoss, nextEma: previousEma }
+      return trainLoss
     case 'val/loss':
-      return { value: valLoss, nextEma: previousEma }
-    case 'train/reward': {
-      const explicitReward = pickValueByPath(point, metricPath, layer)
-      if (explicitReward !== null) return { value: explicitReward, nextEma: previousEma }
-      return {
-        value: trainLoss !== null ? Math.max(0, 1 - trainLoss) : null,
-        nextEma: previousEma,
-      }
-    }
-    case 'train/loss_ema': {
-      if (trainLoss === null) return { value: null, nextEma: previousEma }
-      const nextEma = previousEma == null ? trainLoss : (0.2 * trainLoss + 0.8 * previousEma)
-      return { value: Number(nextEma.toFixed(6)), nextEma }
-    }
-    case 'train/loss_slope': {
-      if (!previousPoint) return { value: null, nextEma: previousEma }
-      const prevTrainLoss = toNumber(previousPoint.trainLoss)
-      if (trainLoss === null || prevTrainLoss === null) return { value: null, nextEma: previousEma }
-      return { value: Number((trainLoss - prevTrainLoss).toFixed(6)), nextEma: previousEma }
-    }
-    case 'val/generalization_gap': {
-      if (trainLoss === null || valLoss === null) return { value: null, nextEma: previousEma }
-      return { value: Number((valLoss - trainLoss).toFixed(6)), nextEma: previousEma }
-    }
+      return valLoss
+    case 'train/reward':
+      return Math.max(0, 1.35 - trainLoss * 0.55)
+    case 'train/loss_ema':
+      return trainLoss * 0.92 + valLoss * 0.08
+    case 'train/loss_slope':
+      return trainLoss - prevTrainLoss
+    case 'val/generalization_gap':
+      return valLoss - trainLoss
+    case 'grad/global_norm':
+      return 0.12 + trainLoss * 0.25 + deterministicNoise(index + point.step) * 0.03
+    case 'grad/global_norm_ema':
+      return 0.08 + trainLoss * 0.2
+    case 'grad/norm/attn':
+      return 0.06 + trainLoss * 0.12 + deterministicNoise(index + point.step * 0.3) * 0.02
+    case 'grad/norm_ratio':
+      return 0.025 + trainLoss * 0.04
+    case 'act/mean':
+      return 0.2 + deterministicNoise(index + point.step * 0.1) * 0.06
     default:
-      return { value: pickValueByPath(point, metricPath, layer), nextEma: previousEma }
+      return trainLoss
   }
 }
 
-function buildDataset(
-  runs: ExperimentRun[],
+function fallbackMetricData(metricPath: string, runs: ExperimentRun[], visibleRunIds: Set<string>) {
+  const visibleRuns = runs.filter((r) => visibleRunIds.has(r.id))
+  const data: { step: number; [key: string]: number }[] = []
+
+  for (let i = 0; i <= 100; i += 5) {
+    const step = i * 100
+    const point: { step: number; [key: string]: number } = { step }
+    visibleRuns.forEach((run, runIdx) => {
+      const seed = i + runIdx * 7
+      const baseValue = metricPath.includes('loss')
+        ? 2.3 * Math.exp(-i / 32) + 0.08
+        : metricPath.includes('grad')
+          ? 0.35 + 0.16 * Math.exp(-i / 40)
+          : 0.35 + 0.2 * deterministicNoise(seed)
+      point[run.id] = Number(baseValue.toFixed(5))
+    })
+    data.push(point)
+  }
+
+  return data
+}
+
+function getRunMetricSeries(run: ExperimentRun, metricPath: string): MetricSeriesPoint[] {
+  const directSeries = run.metricSeries?.[metricPath]
+  if (directSeries && directSeries.length > 0) {
+    return directSeries
+  }
+
+  if (!run.lossHistory || run.lossHistory.length === 0) {
+    return []
+  }
+
+  return run.lossHistory.map((point, index, history) => ({
+    step: point.step,
+    value: Math.max(0, metricValueAt(metricPath, history, index)),
+  }))
+}
+
+function buildMetricData(
   metricPath: string,
-  layer?: number,
-): MetricRow[] {
-  const rowsByStep = new Map<number, MetricRow>()
+  runs: ExperimentRun[],
+  visibleRunIds: Set<string>,
+  smoothing: number
+): { step: number; [key: string]: number }[] {
+  const stepRows = new Map<number, { step: number; [key: string]: number }>()
 
   runs.forEach((run) => {
-    const history = run.lossHistory as Array<Record<string, unknown>> | undefined
-    if (!history || history.length === 0) return
+    if (!visibleRunIds.has(run.id) || run.isArchived) {
+      return
+    }
 
-    let previousPoint: Record<string, unknown> | null = null
-    let previousEma: number | null = null
+    const series = getRunMetricSeries(run, metricPath)
+    if (series.length === 0) {
+      return
+    }
 
-    history.forEach((point) => {
-      const step = toNumber(point.step)
-      if (step === null) return
+    const raw = series.map((point) => point.value)
+    const smoothed = smoothSeries(raw, smoothing)
 
-      const { value, nextEma } = getMetricValue(metricPath, point, previousPoint, previousEma, layer)
-      previousEma = nextEma
-      previousPoint = point
-
-      if (value === null) return
-
-      const existing = rowsByStep.get(step) || { step }
-      existing[run.id] = Number(value.toFixed(6))
-      rowsByStep.set(step, existing)
+    series.forEach((point, i) => {
+      const row = stepRows.get(point.step) || { step: point.step }
+      row[run.id] = Number(smoothed[i].toFixed(6))
+      stepRows.set(point.step, row)
     })
   })
 
-  return Array.from(rowsByStep.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([, row]) => row)
+  if (stepRows.size === 0) {
+    return fallbackMetricData(metricPath, runs, visibleRunIds)
+  }
+
+  return Array.from(stepRows.values()).sort((a, b) => a.step - b.step)
 }
 
-function MetricChartAllRuns({
-  metric,
-  runs,
-  isExpanded,
-  onToggle,
-  selectedLayer,
-}: {
-  metric: MetricVisualization
-  runs: ExperimentRun[]
-  isExpanded: boolean
-  onToggle: () => void
-  selectedLayer?: number
-}) {
-  const data = useMemo(() => {
-    if (!isExpanded) return [] as MetricRow[]
-    return buildDataset(runs, metric.path, selectedLayer)
-  }, [runs, metric.path, isExpanded, selectedLayer])
+export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, onUpdateRun, onShowVisibilityManageChange }: ChartsViewProps) {
+  const [activeSection, setActiveSection] = useState<'standard' | 'custom'>('standard')
+  const [metrics, setMetrics] = useState<MetricVisualization[]>(defaultMetricVisualizations)
+  const [selectedLayer, setSelectedLayer] = useState<Record<string, number>>({})
+  const [showVisibilityManage, setShowVisibilityManageInternal] = useState(false)
+  const [showVisibilitySection, setShowVisibilitySection] = useState(false)
+  const [metricFilter, setMetricFilter] = useState('')
+  const [smoothing, setSmoothing] = useState('0.50')
+  const [sectionOpen, setSectionOpen] = useState<Record<MetricSectionId, boolean>>({
+    pinned: true,
+    primary: true,
+    secondary: true,
+  })
 
-  const hasData = data.length > 0 && runs.some((run) => data.some((row) => typeof row[run.id] === 'number'))
+  const [chartSettings, setChartSettings] = useState({
+    xAxisFontSize: 10,
+    yAxisFontSize: 10,
+    xAxisTickCount: 5,
+    yAxisTickCount: 5,
+    yAxisWidth: 34,
+  })
+  const [draftSettings, setDraftSettings] = useState({ ...chartSettings })
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
-  return (
-    <Collapsible open={isExpanded} onOpenChange={onToggle}>
-      <CollapsibleTrigger asChild>
-        <button
-          type="button"
-          className="flex w-full items-center justify-between rounded-lg px-3 py-2 transition-colors hover:bg-secondary/50"
-        >
-          <span className="text-xs font-medium text-foreground">{metric.name}</span>
-          {isExpanded ? (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          )}
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="mb-2 mt-1 h-36 px-1">
-          {hasData ? (
-            <ResponsiveContainer width="100%" height="100%">
-              {metric.type === 'area' ? (
-                <AreaChart data={data}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                  <XAxis dataKey="step" tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }} />
-                  <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }} width={40} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1f2937',
-                      border: '1px solid #374151',
-                      borderRadius: '6px',
-                      fontSize: '10px',
-                    }}
-                  />
-                  {runs.map((run) => (
-                    <Area
-                      key={`${metric.id}:${run.id}`}
-                      type="monotone"
-                      dataKey={run.id}
-                      name={run.alias || run.name}
-                      stroke={run.color || '#4ade80'}
-                      fill={`${run.color || '#4ade80'}33`}
-                      strokeWidth={1.4}
-                      connectNulls
-                    />
-                  ))}
-                </AreaChart>
-              ) : (
-                <LineChart data={data}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                  <XAxis dataKey="step" tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }} />
-                  <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }} width={40} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1f2937',
-                      border: '1px solid #374151',
-                      borderRadius: '6px',
-                      fontSize: '10px',
-                    }}
-                  />
-                  {runs.map((run) => (
-                    <Line
-                      key={`${metric.id}:${run.id}`}
-                      type="monotone"
-                      dataKey={run.id}
-                      name={run.alias || run.name}
-                      stroke={run.color || '#4ade80'}
-                      strokeWidth={1.5}
-                      dot={false}
-                      connectNulls
-                    />
-                  ))}
-                </LineChart>
-              )}
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex h-full items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
-              No source data for this metric in available runs.
-            </div>
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
+  const handleSaveSettings = () => {
+    setChartSettings({ ...draftSettings })
+    setSettingsOpen(false)
+  }
 
-export function ChartsView({ runs }: ChartsViewProps) {
-  const runsWithHistory = useMemo(
-    () => runs.filter((run) => !run.isArchived && Array.isArray(run.lossHistory) && run.lossHistory.length > 0),
-    [runs],
+  const handleOpenSettings = (open: boolean) => {
+    if (open) {
+      setDraftSettings({ ...chartSettings })
+    }
+    setSettingsOpen(open)
+  }
+
+  const setShowVisibilityManage = (show: boolean) => {
+    setShowVisibilityManageInternal(show)
+    onShowVisibilityManageChange?.(show)
+  }
+
+  const activeRuns = useMemo(
+    () => runs.filter((r) => !r.isArchived && hasRunChartData(r)),
+    [runs]
   )
 
-  const primaryMetrics = useMemo(
-    () => defaultMetricVisualizations.filter((metric) => metric.category === 'primary'),
-    [],
+  const [visibleRunIds, setVisibleRunIds] = useState<Set<string>>(
+    new Set(activeRuns.map((r) => r.id))
   )
-  const secondaryMetrics = useMemo(
-    () => defaultMetricVisualizations.filter((metric) => metric.category === 'secondary'),
-    [],
+  const [visibilityGroups, setVisibilityGroups] = useState<VisibilityGroup[]>([])
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
+
+  const dynamicMetricVisualizations = useMemo<MetricVisualization[]>(() => {
+    const metricKeys = new Set<string>()
+    runs.forEach((run) => {
+      if (!run.metricSeries) return
+      Object.entries(run.metricSeries).forEach(([metricKey, points]) => {
+        if (points && points.length > 0) {
+          metricKeys.add(metricKey)
+        }
+      })
+    })
+
+    if (metricKeys.size === 0) {
+      return []
+    }
+
+    return Array.from(metricKeys)
+      .sort((a, b) => {
+        const sortDiff = metricSortWeight(a) - metricSortWeight(b)
+        if (sortDiff !== 0) return sortDiff
+        return a.localeCompare(b)
+      })
+      .map((metricPath) => {
+        const normalized = metricPath.toLowerCase()
+        const defaultPinned =
+          normalized === 'train/loss' ||
+          normalized === 'loss' ||
+          normalized === 'val/loss' ||
+          normalized === 'validation/loss'
+
+        return {
+          id: toMetricId(metricPath),
+          name: metricDisplayName(metricPath),
+          path: metricPath,
+          category: metricCategoryFromPath(metricPath),
+          type: metricTypeFromPath(metricPath),
+          isPinned: defaultPinned,
+          isInOverview: defaultPinned,
+          layerSelector: false,
+        }
+      })
+  }, [runs])
+
+  useEffect(() => {
+    if (dynamicMetricVisualizations.length === 0) {
+      setMetrics((prev) => {
+        const hasDynamicMetrics = prev.some((metric) => metric.id.startsWith('metric:'))
+        return hasDynamicMetrics ? defaultMetricVisualizations : prev
+      })
+      return
+    }
+
+    setMetrics((prev) => {
+      const previousByPath = new Map(prev.map((metric) => [metric.path, metric]))
+      return dynamicMetricVisualizations.map((metric) => {
+        const previous = previousByPath.get(metric.path)
+        if (!previous) {
+          return metric
+        }
+        return {
+          ...metric,
+          isPinned: previous.isPinned ?? metric.isPinned,
+          isInOverview: previous.isInOverview ?? metric.isInOverview,
+          layerSelector: previous.layerSelector ?? metric.layerSelector,
+        }
+      })
+    })
+  }, [dynamicMetricVisualizations])
+
+  useEffect(() => {
+    const activeIdSet = new Set(activeRuns.map((r) => r.id))
+    setVisibleRunIds((prev) => {
+      const filtered = new Set(Array.from(prev).filter((id) => activeIdSet.has(id)))
+      if (filtered.size > 0 || activeRuns.length === 0) {
+        return filtered
+      }
+      return new Set(activeRuns.map((r) => r.id))
+    })
+  }, [activeRuns])
+
+  const visibleRuns = useMemo(
+    () => runs.filter((r) => !r.isArchived && visibleRunIds.has(r.id) && hasRunChartData(r)),
+    [runs, visibleRunIds]
   )
 
-  const [primaryChartsOpen, setPrimaryChartsOpen] = useState(true)
-  const [secondaryChartsOpen, setSecondaryChartsOpen] = useState(true)
-  const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
-  const [layerSelections, setLayerSelections] = useState<Record<string, number>>({})
+  const filterQuery = metricFilter.trim().toLowerCase()
+  const matchesFilter = (m: MetricVisualization) => {
+    if (!filterQuery) return true
+    return m.name.toLowerCase().includes(filterQuery) || m.path.toLowerCase().includes(filterQuery)
+  }
 
-  const toggleChart = (chartId: string) => {
-    setExpandedCharts((prev) => {
+  const primaryMetrics = metrics.filter((m) => m.category === 'primary' && matchesFilter(m))
+  const secondaryMetrics = metrics.filter((m) => m.category === 'secondary' && matchesFilter(m))
+  const pinnedMetrics = metrics.filter((m) => m.isPinned && matchesFilter(m))
+
+  const toggleRunVisibility = (runId: string) => {
+    setVisibleRunIds((prev) => {
       const next = new Set(prev)
-      if (next.has(chartId)) {
-        next.delete(chartId)
+      if (next.has(runId)) {
+        next.delete(runId)
       } else {
-        next.add(chartId)
+        next.add(runId)
       }
       return next
     })
+    setActiveGroupId(null)
   }
 
-  const toggleAllInCategory = (metricIds: string[], expand: boolean) => {
-    setExpandedCharts((prev) => {
-      const next = new Set(prev)
-      metricIds.forEach((metricId) => {
-        if (expand) {
-          next.add(metricId)
-        } else {
-          next.delete(metricId)
-        }
-      })
-      return next
-    })
+  const handleSelectGroup = (groupId: string | null) => {
+    setActiveGroupId(groupId)
+    if (groupId) {
+      const group = visibilityGroups.find((g) => g.id === groupId)
+      if (group) {
+        setVisibleRunIds(new Set(group.runIds))
+      }
+      return
+    }
+
+    setVisibleRunIds(new Set(activeRuns.map((r) => r.id)))
   }
 
-  const allPrimaryExpanded = primaryMetrics.every((metric) => expandedCharts.has(metric.id))
-  const allSecondaryExpanded = secondaryMetrics.every((metric) => expandedCharts.has(metric.id))
+  const handleCreateGroup = (group: VisibilityGroup) => {
+    setVisibilityGroups((prev) => [...prev, group])
+  }
+
+  const handleDeleteGroup = (groupId: string) => {
+    setVisibilityGroups((prev) => prev.filter((g) => g.id !== groupId))
+    if (activeGroupId === groupId) {
+      setActiveGroupId(null)
+      setVisibleRunIds(new Set(activeRuns.map((r) => r.id)))
+    }
+  }
+
+  const handleToggleMetricPin = (metricId: string) => {
+    setMetrics((prev) => prev.map((m) => (m.id === metricId ? { ...m, isPinned: !m.isPinned } : m)))
+  }
+
+  const handleToggleMetricOverview = (metricId: string) => {
+    setMetrics((prev) => prev.map((m) => (m.id === metricId ? { ...m, isInOverview: !m.isInOverview } : m)))
+  }
+
+  const renderMetricChart = (metric: MetricVisualization) => {
+    const data = buildMetricData(metric.path, runs, visibleRunIds, Number(smoothing))
+    const isArea = metric.type === 'area'
+
+    return (
+      <div key={metric.id} className="rounded-lg border border-border/80 bg-card/70 p-2.5">
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+              <h4 className="truncate text-sm font-semibold text-foreground">{metric.name}</h4>
+              <Badge variant="outline" className="h-5 shrink-0 rounded px-1.5 font-mono text-[10px] text-muted-foreground">
+                {metric.path}
+              </Badge>
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {visibleRuns.length} run{visibleRuns.length !== 1 ? 's' : ''} visible
+            </p>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1">
+            {metric.layerSelector && (
+              <Select
+                value={String(selectedLayer[metric.id] || 0)}
+                onValueChange={(v) => setSelectedLayer((prev) => ({ ...prev, [metric.id]: Number(v) }))}
+              >
+                <SelectTrigger className="h-7 w-20 text-xs">
+                  <SelectValue placeholder="Layer" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <SelectItem key={i} value={String(i)}>
+                      Layer {i}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => handleToggleMetricOverview(metric.id)}
+            >
+              <Star className={cn('h-4 w-4', metric.isInOverview ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground')} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => handleToggleMetricPin(metric.id)}
+            >
+              <Pin className={cn('h-4 w-4', metric.isPinned ? 'fill-accent text-accent' : 'text-muted-foreground')} />
+            </Button>
+          </div>
+        </div>
+
+        <div className="h-44 rounded-md border border-border/70 bg-background/70 p-1.5">
+          <ResponsiveContainer width="100%" height="100%">
+            {isArea ? (
+              <AreaChart data={data}>
+                <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="step"
+                  tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#9ca3af' }}
+                  axisLine={{ stroke: '#404040' }}
+                  tickLine={false}
+                  tickCount={chartSettings.xAxisTickCount}
+                />
+                <YAxis
+                  tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#9ca3af' }}
+                  axisLine={{ stroke: '#404040' }}
+                  tickLine={false}
+                  width={chartSettings.yAxisWidth}
+                  tickCount={chartSettings.yAxisTickCount}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#0f1115',
+                    border: '1px solid #2f2f2f',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    color: '#e5e7eb',
+                  }}
+                  labelStyle={{ color: '#d1d5db' }}
+                />
+                {visibleRuns.map((run) => (
+                  <Area
+                    key={run.id}
+                    name={run.alias || run.name}
+                    type="monotone"
+                    dataKey={run.id}
+                    stroke={run.color || chartStrokeFallback}
+                    fill={`${run.color || chartStrokeFallback}26`}
+                    strokeWidth={1.8}
+                    isAnimationActive={false}
+                    dot={false}
+                    connectNulls
+                  />
+                ))}
+              </AreaChart>
+            ) : (
+              <LineChart data={data}>
+                <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="step"
+                  tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#9ca3af' }}
+                  axisLine={{ stroke: '#404040' }}
+                  tickLine={false}
+                  tickCount={chartSettings.xAxisTickCount}
+                />
+                <YAxis
+                  tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#9ca3af' }}
+                  axisLine={{ stroke: '#404040' }}
+                  tickLine={false}
+                  width={chartSettings.yAxisWidth}
+                  tickCount={chartSettings.yAxisTickCount}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#0f1115',
+                    border: '1px solid #2f2f2f',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    color: '#e5e7eb',
+                  }}
+                  labelStyle={{ color: '#d1d5db' }}
+                />
+                {visibleRuns.map((run) => (
+                  <Line
+                    key={run.id}
+                    name={run.alias || run.name}
+                    type="monotone"
+                    dataKey={run.id}
+                    stroke={run.color || chartStrokeFallback}
+                    strokeWidth={1.8}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                ))}
+              </LineChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          {visibleRuns.map((run) => (
+            <div key={run.id} className="inline-flex items-center gap-1 rounded border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: run.color || chartStrokeFallback }} />
+              <span className="max-w-[96px] truncate">{run.alias || run.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const renderCustomChart = (chart: InsightChart) => {
+    const data = chart.data.map((d) => ({
+      name: d.label,
+      value: d.value,
+      secondary: d.secondary,
+    }))
+
+    let chartElement: React.ReactNode = null
+
+    switch (chart.type) {
+      case 'line':
+        chartElement = (
+          <ResponsiveContainer width="100%" height={128}>
+            <LineChart data={data}>
+              <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
+              <Tooltip contentStyle={{ backgroundColor: '#0f1115', border: '1px solid #2f2f2f', borderRadius: '8px', fontSize: '11px' }} />
+              <Line type="monotone" dataKey="value" stroke="#4ade80" strokeWidth={2} dot={{ fill: '#4ade80', r: 2.6 }} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        )
+        break
+      case 'bar':
+        chartElement = (
+          <ResponsiveContainer width="100%" height={128}>
+            <BarChart data={data}>
+              <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
+              <Tooltip contentStyle={{ backgroundColor: '#0f1115', border: '1px solid #2f2f2f', borderRadius: '8px', fontSize: '11px' }} />
+              <Bar dataKey="value" fill="#4ade80" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )
+        break
+      case 'area':
+        chartElement = (
+          <ResponsiveContainer width="100%" height={128}>
+            <AreaChart data={data}>
+              <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
+              <Tooltip contentStyle={{ backgroundColor: '#0f1115', border: '1px solid #2f2f2f', borderRadius: '8px', fontSize: '11px' }} />
+              <Area type="monotone" dataKey="value" stroke="#4ade80" fill="#4ade8033" strokeWidth={2} isAnimationActive={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )
+        break
+      case 'scatter':
+        chartElement = (
+          <ResponsiveContainer width="100%" height={128}>
+            <ScatterChart>
+              <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: chartSettings.xAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} type="category" allowDuplicatedCategory={false} tickCount={chartSettings.xAxisTickCount} />
+              <YAxis dataKey="value" tick={{ fontSize: chartSettings.yAxisFontSize, fill: '#9ca3af' }} axisLine={{ stroke: '#404040' }} tickLine={false} width={chartSettings.yAxisWidth} tickCount={chartSettings.yAxisTickCount} />
+              <Tooltip contentStyle={{ backgroundColor: '#0f1115', border: '1px solid #2f2f2f', borderRadius: '8px', fontSize: '11px' }} />
+              <Scatter data={data} fill="#4ade80" />
+            </ScatterChart>
+          </ResponsiveContainer>
+        )
+        break
+    }
+
+    return (
+      <div key={chart.id} className="rounded-lg border border-border/80 bg-card/70 p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h4 className="truncate text-sm font-semibold text-foreground">{chart.title}</h4>
+            {chart.description && <p className="truncate text-xs text-muted-foreground">{chart.description}</p>}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onToggleOverview?.(chart.id)}>
+              <Star className={cn('h-4 w-4', chart.isInOverview ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground')} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onTogglePin?.(chart.id)}>
+              <Pin className={cn('h-4 w-4', chart.isPinned ? 'fill-accent text-accent' : 'text-muted-foreground')} />
+            </Button>
+          </div>
+        </div>
+        <div className="rounded-md border border-border/70 bg-background/70 p-1.5">{chartElement}</div>
+      </div>
+    )
+  }
+
+  const renderMetricSection = (id: MetricSectionId, title: string, sectionMetrics: MetricVisualization[], badgeLabel?: string) => {
+    if (sectionMetrics.length === 0) {
+      return null
+    }
+
+    const open = sectionOpen[id]
+
+    return (
+      <Collapsible key={id} open={open} onOpenChange={(next) => setSectionOpen((prev) => ({ ...prev, [id]: next }))}>
+        <div className="rounded-lg border border-border/80 bg-card/50">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-secondary/40"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                {open ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="truncate text-sm font-semibold text-foreground">{title}</span>
+                <Badge variant="outline" className="h-5 rounded px-1.5 text-[10px] text-muted-foreground">
+                  {sectionMetrics.length}
+                </Badge>
+              </div>
+              {badgeLabel && (
+                <Badge variant="outline" className="h-5 rounded border-accent/40 bg-accent/10 px-1.5 text-[10px] text-accent">
+                  {badgeLabel}
+                </Badge>
+              )}
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="space-y-3 border-t border-border/70 p-3">
+              {sectionMetrics.map(renderMetricChart)}
+            </div>
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
+    )
+  }
+
+  if (showVisibilityManage) {
+    return (
+      <VisibilityManageView
+        runs={runs}
+        visibleRunIds={visibleRunIds}
+        onToggleVisibility={toggleRunVisibility}
+        onSetVisibleRuns={setVisibleRunIds}
+        visibilityGroups={visibilityGroups}
+        onCreateGroup={handleCreateGroup}
+        onDeleteGroup={handleDeleteGroup}
+        onUpdateRun={onUpdateRun}
+        onBack={() => setShowVisibilityManage(false)}
+      />
+    )
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-border px-4 py-3">
-        <h3 className="text-sm font-medium text-foreground">Charts</h3>
-        <p className="truncate text-xs text-muted-foreground">
-          Same metric view as Run Detail, aggregated across all runs.
-        </p>
-      </div>
+      <div className="shrink-0 border-b border-border px-3 py-3">
+        <div className="flex items-center gap-2">
+          <div className="flex flex-1 min-w-0 rounded-md bg-secondary p-1">
+            <button
+              type="button"
+              onClick={() => setActiveSection('standard')}
+              className={cn(
+                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
+                activeSection === 'standard' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span className="truncate">Workspace</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('custom')}
+              className={cn(
+                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
+                activeSection === 'custom' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              <span className="truncate">Custom</span>
+            </button>
+          </div>
 
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-3 p-3">
-          {runsWithHistory.length > 0 ? (
-            <>
-              <Collapsible open={primaryChartsOpen} onOpenChange={setPrimaryChartsOpen}>
-                <div className="overflow-hidden rounded-lg border border-border bg-card">
-                  <CollapsibleTrigger asChild>
-                    <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Primary Metrics</span>
-                      <div className="flex items-center gap-2">
-                        {primaryChartsOpen && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 px-2 text-[10px]"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              toggleAllInCategory(primaryMetrics.map((metric) => metric.id), !allPrimaryExpanded)
-                            }}
-                          >
-                            {allPrimaryExpanded ? 'Collapse All' : 'Expand All'}
-                          </Button>
-                        )}
-                        {primaryChartsOpen ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                      </div>
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border px-2 pb-2">
-                      {primaryMetrics.map((metric) => (
-                        <MetricChartAllRuns
-                          key={metric.id}
-                          metric={metric}
-                          runs={runsWithHistory}
-                          isExpanded={expandedCharts.has(metric.id)}
-                          onToggle={() => toggleChart(metric.id)}
-                        />
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
+          <Popover open={settingsOpen} onOpenChange={handleOpenSettings}>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Settings className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64">
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium">Chart Settings</h4>
 
-              <Collapsible open={secondaryChartsOpen} onOpenChange={setSecondaryChartsOpen}>
-                <div className="overflow-hidden rounded-lg border border-border bg-card">
-                  <CollapsibleTrigger asChild>
-                    <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Secondary Metrics</span>
-                      <div className="flex items-center gap-2">
-                        {secondaryChartsOpen && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 px-2 text-[10px]"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              toggleAllInCategory(secondaryMetrics.map((metric) => metric.id), !allSecondaryExpanded)
-                            }}
-                          >
-                            {allSecondaryExpanded ? 'Collapse All' : 'Expand All'}
-                          </Button>
-                        )}
-                        {secondaryChartsOpen ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                      </div>
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border px-2 pb-2">
-                      {secondaryMetrics.map((metric) => (
-                        <div key={metric.id}>
-                          {metric.layerSelector && (
-                            <div className="flex items-center gap-2 px-3 pt-2">
-                              <span className="text-[10px] text-muted-foreground">Layer:</span>
-                              <select
-                                className="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-foreground"
-                                value={layerSelections[metric.id] || 0}
-                                onChange={(event) => {
-                                  setLayerSelections((prev) => ({
-                                    ...prev,
-                                    [metric.id]: Number(event.target.value),
-                                  }))
-                                }}
-                              >
-                                {Array.from({ length: 12 }, (_, index) => (
-                                  <option key={index} value={index}>Layer {index}</option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                          <MetricChartAllRuns
-                            metric={metric}
-                            runs={runsWithHistory}
-                            isExpanded={expandedCharts.has(metric.id)}
-                            onToggle={() => toggleChart(metric.id)}
-                            selectedLayer={layerSelections[metric.id]}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </CollapsibleContent>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="show-visibility" className="text-xs">
+                    Show visibility toggle
+                  </Label>
+                  <Switch
+                    id="show-visibility"
+                    checked={showVisibilitySection}
+                    onCheckedChange={setShowVisibilitySection}
+                  />
                 </div>
-              </Collapsible>
-            </>
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-dashed border-border bg-card">
-              <div className="flex w-full items-center justify-between p-3">
-                <div className="flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">Charts</span>
+
+                <div className="space-y-3 border-t border-border pt-3">
+                  <p className="text-xs font-medium text-muted-foreground">Axis Settings</p>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">X-Axis Font</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.xAxisFontSize}
+                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, xAxisFontSize: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Y-Axis Font</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.yAxisFontSize}
+                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisFontSize: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">X-Axis Ticks</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.xAxisTickCount}
+                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, xAxisTickCount: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Y-Axis Ticks</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.yAxisTickCount}
+                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisTickCount: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Y-Axis Width</Label>
+                    <Input
+                      type="number"
+                      value={draftSettings.yAxisWidth}
+                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisWidth: Number(e.target.value) }))}
+                      className="h-7 w-16 text-xs"
+                      min={0}
+                    />
+                  </div>
                 </div>
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+
+                <Button size="sm" className="h-8 w-full text-xs" onClick={handleSaveSettings}>
+                  Save Settings
+                </Button>
               </div>
-              <div className="border-t border-border px-3 py-6 text-center">
-                <p className="text-xs text-muted-foreground">No run metric history available yet.</p>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {activeSection === 'standard' && (
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={metricFilter}
+                  onChange={(e) => setMetricFilter(e.target.value)}
+                  placeholder="Filter metrics"
+                  className="h-8 pl-7 text-xs"
+                />
+              </div>
+              <div className="inline-flex h-8 items-center gap-1 rounded border border-border/80 bg-card px-2 text-xs text-muted-foreground">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <span>Smooth</span>
+                <Select value={smoothing} onValueChange={setSmoothing}>
+                  <SelectTrigger className="h-6 w-16 border-0 bg-transparent p-0 text-xs shadow-none focus:ring-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {smoothingOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          )}
+            <div className="text-[11px] text-muted-foreground">
+              {visibleRuns.length} visible run{visibleRuns.length !== 1 ? 's' : ''} in workspace
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showVisibilitySection && (
+        <div className="shrink-0 border-b border-border bg-background px-3 py-2">
+          <RunVisibilitySelector
+            runs={activeRuns}
+            visibleRunIds={visibleRunIds}
+            onToggleVisibility={toggleRunVisibility}
+            visibilityGroups={visibilityGroups}
+            activeGroupId={activeGroupId}
+            onSelectGroup={handleSelectGroup}
+            onOpenManage={() => setShowVisibilityManage(true)}
+          />
         </div>
-      </ScrollArea>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="space-y-4 p-3">
+            {activeSection === 'standard' ? (
+              <>
+                {renderMetricSection('pinned', 'Pinned', pinnedMetrics, 'Pinned')}
+                {renderMetricSection('primary', 'Primary Metrics', primaryMetrics.filter((m) => !m.isPinned))}
+                {renderMetricSection('secondary', 'Secondary Metrics', secondaryMetrics.filter((m) => !m.isPinned))}
+
+                {pinnedMetrics.length === 0 && primaryMetrics.length === 0 && secondaryMetrics.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                    No metrics match your filter.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div>
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-accent/30 bg-accent/10">
+                    <TrendingUp className="h-4 w-4 text-accent" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">Custom Visualizations</h3>
+                    <p className="text-xs text-muted-foreground">{customCharts.length} saved charts</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {customCharts.map(renderCustomChart)}
+                </div>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   )
 }

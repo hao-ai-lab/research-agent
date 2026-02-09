@@ -841,6 +841,117 @@ export const mockSweeps: Sweep[] = [
   },
 ]
 
+// Optimized sweep config for sweep-1770657961524 (Pre-launch optimization)
+export const optimizedSweepConfig1770657961524: SweepConfig = {
+  id: 'sweep-config-1770657961524',
+  name: 'Transformer Hyperparameter Optimization',
+  description: 'Bayesian optimization sweep for optimal transformer training configuration with adaptive learning rates and regularization',
+  goal: 'Minimize validation loss while maximizing convergence stability and computational efficiency',
+  command: 'python train.py --model transformer --lr {learning_rate} --dropout {dropout} --attention-heads {attention_heads} --warmup-ratio {warmup_ratio} --weight-decay {weight_decay} --batch-size {batch_size} --epochs 50',
+  hyperparameters: [
+    // Learning rate with log-uniform sampling for better coverage
+    {
+      name: 'learning_rate',
+      type: 'choice',
+      values: [1e-5, 3e-5, 5e-5, 1e-4, 3e-4, 5e-4, 1e-3],
+    },
+    // Dropout for regularization
+    {
+      name: 'dropout',
+      type: 'range',
+      min: 0.0,
+      max: 0.5,
+      step: 0.05,
+    },
+    // Attention heads (architectural parameter)
+    {
+      name: 'attention_heads',
+      type: 'choice',
+      values: [4, 8, 12, 16],
+    },
+    // Warmup ratio for scheduler
+    {
+      name: 'warmup_ratio',
+      type: 'choice',
+      values: [0.0, 0.05, 0.1, 0.15, 0.2],
+    },
+    // Weight decay for regularization
+    {
+      name: 'weight_decay',
+      type: 'choice',
+      values: [0.0, 0.001, 0.01, 0.1],
+    },
+    // Batch size (memory vs speed tradeoff)
+    {
+      name: 'batch_size',
+      type: 'choice',
+      values: [16, 32, 64, 128],
+    },
+  ],
+  metrics: [
+    { name: 'Validation Loss', path: 'val/loss', goal: 'minimize', isPrimary: true },
+    { name: 'Training Loss', path: 'train/loss', goal: 'minimize', isPrimary: false },
+    { name: 'Validation Accuracy', path: 'val/accuracy', goal: 'maximize', isPrimary: false },
+    { name: 'F1 Score', path: 'val/f1', goal: 'maximize', isPrimary: false },
+    { name: 'Perplexity', path: 'val/perplexity', goal: 'minimize', isPrimary: false },
+    { name: 'Learning Rate', path: 'train/learning_rate', goal: 'minimize', isPrimary: false },
+  ],
+  insights: [
+    {
+      id: 'stop-divergence',
+      type: 'failure',
+      condition: 'val/loss > 5 or train/loss > 10 or is_nan(val/loss)',
+      description: 'Training divergence detected - loss exploding or NaN',
+      action: 'Stop run immediately and report failure',
+    },
+    {
+      id: 'stop-overfit',
+      type: 'suspicious',
+      condition: 'val/loss increases for 3 consecutive epochs and train/loss decreases',
+      description: 'Overfitting detected - validation loss rising while training loss falling',
+      action: 'Flag for early stopping consideration',
+    },
+    {
+      id: 'stop-plateau',
+      type: 'suspicious',
+      condition: 'val/loss std < 0.001 for 10 consecutive epochs after epoch 20',
+      description: 'Training plateau - no meaningful improvement',
+      action: 'Stop to conserve compute resources',
+    },
+    {
+      id: 'review-high-perf',
+      type: 'review',
+      condition: 'val/accuracy > 0.95',
+      description: 'Suspiciously high accuracy - verify no data leakage',
+      action: 'Human review required before deployment',
+    },
+    {
+      id: 'stop-convergence',
+      type: 'suspicious',
+      condition: 'val/loss < 0.1 and train/loss < 0.1',
+      description: 'Excellent convergence achieved',
+      action: 'Stop early - save checkpoint for final evaluation',
+    },
+    {
+      id: 'detect-oom-risk',
+      type: 'failure',
+      condition: 'gpu_memory_usage > 0.95',
+      description: 'GPU memory critically high - OOM risk imminent',
+      action: 'Stop run to prevent system crash',
+    },
+  ],
+  maxRuns: 50,
+  parallelRuns: 4,
+  earlyStoppingEnabled: true,
+  earlyStoppingPatience: 7,
+  notes: 'Optimized for production launch: Bayesian search with multi-metric tracking, aggressive stopping for divergent runs, and comprehensive overfitting detection. Targeting < 0.3 val loss within 30 runs.',
+  createdAt: new Date('2025-12-10'),
+  updatedAt: new Date('2025-12-10'),
+}
+
+// Append after declaration to avoid temporal dead zone when this module initializes.
+mockSweepConfigs.push(optimizedSweepConfig1770657961524)
+
 // Helper to create a default sweep config
 export const createDefaultSweepConfig = (): SweepConfig => ({
   id: `sweep-config-${Date.now()}`,
