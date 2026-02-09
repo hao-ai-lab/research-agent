@@ -263,14 +263,14 @@ function StarterInteractiveCard({
           onActivate()
         }
       }}
-      className={`mb-3 w-full break-inside-avoid cursor-pointer overflow-hidden border bg-gradient-to-br ${toneClass} ${className || ''} transition-[border-color,box-shadow,transform] hover:border-foreground/30 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.995]`}
+      className={`h-full w-full cursor-pointer overflow-hidden border bg-gradient-to-br ${toneClass} ${className || ''} transition-[border-color,box-shadow,transform] hover:border-foreground/30 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.995]`}
     >
       <CardHeader className="space-y-1.5 px-3.5 py-3 pb-2">
         <CardTitle className="flex min-w-0 items-center gap-2 text-base leading-tight">
           <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-background/85 text-foreground">
             <Icon className="h-3.5 w-3.5" />
           </span>
-          <span className="line-clamp-2 font-semibold">{title}</span>
+          <span className="font-semibold">{title}</span>
         </CardTitle>
 
         {selector && selector.options.length > 0 && (
@@ -297,9 +297,17 @@ function StarterInteractiveCard({
 
       <CardContent className="space-y-2 px-3.5 pb-3.5 pt-0">
         {previewNode}
-        {hint && <p className="line-clamp-1 text-[11px] text-muted-foreground">{hint}</p>}
+        {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>
+  )
+}
+
+function StarterCardSlide({ children }: { children: ReactNode }) {
+  return (
+    <div className="w-[min(20rem,calc(100vw-5rem))] max-w-full shrink-0 snap-center sm:w-[min(21rem,calc(100vw-4.5rem))] md:w-[22.5rem] md:snap-start">
+      {children}
+    </div>
   )
 }
 
@@ -450,296 +458,310 @@ export function ChatStarterCards({
         <p className="mt-0.5 text-xs text-muted-foreground">Pick a card to stage a contextual prompt.</p>
       </div>
 
-      <div className="columns-1 gap-3 md:columns-2 2xl:columns-3 [column-fill:_balance]">
-        <StarterInteractiveCard
-          title="Observe latest run"
-          icon={FlaskConical}
-          toneClass="from-sky-500/12 to-cyan-500/5 border-sky-500/25"
-          selector={
-            runOptions.length > 0
-              ? {
-                  value: selectedRun?.id || runOptions[0].value,
-                  options: runOptions,
-                  onValueChange: setSelectedRunId,
-                }
-              : undefined
-          }
-          hint={selectedRun ? `Started ${formatRelative(selectedRun.startTime)}` : 'No recent run available'}
-          previewNode={
-            selectedRun ? (
-              <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: selectedRun.color || '#4ade80' }}
+      <div className="w-full">
+        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1.5 pb-2 [scrollbar-width:thin]">
+          <StarterCardSlide>
+            <StarterInteractiveCard
+              title="Observe latest run"
+              icon={FlaskConical}
+              toneClass="from-sky-500/12 to-cyan-500/5 border-sky-500/25"
+              selector={
+                runOptions.length > 0
+                  ? {
+                      value: selectedRun?.id || runOptions[0].value,
+                      options: runOptions,
+                      onValueChange: setSelectedRunId,
+                    }
+                  : undefined
+              }
+              hint={selectedRun ? `Started ${formatRelative(selectedRun.startTime)}` : 'No recent run available'}
+              previewNode={
+                selectedRun ? (
+                  <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: selectedRun.color || '#4ade80' }}
+                          />
+                          <p className="min-w-0 truncate text-sm font-medium text-foreground">
+                            {selectedRun.alias || selectedRun.name}
+                          </p>
+                        </div>
+                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground">Run {selectedRun.id}</p>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {selectedRunPendingAlerts > 0 && (
+                          <div
+                            className="relative inline-flex h-5 w-5 items-center justify-center"
+                            title={`${selectedRunPendingAlerts} pending alert${selectedRunPendingAlerts > 1 ? 's' : ''}`}
+                          >
+                            <AlertTriangle className="h-4 w-4 text-warning" />
+                            {selectedRunPendingAlerts > 1 && (
+                              <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                                {selectedRunPendingAlerts}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        <Badge variant="outline" className={`h-5 gap-1 px-1.5 text-[10px] ${getStatusBadgeClass(selectedRun.status)}`}>
+                          {getRunStatusIcon(selectedRun.status)}
+                          <span>{toStatusLabel(selectedRun.status)}</span>
+                        </Badge>
+                      </div>
+                    </div>
+                    {selectedRunMetrics && (
+                      <p className="mt-1.5 truncate text-[11px] text-muted-foreground">{selectedRunMetrics}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
+                    No recent run available.
+                  </div>
+                )
+              }
+              onActivate={() => {
+                const prompt = selectedRun
+                  ? `@run:${selectedRun.id} summarize what just happened, key outcomes, and the safest next experiment.`
+                  : 'Help me set up the first run and explain what signals to monitor first.'
+                onPromptSelect(prompt)
+              }}
+            />
+          </StarterCardSlide>
+
+          <StarterCardSlide>
+            <StarterInteractiveCard
+              title="Review recent sweep"
+              icon={Sparkles}
+              toneClass="from-indigo-500/12 to-violet-500/5 border-indigo-500/25"
+              selector={
+                sweepOptions.length > 0
+                  ? {
+                      value: selectedSweep?.id || sweepOptions[0].value,
+                      options: sweepOptions,
+                      onValueChange: setSelectedSweepId,
+                    }
+                  : undefined
+              }
+              hint={
+                selectedSweep ? `${selectedSweepProgressPct}% complete` : 'No sweeps yet'
+              }
+              previewNode={
+                selectedSweep ? (
+                  <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 text-sm font-medium text-foreground">{selectedSweep.config.name}</p>
+                      <Badge variant="outline" className={`h-5 px-1.5 text-[10px] capitalize ${getSweepStatusClass(selectedSweep.status)}`}>
+                        {selectedSweep.status}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-border/80">
+                      <div
+                        className="h-full rounded-full bg-indigo-400"
+                        style={{ width: `${selectedSweepProgressPct}%` }}
                       />
-                      <p className="min-w-0 truncate text-sm font-medium text-foreground">
-                        {selectedRun.alias || selectedRun.name}
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] text-muted-foreground">
+                      <span>{selectedSweep.progress.completed}/{selectedSweep.progress.total} done</span>
+                      <span>{selectedSweep.progress.running} running</span>
+                      <span>{selectedSweep.progress.failed} failed</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
+                    No sweep selected.
+                  </div>
+                )
+              }
+              onActivate={() => {
+                const prompt = selectedSweep
+                  ? `@sweep:${selectedSweep.id} rank current candidates, explain why the top configs win, and propose the next 3 runs.`
+                  : 'Draft a practical sweep plan with candidate ranges and stop criteria.'
+                onPromptSelect(prompt)
+              }}
+            />
+          </StarterCardSlide>
+
+          <StarterCardSlide>
+            <StarterInteractiveCard
+              title="Primary metric check"
+              icon={BarChart3}
+              toneClass="from-emerald-500/10 to-teal-500/5 border-emerald-500/25"
+              selector={
+                runOptions.length > 0
+                  ? {
+                      value: selectedRun?.id || runOptions[0].value,
+                      options: runOptions,
+                      onValueChange: setSelectedRunId,
+                    }
+                  : undefined
+              }
+              hint={latestRunPoint ? `Latest step ${latestRunPoint.step}` : 'Primary metric trend'}
+              previewNode={
+                selectedRun ? (
+                  <div className="space-y-1.5">
+                    <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-medium text-foreground">{selectedRun.alias || selectedRun.name}</p>
+                        <Badge variant="outline" className={`h-5 gap-1 px-1.5 text-[10px] ${getStatusBadgeClass(selectedRun.status)}`}>
+                          {getRunStatusIcon(selectedRun.status)}
+                          <span>{toStatusLabel(selectedRun.status)}</span>
+                        </Badge>
+                      </div>
+                      <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                        {selectedRunMetrics || 'No metric snapshot yet'}
                       </p>
                     </div>
-                    <p className="mt-0.5 truncate text-[10px] text-muted-foreground">Run {selectedRun.id}</p>
+                    <MiniMetricChart label="Train loss" values={trainLossSeries} stroke="#f97316" />
+                    <MiniMetricChart label="Val loss" values={valLossSeries} stroke="#38bdf8" />
                   </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
+                    No run selected.
+                  </div>
+                )
+              }
+              onActivate={() => {
+                const prompt = selectedRun
+                  ? `@run:${selectedRun.id} report the primary metric trend, recent movement, and a threshold that should trigger intervention.`
+                  : 'I need a compact primary-metric tracking plan for this project.'
+                onPromptSelect(prompt)
+              }}
+            />
+          </StarterCardSlide>
 
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {selectedRunPendingAlerts > 0 && (
-                      <div
-                        className="relative inline-flex h-5 w-5 items-center justify-center"
-                        title={`${selectedRunPendingAlerts} pending alert${selectedRunPendingAlerts > 1 ? 's' : ''}`}
-                      >
-                        <AlertTriangle className="h-4 w-4 text-warning" />
-                        {selectedRunPendingAlerts > 1 && (
-                          <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
-                            {selectedRunPendingAlerts}
-                          </span>
-                        )}
+          <StarterCardSlide>
+            <StarterInteractiveCard
+              title="Resolve recent alert"
+              icon={AlertTriangle}
+              toneClass="from-amber-500/12 to-orange-500/5 border-amber-500/30"
+              selector={
+                alertOptions.length > 0
+                  ? {
+                      value: selectedAlert?.id || alertOptions[0].value,
+                      options: alertOptions,
+                      onValueChange: setSelectedAlertId,
+                    }
+                  : undefined
+              }
+              hint={
+                selectedAlert
+                  ? `Raised ${formatRelative(new Date(selectedAlert.timestamp * 1000))}`
+                  : 'No pending alerts'
+              }
+              previewNode={
+                selectedAlert && alertTone ? (
+                  <div className={`rounded-lg border px-2.5 py-2.5 ${alertTone.container}`}>
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className={`mt-0.5 h-4 w-4 ${alertTone.iconClass}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline" className={`h-4 px-1.5 text-[9px] ${alertTone.priorityBadge}`}>
+                            {alertTone.priorityLabel}
+                          </Badge>
+                          <Badge variant="outline" className="h-4 px-1.5 text-[9px]">
+                            {selectedAlert.status}
+                          </Badge>
+                        </div>
+                        <p className="mt-1.5 text-xs text-foreground">{selectedAlert.message}</p>
+                        <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <span>Run {selectedAlert.run_id}</span>
+                          <span>·</span>
+                          <span>{formatRelative(new Date(selectedAlert.timestamp * 1000))}</span>
+                        </div>
                       </div>
-                    )}
-                    <Badge variant="outline" className={`h-5 gap-1 px-1.5 text-[10px] ${getStatusBadgeClass(selectedRun.status)}`}>
-                      {getRunStatusIcon(selectedRun.status)}
-                      <span>{toStatusLabel(selectedRun.status)}</span>
-                    </Badge>
+                    </div>
                   </div>
-                </div>
-                {selectedRunMetrics && (
-                  <p className="mt-1.5 truncate text-[11px] text-muted-foreground">{selectedRunMetrics}</p>
-                )}
-              </div>
-            ) : (
-              <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
-                No recent run available.
-              </div>
-            )
-          }
-          onActivate={() => {
-            const prompt = selectedRun
-              ? `@run:${selectedRun.id} summarize what just happened, key outcomes, and the safest next experiment.`
-              : 'Help me set up the first run and explain what signals to monitor first.'
-            onPromptSelect(prompt)
-          }}
-        />
+                ) : (
+                  <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
+                    No pending alerts.
+                  </div>
+                )
+              }
+              onActivate={() => {
+                const prompt = selectedAlert
+                  ? `@alert:${selectedAlert.id} diagnose this alert, evaluate allowed responses, and recommend the safest one.`
+                  : 'No active alerts. Give me a preventive checklist for the next 3 runs.'
+                onPromptSelect(prompt)
+              }}
+            />
+          </StarterCardSlide>
 
-        <StarterInteractiveCard
-          title="Review recent sweep"
-          icon={Sparkles}
-          toneClass="from-indigo-500/12 to-violet-500/5 border-indigo-500/25"
-          selector={
-            sweepOptions.length > 0
-              ? {
-                  value: selectedSweep?.id || sweepOptions[0].value,
-                  options: sweepOptions,
-                  onValueChange: setSelectedSweepId,
-                }
-              : undefined
-          }
-          hint={
-            selectedSweep ? `${selectedSweepProgressPct}% complete` : 'No sweeps yet'
-          }
-          previewNode={
-            selectedSweep ? (
-              <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="line-clamp-2 min-w-0 text-sm font-medium text-foreground">{selectedSweep.config.name}</p>
-                  <Badge variant="outline" className={`h-5 px-1.5 text-[10px] capitalize ${getSweepStatusClass(selectedSweep.status)}`}>
-                    {selectedSweep.status}
-                  </Badge>
-                </div>
-                <div className="mt-2 h-1.5 rounded-full bg-border/80">
-                  <div
-                    className="h-full rounded-full bg-indigo-400"
-                    style={{ width: `${selectedSweepProgressPct}%` }}
-                  />
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] text-muted-foreground">
-                  <span>{selectedSweep.progress.completed}/{selectedSweep.progress.total} done</span>
-                  <span>{selectedSweep.progress.running} running</span>
-                  <span>{selectedSweep.progress.failed} failed</span>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
-                No sweep selected.
-              </div>
-            )
-          }
-          onActivate={() => {
-            const prompt = selectedSweep
-              ? `@sweep:${selectedSweep.id} rank current candidates, explain why the top configs win, and propose the next 3 runs.`
-              : 'Draft a practical sweep plan with candidate ranges and stop criteria.'
-            onPromptSelect(prompt)
-          }}
-        />
-
-        <StarterInteractiveCard
-          title="Primary metric check"
-          icon={BarChart3}
-          toneClass="from-emerald-500/10 to-teal-500/5 border-emerald-500/25"
-          selector={
-            runOptions.length > 0
-              ? {
-                  value: selectedRun?.id || runOptions[0].value,
-                  options: runOptions,
-                  onValueChange: setSelectedRunId,
-                }
-              : undefined
-          }
-          hint={latestRunPoint ? `Latest step ${latestRunPoint.step}` : 'Primary metric trend'}
-          previewNode={
-            selectedRun ? (
-              <div className="space-y-1.5">
+          <StarterCardSlide>
+            <StarterInteractiveCard
+              title="Schedule jobs better"
+              icon={Clock3}
+              toneClass="from-rose-500/10 to-pink-500/5 border-rose-500/25"
+              hint="Rebalance for faster feedback loops."
+              previewNode={
                 <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-medium text-foreground">{selectedRun.alias || selectedRun.name}</p>
-                    <Badge variant="outline" className={`h-5 gap-1 px-1.5 text-[10px] ${getStatusBadgeClass(selectedRun.status)}`}>
-                      {getRunStatusIcon(selectedRun.status)}
-                      <span>{toStatusLabel(selectedRun.status)}</span>
+                    <p className="text-sm font-medium text-foreground">{runningJobs} running · {queuedJobs} queued</p>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      {pendingAlerts.length} alerts
                     </Badge>
                   </div>
-                  <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                    {selectedRunMetrics || 'No metric snapshot yet'}
-                  </p>
-                </div>
-                <MiniMetricChart label="Train loss" values={trainLossSeries} stroke="#f97316" />
-                <MiniMetricChart label="Val loss" values={valLossSeries} stroke="#38bdf8" />
-              </div>
-            ) : (
-              <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
-                No run selected.
-              </div>
-            )
-          }
-          onActivate={() => {
-            const prompt = selectedRun
-              ? `@run:${selectedRun.id} report the primary metric trend, recent movement, and a threshold that should trigger intervention.`
-              : 'I need a compact primary-metric tracking plan for this project.'
-            onPromptSelect(prompt)
-          }}
-        />
-
-        <StarterInteractiveCard
-          title="Resolve recent alert"
-          icon={AlertTriangle}
-          toneClass="from-amber-500/12 to-orange-500/5 border-amber-500/30"
-          selector={
-            alertOptions.length > 0
-              ? {
-                  value: selectedAlert?.id || alertOptions[0].value,
-                  options: alertOptions,
-                  onValueChange: setSelectedAlertId,
-                }
-              : undefined
-          }
-          hint={
-            selectedAlert
-              ? `Raised ${formatRelative(new Date(selectedAlert.timestamp * 1000))}`
-              : 'No pending alerts'
-          }
-          previewNode={
-            selectedAlert && alertTone ? (
-              <div className={`rounded-lg border px-2.5 py-2.5 ${alertTone.container}`}>
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className={`mt-0.5 h-4 w-4 ${alertTone.iconClass}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline" className={`h-4 px-1.5 text-[9px] ${alertTone.priorityBadge}`}>
-                        {alertTone.priorityLabel}
-                      </Badge>
-                      <Badge variant="outline" className="h-4 px-1.5 text-[9px]">
-                        {selectedAlert.status}
-                      </Badge>
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">{queuePreview}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    <div className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5">
+                      <p className="text-[10px] text-muted-foreground">Running</p>
+                      <p className="text-sm font-medium text-foreground">{runningJobs}</p>
                     </div>
-                    <p className="mt-1.5 line-clamp-3 text-xs text-foreground">{selectedAlert.message}</p>
-                    <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <span>Run {selectedAlert.run_id}</span>
-                      <span>·</span>
-                      <span>{formatRelative(new Date(selectedAlert.timestamp * 1000))}</span>
+                    <div className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5">
+                      <p className="text-[10px] text-muted-foreground">Queued</p>
+                      <p className="text-sm font-medium text-foreground">{queuedJobs}</p>
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="rounded-md border border-dashed border-border/80 bg-background/70 px-2.5 py-2 text-[11px] text-muted-foreground">
-                No pending alerts.
-              </div>
-            )
-          }
-          onActivate={() => {
-            const prompt = selectedAlert
-              ? `@alert:${selectedAlert.id} diagnose this alert, evaluate allowed responses, and recommend the safest one.`
-              : 'No active alerts. Give me a preventive checklist for the next 3 runs.'
-            onPromptSelect(prompt)
-          }}
-        />
+              }
+              onActivate={() => {
+                onPromptSelect(
+                  `Given ${runningJobs} running jobs, ${queuedJobs} queued jobs, and ${pendingAlerts.length} pending alerts, propose a scheduling strategy that maximizes learning-per-hour.`
+                )
+              }}
+            />
+          </StarterCardSlide>
 
-        <StarterInteractiveCard
-          title="Schedule jobs better"
-          icon={Clock3}
-          toneClass="from-rose-500/10 to-pink-500/5 border-rose-500/25"
-          hint="Rebalance for faster feedback loops."
-          previewNode={
-            <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-foreground">{runningJobs} running · {queuedJobs} queued</p>
-                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                  {pendingAlerts.length} alerts
-                </Badge>
-              </div>
-              <p className="mt-1.5 line-clamp-2 text-[11px] text-muted-foreground">{queuePreview}</p>
-              <div className="mt-2 grid grid-cols-2 gap-1.5">
-                <div className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5">
-                  <p className="text-[10px] text-muted-foreground">Running</p>
-                  <p className="text-sm font-medium text-foreground">{runningJobs}</p>
+          <StarterCardSlide>
+            <StarterInteractiveCard
+              title="Identify cluster setup"
+              icon={Server}
+              toneClass="from-violet-500/12 to-fuchsia-500/5 border-violet-500/25"
+              selector={{
+                value: selectedClusterSetup,
+                options: CLUSTER_SETUP_OPTIONS,
+                onValueChange: setSelectedClusterSetup,
+              }}
+              hint="Onboarding card for run/sweep execution environment."
+              previewNode={
+                <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
+                  <p className="text-sm font-medium text-foreground">
+                    {CLUSTER_SETUP_LABELS[selectedClusterSetup] || 'Auto detect'}
+                  </p>
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    Determine whether this project uses Slurm, local GPU, Kubernetes, Ray, or a shared head node.
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    {['Slurm', 'Local GPU', 'Kubernetes', 'Ray'].map((label) => (
+                      <span key={label} className="rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground">
+                        {label}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-                <div className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5">
-                  <p className="text-[10px] text-muted-foreground">Queued</p>
-                  <p className="text-sm font-medium text-foreground">{queuedJobs}</p>
-                </div>
-              </div>
-            </div>
-          }
-          onActivate={() => {
-            onPromptSelect(
-              `Given ${runningJobs} running jobs, ${queuedJobs} queued jobs, and ${pendingAlerts.length} pending alerts, propose a scheduling strategy that maximizes learning-per-hour.`
-            )
-          }}
-        />
-
-        <StarterInteractiveCard
-          title="Identify cluster setup"
-          icon={Server}
-          toneClass="from-violet-500/12 to-fuchsia-500/5 border-violet-500/25"
-          selector={{
-            value: selectedClusterSetup,
-            options: CLUSTER_SETUP_OPTIONS,
-            onValueChange: setSelectedClusterSetup,
-          }}
-          hint="Onboarding card for run/sweep execution environment."
-          previewNode={
-            <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
-              <p className="text-sm font-medium text-foreground">
-                {CLUSTER_SETUP_LABELS[selectedClusterSetup] || 'Auto detect'}
-              </p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Determine whether this project uses Slurm, local GPU, Kubernetes, Ray, or a shared head node.
-              </p>
-              <div className="mt-2 grid grid-cols-2 gap-1.5">
-                {['Slurm', 'Local GPU', 'Kubernetes', 'Ray'].map((label) => (
-                  <span key={label} className="rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[10px] text-muted-foreground">
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          }
-          onActivate={() => {
-            const selectedLabel = CLUSTER_SETUP_LABELS[selectedClusterSetup] || 'Auto detect'
-            const prompt = selectedClusterSetup === 'auto'
-              ? 'Help me identify my cluster setup (Slurm, local GPU, Kubernetes, Ray, or shared head-node SSH). Ask the minimum questions, give verification commands, and tell me what to set in Runs > Cluster Status.'
-              : `My cluster setup is ${selectedLabel}. Give me an onboarding checklist for runs/sweeps, command templates, scheduler assumptions, and failure checks.`
-            onPromptSelect(prompt)
-          }}
-        />
+              }
+              onActivate={() => {
+                const selectedLabel = CLUSTER_SETUP_LABELS[selectedClusterSetup] || 'Auto detect'
+                const prompt = selectedClusterSetup === 'auto'
+                  ? 'Help me identify my cluster setup (Slurm, local GPU, Kubernetes, Ray, or shared head-node SSH). Ask the minimum questions, give verification commands, and tell me what to set in Runs > Cluster Status.'
+                  : `My cluster setup is ${selectedLabel}. Give me an onboarding checklist for runs/sweeps, command templates, scheduler assumptions, and failure checks.`
+                onPromptSelect(prompt)
+              }}
+            />
+          </StarterCardSlide>
+        </div>
       </div>
     </div>
   )
