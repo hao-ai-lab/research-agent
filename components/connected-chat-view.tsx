@@ -9,6 +9,7 @@ import { WildLoopBanner } from './wild-loop-banner'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
+import { useAppSettings } from '@/lib/app-settings'
 import { useChatSession } from '@/hooks/use-chat-session'
 import { useWebNotification } from '@/hooks/use-web-notification'
 import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
@@ -74,6 +75,7 @@ export function ConnectedChatView({
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
+    const showStarterCards = useAppSettings().settings.appearance.showStarterCards !== false
     // Track which messages were auto-sent by wild loop
     const [wildMessageIndices, setWildMessageIndices] = useState<Set<number>>(new Set())
     // Track the previous streaming state to detect when streaming finishes
@@ -357,6 +359,7 @@ export function ConnectedChatView({
                     {/* Centered composer for new chats on wide screens */}
                     <div className="hidden flex-1 min-h-0 lg:flex lg:items-center lg:justify-center lg:px-6">
                         <div className="w-full max-w-6xl space-y-4">
+                            {showStarterCards && (
                             <ChatStarterCards
                                 runs={runs}
                                 sweeps={sweeps}
@@ -368,6 +371,7 @@ export function ConnectedChatView({
                                     })
                                 }}
                             />
+                            )}
                             <div className="mx-auto w-full max-w-3xl">
                                 {renderChatInput('centered')}
                             </div>
@@ -379,6 +383,7 @@ export function ConnectedChatView({
                         <div className="flex-1 min-h-0 overflow-hidden">
                             <ScrollArea className="h-full">
                                 <div className="px-3 py-4">
+                                    {showStarterCards && (
                                     <ChatStarterCards
                                         runs={runs}
                                         sweeps={sweeps}
@@ -390,6 +395,7 @@ export function ConnectedChatView({
                                             })
                                         }}
                                     />
+                                    )}
                                 </div>
                             </ScrollArea>
                         </div>
