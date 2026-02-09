@@ -403,9 +403,14 @@ def load_runs_state():
                 data = json.load(f)
                 runs = data.get("runs", {})
                 sweeps = data.get("sweeps", {})
+                sweeps_backfilled = False
                 for sweep in sweeps.values():
                     sweep["status"] = _normalize_sweep_status(sweep.get("status"))
+                    if _ensure_sweep_creation_context(sweep):
+                        sweeps_backfilled = True
                 recompute_all_sweep_states()
+                if sweeps_backfilled:
+                    save_runs_state()
         except Exception as e:
             logger.error(f"Error loading runs state: {e}")
 
@@ -674,6 +679,124 @@ def _normalize_sweep_status(raw_status: Optional[str]) -> str:
     if normalized in {"draft", "pending", "running", "completed", "failed", "canceled"}:
         return normalized
     return "pending"
+
+
+def _coerce_optional_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    stripped = str(value).strip()
+    return stripped or None
+
+
+def _coerce_optional_int(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_optional_bool(value: object) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+    return None
+
+
+def _json_clone(value: object) -> Optional[dict]:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return json.loads(json.dumps(value))
+    except Exception:
+        return None
+
+
+def _derive_sweep_creation_context(
+    *,
+    name: Optional[str],
+    base_command: Optional[str],
+    goal: Optional[str],
+    max_runs: Optional[int],
+    ui_config: Optional[dict],
+    parameters: Optional[dict],
+    created_at: float,
+) -> dict:
+    ui = ui_config if isinstance(ui_config, dict) else {}
+    parameter_grid = parameters if isinstance(parameters, dict) else {}
+
+    ui_hyperparameters = ui.get("hyperparameters")
+    ui_metrics = ui.get("metrics")
+    ui_insights = ui.get("insights")
+
+    max_runs_from_ui = _coerce_optional_int(ui.get("maxRuns"))
+    parallel_runs = _coerce_optional_int(ui.get("parallelRuns"))
+
+    hyperparameter_count = (
+        len(ui_hyperparameters)
+        if isinstance(ui_hyperparameters, list)
+        else len(parameter_grid)
+    )
+    metric_count = len(ui_metrics) if isinstance(ui_metrics, list) else None
+    insight_count = len(ui_insights) if isinstance(ui_insights, list) else None
+
+    return {
+        "name": _coerce_optional_text(ui.get("name")) or _coerce_optional_text(name),
+        "goal": _coerce_optional_text(ui.get("goal")) or _coerce_optional_text(goal),
+        "description": _coerce_optional_text(ui.get("description")),
+        "command": _coerce_optional_text(ui.get("command")) or _coerce_optional_text(base_command),
+        "notes": _coerce_optional_text(ui.get("notes")),
+        "max_runs": max_runs_from_ui if max_runs_from_ui is not None else _coerce_optional_int(max_runs),
+        "parallel_runs": parallel_runs,
+        "early_stopping_enabled": _coerce_optional_bool(ui.get("earlyStoppingEnabled")),
+        "early_stopping_patience": _coerce_optional_int(ui.get("earlyStoppingPatience")),
+        "hyperparameter_count": hyperparameter_count,
+        "metric_count": metric_count,
+        "insight_count": insight_count,
+        "created_at": created_at,
+        "ui_config_snapshot": _json_clone(ui),
+    }
+
+
+def _ensure_sweep_creation_context(sweep: dict) -> bool:
+    existing = sweep.get("creation_context")
+    if isinstance(existing, dict):
+        return False
+
+    sweep["creation_context"] = _derive_sweep_creation_context(
+        name=_coerce_optional_text(sweep.get("name")),
+        base_command=_coerce_optional_text(sweep.get("base_command")),
+        goal=_coerce_optional_text(sweep.get("goal")),
+        max_runs=_coerce_optional_int(sweep.get("max_runs")),
+        ui_config=sweep.get("ui_config") if isinstance(sweep.get("ui_config"), dict) else None,
+        parameters=sweep.get("parameters") if isinstance(sweep.get("parameters"), dict) else None,
+        created_at=float(sweep.get("created_at") or time.time()),
+    )
+    return True
 
 
 def _compute_sweep_progress(sweep: dict) -> dict:
@@ -2068,9 +2191,15 @@ async def list_sweeps(
 ):
     """List all sweeps."""
     recompute_all_sweep_states()
+    backfilled = False
     result = []
     for sweep_id, sweep in sweeps.items():
+        if _ensure_sweep_creation_context(sweep):
+            backfilled = True
         result.append({"id": sweep_id, **sweep})
+
+    if backfilled:
+        save_runs_state()
     
     result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return result[:limit]
@@ -2090,6 +2219,7 @@ async def create_wild_sweep(req: WildSweepCreate):
     """
     sweep_id = uuid.uuid4().hex[:12]
     
+    created_at = time.time()
     sweep_data = {
         "name": req.name,
         "base_command": "",
@@ -2097,10 +2227,19 @@ async def create_wild_sweep(req: WildSweepCreate):
         "parameters": {},
         "run_ids": [],
         "status": "pending",
-        "created_at": time.time(),
+        "created_at": created_at,
         "goal": req.goal,
         "is_wild": True,
         "ui_config": None,
+        "creation_context": _derive_sweep_creation_context(
+            name=req.name,
+            base_command="",
+            goal=req.goal,
+            max_runs=None,
+            ui_config=None,
+            parameters={},
+            created_at=created_at,
+        ),
         "progress": {
             "total": 0,
             "completed": 0,
@@ -2134,6 +2273,17 @@ async def create_sweep(req: SweepCreate):
     if requested_status not in {"draft", "pending", "running"}:
         raise HTTPException(status_code=400, detail=f"Unsupported sweep status: {requested_status}")
 
+    created_at = time.time()
+    creation_context = _derive_sweep_creation_context(
+        name=req.name,
+        base_command=req.base_command,
+        goal=req.goal,
+        max_runs=req.max_runs,
+        ui_config=req.ui_config,
+        parameters=req.parameters,
+        created_at=created_at,
+    )
+
     # Create draft sweep without materializing runs
     if requested_status == "draft":
         sweep_data = {
@@ -2143,9 +2293,11 @@ async def create_sweep(req: SweepCreate):
             "parameters": req.parameters or {},
             "run_ids": [],
             "status": "draft",
-            "created_at": time.time(),
+            "created_at": created_at,
             "goal": req.goal,
+            "max_runs": req.max_runs,
             "ui_config": req.ui_config,
+            "creation_context": creation_context,
             "progress": {
                 "total": 0,
                 "completed": 0,
@@ -2198,9 +2350,11 @@ async def create_sweep(req: SweepCreate):
         "parameters": req.parameters,
         "run_ids": run_ids,
         "status": "running" if requested_status == "running" else "pending",
-        "created_at": time.time(),
+        "created_at": created_at,
         "goal": req.goal,
+        "max_runs": req.max_runs,
         "ui_config": req.ui_config,
+        "creation_context": creation_context,
         "progress": {
             "total": len(run_ids),
             "completed": 0,
@@ -2290,6 +2444,8 @@ async def get_sweep(sweep_id: str):
         raise HTTPException(status_code=404, detail="Sweep not found")
 
     sweep = recompute_sweep_state(sweep_id) or sweeps[sweep_id]
+    if _ensure_sweep_creation_context(sweep):
+        save_runs_state()
     return {"id": sweep_id, **sweep}
 
 

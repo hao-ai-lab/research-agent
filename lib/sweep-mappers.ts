@@ -5,6 +5,7 @@ import type {
 } from '@/lib/api-client'
 import type {
   Sweep as UiSweep,
+  SweepCreationContext,
   SweepConfig,
   SweepHyperparameter,
   SweepStatus,
@@ -20,18 +21,61 @@ function toChoiceValues(values: unknown[]): Array<string | number> {
 
 function toDate(value: unknown, fallback: Date): Date {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value
-  if (typeof value === 'string' || typeof value === 'number') {
+  if (typeof value === 'number') {
+    const normalized = value < 1_000_000_000_000 ? value * 1000 : value
+    const parsed = new Date(normalized)
+    if (!Number.isNaN(parsed.getTime())) return parsed
+  }
+  if (typeof value === 'string') {
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) {
+      const normalized = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric
+      const parsedNumeric = new Date(normalized)
+      if (!Number.isNaN(parsedNumeric.getTime())) return parsedNumeric
+    }
     const parsed = new Date(value)
     if (!Number.isNaN(parsed.getTime())) return parsed
   }
   return fallback
 }
 
+function toNullableString(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+  }
+  if (value === null || value === undefined) return null
+  const text = String(value).trim()
+  return text.length > 0 ? text : null
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function toNullableBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'string') {
+    const lowered = value.trim().toLowerCase()
+    if (['true', '1', 'yes', 'y', 'on'].includes(lowered)) return true
+    if (['false', '0', 'no', 'n', 'off'].includes(lowered)) return false
+  }
+  return null
+}
+
 function buildFallbackConfig(sweep: ApiSweep, createdAt: Date): SweepConfig {
   return {
     id: sweep.id,
     name: sweep.name || sweep.id,
-    description: sweep.goal || '',
+    description: '',
     goal: sweep.goal || '',
     command: sweep.base_command || '',
     hyperparameters: Object.entries(sweep.parameters || {}).map(([name, values]) => ({
@@ -73,6 +117,37 @@ function hydrateConfigFromApi(sweep: ApiSweep, createdAt: Date): SweepConfig {
     insights: Array.isArray(uiConfig.insights) ? uiConfig.insights : fallback.insights,
     createdAt: toDate(uiConfig.createdAt, fallback.createdAt),
     updatedAt: toDate(uiConfig.updatedAt, fallback.updatedAt),
+  }
+}
+
+function hydrateCreationContextFromApi(
+  sweep: ApiSweep,
+  createdAt: Date,
+  config: SweepConfig,
+): SweepCreationContext {
+  const raw = sweep.creation_context && typeof sweep.creation_context === 'object'
+    ? (sweep.creation_context as Record<string, unknown>)
+    : null
+
+  const fallbackGoal = toNullableString(config.goal) || toNullableString(sweep.goal)
+  const fallbackDescription = toNullableString(config.description)
+  const fallbackCommand = toNullableString(config.command) || toNullableString(sweep.base_command)
+  const fallbackMaxRuns = toNullableNumber(config.maxRuns) ?? toNullableNumber(sweep.max_runs) ?? null
+
+  return {
+    name: toNullableString(raw?.name) || toNullableString(config.name) || toNullableString(sweep.name),
+    goal: toNullableString(raw?.goal) ?? fallbackGoal,
+    description: toNullableString(raw?.description) ?? fallbackDescription,
+    command: toNullableString(raw?.command) ?? fallbackCommand,
+    notes: toNullableString(raw?.notes) ?? toNullableString(config.notes),
+    maxRuns: toNullableNumber(raw?.max_runs) ?? fallbackMaxRuns,
+    parallelRuns: toNullableNumber(raw?.parallel_runs) ?? toNullableNumber(config.parallelRuns),
+    earlyStoppingEnabled: toNullableBoolean(raw?.early_stopping_enabled) ?? toNullableBoolean(config.earlyStoppingEnabled),
+    earlyStoppingPatience: toNullableNumber(raw?.early_stopping_patience) ?? toNullableNumber(config.earlyStoppingPatience),
+    hyperparameterCount: toNullableNumber(raw?.hyperparameter_count) ?? config.hyperparameters.length,
+    metricCount: toNullableNumber(raw?.metric_count) ?? config.metrics.length,
+    insightCount: toNullableNumber(raw?.insight_count) ?? config.insights.length,
+    createdAt: toDate(raw?.created_at, config.createdAt || createdAt),
   }
 }
 
@@ -138,9 +213,11 @@ export function mapApiSweepStatusToUi(status: ApiSweep['status']): SweepStatus {
 
 export function mapApiSweepToUiSweep(sweep: ApiSweep): UiSweep {
   const createdAt = new Date(sweep.created_at * 1000)
+  const config = hydrateConfigFromApi(sweep, createdAt)
   return {
     id: sweep.id,
-    config: hydrateConfigFromApi(sweep, createdAt),
+    config,
+    creationContext: hydrateCreationContextFromApi(sweep, createdAt, config),
     status: mapApiSweepStatusToUi(sweep.status),
     runIds: sweep.run_ids,
     createdAt,

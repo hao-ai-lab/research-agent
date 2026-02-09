@@ -577,9 +577,12 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                               <span>Best: {sweep.bestMetricValue.toFixed(4)}</span>
                             )}
                           </div>
-                          {sweep.config.goal && (
-                            <p className="text-[10px] text-muted-foreground line-clamp-1">{sweep.config.goal}</p>
-                          )}
+                          <p className="text-[10px] text-muted-foreground line-clamp-1">
+                            Goal: {(sweep.creationContext.goal || sweep.config.goal || '').trim() || 'Not provided'}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground line-clamp-1">
+                            Description: {(sweep.creationContext.description || sweep.config.description || '').trim() || 'Not provided'}
+                          </p>
                         </div>
                       )
                     }

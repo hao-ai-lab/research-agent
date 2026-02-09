@@ -326,9 +326,26 @@ export interface SweepConfig {
   updatedAt: Date;
 }
 
+export interface SweepCreationContext {
+  name: string | null;
+  goal: string | null;
+  description: string | null;
+  command: string | null;
+  notes: string | null;
+  maxRuns: number | null;
+  parallelRuns: number | null;
+  earlyStoppingEnabled: boolean | null;
+  earlyStoppingPatience: number | null;
+  hyperparameterCount: number | null;
+  metricCount: number | null;
+  insightCount: number | null;
+  createdAt: Date;
+}
+
 export interface Sweep {
   id: string;
   config: SweepConfig;
+  creationContext: SweepCreationContext;
   status: SweepStatus;
   runIds: string[];
   bestRunId?: string;

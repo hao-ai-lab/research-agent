@@ -239,6 +239,22 @@ const mockSweeps: Map<string, Sweep> = new Map([
         run_ids: ['run-qwen-001', 'run-qwen-002', 'run-qwen-003', 'run-qwen-004', 'run-qwen-005', 'run-qwen-006', 'run-qwen-007', 'run-qwen-008', 'run-qwen-009'],
         status: 'running',
         created_at: Date.now() / 1000 - 7200,
+        creation_context: {
+            name: 'Qwen8B Hyperparameter Search',
+            goal: 'Find stable lr/batch_size settings for qwen-8b fine-tuning.',
+            description: 'Initial sweep created from the run panel to explore 3x3 parameter combinations.',
+            command: 'python train.py --model qwen-8b --epochs 3 --warmup_steps 100',
+            notes: null,
+            max_runs: 9,
+            parallel_runs: 2,
+            early_stopping_enabled: null,
+            early_stopping_patience: null,
+            hyperparameter_count: 2,
+            metric_count: null,
+            insight_count: null,
+            created_at: Date.now() / 1000 - 7200,
+            ui_config_snapshot: null,
+        },
         progress: { total: 9, completed: 4, failed: 0, running: 2, ready: 2, queued: 1 },
     }],
 ])
@@ -736,6 +752,26 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
     const sweepId = `sweep-${generateId()}`
     const requestedStatus = request.status || (request.auto_start ? 'running' : 'pending')
     const shouldCreateDraft = requestedStatus === 'draft'
+    const createdAt = Date.now() / 1000
+    const uiConfig = request.ui_config || {}
+    const creationContext = {
+        name: typeof uiConfig.name === 'string' ? uiConfig.name : request.name,
+        goal: typeof uiConfig.goal === 'string' ? uiConfig.goal : (request.goal || null),
+        description: typeof uiConfig.description === 'string' ? uiConfig.description : null,
+        command: typeof uiConfig.command === 'string' ? uiConfig.command : request.base_command,
+        notes: typeof uiConfig.notes === 'string' ? uiConfig.notes : null,
+        max_runs: typeof uiConfig.maxRuns === 'number' ? uiConfig.maxRuns : (request.max_runs ?? null),
+        parallel_runs: typeof uiConfig.parallelRuns === 'number' ? uiConfig.parallelRuns : null,
+        early_stopping_enabled: typeof uiConfig.earlyStoppingEnabled === 'boolean' ? uiConfig.earlyStoppingEnabled : null,
+        early_stopping_patience: typeof uiConfig.earlyStoppingPatience === 'number' ? uiConfig.earlyStoppingPatience : null,
+        hyperparameter_count: Array.isArray(uiConfig.hyperparameters)
+            ? uiConfig.hyperparameters.length
+            : Object.keys(request.parameters || {}).length,
+        metric_count: Array.isArray(uiConfig.metrics) ? uiConfig.metrics.length : null,
+        insight_count: Array.isArray(uiConfig.insights) ? uiConfig.insights.length : null,
+        created_at: createdAt,
+        ui_config_snapshot: uiConfig,
+    }
 
     if (shouldCreateDraft) {
         const sweep: Sweep = {
@@ -746,9 +782,11 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
             parameters: request.parameters,
             run_ids: [],
             status: 'draft',
-            created_at: Date.now() / 1000,
+            created_at: createdAt,
             goal: request.goal,
+            max_runs: request.max_runs,
             ui_config: request.ui_config,
+            creation_context: creationContext,
             progress: {
                 total: 0,
                 completed: 0,
@@ -814,9 +852,11 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
         parameters: request.parameters,
         run_ids: runIds,
         status: requestedStatus === 'running' ? 'running' : 'pending',
-        created_at: Date.now() / 1000,
+        created_at: createdAt,
         goal: request.goal,
+        max_runs: request.max_runs,
         ui_config: request.ui_config,
+        creation_context: creationContext,
         progress: {
             total: runIds.length,
             completed: 0,
