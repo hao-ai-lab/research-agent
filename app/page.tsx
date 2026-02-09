@@ -46,6 +46,7 @@ const STORAGE_KEY_JOURNEY_SUB_TAB = 'journeySubTab'
 const STORAGE_KEY_CHAT_SHOW_ARTIFACTS = 'chatShowArtifacts'
 const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
 const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
+const DESKTOP_SIDEBAR_ICON_RAIL_TRIGGER_WIDTH = 136
 
 export default function ResearchChat() {
   const router = useRouter()
@@ -111,8 +112,11 @@ export default function ResearchChat() {
     if (!storedWidth) return
     const parsed = Number(storedWidth)
     if (!Number.isFinite(parsed)) return
+    const widthForSidebar = parsed <= DESKTOP_SIDEBAR_ICON_RAIL_TRIGGER_WIDTH
+      ? DESKTOP_SIDEBAR_DEFAULT_WIDTH
+      : parsed
     setDesktopSidebarWidth(
-      Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, parsed))
+      Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, widthForSidebar))
     )
   }, [])
 
@@ -213,7 +217,15 @@ export default function ResearchChat() {
 
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
-  const { createNewSession, sessions, selectSession, archiveSession } = chatSession
+  const {
+    createNewSession,
+    sessions,
+    savedSessionIds,
+    selectSession,
+    saveSession,
+    unsaveSession,
+    archiveSession,
+  } = chatSession
   const { sendMessage } = chatSession
 
   // Wild loop hook
@@ -579,6 +591,7 @@ export default function ResearchChat() {
           minWidth={DESKTOP_SIDEBAR_MIN_WIDTH}
           maxWidth={DESKTOP_SIDEBAR_MAX_WIDTH}
           sessions={sessions}
+          savedSessionIds={savedSessionIds}
           runs={runs}
           sweeps={sweeps}
           pendingAlertsByRun={pendingAlertsByRun}
@@ -590,6 +603,12 @@ export default function ResearchChat() {
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
             handleTabChange('chat')
+          }}
+          onSaveSession={async (sessionId) => {
+            await saveSession(sessionId)
+          }}
+          onUnsaveSession={async (sessionId) => {
+            await unsaveSession(sessionId)
           }}
           onArchiveSession={async (sessionId) => {
             await archiveSession(sessionId)
