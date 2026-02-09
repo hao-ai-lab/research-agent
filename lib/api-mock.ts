@@ -23,10 +23,16 @@ import type {
     ClusterStatusResponse,
     ClusterUpdateRequest,
     ClusterDetectRequest,
+    RepoDiffFileStatus,
+    RepoDiffLine,
+    RepoDiffFile,
+    RepoDiffResponse,
+    RepoFilesResponse,
+    RepoFileResponse,
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest }
+export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -314,6 +320,56 @@ let mockCluster: ClusterState = {
     },
     last_detected_at: Date.now() / 1000 - 120,
     updated_at: Date.now() / 1000 - 120,
+}
+
+const mockRepoDiff: RepoDiffResponse = {
+    repo_path: '/workspace/research-agent',
+    head: 'mock-head',
+    files: [
+        {
+            path: 'app/contextual/page.tsx',
+            status: 'modified',
+            additions: 8,
+            deletions: 2,
+            lines: [
+                { type: 'hunk', text: '@@ -64,6 +64,7 @@', oldLine: null, newLine: null },
+                { type: 'context', text: '  const [showOpsPanel, setShowOpsPanel] = useState(true)', oldLine: 64, newLine: 64 },
+                { type: 'add', text: '  const [diffExplorerOpen, setDiffExplorerOpen] = useState(false)', oldLine: null, newLine: 65 },
+            ],
+        },
+        {
+            path: 'components/contextual-diff-explorer.tsx',
+            status: 'added',
+            additions: 36,
+            deletions: 0,
+            lines: [
+                { type: 'hunk', text: '@@ -0,0 +1,36 @@', oldLine: null, newLine: null },
+                { type: 'add', text: '\'use client\'', oldLine: null, newLine: 1 },
+                { type: 'add', text: 'export function ContextualDiffExplorer() {', oldLine: null, newLine: 10 },
+            ],
+        },
+    ],
+}
+
+const mockRepoFiles: RepoFilesResponse = {
+    repo_path: '/workspace/research-agent',
+    files: [
+        'README.md',
+        'app/contextual/page.tsx',
+        'components/contextual-diff-explorer.tsx',
+        'lib/api.ts',
+        'lib/api-client.ts',
+        'server/server.py',
+    ],
+}
+
+const mockRepoFileContents: Record<string, string> = {
+    'README.md': '# Research Agent\n\nMock file explorer content.\n',
+    'app/contextual/page.tsx': '\'use client\'\n\nexport default function ContextualChatPage() {\n  return null\n}\n',
+    'components/contextual-diff-explorer.tsx': '\'use client\'\n\nexport function ContextualDiffExplorer() {\n  return null\n}\n',
+    'lib/api.ts': 'export async function getRepoDiff() {\n  return { files: [] }\n}\n',
+    'lib/api-client.ts': 'export const getRepoDiff = () => Promise.resolve({ files: [] })\n',
+    'server/server.py': 'def get_repo_diff():\n    return {"files": []}\n',
 }
 
 // =============================================================================
@@ -736,6 +792,34 @@ export async function queueRun(runId: string): Promise<Run> {
     run.status = 'queued'
     run.queued_at = Date.now() / 1000
     return run
+}
+
+export async function getRepoDiff(): Promise<RepoDiffResponse> {
+    await delay(80)
+    return mockRepoDiff
+}
+
+export async function getRepoFiles(limit: number = 5000): Promise<RepoFilesResponse> {
+    await delay(80)
+    return {
+        repo_path: mockRepoFiles.repo_path,
+        files: mockRepoFiles.files.slice(0, limit),
+    }
+}
+
+export async function getRepoFile(path: string, maxBytes: number = 120000): Promise<RepoFileResponse> {
+    await delay(80)
+    const content = mockRepoFileContents[path]
+    if (content === undefined) {
+        throw new Error('File not found')
+    }
+    const sliced = content.slice(0, maxBytes)
+    return {
+        path,
+        content: sliced,
+        binary: false,
+        truncated: content.length > sliced.length,
+    }
 }
 
 // =============================================================================

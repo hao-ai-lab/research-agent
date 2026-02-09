@@ -37,6 +37,12 @@ export type {
     ClusterStatusResponse,
     ClusterUpdateRequest,
     ClusterDetectRequest,
+    RepoDiffFileStatus,
+    RepoDiffLine,
+    RepoDiffFile,
+    RepoDiffResponse,
+    RepoFilesResponse,
+    RepoFileResponse,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -125,6 +131,15 @@ export const getRunArtifacts = (...args: Parameters<typeof realApi.getRunArtifac
 
 export const queueRun = (...args: Parameters<typeof realApi.queueRun>) =>
     getApi().queueRun(...args)
+
+export const getRepoDiff = (...args: Parameters<typeof realApi.getRepoDiff>) =>
+    getApi().getRepoDiff(...args)
+
+export const getRepoFiles = (...args: Parameters<typeof realApi.getRepoFiles>) =>
+    getApi().getRepoFiles(...args)
+
+export const getRepoFile = (...args: Parameters<typeof realApi.getRepoFile>) =>
+    getApi().getRepoFile(...args)
 
 export const listSweeps = (...args: Parameters<typeof realApi.listSweeps>) =>
     getApi().listSweeps(...args)

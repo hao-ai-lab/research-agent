@@ -7,6 +7,7 @@ import {
   Bell,
   Clock3,
   Cpu,
+  FileText,
   LayoutGrid,
   Menu,
   PanelLeftClose,
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -32,6 +34,7 @@ import { NavPage } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
 import { ContextualOperationsPanel } from '@/components/contextual-operations-panel'
 import { ContextualContextCanvas } from '@/components/contextual-context-canvas'
+import { ContextualDiffExplorer } from '@/components/contextual-diff-explorer'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
 import { listSweeps, type Sweep as ApiSweep } from '@/lib/api-client'
@@ -62,6 +65,7 @@ export default function ContextualChatPage() {
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
   const [showOpsPanel, setShowOpsPanel] = useState(true)
   const [showContextPanel, setShowContextPanel] = useState(true)
+  const [diffExplorerOpen, setDiffExplorerOpen] = useState(false)
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
 
   const fetchSweeps = useCallback(async () => {
@@ -214,6 +218,15 @@ export default function ContextualChatPage() {
               </div>
 
               <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 px-2 text-xs"
+                  onClick={() => setDiffExplorerOpen(true)}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Git Explorer
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -472,7 +485,12 @@ export default function ContextualChatPage() {
                   variant="outline"
                   size="icon"
                   className="absolute right-2 top-2 z-20 h-7 w-7 bg-background/95 backdrop-blur"
-                  onClick={() => setShowContextPanel((prev) => !prev)}
+                  onClick={() =>
+                    setShowContextPanel((prev) => {
+                      const next = !prev
+                      return next
+                    })
+                  }
                   title={showContextPanel ? 'Hide context panel' : 'Show context panel'}
                 >
                   {showContextPanel ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
@@ -536,6 +554,16 @@ export default function ContextualChatPage() {
               await selectSession(sessionId)
             }}
           />
+
+          <Dialog open={diffExplorerOpen} onOpenChange={setDiffExplorerOpen}>
+            <DialogContent
+              className="h-[94vh] w-[96vw] max-h-none max-w-none overflow-hidden p-0 gap-0"
+              showCloseButton={false}
+            >
+              <DialogTitle className="sr-only">Git Explorer</DialogTitle>
+              <ContextualDiffExplorer onClose={() => setDiffExplorerOpen(false)} />
+            </DialogContent>
+          </Dialog>
         </section>
       </main>
     </div>
