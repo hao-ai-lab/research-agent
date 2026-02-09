@@ -1,7 +1,6 @@
 'use client'
 
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
@@ -72,9 +71,9 @@ export function ConnectedChatView({
     injectedMessages = [],
     onUserMessage,
 }: ConnectedChatViewProps) {
-    const router = useRouter()
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
+    const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
     // Track which messages were auto-sent by wild loop
     const [wildMessageIndices, setWildMessageIndices] = useState<Set<number>>(new Set())
     // Track the previous streaming state to detect when streaming finishes
@@ -132,6 +131,42 @@ export function ConnectedChatView({
             (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
         )
     }, [apiDisplayMessages, injectedMessages])
+
+    const messagePairs = useMemo(() => {
+        const pairs: { user: ChatMessageType; assistant?: ChatMessageType }[] = []
+        for (let idx = 0; idx < displayMessages.length; idx += 1) {
+            const message = displayMessages[idx]
+            if (message.role === 'user') {
+                const next = displayMessages[idx + 1]
+                if (next?.role === 'assistant') {
+                    pairs.push({ user: message, assistant: next })
+                    idx += 1
+                } else {
+                    pairs.push({ user: message })
+                }
+                continue
+            }
+
+            if (message.role === 'assistant' && pairs.length === 0) {
+                pairs.push({
+                    user: {
+                        id: `system-${idx}`,
+                        role: 'user',
+                        content: '',
+                        timestamp: message.timestamp,
+                    },
+                    assistant: message,
+                })
+            }
+        }
+        return pairs
+    }, [displayMessages])
+
+    const effectiveInsertDraft = useMemo(() => {
+        if (!starterDraftInsert) return insertDraft
+        if (!insertDraft) return starterDraftInsert
+        return starterDraftInsert.id >= insertDraft.id ? starterDraftInsert : insertDraft
+    }, [starterDraftInsert, insertDraft])
 
     // ========== Wild Loop Integration ==========
 
@@ -262,36 +297,6 @@ export function ConnectedChatView({
 
     const hasConversation = displayMessages.length > 0 || streamingState.isStreaming
 
-    const messagePairs = useMemo(() => {
-        const pairs: { user: ChatMessageType; assistant?: ChatMessageType }[] = []
-        for (let idx = 0; idx < displayMessages.length; idx += 1) {
-            const message = displayMessages[idx]
-            if (message.role === 'user') {
-                const next = displayMessages[idx + 1]
-                if (next?.role === 'assistant') {
-                    pairs.push({ user: message, assistant: next })
-                    idx += 1
-                } else {
-                    pairs.push({ user: message })
-                }
-                continue
-            }
-
-            if (message.role === 'assistant' && pairs.length === 0) {
-                pairs.push({
-                    user: {
-                        id: `system-${idx}`,
-                        role: 'user',
-                        content: '',
-                        timestamp: message.timestamp,
-                    },
-                    assistant: message,
-                })
-            }
-        }
-        return pairs
-    }, [displayMessages])
-
     const renderChatInput = (layout: 'docked' | 'centered') => (
         <ChatInput
             onSend={handleSend}
@@ -314,7 +319,7 @@ export function ConnectedChatView({
             queueCount={messageQueue.length}
             queue={messageQueue}
             onRemoveFromQueue={removeFromQueue}
-            insertDraft={insertDraft}
+            insertDraft={effectiveInsertDraft}
             layout={layout}
         />
     )
@@ -351,15 +356,17 @@ export function ConnectedChatView({
                 <>
                     {/* Centered composer for new chats on wide screens */}
                     <div className="hidden flex-1 min-h-0 lg:flex lg:items-center lg:justify-center lg:px-6">
-                        <div className="w-full max-w-5xl space-y-6">
+                        <div className="w-full max-w-6xl space-y-4">
                             <ChatStarterCards
                                 runs={runs}
                                 sweeps={sweeps}
                                 alerts={alerts}
                                 onPromptSelect={(prompt) => {
-                                    void handleSend(prompt)
+                                    setStarterDraftInsert({
+                                        id: Date.now(),
+                                        text: prompt,
+                                    })
                                 }}
-                                onOpenContextual={() => router.push('/contextual')}
                             />
                             <div className="mx-auto w-full max-w-3xl">
                                 {renderChatInput('centered')}
@@ -377,9 +384,11 @@ export function ConnectedChatView({
                                         sweeps={sweeps}
                                         alerts={alerts}
                                         onPromptSelect={(prompt) => {
-                                            void handleSend(prompt)
+                                            setStarterDraftInsert({
+                                                id: Date.now(),
+                                                text: prompt,
+                                            })
                                         }}
-                                        onOpenContextual={() => router.push('/contextual')}
                                     />
                                 </div>
                             </ScrollArea>

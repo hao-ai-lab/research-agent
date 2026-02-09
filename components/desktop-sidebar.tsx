@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
+  AlertCircle,
+  AlertTriangle,
+  Archive,
+  CheckCircle2,
+  Clock3,
   ChevronsUpDown,
   FlaskConical,
   PanelLeftClose,
+  Play,
   Plus,
   Settings,
+  XCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -22,7 +29,7 @@ import {
 import { useApiConfig } from '@/lib/api-config'
 import type { ChatSession } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
-import { getStatusText } from '@/lib/status-utils'
+import { getStatusBadgeClass as getStatusBadgeClassUtil } from '@/lib/status-utils'
 import type { AppTab, HomeTab } from '@/lib/navigation'
 import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
 import { NavTabButton } from '@/components/navigation/nav-tab-button'
@@ -39,9 +46,11 @@ interface DesktopSidebarProps {
   sessions: ChatSession[]
   runs: ExperimentRun[]
   sweeps: Sweep[]
+  pendingAlertsByRun?: Record<string, number>
   onTabChange: (tab: HomeTab | 'contextual') => void
   onNewChat: () => Promise<void> | void
   onSelectSession: (sessionId: string) => Promise<void> | void
+  onArchiveSession?: (sessionId: string) => Promise<void> | void
   onNavigateToRun: (runId: string) => void
   onInsertReference: (text: string) => void
   onSettingsClick: () => void
@@ -91,9 +100,11 @@ export function DesktopSidebar({
   sessions,
   runs,
   sweeps,
+  pendingAlertsByRun = {},
   onTabChange,
   onNewChat,
   onSelectSession,
+  onArchiveSession,
   onNavigateToRun,
   onInsertReference,
   onSettingsClick,
@@ -102,6 +113,25 @@ export function DesktopSidebar({
   onResizeStart,
   onResizeEnd,
 }: DesktopSidebarProps) {
+  const getRunStatusIcon = useCallback((status: ExperimentRun['status']) => {
+    switch (status) {
+      case 'running':
+        return <Play className="h-3 w-3" />
+      case 'failed':
+        return <AlertCircle className="h-3 w-3" />
+      case 'completed':
+        return <CheckCircle2 className="h-3 w-3" />
+      case 'canceled':
+        return <XCircle className="h-3 w-3" />
+      default:
+        return <Clock3 className="h-3 w-3" />
+    }
+  }, [])
+
+  const getRunStatusBadgeClass = useCallback((status: ExperimentRun['status']) => {
+    return getStatusBadgeClassUtil(status)
+  }, [])
+
   const isIconRail = !hidden && width <= ICON_RAIL_TRIGGER_WIDTH
   const recentRuns = useMemo(
     () =>
@@ -125,6 +155,7 @@ export function DesktopSidebar({
   )
   const { useMock: isDemoMode } = useApiConfig()
   const [isResizing, setIsResizing] = useState(false)
+  const [chatEditEnabled, setChatEditEnabled] = useState(false)
   const resizeStartXRef = useRef(0)
   const resizeStartWidthRef = useRef(width)
 
@@ -164,6 +195,11 @@ export function DesktopSidebar({
       document.body.style.userSelect = ''
     }
   }, [isResizing, maxWidth, minWidth, onResizeEnd, onWidthChange])
+
+  useEffect(() => {
+    if (!isIconRail) return
+    setChatEditEnabled(false)
+  }, [isIconRail])
 
   return (
     <aside
@@ -242,7 +278,17 @@ export function DesktopSidebar({
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Chats
                 </p>
-                <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
+                {onArchiveSession ? (
+                  <button
+                    type="button"
+                    onClick={() => setChatEditEnabled((prev) => !prev)}
+                    className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {chatEditEnabled ? 'Done' : 'Edit'}
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">Edit</span>
+                )}
               </div>
               <div className="space-y-1">
                 {sessions.slice(0, 10).map((session) => (
@@ -263,14 +309,28 @@ export function DesktopSidebar({
                         {formatRelativeTime(new Date(session.created_at * 1000))}
                       </span>
                     </button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 shrink-0 px-2 text-[16px]"
-                      onClick={() => onInsertReference(`@chat:${session.id} `)}
-                    >
-                      @
-                    </Button>
+                    {chatEditEnabled && onArchiveSession ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 shrink-0 px-0.5 text-[10px] text-muted-foreground"
+                        onClick={() => {
+                          void onArchiveSession(session.id)
+                        }}
+                      >
+                        <Archive className="mr-1 h-3.5 w-1.5" />
+                        
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 shrink-0 px-2 text-[16px]"
+                        onClick={() => onInsertReference(`@chat:${session.id} `)}
+                      >
+                        @
+                      </Button>
+                    )}
                   </div>
                 ))}
                 {sessions.length === 0 && (
@@ -289,29 +349,54 @@ export function DesktopSidebar({
                 <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
               </div>
               <div className="space-y-1">
-                {recentRuns.map((run) => (
-                  <div
-                    key={run.id}
-                    className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onNavigateToRun(run.id)}
-                      className="min-w-0 flex-1 text-left"
+                {recentRuns.map((run) => {
+                  const pendingAlertCount = pendingAlertsByRun[run.id] || run.alerts?.length || 0
+                  const hasPendingAlerts = pendingAlertCount > 0
+
+                  return (
+                    <div
+                      key={run.id}
+                      className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                     >
-                      <p className="truncate text-foreground">{run.alias || run.name}</p>
-                      <p className="truncate text-[10px] text-muted-foreground">{getStatusText(run.status)}</p>
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[16px]"
-                      onClick={() => onInsertReference(`@run:${run.id} `)}
-                    >
-                      @
-                    </Button>
-                  </div>
-                ))}
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToRun(run.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <p className="min-w-0 truncate text-foreground">{run.alias || run.name}</p>
+                          <span
+                            className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${getRunStatusBadgeClass(run.status)}`}
+                            title={run.status}
+                          >
+                            {getRunStatusIcon(run.status)}
+                          </span>
+                          {hasPendingAlerts && (
+                            <div
+                              className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
+                              title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+                              {pendingAlertCount > 1 && (
+                                <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                                  {pendingAlertCount}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[16px]"
+                        onClick={() => onInsertReference(`@run:${run.id} `)}
+                      >
+                        @
+                      </Button>
+                    </div>
+                  )
+                })}
                 {recentRuns.length === 0 && (
                   <p className="px-2 py-1 text-xs text-muted-foreground">No recent runs yet.</p>
                 )}

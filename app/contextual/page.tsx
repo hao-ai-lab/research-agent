@@ -2,9 +2,31 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { LayoutGrid, Menu, MessageSquarePlus, Rows3, Settings } from 'lucide-react'
+import {
+  AlertTriangle,
+  Bell,
+  Clock3,
+  Cpu,
+  LayoutGrid,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Rows3,
+  SlidersHorizontal,
+  Sparkles,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { NavPage } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
@@ -16,7 +38,7 @@ import { listSweeps, type Sweep as ApiSweep } from '@/lib/api-client'
 import { buildHomeHref, type HomeTab, type JourneySubTab } from '@/lib/navigation'
 import { extractContextReferences } from '@/lib/contextual-chat'
 import type { ChatMode } from '@/components/chat-input'
-import type { Sweep as UiSweep, SweepConfig, SweepStatus } from '@/lib/types'
+import type { Sweep as UiSweep, SweepStatus } from '@/lib/types'
 
 const DESKTOP_SIDEBAR_MIN_WIDTH = 72
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
@@ -75,7 +97,7 @@ export default function ContextualChatPage() {
   const { runs } = useRuns()
   const { alerts } = useAlerts()
   const chatSession = useChatSession()
-  const { sessions, messages, createNewSession, selectSession } = chatSession
+  const { sessions, messages, createNewSession, selectSession, archiveSession } = chatSession
 
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [chatMode, setChatMode] = useState<ChatMode>('agent')
@@ -85,8 +107,9 @@ export default function ContextualChatPage() {
   const [sweeps, setSweeps] = useState<ApiSweep[]>([])
   const [collapseChats, setCollapseChats] = useState(true)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+  const [showOpsPanel, setShowOpsPanel] = useState(true)
+  const [showContextPanel, setShowContextPanel] = useState(true)
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
-  const [mobilePanel, setMobilePanel] = useState<'chat' | 'ops' | 'context'>('chat')
 
   const fetchSweeps = useCallback(async () => {
     try {
@@ -115,7 +138,6 @@ export default function ContextualChatPage() {
       id: Date.now(),
       text: prompt,
     })
-    setMobilePanel('chat')
   }, [])
 
   const navigateFromSidebar = useCallback((tab: HomeTab | 'contextual') => {
@@ -139,6 +161,52 @@ export default function ContextualChatPage() {
     />
   )
 
+  const runningRunCount = useMemo(
+    () => runs.filter((run) => run.status === 'running').length,
+    [runs]
+  )
+  const queuedRunCount = useMemo(
+    () => runs.filter((run) => run.status === 'queued' || run.status === 'ready').length,
+    [runs]
+  )
+  const pendingAlerts = useMemo(
+    () => alerts.filter((alert) => alert.status === 'pending').sort((a, b) => b.timestamp - a.timestamp),
+    [alerts]
+  )
+  const pendingAlertsByRun = useMemo(() => {
+    const counts: Record<string, number> = {}
+    alerts.forEach((alert) => {
+      if (alert.status === 'pending') {
+        counts[alert.run_id] = (counts[alert.run_id] || 0) + 1
+      }
+    })
+    return counts
+  }, [alerts])
+  const activeSweepCount = useMemo(
+    () => uiSweeps.filter((sweep) => sweep.status === 'running' || sweep.status === 'pending').length,
+    [uiSweeps]
+  )
+  const topContextReferences = useMemo(
+    () => contextReferences.slice(0, 3),
+    [contextReferences]
+  )
+  const queuedRunsPreview = useMemo(
+    () =>
+      runs
+        .filter((run) => run.status === 'queued' || run.status === 'ready')
+        .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+        .slice(0, 2),
+    [runs]
+  )
+  const activeSweepsPreview = useMemo(
+    () =>
+      uiSweeps
+        .filter((sweep) => sweep.status === 'running' || sweep.status === 'pending')
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, 2),
+    [uiSweeps]
+  )
+
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main className="flex h-full w-full overflow-hidden bg-background">
@@ -151,12 +219,16 @@ export default function ContextualChatPage() {
           sessions={sessions}
           runs={runs}
           sweeps={uiSweeps}
+          pendingAlertsByRun={pendingAlertsByRun}
           onTabChange={navigateFromSidebar}
           onNewChat={async () => {
             await createNewSession()
           }}
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
+          }}
+          onArchiveSession={async (sessionId) => {
+            await archiveSession(sessionId)
           }}
           onNavigateToRun={(runId) => {
             router.push(buildHomeHref('runs', journeySubTab) + `#${runId}`)
@@ -189,79 +261,270 @@ export default function ContextualChatPage() {
               </div>
 
               <div className="flex items-center gap-1">
-                <Button
-                  variant={collapseChats ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  onClick={() => setCollapseChats((prev) => !prev)}
-                >
-                  <Rows3 className="h-3.5 w-3.5" />
-                  Collapse
-                </Button>
-                <Button
-                  variant={collapseArtifactsInChat ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  onClick={() => setCollapseArtifactsInChat((prev) => !prev)}
-                >
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                  Artifacts
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  onClick={async () => {
-                    await createNewSession()
-                  }}
-                >
-                  <MessageSquarePlus className="h-3.5 w-3.5" />
-                  New
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => router.push(buildHomeHref('settings', journeySubTab))}
-                  title="Settings"
-                >
-                  <Settings className="h-4 w-4" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      title="Chat view settings"
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      <span className="sr-only">Chat view settings</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuLabel>Chat View</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuCheckboxItem
+                      checked={collapseChats}
+                      onCheckedChange={(checked) => setCollapseChats(Boolean(checked))}
+                    >
+                      <Rows3 className="mr-1 h-3.5 w-3.5" />
+                      Collapse chats
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={collapseArtifactsInChat}
+                      onCheckedChange={(checked) => setCollapseArtifactsInChat(Boolean(checked))}
+                    >
+                      <LayoutGrid className="mr-1 h-3.5 w-3.5" />
+                      Collapse artifacts
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
-            <div className="mt-2 flex items-center gap-1.5 lg:hidden">
-              <Button
-                variant={mobilePanel === 'chat' ? 'secondary' : 'ghost'}
-                size="sm"
-                className="h-7 flex-1 text-xs"
-                onClick={() => setMobilePanel('chat')}
-              >
-                Chat
-              </Button>
-              <Button
-                variant={mobilePanel === 'ops' ? 'secondary' : 'ghost'}
-                size="sm"
-                className="h-7 flex-1 text-xs"
-                onClick={() => setMobilePanel('ops')}
-              >
-                Ops
-              </Button>
-              <Button
-                variant={mobilePanel === 'context' ? 'secondary' : 'ghost'}
-                size="sm"
-                className="h-7 flex-1 text-xs"
-                onClick={() => setMobilePanel('context')}
-              >
-                Context
-              </Button>
+            <div className="mt-2 lg:hidden">
+              <div className="flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <section className="w-[78vw] max-w-[300px] shrink-0 snap-start rounded-xl border border-border/80 bg-card/90 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="inline-flex items-center gap-1 text-xs font-semibold text-foreground">
+                      <Cpu className="h-3.5 w-3.5 text-primary" />
+                      Cluster Pulse
+                    </p>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      {runningRunCount} running
+                    </Badge>
+                  </div>
+                  <div className="mb-2 grid grid-cols-2 gap-1.5 text-[10px]">
+                    <div className="rounded-md border border-border/70 bg-background/70 px-1.5 py-1 text-center">
+                      <p className="text-muted-foreground">Queued</p>
+                      <p className="mt-0.5 font-semibold text-foreground">{queuedRunCount}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-background/70 px-1.5 py-1 text-center">
+                      <p className="text-muted-foreground">Sweeps</p>
+                      <p className="mt-0.5 font-semibold text-foreground">{activeSweepCount}</p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-full text-[11px]"
+                    onClick={() =>
+                      insertPrompt(
+                        `Given ${runningRunCount} running jobs and ${queuedRunCount} queued jobs, propose a queue rebalance strategy for the next hour.`
+                      )
+                    }
+                  >
+                    Rebalance queue
+                  </Button>
+                </section>
+
+                <section className="w-[78vw] max-w-[300px] shrink-0 snap-start rounded-xl border border-border/80 bg-card/90 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="inline-flex items-center gap-1 text-xs font-semibold text-foreground">
+                      <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />
+                      Job Queue
+                    </p>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      {queuedRunCount}
+                    </Badge>
+                  </div>
+                  <div className="mb-2 space-y-1">
+                    {queuedRunsPreview.length === 0 ? (
+                      <p className="rounded-md border border-dashed border-border/80 bg-background/60 px-2 py-1.5 text-[10px] text-muted-foreground">
+                        No queued jobs.
+                      </p>
+                    ) : (
+                      queuedRunsPreview.map((run) => (
+                        <div
+                          key={run.id}
+                          className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5"
+                        >
+                          <p className="truncate text-[10px] text-foreground">{run.alias || run.name}</p>
+                          <p className="text-[9px] text-muted-foreground">{run.status}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-full text-[11px]"
+                    onClick={() =>
+                      insertPrompt('Review the queued jobs and reorder for fastest learning feedback.')
+                    }
+                  >
+                    Optimize queue
+                  </Button>
+                </section>
+
+                <section className="w-[78vw] max-w-[300px] shrink-0 snap-start rounded-xl border border-border/80 bg-card/90 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="inline-flex items-center gap-1 text-xs font-semibold text-foreground">
+                      <Bell className="h-3.5 w-3.5 text-amber-500" />
+                      Active Alerts
+                    </p>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      {pendingAlerts.length}
+                    </Badge>
+                  </div>
+                  <div className="mb-2 space-y-1">
+                    {pendingAlerts.length === 0 ? (
+                      <p className="rounded-md border border-dashed border-border/80 bg-background/60 px-2 py-1.5 text-[10px] text-muted-foreground">
+                        No pending alerts.
+                      </p>
+                    ) : (
+                      pendingAlerts.slice(0, 2).map((alert) => (
+                        <div
+                          key={alert.id}
+                          className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5"
+                        >
+                          <p className="line-clamp-2 text-[10px] text-foreground">{alert.message}</p>
+                          <p className="text-[9px] text-muted-foreground">{alert.severity}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-full text-[11px]"
+                    onClick={() =>
+                      insertPrompt(
+                        pendingAlerts[0]
+                          ? `@alert:${pendingAlerts[0].id} diagnose this alert and recommend the safest response.`
+                          : 'No pending alerts. Suggest a preventive checklist for upcoming runs.'
+                      )
+                    }
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Triage
+                  </Button>
+                </section>
+
+                <section className="w-[78vw] max-w-[300px] shrink-0 snap-start rounded-xl border border-border/80 bg-card/90 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="inline-flex items-center gap-1 text-xs font-semibold text-foreground">
+                      <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
+                      Sweeps In Flight
+                    </p>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      {activeSweepCount}
+                    </Badge>
+                  </div>
+                  <div className="mb-2 space-y-1">
+                    {activeSweepsPreview.length === 0 ? (
+                      <p className="rounded-md border border-dashed border-border/80 bg-background/60 px-2 py-1.5 text-[10px] text-muted-foreground">
+                        No active sweeps.
+                      </p>
+                    ) : (
+                      activeSweepsPreview.map((sweep) => (
+                        <div
+                          key={sweep.id}
+                          className="rounded-md border border-border/70 bg-background/70 px-2 py-1.5"
+                        >
+                          <p className="truncate text-[10px] text-foreground">{sweep.config.name}</p>
+                          <p className="text-[9px] text-muted-foreground">
+                            {sweep.progress.running} running · {sweep.progress.completed}/{sweep.progress.total}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-full text-[11px]"
+                    onClick={() =>
+                      insertPrompt('Summarize active sweep progress and recommend the next parameter experiments.')
+                    }
+                  >
+                    Review sweeps
+                  </Button>
+                </section>
+
+                <section className="w-[78vw] max-w-[300px] shrink-0 snap-start rounded-xl border border-border/80 bg-card/90 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-xs font-semibold text-foreground">Context Artifacts</p>
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      {contextReferences.length}
+                    </Badge>
+                  </div>
+                  <div className="mb-2 space-y-1">
+                    {topContextReferences.length === 0 ? (
+                      <p className="rounded-md border border-dashed border-border/80 bg-background/60 px-2 py-1.5 text-[10px] text-muted-foreground">
+                        Mention `@run`, `@sweep`, or `@alert` to pin context here.
+                      </p>
+                    ) : (
+                      topContextReferences.map((reference) => (
+                        <div
+                          key={reference.key}
+                          className="flex items-center justify-between gap-2 rounded-md border border-border/70 bg-background/70 px-2 py-1.5"
+                        >
+                          <p className="min-w-0 truncate text-[10px] text-foreground">{reference.label}</p>
+                          <Badge variant="secondary" className="h-4 px-1 text-[9px] uppercase">
+                            {reference.kind}
+                          </Badge>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-full text-[11px]"
+                    onClick={() =>
+                      insertPrompt('Summarize current context artifacts and give me the next best action.')
+                    }
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Summarize context
+                  </Button>
+                </section>
+              </div>
             </div>
           </header>
 
           <div className="flex-1 min-h-0 overflow-hidden">
-            <div className="hidden h-full min-h-0 lg:grid lg:grid-cols-[280px_minmax(0,1fr)_320px]">
-              <aside className="min-h-0 border-r border-border/80 bg-card/35">{operationsPanel}</aside>
-              <section className="min-h-0 overflow-hidden">
+            <div className="hidden h-full min-h-0 lg:flex">
+              {showOpsPanel && (
+                <aside className="h-full w-[280px] shrink-0 min-h-0 border-r border-border/80 bg-card/35">
+                  {operationsPanel}
+                </aside>
+              )}
+              <section className="relative min-w-0 flex-1 min-h-0 overflow-hidden">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute left-2 top-2 z-20 h-7 w-7 bg-background/95 backdrop-blur"
+                  onClick={() => setShowOpsPanel((prev) => !prev)}
+                  title={showOpsPanel ? 'Hide ops panel' : 'Show ops panel'}
+                >
+                  {showOpsPanel ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeftOpen className="h-3.5 w-3.5" />}
+                  <span className="sr-only">{showOpsPanel ? 'Hide ops panel' : 'Show ops panel'}</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute right-2 top-2 z-20 h-7 w-7 bg-background/95 backdrop-blur"
+                  onClick={() => setShowContextPanel((prev) => !prev)}
+                  title={showContextPanel ? 'Hide context panel' : 'Show context panel'}
+                >
+                  {showContextPanel ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
+                  <span className="sr-only">{showContextPanel ? 'Hide context panel' : 'Show context panel'}</span>
+                </Button>
                 <ConnectedChatView
                   runs={runs}
                   alerts={alerts}
@@ -270,12 +533,6 @@ export default function ContextualChatPage() {
                   onModeChange={setChatMode}
                   onRunClick={() => {
                     router.push(buildHomeHref('runs', journeySubTab))
-                  }}
-                  onEditSweep={(_config: SweepConfig) => {
-                    // Editing remains in runs/chat views for now.
-                  }}
-                  onLaunchSweep={(_config: SweepConfig) => {
-                    // Launch action handled by /sweep tools in chat for this page.
                   }}
                   collapseChats={collapseChats}
                   collapseArtifactsInChat={collapseArtifactsInChat}
@@ -284,37 +541,29 @@ export default function ContextualChatPage() {
                   onOpenSettings={() => router.push(buildHomeHref('settings', journeySubTab))}
                 />
               </section>
-              <aside className="min-h-0 border-l border-border/80 bg-card/35">{contextPanel}</aside>
+              {showContextPanel && (
+                <aside className="h-full w-[320px] shrink-0 min-h-0 border-l border-border/80 bg-card/35">
+                  {contextPanel}
+                </aside>
+              )}
             </div>
 
             <div className="flex h-full min-h-0 flex-col lg:hidden">
-              {mobilePanel === 'chat' ? (
-                <ConnectedChatView
-                  runs={runs}
-                  alerts={alerts}
-                  sweeps={uiSweeps}
-                  mode={chatMode}
-                  onModeChange={setChatMode}
-                  onRunClick={() => {
-                    router.push(buildHomeHref('runs', journeySubTab))
-                  }}
-                  onEditSweep={(_config: SweepConfig) => {
-                    // Editing remains in runs/chat views for now.
-                  }}
-                  onLaunchSweep={(_config: SweepConfig) => {
-                    // Launch action handled by /sweep tools in chat for this page.
-                  }}
-                  collapseChats={collapseChats}
-                  collapseArtifactsInChat={collapseArtifactsInChat}
-                  chatSession={chatSession}
-                  insertDraft={chatDraftInsert}
-                  onOpenSettings={() => router.push(buildHomeHref('settings', journeySubTab))}
-                />
-              ) : mobilePanel === 'ops' ? (
-                <div className="min-h-0 flex-1 overflow-hidden">{operationsPanel}</div>
-              ) : (
-                <div className="min-h-0 flex-1 overflow-hidden">{contextPanel}</div>
-              )}
+              <ConnectedChatView
+                runs={runs}
+                alerts={alerts}
+                sweeps={uiSweeps}
+                mode={chatMode}
+                onModeChange={setChatMode}
+                onRunClick={() => {
+                  router.push(buildHomeHref('runs', journeySubTab))
+                }}
+                collapseChats={collapseChats}
+                collapseArtifactsInChat={collapseArtifactsInChat}
+                chatSession={chatSession}
+                insertDraft={chatDraftInsert}
+                onOpenSettings={() => router.push(buildHomeHref('settings', journeySubTab))}
+              />
             </div>
           </div>
 

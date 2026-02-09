@@ -196,7 +196,7 @@ export default function ResearchChat() {
 
   // Chat session hook - single instance shared with ConnectedChatView
   const chatSession = useChatSession()
-  const { createNewSession, sessions, selectSession } = chatSession
+  const { createNewSession, sessions, selectSession, archiveSession } = chatSession
   const { sendMessage } = chatSession
 
   // Wild loop hook
@@ -560,6 +560,7 @@ export default function ResearchChat() {
           sessions={sessions}
           runs={runs}
           sweeps={sweeps}
+          pendingAlertsByRun={pendingAlertsByRun}
           onTabChange={handleTabChange}
           onNewChat={async () => {
             await createNewSession()
@@ -568,6 +569,9 @@ export default function ResearchChat() {
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
             handleTabChange('chat')
+          }}
+          onArchiveSession={async (sessionId) => {
+            await archiveSession(sessionId)
           }}
           onNavigateToRun={handleNavigateToRun}
           onInsertReference={handleInsertChatReference}
