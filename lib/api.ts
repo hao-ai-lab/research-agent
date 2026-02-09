@@ -729,8 +729,8 @@ export interface UpdateSweepRequest {
 /**
  * List all sweeps
  */
-export async function listSweeps(): Promise<Sweep[]> {
-    const response = await fetch(`${API_URL()}/sweeps`, {
+export async function listSweeps(limit: number = 200): Promise<Sweep[]> {
+    const response = await fetch(`${API_URL()}/sweeps?limit=${limit}`, {
         headers: getHeaders()
     })
     if (!response.ok) {

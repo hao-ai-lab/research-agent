@@ -71,6 +71,12 @@ export interface ExperimentRun {
   notes?: string;
   color?: string;
   isArchived?: boolean;
+  tmux_window?: string;
+  tmux_pane?: string;
+  run_dir?: string;
+  exit_code?: number | null;
+  error?: string | null;
+  wandb_dir?: string | null;
 }
 
 
@@ -80,6 +86,7 @@ export interface AppSettings {
     fontSize: "small" | "medium" | "large";
     buttonSize: "compact" | "default" | "large";
     runItemInteractionMode?: "detail-page" | "inline-expand";
+    showRunItemMetadata?: boolean;
     customFontSizePx?: number | null;
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
@@ -237,6 +244,7 @@ export interface InsightChart {
   createdAt: Date;
   source: "coding" | "chat";
   metric?: string;
+  isFavorite?: boolean;
   isPinned?: boolean;
   isInOverview?: boolean;
 }
@@ -252,6 +260,7 @@ export interface MetricVisualization {
   path: string;
   category: "primary" | "secondary";
   type: "line" | "bar" | "area";
+  isFavorite?: boolean;
   isPinned?: boolean;
   isInOverview?: boolean;
   layerSelector?: boolean;

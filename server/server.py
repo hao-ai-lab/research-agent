@@ -562,6 +562,109 @@ SWEEP_STATUS_TERMINAL = {"completed", "failed", "canceled"}
 SWEEP_STATUS_EDITABLE = {"draft", "pending"}
 
 
+def _coerce_exit_code(raw_value: object) -> Optional[int]:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bool):
+        return int(raw_value)
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, float) and raw_value.is_integer():
+        return int(raw_value)
+    if isinstance(raw_value, str):
+        stripped = raw_value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _terminal_status_from_exit_code(exit_code: Optional[int]) -> Optional[str]:
+    if exit_code is None:
+        return None
+    return "finished" if exit_code == 0 else "failed"
+
+
+def _reconcile_run_terminal_state(run_id: str, run: dict) -> bool:
+    changed = False
+
+    normalized_exit_code = _coerce_exit_code(run.get("exit_code"))
+    if run.get("exit_code") != normalized_exit_code:
+        run["exit_code"] = normalized_exit_code
+        changed = True
+
+    completion_file = None
+    run_dir = run.get("run_dir")
+    if run_dir:
+        completion_candidate = os.path.join(run_dir, "job.done")
+        if os.path.exists(completion_candidate):
+            completion_file = completion_candidate
+
+    if completion_file:
+        completion_exit_code: Optional[int] = None
+        try:
+            with open(completion_file, "r", encoding="utf-8", errors="replace") as f:
+                completion_exit_code = _coerce_exit_code(f.read())
+        except Exception as e:
+            logger.warning("Failed to read completion file for %s: %s", run_id, e)
+
+        if completion_exit_code is not None and run.get("exit_code") != completion_exit_code:
+            run["exit_code"] = completion_exit_code
+            normalized_exit_code = completion_exit_code
+            changed = True
+
+        completion_status = _terminal_status_from_exit_code(completion_exit_code)
+        current_status = run.get("status")
+        if completion_status and current_status not in RUN_STATUS_TERMINAL:
+            run["status"] = completion_status
+            changed = True
+        elif not completion_status and current_status not in RUN_STATUS_TERMINAL:
+            run["status"] = "failed"
+            changed = True
+            if not run.get("error"):
+                run["error"] = "Run ended but exit code could not be parsed"
+                changed = True
+
+        if completion_status == "failed" and completion_exit_code not in (None, 0) and not run.get("error"):
+            run["error"] = f"Process exited with code {completion_exit_code}"
+            changed = True
+
+        if not run.get("ended_at"):
+            try:
+                run["ended_at"] = os.path.getmtime(completion_file)
+            except OSError:
+                run["ended_at"] = time.time()
+            changed = True
+    elif run.get("status") in RUN_STATUS_TERMINAL and not run.get("ended_at"):
+        run["ended_at"] = time.time()
+        changed = True
+
+    return changed
+
+
+def _reconcile_all_run_terminal_states() -> bool:
+    changed = False
+    affected_sweeps: set[str] = set()
+
+    for run_id, run in runs.items():
+        if _reconcile_run_terminal_state(run_id, run):
+            changed = True
+            sweep_id = run.get("sweep_id")
+            if sweep_id:
+                affected_sweeps.add(sweep_id)
+
+    for sweep_id in affected_sweeps:
+        recompute_sweep_state(sweep_id)
+
+    if changed:
+        save_runs_state()
+
+    return changed
+
+
 def _normalize_sweep_status(raw_status: Optional[str]) -> str:
     if not raw_status:
         return "pending"
@@ -811,6 +914,7 @@ def _infer_cluster_from_environment() -> dict:
 
 
 def _current_run_summary() -> dict:
+    _reconcile_all_run_terminal_states()
     active_runs = [run for run in runs.values() if not run.get("is_archived", False)]
     return {
         "total": len(active_runs),
@@ -1353,6 +1457,7 @@ async def list_runs(
     limit: int = Query(100, description="Max runs to return")
 ):
     """List all runs."""
+    _reconcile_all_run_terminal_states()
     result = []
     for run_id, run in runs.items():
         if not archived and run.get("is_archived", False):
@@ -1402,6 +1507,7 @@ async def create_run(req: RunCreate):
 @app.get("/runs/{run_id}")
 async def get_run(run_id: str):
     """Get run details."""
+    _reconcile_all_run_terminal_states()
     if run_id not in runs:
         raise HTTPException(status_code=404, detail="Run not found")
     return {"id": run_id, **runs[run_id]}
@@ -1565,20 +1671,31 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
     run = runs[run_id]
     
     # Update fields
-    run["status"] = update.status
+    next_status = update.status.strip().lower()
     if update.exit_code is not None:
-        run["exit_code"] = update.exit_code
+        run["exit_code"] = _coerce_exit_code(update.exit_code)
     if update.error:
         run["error"] = update.error
     if update.tmux_pane:
         run["tmux_pane"] = update.tmux_pane
     if update.wandb_dir:
         run["wandb_dir"] = update.wandb_dir
+
+    effective_exit_code = _coerce_exit_code(run.get("exit_code"))
+    if run.get("exit_code") != effective_exit_code:
+        run["exit_code"] = effective_exit_code
+
+    if next_status == "finished" and effective_exit_code not in (None, 0):
+        next_status = "failed"
+        if not run.get("error"):
+            run["error"] = f"Process exited with code {effective_exit_code}"
+
+    run["status"] = next_status
     
     # Track timestamps
-    if update.status == "running" and not run.get("started_at"):
+    if next_status == "running" and not run.get("started_at"):
         run["started_at"] = time.time()
-    elif update.status in ["finished", "failed", "stopped"]:
+    elif next_status in RUN_STATUS_TERMINAL:
         run["ended_at"] = time.time()
 
     if run.get("sweep_id"):

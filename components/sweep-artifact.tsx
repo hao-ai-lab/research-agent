@@ -51,6 +51,9 @@ export function SweepArtifact({
   }
 
   const primaryMetric = config.metrics.find(m => m.isPrimary)
+  const goal = config.goal?.trim()
+  const description = config.description?.trim()
+  const hasDistinctDescription = Boolean(description && description !== goal)
   const statusColor = sweep?.status === 'draft'
     ? 'bg-violet-500'
     : sweep?.status === 'running' 
@@ -96,13 +99,23 @@ export function SweepArtifact({
       {expanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-border/50">
           {/* Goal */}
-          {config.goal && (
+          {goal && (
             <div className="pt-2">
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <Target className="h-3 w-3" />
                 <span>Goal</span>
               </div>
-              <p className="text-xs text-foreground/90">{config.goal}</p>
+              <p className="text-xs text-foreground/90 whitespace-pre-wrap break-words">{goal}</p>
+            </div>
+          )}
+
+          {hasDistinctDescription && (
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
+                <FileJson className="h-3 w-3" />
+                <span>Description</span>
+              </div>
+              <p className="text-xs text-foreground/90 whitespace-pre-wrap break-words">{description}</p>
             </div>
           )}
 

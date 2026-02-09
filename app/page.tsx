@@ -462,9 +462,15 @@ export default function ResearchChat() {
 
   const handleToggleChartOverview = useCallback((chartId: string) => {
     setInsightCharts(prev =>
-      prev.map(chart =>
-        chart.id === chartId ? { ...chart, isInOverview: !chart.isInOverview } : chart
-      )
+      prev.map(chart => {
+        if (chart.id !== chartId) return chart
+        const nextFavorite = !(chart.isInOverview || chart.isFavorite)
+        return {
+          ...chart,
+          isFavorite: nextFavorite,
+          isInOverview: nextFavorite,
+        }
+      })
     )
   }, [])
 

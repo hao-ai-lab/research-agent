@@ -15,6 +15,7 @@ import {
   Rows3,
   RotateCcw,
   Server,
+  Clock,
   Slack,
   Sparkles,
   Square,
@@ -170,6 +171,14 @@ export function SettingsPageContent({
           type: 'select' as const,
           options: ['detail-page', 'inline-expand'],
           value: settings.appearance.runItemInteractionMode || 'detail-page',
+        },
+        {
+          id: 'showRunItemMetadata',
+          label: 'Run Item Metadata',
+          description: 'Show Start, Created, and Runtime under each run name',
+          icon: Clock,
+          type: 'toggle' as const,
+          value: settings.appearance.showRunItemMetadata !== false,
         },
         {
           id: 'showStarterCards',
@@ -447,6 +456,7 @@ export function SettingsPageContent({
               onCheckedChange={(checked) => {
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
+                if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
               }}
             />
