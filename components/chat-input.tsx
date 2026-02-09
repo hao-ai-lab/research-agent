@@ -145,6 +145,7 @@ export function ChatInput({
         type: 'sweep',
         label: sweep.config.name || `Sweep ${sweep.id}`,
         sublabel: `${sweep.status} · ${sweep.progress.running} running · ${sweep.progress.completed} done`,
+        color: '#a855f7',
         icon: <Sparkles className="h-3 w-3" />,
       })
     })
@@ -284,15 +285,39 @@ export function ChatInput({
     return map
   }, [])
 
+  const mentionTypeColorMap = useMemo<Record<MentionType, string>>(
+    () => ({
+      run: '#22c55e',
+      sweep: '#a855f7',
+      artifact: '#0ea5e9',
+      alert: '#f97316',
+      chart: '#14b8a6',
+      chat: '#64748b',
+    }),
+    []
+  )
+
+  const mentionTypeBackgroundMap = useMemo<Record<MentionType, string>>(
+    () => ({
+      run: 'rgba(34, 197, 94, 0.18)',
+      sweep: 'rgba(168, 85, 247, 0.2)',
+      artifact: 'rgba(14, 165, 233, 0.16)',
+      alert: 'rgba(249, 115, 22, 0.18)',
+      chart: 'rgba(20, 184, 166, 0.16)',
+      chat: 'rgba(100, 116, 139, 0.2)',
+    }),
+    []
+  )
+
   const highlightedMessage = useMemo(() => {
     if (!message) return null
     const parts: React.ReactNode[] = []
-    const commandRegex = /\/[a-zA-Z][\w-]*/g
+    const tokenRegex = /(@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+|\/[a-zA-Z][\w-]*)/g
     let cursor = 0
     let match: RegExpExecArray | null
     let keyIndex = 0
 
-    while ((match = commandRegex.exec(message)) !== null) {
+    while ((match = tokenRegex.exec(message)) !== null) {
       const token = match[0]
       const matchStart = match.index
       const matchEnd = matchStart + token.length
@@ -305,12 +330,30 @@ export function ChatInput({
         )
       }
 
-      const color = commandColorMap.get(token.toLowerCase())
-      parts.push(
-        <span key={`command-${keyIndex++}`} style={color ? { color } : undefined}>
-          {token}
-        </span>
-      )
+      if (token.startsWith('/')) {
+        const color = commandColorMap.get(token.toLowerCase())
+        parts.push(
+          <span key={`command-${keyIndex++}`} style={color ? { color } : undefined}>
+            {token}
+          </span>
+        )
+      } else {
+        const mentionType = token.slice(1).split(':')[0] as MentionType
+        const mentionColor = mentionTypeColorMap[mentionType]
+        const mentionBackground = mentionTypeBackgroundMap[mentionType]
+        parts.push(
+          <span
+            key={`mention-${keyIndex++}`}
+            className="rounded-md px-1 py-0.5"
+            style={{
+              color: mentionColor,
+              backgroundColor: mentionBackground,
+            }}
+          >
+            {token}
+          </span>
+        )
+      }
 
       cursor = matchEnd
     }
@@ -324,7 +367,7 @@ export function ChatInput({
     }
 
     return parts
-  }, [message, commandColorMap])
+  }, [message, commandColorMap, mentionTypeBackgroundMap, mentionTypeColorMap])
 
   // Reset selected index when filtered items change
   useEffect(() => {
@@ -523,6 +566,9 @@ export function ChatInput({
         if (textAfterAt.startsWith('run:')) {
           setMentionFilter('run')
           setMentionQuery(textAfterAt.slice(4))
+        } else if (textAfterAt.startsWith('sweep:')) {
+          setMentionFilter('sweep')
+          setMentionQuery(textAfterAt.slice(6))
         } else if (textAfterAt.startsWith('alert:')) {
           setMentionFilter('alert')
           setMentionQuery(textAfterAt.slice(6))
@@ -764,30 +810,6 @@ export function ChatInput({
             ref={mentionPopoverRef}
             className="absolute bottom-full left-0 right-0 mb-1 z-50 bg-card border border-border rounded-lg shadow-lg overflow-hidden"
           >
-            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-secondary/30">
-              <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
-              <div className="flex-1 min-w-0 overflow-x-auto">
-                <div className="flex min-w-max items-center gap-1 pr-1">
-                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setMentionFilter(type)}
-                      className={`shrink-0 max-w-[88px] px-2 py-0.5 text-[10px] rounded transition-colors ${
-                        mentionFilter === type
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-muted-foreground hover:bg-secondary'
-                      }`}
-                    >
-                      <span className="block truncate">
-                        {type === 'all' ? 'All' : type.charAt(0).toUpperCase() + type.slice(1)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
             <div className="max-h-[200px] overflow-y-auto py-1">
               {filteredMentionItems.length > 0 ? (
                 filteredMentionItems.map((item, index) => (
@@ -815,8 +837,15 @@ export function ChatInput({
                         <p className="text-[10px] text-muted-foreground truncate">{item.sublabel}</p>
                       )}
                     </div>
-                    <span className="text-[9px] text-muted-foreground/60 uppercase shrink-0">
-                      {item.type}
+                    <span
+                      className="shrink-0 rounded border px-1.5 py-0.5 text-[9px] uppercase"
+                      style={{
+                        color: mentionTypeColorMap[item.type],
+                        backgroundColor: mentionTypeBackgroundMap[item.type],
+                        borderColor: `${mentionTypeColorMap[item.type]}66`,
+                      }}
+                    >
+                      @{item.type}
                     </span>
                   </button>
                 ))
@@ -829,6 +858,45 @@ export function ChatInput({
                       : `No ${mentionFilter} items available.`}
                 </div>
               )}
+            </div>
+
+            <div className="flex items-center gap-1 px-2 py-1.5 border-t border-border bg-secondary/30">
+              <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
+              <div className="flex-1 min-w-0 overflow-x-auto">
+                <div className="flex min-w-max items-center gap-1 pr-1">
+                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setMentionFilter(type)}
+                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${
+                        mentionFilter === type
+                          ? 'border-transparent'
+                          : 'border-transparent text-muted-foreground hover:bg-secondary'
+                      }`}
+                      style={
+                        mentionFilter === type
+                          ? type === 'all'
+                            ? {
+                                backgroundColor: 'hsl(var(--secondary))',
+                                color: 'hsl(var(--foreground))',
+                                borderColor: 'hsl(var(--border))',
+                              }
+                            : {
+                                color: mentionTypeColorMap[type],
+                                backgroundColor: mentionTypeBackgroundMap[type],
+                                borderColor: `${mentionTypeColorMap[type]}66`,
+                              }
+                          : undefined
+                      }
+                    >
+                      <span className="block truncate">
+                        {type === 'all' ? 'All' : type.charAt(0).toUpperCase() + type.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="px-2 py-1 border-t border-border bg-secondary/20">
@@ -1039,6 +1107,14 @@ export function ChatInput({
                 >
                   <Play className="h-3.5 w-3.5" />
                   <span>Add run</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openMentionFromToolbar('sweep')}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                  <span>Add sweep</span>
                 </button>
                 <button
                   type="button"

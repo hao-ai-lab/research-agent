@@ -25,6 +25,7 @@ import {
   Square,
   BarChart3,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -59,6 +60,8 @@ import {
 import { TagsDialog } from './tags-dialog'
 import { LogViewer } from './log-viewer'
 import { TmuxTerminalPanel } from './tmux-terminal-panel'
+import { SweepArtifact } from './sweep-artifact'
+import { SweepStatus } from './sweep-status'
 import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
 import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
 import type { Alert } from '@/lib/api-client'
@@ -224,9 +227,14 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [logsFullPage, setLogsFullPage] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(true)
+  const [sweepObjectOpen, setSweepObjectOpen] = useState(true)
 
   const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
   const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
+  const linkedSweep = useMemo(
+    () => sweeps.find((sweep) => sweep.id === run.sweepId),
+    [run.sweepId, sweeps]
+  )
 
   const copyCommand = () => {
     navigator.clipboard.writeText(run.command)
@@ -427,13 +435,14 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                 <div className="min-w-0">
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
                   {(() => {
-                    const sweep = sweeps.find(s => s.id === run.sweepId)
+                    const sweep = linkedSweep
                     if (sweep) {
                       return (
                         <div className="mt-1 space-y-1.5">
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-medium text-foreground truncate">{sweep.config.name}</span>
                             <Badge variant="outline" className={`text-[9px] h-4 ${
+                              sweep.status === 'draft' ? 'border-violet-500/50 bg-violet-500/10 text-violet-500' :
                               sweep.status === 'running' ? 'border-blue-400/50 bg-blue-400/10 text-blue-400' :
                               sweep.status === 'completed' ? 'border-green-400/50 bg-green-400/10 text-green-400' :
                               sweep.status === 'failed' ? 'border-destructive/50 bg-destructive/10 text-destructive' :
@@ -468,6 +477,48 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                 )}
               </div>
             </div>
+
+            {/* Sweep Object */}
+            <Collapsible open={sweepObjectOpen} onOpenChange={setSweepObjectOpen}>
+              <div className={`rounded-lg border overflow-hidden ${linkedSweep ? 'border-border bg-card' : 'border-border border-dashed bg-card'}`}>
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-violet-500" />
+                      <span className={`text-xs font-medium ${linkedSweep ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        Sweep Object
+                      </span>
+                    </div>
+                    {sweepObjectOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border px-2 pb-2">
+                    {linkedSweep ? (
+                      <div className="pt-2">
+                        {linkedSweep.status === 'draft' ? (
+                          <SweepArtifact config={linkedSweep.config} sweep={linkedSweep} isCollapsed={false} />
+                        ) : (
+                          <SweepStatus sweep={linkedSweep} runs={runs} onRunClick={onRunSelect} isCollapsed={false} />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-5 text-center">
+                        <p className="text-xs text-muted-foreground">
+                          {run.sweepId
+                            ? `Sweep ${run.sweepId} was not found.`
+                            : 'This run is not attached to a sweep object.'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
 
             {/* Tags + Quick Actions Row */}
             <div className="flex items-center gap-2">

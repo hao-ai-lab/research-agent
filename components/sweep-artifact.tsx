@@ -51,7 +51,9 @@ export function SweepArtifact({
   }
 
   const primaryMetric = config.metrics.find(m => m.isPrimary)
-  const statusColor = sweep?.status === 'running' 
+  const statusColor = sweep?.status === 'draft'
+    ? 'bg-violet-500'
+    : sweep?.status === 'running' 
     ? 'bg-accent' 
     : sweep?.status === 'completed' 
     ? 'bg-emerald-500' 
