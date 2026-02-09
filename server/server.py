@@ -2485,11 +2485,15 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
         if runtime.full_text or runtime.full_thinking or parts:
             session = chat_sessions.get(session_id)
             if isinstance(session, dict):
+                # Filter out pure text parts to avoid duplication, as they are already in 'content'
+                start_parts = parts if parts else []
+                final_parts = [p for p in start_parts if p.get("type") != "text"]
+
                 assistant_msg = {
                     "role": "assistant",
                     "content": runtime.full_text.strip(),
                     "thinking": runtime.full_thinking.strip() if runtime.full_thinking else None,
-                    "parts": parts if parts else None,
+                    "parts": final_parts if final_parts else None,
                     "timestamp": time.time(),
                 }
                 session.setdefault("messages", []).append(assistant_msg)

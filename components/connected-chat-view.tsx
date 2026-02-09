@@ -7,11 +7,19 @@ import { ChatInput, type ChatMode } from './chat-input'
 import { StreamingMessage } from './streaming-message'
 import { WildLoopBanner } from './wild-loop-banner'
 import { WildTerminationDialog } from './wild-termination-dialog'
+import { AlertCircle, Loader2, WifiOff, Plus } from 'lucide-react'
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
 import { useAppSettings } from '@/lib/app-settings'
 import { useChatSession } from '@/hooks/use-chat-session'
 import { useWebNotification } from '@/hooks/use-web-notification'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
 import type {
     ChatMessage as ChatMessageType,
@@ -110,15 +118,30 @@ export function ConnectedChatView({
         isLoading,
         error,
         currentSessionId,
+        currentSession,
+        sessions,
         messages,
         streamingState,
         sendMessage,
         createNewSession,
+        selectSession,
         stopStreaming,
         queueMessage,
         messageQueue,
         removeFromQueue,
     } = externalChatSession || internalChatSession
+
+    // Get the session title for display
+    const sessionTitle = currentSession?.title || 'New Chat'
+
+    // Handle session change from dropdown
+    const handleSessionChange = useCallback(async (sessionId: string) => {
+        if (sessionId === 'new') {
+            await createNewSession()
+        } else {
+            await selectSession(sessionId)
+        }
+    }, [createNewSession, selectSession])
 
     // Notify parent of session changes
     useEffect(() => {
@@ -360,6 +383,42 @@ export function ConnectedChatView({
 
     return (
         <div className="flex h-full flex-col overflow-hidden">
+            {/* Title Header with Session Selector */}
+            <div className="shrink-0 border-b border-border bg-background px-6 py-4">
+                <Select
+                    value={currentSessionId || 'new'}
+                    onValueChange={handleSessionChange}
+                >
+                    <SelectTrigger className="w-full max-w-md border-0 px-3 py-2 shadow-none focus:ring-0 bg-secondary/100 hover:bg-secondary/80 rounded-lg transition-colors">
+                        <SelectValue>
+                            <h1 className="text-2xl font-semibold text-foreground">
+                                {sessionTitle}
+                            </h1>
+                        </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="new">
+                            <div className="flex items-center gap-2">
+                                <Plus className="h-4 w-4" />
+                                <span className="font-medium">New Chat</span>
+                            </div>
+                        </SelectItem>
+                        {sessions
+                            .sort((a, b) => b.created_at - a.created_at)
+                            .map((session) => (
+                                <SelectItem key={session.id} value={session.id}>
+                                    <div className="flex flex-col">
+                                        <span className="font-medium">{session.title}</span>
+                                        <span className="text-xs text-muted-foreground">
+                                            {session.message_count} message{session.message_count !== 1 ? 's' : ''}
+                                        </span>
+                                    </div>
+                                </SelectItem>
+                            ))}
+                    </SelectContent>
+                </Select>
+            </div>
+
             {/* Wild Loop Banner */}
             {wildLoop?.isActive && (
                 <WildLoopBanner
