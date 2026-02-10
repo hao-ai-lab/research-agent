@@ -152,8 +152,8 @@ export async function deleteSession(sessionId: string): Promise<void> {
 export async function* streamChat(
     sessionId: string,
     message: string,
-    wildMode: boolean = false,
-    signal?: AbortSignal
+    mode: string = 'agent',
+    signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent, void, unknown> {
     const response = await fetch(`${API_URL()}/chat`, {
         method: 'POST',
@@ -161,7 +161,7 @@ export async function* streamChat(
         body: JSON.stringify({
             session_id: sessionId,
             message,
-            wild_mode: wildMode,
+            mode,
         }),
         signal,
     })

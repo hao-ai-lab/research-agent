@@ -11,6 +11,7 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
+from dataclasses import dataclass
 import json
 import math
 import os
@@ -24,7 +25,7 @@ import asyncio
 import shutil
 import socket
 import subprocess
-from typing import Any, Dict, Optional, AsyncIterator, List
+from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
 import httpx
 import uvicorn
@@ -192,6 +193,8 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    mode: str = "agent"  # "agent" | "wild" | "plan" | "sweep"
+    # Backward compat: accept old boolean fields and convert
     wild_mode: bool = False
 
 
@@ -2575,81 +2578,96 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
     return {"system_prompt": req.system_prompt}
 
 
-def _build_chat_prompt(session: dict, message: str, wild_mode: bool) -> str:
-    wild_mode_note = ""
-    if wild_mode:
-        # Build Ralph-style loop prompt using prompt skill templates
-        iteration = wild_loop_state.get("iteration", 0) + 1
-        goal = wild_loop_state.get("goal") or "No specific goal set"
-        max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
-        custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
+# ---------------------------------------------------------------------------
+# Mode Registry: data-driven prompt builder
+# ---------------------------------------------------------------------------
 
-        # Build experiment state summary
-        experiment_context = _build_experiment_context()
+@dataclass
+class ModeConfig:
+    """Declares how to build a mode-specific prompt preamble."""
+    skill_id: str
+    build_state: Callable[[str], dict]  # (message) -> template variables
 
-        iter_display = f"{iteration}"
-        if max_iter:
-            iter_display += f" / {max_iter}"
+
+def _build_plan_state(message: str) -> dict:
+    """Build template variables for plan mode."""
+    return {
+        "goal": message,
+        "experiment_context": _build_experiment_context(),
+    }
+
+
+def _build_wild_prompt_inline() -> str:
+    """Build the wild-mode preamble using inline state (no external module)."""
+    iteration = wild_loop_state.get("iteration", 0) + 1
+    goal = wild_loop_state.get("goal") or "No specific goal set"
+    max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+    custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
+
+    experiment_context = _build_experiment_context()
+
+    iter_display = f"{iteration}"
+    if max_iter:
+        iter_display += f" / {max_iter}"
+    else:
+        iter_display += " (unlimited)"
+
+    sweep_id = wild_loop_state.get("sweep_id")
+    sweep_note = ""
+    if sweep_id:
+        sweep_note = (
+            f"\n## Active Wild Sweep\n"
+            f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
+            f"so they are tracked as part of this wild loop session.\n"
+        )
+
+    custom_condition_text = ""
+    if custom_cond:
+        custom_condition_text = f"- Custom stop condition: {custom_cond}"
+
+    rendered = prompt_skill_manager.render("wild_system", {
+        "iteration": iter_display,
+        "max_iterations": str(max_iter) if max_iter else "unlimited",
+        "goal": goal,
+        "experiment_context": experiment_context,
+        "sweep_note": sweep_note,
+        "custom_condition": custom_condition_text,
+    })
+    if rendered:
+        return rendered + "\n\n"
+
+    logger.warning("wild_system prompt skill not found — sending raw message")
+    return ""
+
+
+# NOTE: wild mode uses _build_wild_prompt_inline() because it has its own
+# iteration/sweep/condition logic. We register it with a special sentinel
+# so the generic path delegates correctly.
+_WILD_SENTINEL = "__wild__"
+
+MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "plan": ModeConfig(skill_id="ra_mode_plan", build_state=_build_plan_state),
+    "wild": ModeConfig(skill_id=_WILD_SENTINEL, build_state=lambda _msg: {}),
+}
+
+
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> str:
+    """Build the full prompt for a chat turn, prepending mode-specific preamble."""
+    mode_note = ""
+
+    config = MODE_REGISTRY.get(mode)
+    if config:
+        if config.skill_id == _WILD_SENTINEL:
+            mode_note = _build_wild_prompt_inline()
         else:
-            iter_display += " (unlimited)"
+            variables = config.build_state(message)
+            rendered = prompt_skill_manager.render(config.skill_id, variables)
+            if rendered:
+                mode_note = rendered + "\n\n"
+            else:
+                logger.warning(f"{config.skill_id} prompt skill not found — sending raw message")
 
-        # Include sweep_id so the agent associates runs with this wild loop
-        sweep_id = wild_loop_state.get("sweep_id")
-        sweep_note = ""
-        if sweep_id:
-            sweep_note = (
-                f"\n## Active Wild Sweep\n"
-                f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
-                f"so they are tracked as part of this wild loop session.\n"
-            )
-
-        custom_condition_text = ""
-        if custom_cond:
-            custom_condition_text = f"- Custom stop condition: {custom_cond}"
-
-        # Try template-based rendering first, fall back to inline
-        rendered = prompt_skill_manager.render("wild_system", {
-            "iteration": iter_display,
-            "max_iterations": str(max_iter) if max_iter else "unlimited",
-            "goal": goal,
-            "experiment_context": experiment_context,
-            "sweep_note": sweep_note,
-            "custom_condition": custom_condition_text,
-        })
-        if rendered:
-            wild_mode_note = rendered + "\n\n"
-        else:
-            # Fallback: inline prompt (in case template file is missing)
-            logger.warning("wild_system prompt skill not found, using inline fallback")
-            wild_mode_note = (
-                f"# Wild Loop — Iteration {iter_display}\n\n"
-                f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
-                f"## Your Goal\n{goal}\n\n"
-                f"{experiment_context}\n"
-                f"{sweep_note}"
-                f"## Instructions\n"
-                f"1. Read the current state of runs, sweeps, and alerts above\n"
-                f"2. Plan what work remains to achieve the goal\n"
-                f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
-                f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
-                f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
-                f"6. At the END of your response, output exactly ONE promise tag:\n"
-                f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
-                f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
-                f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
-                f"## Critical Rules\n"
-                f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
-                f"- Creating or launching runs is NOT completion — you must check their results\n"
-                f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
-                f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
-                f"- If stuck, try a different approach\n"
-                f"- The loop will continue until you succeed or are stopped\n"
-            )
-            if custom_cond:
-                wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
-            wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
-
-    content = f"{wild_mode_note}[USER] {message}"
+    content = f"{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
@@ -2782,7 +2800,14 @@ async def chat_endpoint(req: ChatRequest):
 
     save_chat_state()
 
-    content = _build_chat_prompt(session, req.message, req.wild_mode)
+    # Resolve mode: prefer explicit mode field, fall back to legacy booleans
+    effective_mode = req.mode
+    if effective_mode == "agent":
+        if req.wild_mode:
+            effective_mode = "wild"
+        elif req.plan_mode:
+            effective_mode = "plan"
+    content = _build_chat_prompt(session, req.message, effective_mode)
     runtime = await _start_chat_worker(session_id, content)
     return StreamingResponse(
         _stream_runtime_events(session_id, from_seq=1, run_id=runtime.run_id),

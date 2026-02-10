@@ -492,7 +492,7 @@ export async function* streamChat(
     sessionId: string,
     message: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _wildMode: boolean = false,
+    _mode: string = 'agent',
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _signal?: AbortSignal
 ): AsyncGenerator<StreamEvent, void, unknown> {
