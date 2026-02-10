@@ -8,7 +8,7 @@ This guide walks you through setting up and running the research agent locally, 
 
 ```bash
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
-
+```
 
 ---
 
