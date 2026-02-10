@@ -3363,6 +3363,188 @@ def _build_experiment_context() -> str:
 
 
 # =============================================================================
+# GPU Orchestration Endpoints
+# =============================================================================
+
+from gpu_resource_manager import resource_manager
+from job_queue_manager import job_queue, JobPriority
+from orchestration_agent import orchestration_agent, OrchestrationPolicy
+
+
+class JobSubmitRequest(BaseModel):
+    run_id: str
+    user: str
+    command: str
+    gpu_count: int
+    gpu_memory_gb: float = 0
+    priority: int = JobPriority.NORMAL
+    estimated_duration_seconds: Optional[int] = None
+
+
+class JobPriorityUpdateRequest(BaseModel):
+    priority: int
+
+
+class OrchestrationPolicyUpdateRequest(BaseModel):
+    scheduling_algorithm: Optional[str] = None
+    max_concurrent_jobs: Optional[int] = None
+    enable_auto_retry: Optional[bool] = None
+
+
+@app.get("/gpu/status")
+async def get_gpu_status():
+    """Get current GPU resource status and allocations."""
+    return {
+        "cluster_status": resource_manager.get_cluster_status(),
+        "queue_stats": job_queue.get_statistics(),
+    }
+
+
+@app.post("/gpu/initialize")
+async def initialize_gpu_cluster(node_count: int = 2, gpus_per_node: int = 8):
+    """Initialize GPU cluster with specified configuration."""
+    resource_manager.initialize_cluster(node_count, gpus_per_node)
+    return {
+        "message": "GPU cluster initialized",
+        "cluster_status": resource_manager.get_cluster_status(),
+    }
+
+
+@app.get("/queue")
+async def get_queue_state():
+    """Get current job queue state."""
+    queued_jobs = job_queue.get_queue_state()
+    running_jobs = job_queue.get_running_jobs()
+    
+    return {
+        "queued": [job.to_dict() for job in queued_jobs],
+        "running": [job.to_dict() for job in running_jobs],
+        "statistics": job_queue.get_statistics(),
+    }
+
+
+@app.post("/queue/submit")
+async def submit_job_to_queue(req: JobSubmitRequest):
+    """Submit a new job to the GPU job queue."""
+    try:
+        job_id = job_queue.enqueue(
+            run_id=req.run_id,
+            user=req.user,
+            command=req.command,
+            gpu_count=req.gpu_count,
+            gpu_memory_gb=req.gpu_memory_gb,
+            priority=req.priority,
+            estimated_duration_seconds=req.estimated_duration_seconds,
+        )
+        
+        job = job_queue.get_job(job_id)
+        
+        return {
+            "success": True,
+            "job_id": job_id,
+            "job": job.to_dict() if job else None,
+            "queue_position": len([j for j in job_queue.get_queue_state() if j.priority >= req.priority]),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/queue/{job_id}")
+async def cancel_queued_job(job_id: str):
+    """Cancel a queued or scheduled job."""
+    success = job_queue.cancel_job(job_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found or cannot be canceled")
+    
+    return {"success": True, "message": f"Job {job_id} canceled"}
+
+
+@app.patch("/queue/{job_id}/priority")
+async def update_job_priority(job_id: str, req: JobPriorityUpdateRequest):
+    """Update priority of a queued job."""
+    success = job_queue.update_priority(job_id, req.priority)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found or cannot update priority")
+    
+    job = job_queue.get_job(job_id)
+    return {
+        "success": True,
+        "job": job.to_dict() if job else None,
+    }
+
+
+@app.get("/orchestrator/status")
+async def get_orchestrator_status():
+    """Get orchestration agent status."""
+    if orchestration_agent is None:
+        return {"error": "Orchestration agent not initialized"}
+    
+    return orchestration_agent.get_status()
+
+
+@app.post("/orchestrator/start")
+async def start_orchestrator():
+    """Start the orchestration agent."""
+    if orchestration_agent is None:
+        raise HTTPException(status_code=503, detail="Orchestration agent not initialized")
+    
+    await orchestration_agent.start()
+    
+    return {
+        "success": True,
+        "message": "Orchestration agent started",
+        "status": orchestration_agent.get_status(),
+    }
+
+
+@app.post("/orchestrator/stop")
+async def stop_orchestrator():
+    """Stop the orchestration agent."""
+    if orchestration_agent is None:
+        raise HTTPException(status_code=503, detail="Orchestration agent not initialized")
+    
+    await orchestration_agent.stop()
+    
+    return {
+        "success": True,
+        "message": "Orchestration agent stopped",
+    }
+
+
+@app.put("/orchestrator/policy")
+async def update_orchestrator_policy(req: OrchestrationPolicyUpdateRequest):
+    """Update orchestration agent policy."""
+    if orchestration_agent is None:
+        raise HTTPException(status_code=503, detail="Orchestration agent not initialized")
+    
+    updates = req.model_dump(exclude_unset=True)
+    orchestration_agent.update_policy(**updates)
+    
+    return {
+        "success": True,
+        "policy": orchestration_agent.get_status()["policy"],
+    }
+
+
+@app.post("/jobs/{job_id}/complete")
+async def mark_job_complete(job_id: str, success: bool = True, error_message: Optional[str] = None):
+    """Mark a job as complete (called by job execution system)."""
+    if orchestration_agent is None:
+        # If orchestrator not running, just release resources directly
+        resource_manager.release_gpus(job_id)
+        return {"success": True, "message": "Resources released"}
+    
+    orchestration_agent.handle_job_completion(job_id, success, error_message)
+    
+    return {
+        "success": True,
+        "message": f"Job {job_id} marked as {'completed' if success else 'failed'}",
+    }
+
+
+# =============================================================================
 # Prompt Skill Endpoints
 # =============================================================================
 
@@ -4023,6 +4205,22 @@ def main():
         inferred = _infer_cluster_from_environment()
         cluster_state.update(_normalize_cluster_state(inferred))
         save_settings_state()
+    
+    # Initialize GPU orchestration
+    gpu_enabled = os.environ.get("RESEARCH_AGENT_GPU_ORCHESTRATION_ENABLED", "false").lower() == "true"
+    if gpu_enabled:
+        logger.info("Initializing GPU orchestration system...")
+        from orchestration_agent import OrchestrationAgent, OrchestrationPolicy
+        import orchestration_agent as orch_mod
+        orch_mod.orchestration_agent = OrchestrationAgent(
+            resource_manager=resource_manager,
+            job_queue=job_queue,
+            policy=OrchestrationPolicy(),
+        )
+        # Initialize cluster with default config (2 nodes, 8 GPUs each)
+        resource_manager.initialize_cluster(node_count=2, gpus_per_node=8)
+        logger.info("GPU orchestration initialized")
+    
     maybe_mount_frontend_static()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
