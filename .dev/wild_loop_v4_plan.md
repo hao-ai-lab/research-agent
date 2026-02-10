@@ -6,15 +6,15 @@
 
 The v3 frontend-driven wild loop (`use-wild-loop.ts`) works, but has fundamental fragility:
 
-| Problem                                | Root Cause                                                                                            |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Browser-bound**                      | Loop dies on tab close/refresh — no persistence                                                       |
-| **Stale closures**                     | 15+ `useRef` mirrors for every piece of state, all manually synced                                    |
-| **Prompt logic spread across FE + BE** | `buildExploringPrompt()` in frontend, `_build_chat_prompt()` in backend — both inject context         |
-| **Single-slot prompt queue**           | `pendingPrompt` is a single `string                                                                   |
-| **No planning phase**                  | Agent jumps straight into action; no user review of the plan before execution                         |
-| **Prompt hardcoded**                   | Markdown templates are string literals in TS — impossible for users to customize without code changes |
-| **No priority**                        | Alerts and run events processed in arrival order, not by importance                                   |
+| Problem                                | Root Cause                                                                                    |
+| -------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Browser-bound**                      | Loop dies on tab close/refresh — no persistence                                               |
+| **Stale closures**                     | 15+ `useRef` mirrors for every piece of state, all manually synced                            |
+| **Prompt logic spread across FE + BE** | `buildExploringPrompt()` in frontend, `_build_chat_prompt()` in backend — both inject context |
+
+| **No planning phase** | Agent jumps straight into action; no user review of the plan before execution |
+| **Prompt hardcoded** | Markdown templates are string literals in TS — impossible for users to customize without code changes |
+| **No priority** | Alerts and run events processed in arrival order, not by importance |
 
 ## Approach: Incremental Steps
 
@@ -290,6 +290,74 @@ The backend runs an `asyncio.Task` that:
 
 ---
 
+## Step 8 — Code Cleanup: Data-Driven Mode Prompt Builder
+
+**Goal**: Refactor `_build_chat_prompt()` to eliminate per-mode `if/elif` branches. Each mode should be a declarative entry mapping a **skill ID** to a **state builder** function — not a bespoke code path.
+
+### Problem
+
+Today `_build_chat_prompt()` has mode-specific logic inline:
+
+```python
+if plan_mode:
+    # 10 lines: build variables, call render("ra_mode_plan", {...})
+elif wild_mode:
+    # 40 lines: build iteration, sweep_note, experiment_context, call render("wild_system", {...})
+```
+
+Adding a new mode means adding another `elif` with its own variable-construction code. This doesn't scale.
+
+### Design: Mode Registry
+
+```python
+# Each mode declares: skill template ID + a function that produces the template variables
+MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "plan": ModeConfig(
+        skill_id="ra_mode_plan",
+        build_state=_build_plan_state,   # returns {"goal": ..., "experiment_context": ...}
+    ),
+    "wild": ModeConfig(
+        skill_id="wild_system",
+        build_state=_build_wild_state,   # returns {"iteration": ..., "goal": ..., ...}
+    ),
+}
+```
+
+Then `_build_chat_prompt()` becomes:
+
+```python
+def _build_chat_prompt(session, message, mode="agent"):
+    mode_note = ""
+    config = MODE_REGISTRY.get(mode)
+    if config:
+        variables = config.build_state(message)
+        rendered = prompt_skill_manager.render(config.skill_id, variables)
+        if rendered:
+            mode_note = rendered + "\n\n"
+        else:
+            logger.warning(f"{config.skill_id} skill not found")
+    content = f"{mode_note}[USER] {message}"
+    ...
+```
+
+### Changes
+
+- **[MODIFY] [server.py](file:///Users/mike/Project/GitHub/v0-research-agent-mobile/server/server.py)**
+  - Replace `wild_mode: bool` + `plan_mode: bool` with `mode: str = "agent"` in `ChatRequest`
+  - Extract `_build_plan_state(message)` and `_build_wild_state(message)` as standalone functions
+  - Create `MODE_REGISTRY` dict
+  - Simplify `_build_chat_prompt()` to a generic loop over the registry
+
+- **[MODIFY] Frontend data flow**
+  - Send `mode: "plan" | "wild" | "agent"` as a string instead of separate boolean flags
+
+### Verification
+
+- Manual: All three modes (agent, plan, wild) still produce correct prompts
+- Adding a hypothetical new mode should only require: 1 skill template + 1 state builder function + 1 registry entry
+
+---
+
 ## Implementation Order & Dependencies
 
 ```mermaid
@@ -300,9 +368,10 @@ graph LR
     S4 --> S5["5. Server Cleanup"]
     S5 --> S6["6. Backend-Driven Loop"]
     S6 --> S7["7. Test All Interrupts"]
+    S1 --> S8["8. Code Cleanup"]
 ```
 
-Each step can be merged independently. Steps 1–3 are purely additive. Steps 4–5 are refactors. Step 6 is the big architectural shift. Step 7 is validation.
+Each step can be merged independently. Steps 1–3 are purely additive. Steps 4–5 are refactors. Step 6 is the big architectural shift. Step 7 is validation. Step 8 can happen any time after Step 1.
 
 ---
 
@@ -317,3 +386,4 @@ Each step can be merged independently. Steps 1–3 are purely additive. Steps 4�
 | 5. Server Cleanup      | Medium (extract module)         | Low — refactor only                   |
 | 6. Backend-Driven Loop | Large (new runner, gut FE)      | High — core architecture change       |
 | 7. Testing             | Medium                          | Low                                   |
+| 8. Code Cleanup        | Small (refactor only)           | Low — pure refactor, no new features  |
