@@ -305,6 +305,40 @@ export interface Artifact {
     type: 'checkpoint' | 'metrics' | 'wandb' | 'other'
 }
 
+export interface NotebookSession {
+    id: string
+    name: string
+    kernel: 'python'
+    status: 'starting' | 'running' | 'stopped' | 'error'
+    workdir: string
+    python_command: string
+    venv_path?: string | null
+    created_at: number
+    last_activity_at: number
+    last_execution_count: number
+    tmux_window?: string | null
+    tmux_pane?: string | null
+    run_dir?: string | null
+    error?: string | null
+}
+
+export interface CreateNotebookRequest {
+    name?: string
+    workdir?: string
+    python_command?: string
+    venv_path?: string
+}
+
+export interface NotebookExecutionResult {
+    id: string
+    execution_count: number
+    stdout: string
+    stderr: string
+    result: string | null
+    error: string | null
+    duration_ms: number
+}
+
 // =============================================================================
 // Run Management Functions
 // =============================================================================
@@ -650,6 +684,73 @@ export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
     })
     if (!response.ok) {
         throw new Error(`Failed to get artifacts: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * List notebook sessions
+ */
+export async function listNotebooks(limit: number = 50): Promise<NotebookSession[]> {
+    const response = await fetch(`${API_URL()}/notebooks?limit=${limit}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list notebooks: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Create a notebook session (tmux-backed Python kernel)
+ */
+export async function createNotebook(request: CreateNotebookRequest = {}): Promise<NotebookSession> {
+    const response = await fetch(`${API_URL()}/notebooks`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to create notebook: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Execute code in a notebook session
+ */
+export async function executeNotebookCell(
+    notebookId: string,
+    code: string,
+    timeoutSeconds: number = 30
+): Promise<NotebookExecutionResult> {
+    const response = await fetch(`${API_URL()}/notebooks/${notebookId}/execute`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({
+            code,
+            timeout_seconds: timeoutSeconds,
+        }),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to execute notebook cell: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stop a notebook session
+ */
+export async function stopNotebook(notebookId: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_URL()}/notebooks/${notebookId}/stop`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to stop notebook: ${error}`)
     }
     return response.json()
 }

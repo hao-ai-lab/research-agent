@@ -17,10 +17,13 @@ import type {
     Sweep,
     CreateSweepRequest,
     WildModeState,
+    NotebookSession,
+    CreateNotebookRequest,
+    NotebookExecutionResult,
 } from './api'
 
 // Re-export types
-export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, WildModeState }
+export type { ChatSession, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, WildModeState, NotebookSession, CreateNotebookRequest, NotebookExecutionResult }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -267,6 +270,8 @@ const mockAlerts: Map<string, Alert> = new Map([
 ])
 
 let wildModeEnabled = false
+const mockNotebooks: Map<string, NotebookSession> = new Map()
+const mockNotebookMemory: Map<string, Record<string, string>> = new Map()
 
 // =============================================================================
 // Helper Functions
@@ -617,6 +622,116 @@ export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
         ]
     }
     return []
+}
+
+function simulateNotebookExecution(notebookId: string, code: string): { stdout: string; stderr: string; result: string | null; error: string | null } {
+    const memory = mockNotebookMemory.get(notebookId) || {}
+    const lines = code.split('\n').map(line => line.trim()).filter(Boolean)
+    const stdout: string[] = []
+    let result: string | null = null
+
+    for (const line of lines) {
+        const assignMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/)
+        if (assignMatch) {
+            memory[assignMatch[1]] = assignMatch[2]
+            continue
+        }
+
+        const printMatch = line.match(/^print\((.+)\)$/)
+        if (printMatch) {
+            const raw = printMatch[1].trim()
+            const value = memory[raw] ?? raw.replace(/^['"]|['"]$/g, '')
+            stdout.push(value)
+            continue
+        }
+
+        if (memory[line] !== undefined) {
+            result = memory[line]
+            continue
+        }
+
+        result = line
+    }
+
+    mockNotebookMemory.set(notebookId, memory)
+    return {
+        stdout: stdout.join('\n'),
+        stderr: '',
+        result,
+        error: null,
+    }
+}
+
+export async function listNotebooks(limit: number = 50): Promise<NotebookSession[]> {
+    await delay(80)
+    return Array.from(mockNotebooks.values())
+        .sort((a, b) => b.created_at - a.created_at)
+        .slice(0, limit)
+}
+
+export async function createNotebook(request: CreateNotebookRequest = {}): Promise<NotebookSession> {
+    await delay(180)
+    const id = `nb-${generateId()}`
+    const notebook: NotebookSession = {
+        id,
+        name: request.name || 'Notebook',
+        kernel: 'python',
+        status: 'running',
+        workdir: request.workdir || '/workspace',
+        python_command: request.python_command || 'python',
+        venv_path: request.venv_path || null,
+        created_at: Date.now() / 1000,
+        last_activity_at: Date.now() / 1000,
+        last_execution_count: 0,
+        tmux_window: `nb-${id.slice(-8)}`,
+        tmux_pane: `%${Math.floor(Math.random() * 100) + 1}`,
+        run_dir: `/workspace/.agents/notebooks/${id}`,
+        error: null,
+    }
+    mockNotebooks.set(id, notebook)
+    mockNotebookMemory.set(id, {})
+    return notebook
+}
+
+export async function executeNotebookCell(
+    notebookId: string,
+    code: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _timeoutSeconds: number = 30
+): Promise<NotebookExecutionResult> {
+    await delay(150)
+    const notebook = mockNotebooks.get(notebookId)
+    if (!notebook) {
+        throw new Error('Notebook not found')
+    }
+    if (notebook.status !== 'running') {
+        throw new Error(`Notebook is not running (status: ${notebook.status})`)
+    }
+
+    const exec = simulateNotebookExecution(notebookId, code)
+    notebook.last_execution_count += 1
+    notebook.last_activity_at = Date.now() / 1000
+
+    return {
+        id: `exec-${generateId()}`,
+        execution_count: notebook.last_execution_count,
+        stdout: exec.stdout,
+        stderr: exec.stderr,
+        result: exec.result,
+        error: exec.error,
+        duration_ms: 120,
+    }
+}
+
+export async function stopNotebook(notebookId: string): Promise<{ message: string }> {
+    await delay(100)
+    const notebook = mockNotebooks.get(notebookId)
+    if (!notebook) {
+        throw new Error('Notebook not found')
+    }
+    notebook.status = 'stopped'
+    notebook.last_activity_at = Date.now() / 1000
+    return { message: 'Notebook stopped (mock)' }
 }
 
 export async function queueRun(runId: string): Promise<Run> {

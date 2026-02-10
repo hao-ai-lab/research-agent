@@ -29,6 +29,9 @@ export type {
     Sweep,
     CreateSweepRequest,
     WildModeState,
+    NotebookSession,
+    CreateNotebookRequest,
+    NotebookExecutionResult,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -114,6 +117,18 @@ export const streamRunLogs = (...args: Parameters<typeof realApi.streamRunLogs>)
 
 export const getRunArtifacts = (...args: Parameters<typeof realApi.getRunArtifacts>) =>
     getApi().getRunArtifacts(...args)
+
+export const listNotebooks = (...args: Parameters<typeof realApi.listNotebooks>) =>
+    getApi().listNotebooks(...args)
+
+export const createNotebook = (...args: Parameters<typeof realApi.createNotebook>) =>
+    getApi().createNotebook(...args)
+
+export const executeNotebookCell = (...args: Parameters<typeof realApi.executeNotebookCell>) =>
+    getApi().executeNotebookCell(...args)
+
+export const stopNotebook = (...args: Parameters<typeof realApi.stopNotebook>) =>
+    getApi().stopNotebook(...args)
 
 export const queueRun = (...args: Parameters<typeof realApi.queueRun>) =>
     getApi().queueRun(...args)

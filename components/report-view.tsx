@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   Play,
   Plus,
@@ -13,17 +13,21 @@ import {
   X,
   Send,
   Sparkles,
-  GripVertical,
   MoreHorizontal,
   Code,
   Type,
   BarChart3,
-  Image,
+  FileText,
+  FlaskConical,
+  TerminalSquare,
+  Loader2,
+  Square,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,9 +38,18 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu'
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '@/components/ui/resizable'
 import type { ExperimentRun } from '@/lib/types'
+import {
+  createNotebook,
+  executeNotebookCell,
+  stopNotebook,
+} from '@/lib/api-client'
 
-// Cell types
 export type ReportCellType = 'markdown' | 'code' | 'chart' | 'insight'
 
 interface ReportCell {
@@ -46,6 +59,36 @@ interface ReportCell {
   output?: string
   isExecuting?: boolean
   executionCount?: number
+}
+
+interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  referencedCells?: string[]
+  timestamp: Date
+}
+
+interface NotebookRuntime {
+  sessionId: string | null
+  status: 'stopped' | 'starting' | 'running' | 'error'
+  tmuxWindow: string | null
+  tmuxPane: string | null
+  pythonCommand: string
+  venvPath: string
+  workdir: string
+  lastExecutionCount: number
+  error: string | null
+}
+
+interface ReportDocument {
+  id: string
+  title: string
+  summary: string
+  updatedAt: number
+  cells: ReportCell[]
+  chatMessages: ChatMessage[]
+  notebook: NotebookRuntime
 }
 
 export interface ReportToolbarState {
@@ -59,7 +102,6 @@ interface ReportViewProps {
   onToolbarChange?: (toolbar: ReportToolbarState | null) => void
 }
 
-// Mock initial cells
 const initialCells: ReportCell[] = [
   {
     id: 'cell-1',
@@ -82,7 +124,7 @@ const initialCells: ReportCell[] = [
     id: 'cell-4',
     type: 'code',
     content: '# Calculate average loss per epoch\nimport numpy as np\n\nlosses = [2.5, 1.8, 1.2, 0.8, 0.5, 0.35, 0.28, 0.25, 0.24, 0.23]\navg_loss = np.mean(losses)\nprint(f"Average Loss: {avg_loss:.3f}")',
-    output: 'Average Loss: 0.813',
+    output: 'Out[1]: Average Loss: 0.813',
     executionCount: 1,
   },
   {
@@ -92,166 +134,88 @@ const initialCells: ReportCell[] = [
   },
 ]
 
-// Chat message type for the AI assistant
-interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  referencedCells?: string[]
-  timestamp: Date
+function buildNotebookRuntime(): NotebookRuntime {
+  return {
+    sessionId: null,
+    status: 'stopped',
+    tmuxWindow: null,
+    tmuxPane: null,
+    pythonCommand: 'python',
+    venvPath: '',
+    workdir: '',
+    lastExecutionCount: 0,
+    error: null,
+  }
+}
+
+function buildInitialReports(runs: ExperimentRun[]): ReportDocument[] {
+  const now = Date.now()
+  return [
+    {
+      id: 'report-main',
+      title: 'Main Analysis Notebook',
+      summary: `Notebook covering current experiment trends (${runs.length} tracked runs).`,
+      updatedAt: now,
+      cells: initialCells,
+      chatMessages: [],
+      notebook: buildNotebookRuntime(),
+    },
+    {
+      id: 'report-review',
+      title: 'Failure Review Notebook',
+      summary: 'Space for debugging failed runs and mitigation experiments.',
+      updatedAt: now - 60_000,
+      cells: [
+        {
+          id: 'review-1',
+          type: 'markdown',
+          content: '# Failure Investigation\n\nTrack failure modes, suspicious metrics, and remediation notes here.',
+        },
+        {
+          id: 'review-2',
+          type: 'code',
+          content: '# Start with quick checks\nprint("Ready to inspect failed runs")',
+        },
+      ],
+      chatMessages: [],
+      notebook: buildNotebookRuntime(),
+    },
+  ]
 }
 
 export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
-  const [cells, setCells] = useState<ReportCell[]>(initialCells)
+  const [reports, setReports] = useState<ReportDocument[]>(() => buildInitialReports(runs))
+  const [activeReportId, setActiveReportId] = useState<string>('report-main')
+
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null)
   const [editingCellId, setEditingCellId] = useState<string | null>(null)
   const [isPreviewMode, setIsPreviewMode] = useState(true)
   const [showChat, setShowChat] = useState(false)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [referencedCells, setReferencedCells] = useState<string[]>([])
-  const [executionCounter, setExecutionCounter] = useState(2)
   const chatInputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Generate unique ID
-  const generateId = () => `cell-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-
-  // Cell operations
-  const addCell = useCallback((type: ReportCellType, afterId?: string) => {
-    const newCell: ReportCell = {
-      id: generateId(),
-      type,
-      content: type === 'markdown' ? '# New Section' : type === 'code' ? '# Enter code here' : 'New content',
+  useEffect(() => {
+    if (reports.length === 0) return
+    if (!reports.some(report => report.id === activeReportId)) {
+      setActiveReportId(reports[0].id)
     }
-    
-    setCells(prev => {
-      if (afterId) {
-        const index = prev.findIndex(c => c.id === afterId)
-        return [...prev.slice(0, index + 1), newCell, ...prev.slice(index + 1)]
-      }
-      return [...prev, newCell]
-    })
-    setEditingCellId(newCell.id)
-    setSelectedCellId(newCell.id)
+  }, [activeReportId, reports])
+
+  const activeReport = useMemo(() => {
+    return reports.find(report => report.id === activeReportId) ?? reports[0] ?? null
+  }, [reports, activeReportId])
+
+  const cells = activeReport?.cells ?? []
+  const chatMessages = activeReport?.chatMessages ?? []
+  const activeNotebook = activeReport?.notebook ?? buildNotebookRuntime()
+
+  const generateId = () => `cell-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+
+  const patchReport = useCallback((reportId: string, updater: (report: ReportDocument) => ReportDocument) => {
+    setReports(prev => prev.map(report => (report.id === reportId ? updater(report) : report)))
   }, [])
 
-  const deleteCell = useCallback((id: string) => {
-    setCells(prev => prev.filter(c => c.id !== id))
-    if (selectedCellId === id) setSelectedCellId(null)
-    if (editingCellId === id) setEditingCellId(null)
-  }, [selectedCellId, editingCellId])
-
-  const duplicateCell = useCallback((id: string) => {
-    setCells(prev => {
-      const index = prev.findIndex(c => c.id === id)
-      const cell = prev[index]
-      const newCell = { ...cell, id: generateId(), executionCount: undefined, output: undefined }
-      return [...prev.slice(0, index + 1), newCell, ...prev.slice(index + 1)]
-    })
-  }, [])
-
-  const moveCell = useCallback((id: string, direction: 'up' | 'down') => {
-    setCells(prev => {
-      const index = prev.findIndex(c => c.id === id)
-      if ((direction === 'up' && index === 0) || (direction === 'down' && index === prev.length - 1)) {
-        return prev
-      }
-      const newIndex = direction === 'up' ? index - 1 : index + 1
-      const newCells = [...prev]
-      const [removed] = newCells.splice(index, 1)
-      newCells.splice(newIndex, 0, removed)
-      return newCells
-    })
-  }, [])
-
-  const updateCellContent = useCallback((id: string, content: string) => {
-    setCells(prev => prev.map(c => c.id === id ? { ...c, content } : c))
-  }, [])
-
-  const changeCellType = useCallback((id: string, newType: ReportCellType) => {
-    setCells(prev => prev.map(c => c.id === id ? { ...c, type: newType, output: undefined, executionCount: undefined } : c))
-  }, [])
-
-  const executeCell = useCallback((id: string) => {
-    setCells(prev => prev.map(c => {
-      if (c.id !== id) return c
-      
-      // Simulate execution
-      if (c.type === 'code') {
-        return {
-          ...c,
-          isExecuting: true,
-        }
-      }
-      return c
-    }))
-
-    // Simulate execution completion
-    setTimeout(() => {
-      setCells(prev => prev.map(c => {
-        if (c.id !== id) return c
-        
-        if (c.type === 'code') {
-          setExecutionCounter(count => count + 1)
-          return {
-            ...c,
-            isExecuting: false,
-            executionCount: executionCounter,
-            output: 'Execution completed successfully.\n> Output: Result calculated',
-          }
-        }
-        return c
-      }))
-    }, 1500)
-  }, [executionCounter])
-
-  // Reference cell for chat
-  const addCellReference = useCallback((cellId: string) => {
-    if (!referencedCells.includes(cellId)) {
-      setReferencedCells(prev => [...prev, cellId])
-    }
-    setShowChat(true)
-    chatInputRef.current?.focus()
-  }, [referencedCells])
-
-  const removeCellReference = useCallback((cellId: string) => {
-    setReferencedCells(prev => prev.filter(id => id !== cellId))
-  }, [])
-
-  // Send chat message
-  const sendChatMessage = useCallback(() => {
-    if (!chatInput.trim() && referencedCells.length === 0) return
-
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: chatInput,
-      referencedCells: [...referencedCells],
-      timestamp: new Date(),
-    }
-
-    setChatMessages(prev => [...prev, userMessage])
-    setChatInput('')
-    setReferencedCells([])
-
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        role: 'assistant',
-        content: referencedCells.length > 0
-          ? `I've analyzed the referenced cell(s). Here's my suggestion:\n\n**Analysis:**\nThe cell content shows good progress. Consider:\n1. Adding more detailed comments\n2. Breaking down complex operations\n3. Adding visualization for better insights\n\nWould you like me to modify the cell or create a new one?`
-          : `I understand your request. How can I help you with the report? You can:\n\n- Reference a cell using the @ button in the toolbar\n- Ask me to generate new content\n- Request analysis of your data`,
-        timestamp: new Date(),
-      }
-      setChatMessages(prev => [...prev, aiMessage])
-    }, 1000)
-  }, [chatInput, referencedCells])
-
-  // Get cell by ID for display
-  const getCellById = (id: string) => cells.find(c => c.id === id)
-
-  // Render cell type icon
   const getCellTypeIcon = (type: ReportCellType) => {
     switch (type) {
       case 'markdown': return <Type className="h-3.5 w-3.5" />
@@ -268,7 +232,7 @@ export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
       setPreviewMode: setIsPreviewMode,
       addCell: (type) => addCell(type),
     })
-  }, [onToolbarChange, isPreviewMode, addCell])
+  }, [onToolbarChange, isPreviewMode, activeReportId])
 
   useEffect(() => {
     return () => {
@@ -276,16 +240,366 @@ export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
     }
   }, [onToolbarChange])
 
-  // Render cell content
+  useEffect(() => {
+    setSelectedCellId(null)
+    setEditingCellId(null)
+    setReferencedCells([])
+    setChatInput('')
+  }, [activeReportId])
+
+  const addCell = useCallback((type: ReportCellType, afterId?: string) => {
+    if (!activeReport) return
+
+    const newCell: ReportCell = {
+      id: generateId(),
+      type,
+      content: type === 'markdown' ? '# New Section' : type === 'code' ? '# Enter code here' : 'New content',
+    }
+
+    patchReport(activeReport.id, report => {
+      const nextCells = (() => {
+        if (!afterId) return [...report.cells, newCell]
+        const index = report.cells.findIndex(c => c.id === afterId)
+        if (index === -1) return [...report.cells, newCell]
+        return [...report.cells.slice(0, index + 1), newCell, ...report.cells.slice(index + 1)]
+      })()
+
+      return {
+        ...report,
+        cells: nextCells,
+        updatedAt: Date.now(),
+      }
+    })
+
+    setEditingCellId(newCell.id)
+    setSelectedCellId(newCell.id)
+  }, [activeReport, patchReport])
+
+  const deleteCell = useCallback((id: string) => {
+    if (!activeReport) return
+
+    patchReport(activeReport.id, report => ({
+      ...report,
+      cells: report.cells.filter(c => c.id !== id),
+      updatedAt: Date.now(),
+    }))
+
+    if (selectedCellId === id) setSelectedCellId(null)
+    if (editingCellId === id) setEditingCellId(null)
+  }, [activeReport, patchReport, selectedCellId, editingCellId])
+
+  const duplicateCell = useCallback((id: string) => {
+    if (!activeReport) return
+
+    patchReport(activeReport.id, report => {
+      const index = report.cells.findIndex(c => c.id === id)
+      if (index === -1) return report
+      const cell = report.cells[index]
+      const newCell = { ...cell, id: generateId(), executionCount: undefined, output: undefined, isExecuting: false }
+      return {
+        ...report,
+        cells: [...report.cells.slice(0, index + 1), newCell, ...report.cells.slice(index + 1)],
+        updatedAt: Date.now(),
+      }
+    })
+  }, [activeReport, patchReport])
+
+  const moveCell = useCallback((id: string, direction: 'up' | 'down') => {
+    if (!activeReport) return
+
+    patchReport(activeReport.id, report => {
+      const index = report.cells.findIndex(c => c.id === id)
+      if (index === -1) return report
+      if ((direction === 'up' && index === 0) || (direction === 'down' && index === report.cells.length - 1)) {
+        return report
+      }
+
+      const newIndex = direction === 'up' ? index - 1 : index + 1
+      const nextCells = [...report.cells]
+      const [removed] = nextCells.splice(index, 1)
+      nextCells.splice(newIndex, 0, removed)
+      return {
+        ...report,
+        cells: nextCells,
+        updatedAt: Date.now(),
+      }
+    })
+  }, [activeReport, patchReport])
+
+  const updateCellContent = useCallback((id: string, content: string) => {
+    if (!activeReport) return
+
+    patchReport(activeReport.id, report => ({
+      ...report,
+      cells: report.cells.map(c => (c.id === id ? { ...c, content } : c)),
+      updatedAt: Date.now(),
+    }))
+  }, [activeReport, patchReport])
+
+  const changeCellType = useCallback((id: string, newType: ReportCellType) => {
+    if (!activeReport) return
+
+    patchReport(activeReport.id, report => ({
+      ...report,
+      cells: report.cells.map(c => (
+        c.id === id
+          ? { ...c, type: newType, output: undefined, executionCount: undefined }
+          : c
+      )),
+      updatedAt: Date.now(),
+    }))
+  }, [activeReport, patchReport])
+
+  const setNotebookConfig = useCallback((field: 'workdir' | 'pythonCommand' | 'venvPath', value: string) => {
+    if (!activeReport) return
+
+    patchReport(activeReport.id, report => ({
+      ...report,
+      notebook: {
+        ...report.notebook,
+        [field]: value,
+      },
+      updatedAt: Date.now(),
+    }))
+  }, [activeReport, patchReport])
+
+  const startNotebookKernel = useCallback(async () => {
+    if (!activeReport) return
+
+    const reportId = activeReport.id
+    const previousSessionId = activeReport.notebook.sessionId
+    const wasRunning = activeReport.notebook.status === 'running'
+
+    patchReport(reportId, report => ({
+      ...report,
+      notebook: {
+        ...report.notebook,
+        status: 'starting',
+        error: null,
+      },
+      updatedAt: Date.now(),
+    }))
+
+    try {
+      if (previousSessionId && wasRunning) {
+        await stopNotebook(previousSessionId)
+      }
+
+      const notebook = await createNotebook({
+        name: activeReport.title,
+        workdir: activeReport.notebook.workdir || undefined,
+        python_command: activeReport.notebook.pythonCommand || undefined,
+        venv_path: activeReport.notebook.venvPath || undefined,
+      })
+
+      patchReport(reportId, report => ({
+        ...report,
+        notebook: {
+          ...report.notebook,
+          sessionId: notebook.id,
+          status: notebook.status,
+          tmuxWindow: notebook.tmux_window ?? null,
+          tmuxPane: notebook.tmux_pane ?? null,
+          workdir: notebook.workdir || report.notebook.workdir,
+          pythonCommand: notebook.python_command || report.notebook.pythonCommand,
+          venvPath: notebook.venv_path || report.notebook.venvPath,
+          lastExecutionCount: notebook.last_execution_count || 0,
+          error: notebook.error ?? null,
+        },
+        updatedAt: Date.now(),
+      }))
+    } catch (error) {
+      patchReport(reportId, report => ({
+        ...report,
+        notebook: {
+          ...report.notebook,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Failed to start kernel',
+        },
+        updatedAt: Date.now(),
+      }))
+    }
+  }, [activeReport, patchReport])
+
+  const stopNotebookKernel = useCallback(async () => {
+    if (!activeReport?.notebook.sessionId) return
+
+    const reportId = activeReport.id
+    const notebookId = activeReport.notebook.sessionId
+
+    try {
+      await stopNotebook(notebookId)
+    } catch (error) {
+      console.error('Failed to stop notebook:', error)
+    }
+
+    patchReport(reportId, report => ({
+      ...report,
+      notebook: {
+        ...report.notebook,
+        status: 'stopped',
+        sessionId: null,
+      },
+      updatedAt: Date.now(),
+    }))
+  }, [activeReport, patchReport])
+
+  const executeCell = useCallback(async (id: string) => {
+    if (!activeReport) return
+
+    const reportId = activeReport.id
+    const cell = activeReport.cells.find(c => c.id === id)
+    if (!cell || cell.type !== 'code') return
+
+    if (!activeReport.notebook.sessionId || activeReport.notebook.status !== 'running') {
+      patchReport(reportId, report => ({
+        ...report,
+        cells: report.cells.map(c => c.id === id
+          ? {
+              ...c,
+              output: 'Kernel not running. Start the Python kernel first to execute notebook cells.',
+              isExecuting: false,
+            }
+          : c),
+        updatedAt: Date.now(),
+      }))
+      return
+    }
+
+    patchReport(reportId, report => ({
+      ...report,
+      cells: report.cells.map(c => c.id === id ? { ...c, isExecuting: true } : c),
+      updatedAt: Date.now(),
+    }))
+
+    try {
+      const result = await executeNotebookCell(activeReport.notebook.sessionId, cell.content, 60)
+      const chunks: string[] = []
+      if (result.stdout?.trim()) chunks.push(result.stdout.trimEnd())
+      if (result.stderr?.trim()) chunks.push(`stderr:\n${result.stderr.trimEnd()}`)
+      if (result.result) chunks.push(`Out[${result.execution_count}]: ${result.result}`)
+      if (result.error) chunks.push(`Traceback:\n${result.error.trimEnd()}`)
+      if (chunks.length === 0) chunks.push(`Execution ${result.execution_count} completed with no output.`)
+
+      patchReport(reportId, report => ({
+        ...report,
+        notebook: {
+          ...report.notebook,
+          lastExecutionCount: result.execution_count,
+          error: result.error,
+        },
+        cells: report.cells.map(c => c.id === id
+          ? {
+              ...c,
+              isExecuting: false,
+              executionCount: result.execution_count,
+              output: chunks.join('\n\n'),
+            }
+          : c),
+        updatedAt: Date.now(),
+      }))
+    } catch (error) {
+      patchReport(reportId, report => ({
+        ...report,
+        cells: report.cells.map(c => c.id === id
+          ? {
+              ...c,
+              isExecuting: false,
+              output: `Execution failed:\n${error instanceof Error ? error.message : 'Unknown error'}`,
+            }
+          : c),
+        updatedAt: Date.now(),
+      }))
+    }
+  }, [activeReport, patchReport])
+
+  const addCellReference = useCallback((cellId: string) => {
+    if (!referencedCells.includes(cellId)) {
+      setReferencedCells(prev => [...prev, cellId])
+    }
+    setShowChat(true)
+    chatInputRef.current?.focus()
+  }, [referencedCells])
+
+  const removeCellReference = useCallback((cellId: string) => {
+    setReferencedCells(prev => prev.filter(id => id !== cellId))
+  }, [])
+
+  const sendChatMessage = useCallback(() => {
+    if (!activeReport) return
+    if (!chatInput.trim() && referencedCells.length === 0) return
+
+    const reportId = activeReport.id
+
+    const userMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      role: 'user',
+      content: chatInput,
+      referencedCells: [...referencedCells],
+      timestamp: new Date(),
+    }
+
+    patchReport(reportId, report => ({
+      ...report,
+      chatMessages: [...report.chatMessages, userMessage],
+      updatedAt: Date.now(),
+    }))
+    setChatInput('')
+    setReferencedCells([])
+
+    setTimeout(() => {
+      const aiMessage: ChatMessage = {
+        id: `msg-${Date.now() + 1}`,
+        role: 'assistant',
+        content: userMessage.referencedCells && userMessage.referencedCells.length > 0
+          ? `I reviewed the referenced cells. Suggested notebook follow-up:\n\n1. Convert repeated analysis into a reusable code cell\n2. Add a chart cell for key metric drift\n3. Save final conclusions in a markdown summary section`
+          : 'I can help draft markdown, generate code cells, or propose follow-up experiments from this notebook.',
+        timestamp: new Date(),
+      }
+
+      patchReport(reportId, report => ({
+        ...report,
+        chatMessages: [...report.chatMessages, aiMessage],
+        updatedAt: Date.now(),
+      }))
+    }, 800)
+  }, [activeReport, chatInput, referencedCells, patchReport])
+
+  const createReport = useCallback(() => {
+    const reportId = `report-${Date.now()}`
+    const newReport: ReportDocument = {
+      id: reportId,
+      title: `Notebook ${reports.length + 1}`,
+      summary: 'New notebook for experiment exploration.',
+      updatedAt: Date.now(),
+      cells: [{ id: generateId(), type: 'markdown', content: '# New Notebook\n\nStart writing your analysis.' }],
+      chatMessages: [],
+      notebook: buildNotebookRuntime(),
+    }
+
+    setReports(prev => [newReport, ...prev])
+    setActiveReportId(reportId)
+  }, [reports.length])
+
+  const deleteActiveReport = useCallback(() => {
+    if (!activeReport || reports.length <= 1) return
+
+    const remaining = reports.filter(report => report.id !== activeReport.id)
+    setReports(remaining)
+    setActiveReportId(remaining[0].id)
+  }, [activeReport, reports])
+
+  const getCellById = (id: string) => cells.find(c => c.id === id)
+
   const renderCellContent = (cell: ReportCell) => {
     const isEditing = editingCellId === cell.id && !isPreviewMode
-    
+
     if (isEditing) {
       return (
         <Textarea
           value={cell.content}
           onChange={(e) => updateCellContent(cell.id, e.target.value)}
-          className="min-h-[100px] font-mono text-sm bg-background border-none focus-visible:ring-0 resize-none"
+          className="min-h-[110px] font-mono text-sm bg-background border-none focus-visible:ring-0 resize-none"
           autoFocus
         />
       )
@@ -306,7 +620,7 @@ export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
             })}
           </div>
         )
-      
+
       case 'code':
         return (
           <div>
@@ -314,13 +628,13 @@ export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
               <code>{cell.content}</code>
             </pre>
             {cell.output && (
-              <div className="mt-2 p-2 bg-muted/30 rounded text-sm font-mono text-muted-foreground border-l-2 border-primary/50">
+              <div className="mt-2 p-2 bg-muted/20 rounded text-sm font-mono text-muted-foreground border-l-2 border-primary/50 whitespace-pre-wrap">
                 {cell.output}
               </div>
             )}
           </div>
         )
-      
+
       case 'chart':
         return (
           <div className="bg-secondary/30 rounded-lg p-4">
@@ -328,12 +642,12 @@ export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
             <div className="h-[180px] bg-background/50 rounded flex items-center justify-center border border-border/50">
               <div className="text-muted-foreground text-sm flex items-center gap-2">
                 <BarChart3 className="h-5 w-5" />
-                Chart: Training Loss Visualization
+                Chart output placeholder
               </div>
             </div>
           </div>
         )
-      
+
       case 'insight':
         return (
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
@@ -360,381 +674,529 @@ export function ReportView({ runs, onToolbarChange }: ReportViewProps) {
             )}
           </div>
         )
-      
+
       default:
         return <div>{cell.content}</div>
     }
   }
 
-  return (
-    <div className="flex flex-col h-full overflow-hidden bg-background">
-      {/* Main Content Area */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        {/* Cells */}
-        <ScrollArea className={`flex-1 ${showChat ? 'h-1/2' : 'h-full'}`}>
-          <div className="p-4 space-y-3">
-            {cells.map((cell, index) => {
-              const isSelected = selectedCellId === cell.id
-              const isEditing = editingCellId === cell.id
-              
-              return (
-                <div key={cell.id} className="relative group">
-                  {/* Cell Container */}
-                  <div
-                    onClick={() => {
-                      setSelectedCellId(cell.id)
-                      if (!isPreviewMode) {
-                        setEditingCellId(cell.id)
-                      }
-                    }}
-                    className={`relative rounded-lg border transition-all ${
-                      isSelected
-                        ? 'border-primary/50 bg-primary/5'
-                        : 'border-border/50 bg-card hover:border-border'
-                    } ${cell.isExecuting ? 'animate-pulse' : ''}`}
-                  >
-                    {/* Cell Header */}
-                    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/50 bg-secondary/30 rounded-t-lg">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        {getCellTypeIcon(cell.type)}
-                        <span className="capitalize">{cell.type}</span>
-                        {cell.executionCount && (
-                          <span className="text-primary/70">[{cell.executionCount}]</span>
-                        )}
-                      </div>
-                      
-                      {!isPreviewMode && (
-                        <div className="ml-auto flex items-center gap-0.5">
-                          {/* Inline toolbar - shows when selected */}
-                          {isSelected && (
-                            <>
-                              {cell.type === 'code' && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    executeCell(cell.id)
-                                  }}
-                                  className="h-6 w-6 p-0"
-                                  title="Execute"
-                                >
-                                  <Play className="h-3 w-3" />
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  moveCell(cell.id, 'up')
-                                }}
-                                className="h-6 w-6 p-0"
-                                disabled={index === 0}
-                                title="Move up"
-                              >
-                                <ChevronUp className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  moveCell(cell.id, 'down')
-                                }}
-                                className="h-6 w-6 p-0"
-                                disabled={index === cells.length - 1}
-                                title="Move down"
-                              >
-                                <ChevronDown className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  duplicateCell(cell.id)
-                                }}
-                                className="h-6 w-6 p-0"
-                                title="Duplicate"
-                              >
-                                <Copy className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  addCellReference(cell.id)
-                                }}
-                                className="h-6 w-6 p-0 text-primary"
-                                title="Reference in chat"
-                              >
-                                <AtSign className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  deleteCell(cell.id)
-                                }}
-                                className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                                title="Delete"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                              <div className="w-px h-4 bg-border mx-1" />
-                            </>
-                          )}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                                <MoreHorizontal className="h-3.5 w-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuSub>
-                                <DropdownMenuSubTrigger>
-                                  {getCellTypeIcon(cell.type)}
-                                  <span className="ml-2">Cell Type</span>
-                                </DropdownMenuSubTrigger>
-                                <DropdownMenuSubContent>
-                                  <DropdownMenuItem 
-                                    onClick={() => changeCellType(cell.id, 'markdown')}
-                                    className={cell.type === 'markdown' ? 'bg-secondary' : ''}
-                                  >
-                                    <Type className="h-4 w-4 mr-2" />
-                                    Markdown
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    onClick={() => changeCellType(cell.id, 'code')}
-                                    className={cell.type === 'code' ? 'bg-secondary' : ''}
-                                  >
-                                    <Code className="h-4 w-4 mr-2" />
-                                    Code
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    onClick={() => changeCellType(cell.id, 'chart')}
-                                    className={cell.type === 'chart' ? 'bg-secondary' : ''}
-                                  >
-                                    <BarChart3 className="h-4 w-4 mr-2" />
-                                    Chart
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    onClick={() => changeCellType(cell.id, 'insight')}
-                                    className={cell.type === 'insight' ? 'bg-secondary' : ''}
-                                  >
-                                    <Sparkles className="h-4 w-4 mr-2" />
-                                    Insight
-                                  </DropdownMenuItem>
-                                </DropdownMenuSubContent>
-                              </DropdownMenuSub>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => addCell('markdown', cell.id)}>
-                                <Plus className="h-4 w-4 mr-2" />
-                                Add cell below
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => duplicateCell(cell.id)}>
-                                <Copy className="h-4 w-4 mr-2" />
-                                Duplicate
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => addCellReference(cell.id)}>
-                                <AtSign className="h-4 w-4 mr-2" />
-                                Reference in chat
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem 
-                                onClick={() => deleteCell(cell.id)}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      )}
-                    </div>
+  const renderNotebookCells = () => (
+    <ScrollArea className="h-full">
+      <div className="p-4 space-y-3">
+        {cells.map((cell, index) => {
+          const isSelected = selectedCellId === cell.id
 
-                    {/* Cell Content */}
-                    <div className="p-3">
-                      {renderCellContent(cell)}
-                    </div>
+          return (
+            <div key={cell.id} className="relative group">
+              <div
+                onClick={() => {
+                  setSelectedCellId(cell.id)
+                  if (!isPreviewMode) setEditingCellId(cell.id)
+                }}
+                className={`relative rounded-lg border transition-all ${
+                  isSelected
+                    ? 'border-primary/50 bg-primary/5'
+                    : 'border-border/50 bg-card hover:border-border'
+                } ${cell.isExecuting ? 'animate-pulse' : ''}`}
+              >
+                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/50 bg-secondary/30 rounded-t-lg">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {getCellTypeIcon(cell.type)}
+                    <span className="capitalize">{cell.type}</span>
+                    {cell.executionCount && (
+                      <span className="text-primary/70">In [{cell.executionCount}]</span>
+                    )}
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-0.5">
+                    {cell.type === 'code' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          executeCell(cell.id)
+                        }}
+                        className="h-6 px-2 text-xs gap-1"
+                        title="Run cell"
+                        disabled={cell.isExecuting}
+                      >
+                        {cell.isExecuting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                        Run
+                      </Button>
+                    )}
+
+                    {!isPreviewMode && isSelected && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            moveCell(cell.id, 'up')
+                          }}
+                          className="h-6 w-6 p-0"
+                          disabled={index === 0}
+                          title="Move up"
+                        >
+                          <ChevronUp className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            moveCell(cell.id, 'down')
+                          }}
+                          className="h-6 w-6 p-0"
+                          disabled={index === cells.length - 1}
+                          title="Move down"
+                        >
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            duplicateCell(cell.id)
+                          }}
+                          className="h-6 w-6 p-0"
+                          title="Duplicate"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteCell(cell.id)
+                          }}
+                          className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </>
+                    )}
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        addCellReference(cell.id)
+                      }}
+                      className="h-6 w-6 p-0 text-primary"
+                      title="Reference in assistant"
+                    >
+                      <AtSign className="h-3 w-3" />
+                    </Button>
+
+                    {!isPreviewMode && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              {getCellTypeIcon(cell.type)}
+                              <span className="ml-2">Cell Type</span>
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              <DropdownMenuItem
+                                onClick={() => changeCellType(cell.id, 'markdown')}
+                                className={cell.type === 'markdown' ? 'bg-secondary' : ''}
+                              >
+                                <Type className="h-4 w-4 mr-2" />
+                                Markdown
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => changeCellType(cell.id, 'code')}
+                                className={cell.type === 'code' ? 'bg-secondary' : ''}
+                              >
+                                <Code className="h-4 w-4 mr-2" />
+                                Code
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => changeCellType(cell.id, 'chart')}
+                                className={cell.type === 'chart' ? 'bg-secondary' : ''}
+                              >
+                                <BarChart3 className="h-4 w-4 mr-2" />
+                                Chart
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => changeCellType(cell.id, 'insight')}
+                                className={cell.type === 'insight' ? 'bg-secondary' : ''}
+                              >
+                                <Sparkles className="h-4 w-4 mr-2" />
+                                Insight
+                              </DropdownMenuItem>
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => addCell('markdown', cell.id)}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Add cell below
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => duplicateCell(cell.id)}>
+                            <Copy className="h-4 w-4 mr-2" />
+                            Duplicate
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => deleteCell(cell.id)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 </div>
+
+                <div className="p-3">
+                  {renderCellContent(cell)}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+
+        {!isPreviewMode && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="w-full mt-2 mb-4 p-4 border-2 border-dashed border-border/50 rounded-lg hover:border-primary/50 hover:bg-secondary/20 transition-colors group cursor-pointer"
+              >
+                <div className="flex items-center justify-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
+                  <Plus className="h-4 w-4" />
+                  <span className="text-sm">Add cell</span>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center">
+              <DropdownMenuItem onClick={() => addCell('markdown')}>
+                <Type className="h-4 w-4 mr-2" />
+                Markdown
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => addCell('code')}>
+                <Code className="h-4 w-4 mr-2" />
+                Code
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => addCell('chart')}>
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Chart
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => addCell('insight')}>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Insight
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+    </ScrollArea>
+  )
+
+  const renderChatPanel = () => (
+    <div className="h-full flex flex-col bg-background">
+      <div className="shrink-0 px-3 py-2 border-b border-border flex items-center justify-between bg-secondary/30">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-4 w-4 text-primary" />
+          <span className="text-sm font-medium">AI Assistant</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowChat(false)}
+          className="h-6 w-6 p-0"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-3 space-y-3">
+          {chatMessages.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>Ask the AI to help with this notebook</p>
+              <p className="text-xs mt-1">Use @ on any cell to reference it</p>
+            </div>
+          ) : (
+            chatMessages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[85%] rounded-lg p-3 text-sm ${
+                    msg.role === 'user'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary'
+                  }`}
+                >
+                  {msg.referencedCells && msg.referencedCells.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {msg.referencedCells.map(cellId => {
+                        const cell = getCellById(cellId)
+                        return (
+                          <Badge key={cellId} variant="outline" className="text-[10px] gap-1">
+                            {cell && getCellTypeIcon(cell.type)}
+                            @{cell?.type || 'cell'}
+                          </Badge>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </ScrollArea>
+
+      {referencedCells.length > 0 && (
+        <div className="shrink-0 px-3 py-2 border-t border-border/50 bg-secondary/20">
+          <div className="flex flex-wrap gap-1">
+            {referencedCells.map(cellId => {
+              const cell = getCellById(cellId)
+              return (
+                <Badge
+                  key={cellId}
+                  variant="secondary"
+                  className="gap-1 pr-1"
+                >
+                  {cell && getCellTypeIcon(cell.type)}
+                  @{cell?.type || 'cell'}
+                  <button
+                    onClick={() => removeCellReference(cellId)}
+                    className="ml-1 hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
               )
             })}
-
-            {/* Ghost cell - Add new cell at bottom */}
-            {!isPreviewMode && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="w-full mt-2 mb-4 p-4 border-2 border-dashed border-border/50 rounded-lg hover:border-primary/50 hover:bg-secondary/20 transition-colors group cursor-pointer"
-                  >
-                    <div className="flex items-center justify-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
-                      <Plus className="h-4 w-4" />
-                      <span className="text-sm">Add cell</span>
-                    </div>
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="center">
-                  <DropdownMenuItem onClick={() => addCell('markdown')}>
-                    <Type className="h-4 w-4 mr-2" />
-                    Markdown
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => addCell('code')}>
-                    <Code className="h-4 w-4 mr-2" />
-                    Code
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => addCell('chart')}>
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                    Chart
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => addCell('insight')}>
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Insight
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
           </div>
-        </ScrollArea>
+        </div>
+      )}
 
-        {/* Chat Panel - Collapsible from bottom */}
-        {showChat && (
-          <div className="h-1/2 border-t border-border flex flex-col bg-background">
-            {/* Chat Header */}
-            <div className="shrink-0 px-3 py-2 border-b border-border flex items-center justify-between bg-secondary/30">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">AI Assistant</span>
+      <div className="shrink-0 px-3 py-2 border-t border-border">
+        <div className="flex gap-1.5 items-end">
+          <Textarea
+            ref={chatInputRef}
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder="Ask AI about this notebook..."
+            className="min-h-[36px] max-h-[80px] resize-none text-sm py-2 px-3"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                sendChatMessage()
+              }
+            }}
+          />
+          <Button
+            onClick={sendChatMessage}
+            size="icon"
+            className="shrink-0 h-7 w-7 rounded-md"
+            disabled={!chatInput.trim() && referencedCells.length === 0}
+          >
+            <Send className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const kernelStatusTone = activeNotebook.status === 'running'
+    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+    : activeNotebook.status === 'starting'
+      ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+      : activeNotebook.status === 'error'
+        ? 'bg-destructive/15 text-destructive border-destructive/30'
+        : 'bg-muted text-muted-foreground border-border'
+
+  return (
+    <div className="h-full overflow-hidden bg-background">
+      <ResizablePanelGroup direction="horizontal" className="h-full">
+        <ResizablePanel defaultSize={24} minSize={18} maxSize={40}>
+          <div className="h-full border-r border-border/70 bg-secondary/15 flex flex-col">
+            <div className="p-3 border-b border-border/60 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold tracking-wide">Reports</p>
+                <p className="text-xs text-muted-foreground">Notebook list</p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowChat(false)}
-                className="h-6 w-6 p-0"
-              >
-                <X className="h-4 w-4" />
+              <Button size="sm" variant="outline" className="h-7 px-2" onClick={createReport}>
+                <Plus className="h-3.5 w-3.5" />
               </Button>
             </div>
 
-            {/* Chat Messages */}
-            <ScrollArea className="flex-1 min-h-0">
-              <div className="p-3 space-y-3">
-                {chatMessages.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
-                    <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>Ask the AI to help with your report</p>
-                    <p className="text-xs mt-1">Use @ to reference specific cells</p>
-                  </div>
-                ) : (
-                  chatMessages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            <ScrollArea className="flex-1">
+              <div className="p-2 space-y-1.5">
+                {reports.map(report => {
+                  const isActive = activeReport?.id === report.id
+                  const kernel = report.notebook
+                  return (
+                    <button
+                      type="button"
+                      key={report.id}
+                      onClick={() => setActiveReportId(report.id)}
+                      className={`w-full text-left rounded-lg border p-2.5 transition-colors ${
+                        isActive
+                          ? 'border-primary/50 bg-primary/10'
+                          : 'border-border/40 bg-card hover:border-border/80'
+                      }`}
                     >
-                      <div
-                        className={`max-w-[85%] rounded-lg p-3 text-sm ${
-                          msg.role === 'user'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-secondary'
-                        }`}
-                      >
-                        {msg.referencedCells && msg.referencedCells.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mb-2">
-                            {msg.referencedCells.map(cellId => {
-                              const cell = getCellById(cellId)
-                              return (
-                                <Badge key={cellId} variant="outline" className="text-[10px] gap-1">
-                                  {cell && getCellTypeIcon(cell.type)}
-                                  @{cell?.type || 'cell'}
-                                </Badge>
-                              )
-                            })}
-                          </div>
-                        )}
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium truncate">{report.title}</p>
+                        <span className={`h-2 w-2 mt-1 rounded-full ${
+                          kernel.status === 'running' ? 'bg-emerald-400' :
+                          kernel.status === 'starting' ? 'bg-amber-400' :
+                          kernel.status === 'error' ? 'bg-destructive' :
+                          'bg-muted-foreground/40'
+                        }`} />
                       </div>
-                    </div>
-                  ))
-                )}
+                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{report.summary}</p>
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        Updated {new Date(report.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </button>
+                  )
+                })}
               </div>
             </ScrollArea>
 
-            {/* Referenced Cells Display */}
-            {referencedCells.length > 0 && (
-              <div className="shrink-0 px-3 py-2 border-t border-border/50 bg-secondary/20">
-                <div className="flex flex-wrap gap-1">
-                  {referencedCells.map(cellId => {
-                    const cell = getCellById(cellId)
-                    return (
-                      <Badge
-                        key={cellId}
-                        variant="secondary"
-                        className="gap-1 pr-1"
-                      >
-                        {cell && getCellTypeIcon(cell.type)}
-                        @{cell?.type || 'cell'}
-                        <button
-                          onClick={() => removeCellReference(cellId)}
-                          className="ml-1 hover:text-destructive"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Chat Input */}
-            <div className="shrink-0 px-3 py-2 border-t border-border">
-              <div className="flex gap-1.5 items-end">
-                <Textarea
-                  ref={chatInputRef}
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask AI about your report..."
-                  className="min-h-[36px] max-h-[80px] resize-none text-sm py-2 px-3"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      sendChatMessage()
-                    }
-                  }}
-                />
-                <Button
-                  onClick={sendChatMessage}
-                  size="icon"
-                  className="shrink-0 h-7 w-7 rounded-md"
-                  disabled={!chatInput.trim() && referencedCells.length === 0}
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+            <div className="p-3 border-t border-border/60 text-xs text-muted-foreground">
+              {runs.length} runs available for notebook analysis.
             </div>
           </div>
-        )}
-      </div>
+        </ResizablePanel>
 
-      {/* Floating Chat Toggle Button */}
-      {!showChat && (
-        <div className="absolute bottom-4 right-4">
-          <Button
-            onClick={() => setShowChat(true)}
-            size="lg"
-            className="rounded-full h-12 w-12 shadow-lg"
-          >
-            <MessageSquare className="h-5 w-5" />
-          </Button>
-        </div>
-      )}
+        <ResizableHandle withHandle />
+
+        <ResizablePanel defaultSize={76} minSize={52}>
+          <div className="h-full flex flex-col overflow-hidden">
+            {activeReport && (
+              <>
+                <div className="border-b border-border/70 p-3 bg-card/30 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-primary shrink-0" />
+                        <h2 className="text-sm font-semibold truncate">{activeReport.title}</h2>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 truncate">{activeReport.summary}</p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant="outline" className={`capitalize ${kernelStatusTone}`}>
+                        {activeNotebook.status}
+                      </Badge>
+
+                      {activeNotebook.status === 'running' || activeNotebook.status === 'starting' ? (
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={stopNotebookKernel}>
+                          <Square className="h-3 w-3 mr-1.5" />
+                          Stop Kernel
+                        </Button>
+                      ) : (
+                        <Button variant="default" size="sm" className="h-7 text-xs" onClick={startNotebookKernel}>
+                          <FlaskConical className="h-3 w-3 mr-1.5" />
+                          {activeNotebook.sessionId ? 'Restart Kernel' : 'Start Python Kernel'}
+                        </Button>
+                      )}
+
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={deleteActiveReport}
+                        disabled={reports.length <= 1}
+                        title="Delete notebook"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <Input
+                      value={activeNotebook.workdir}
+                      onChange={(e) => setNotebookConfig('workdir', e.target.value)}
+                      placeholder="Working directory (optional)"
+                      className="h-8 text-xs"
+                    />
+                    <Input
+                      value={activeNotebook.pythonCommand}
+                      onChange={(e) => setNotebookConfig('pythonCommand', e.target.value)}
+                      placeholder="Python command (default: python)"
+                      className="h-8 text-xs"
+                    />
+                    <Input
+                      value={activeNotebook.venvPath}
+                      onChange={(e) => setNotebookConfig('venvPath', e.target.value)}
+                      placeholder="Venv path (optional)"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+
+                  {activeNotebook.tmuxWindow && (
+                    <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="inline-flex items-center gap-1">
+                        <TerminalSquare className="h-3.5 w-3.5" />
+                        tmux window: <code>{activeNotebook.tmuxWindow}</code>
+                      </span>
+                      {activeNotebook.tmuxPane && <span>pane: <code>{activeNotebook.tmuxPane}</code></span>}
+                      <span>attach: <code>{`tmux attach -t research-agent:${activeNotebook.tmuxWindow}`}</code></span>
+                    </div>
+                  )}
+
+                  {activeNotebook.error && (
+                    <p className="text-xs text-destructive">{activeNotebook.error}</p>
+                  )}
+                </div>
+
+                <div className="flex-1 min-h-0 overflow-hidden relative">
+                  {showChat ? (
+                    <ResizablePanelGroup direction="vertical" className="h-full">
+                      <ResizablePanel defaultSize={68} minSize={40}>
+                        {renderNotebookCells()}
+                      </ResizablePanel>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel defaultSize={32} minSize={18}>
+                        {renderChatPanel()}
+                      </ResizablePanel>
+                    </ResizablePanelGroup>
+                  ) : (
+                    <>
+                      {renderNotebookCells()}
+                      <div className="absolute bottom-4 right-4">
+                        <Button
+                          onClick={() => setShowChat(true)}
+                          size="lg"
+                          className="rounded-full h-12 w-12 shadow-lg"
+                        >
+                          <MessageSquare className="h-5 w-5" />
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   )
 }

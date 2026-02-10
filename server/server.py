@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import shlex
+import subprocess
 import sys
 import time
 import uuid
@@ -64,21 +65,25 @@ CHAT_DATA_FILE = ""
 JOBS_DATA_FILE = ""
 ALERTS_DATA_FILE = ""
 SETTINGS_DATA_FILE = ""
+NOTEBOOKS_DATA_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
+NOTEBOOK_RESPONSE_PREFIX = "__RA_NOTEBOOK_RESPONSE__"
 
 
 def init_paths(workdir: str):
     """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE
+    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE, NOTEBOOKS_DATA_FILE
     WORKDIR = os.path.abspath(workdir)
     DATA_DIR = os.path.join(WORKDIR, ".agents")
     CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
     JOBS_DATA_FILE = os.path.join(DATA_DIR, "jobs.json")
     ALERTS_DATA_FILE = os.path.join(DATA_DIR, "alerts.json")
     SETTINGS_DATA_FILE = os.path.join(DATA_DIR, "settings.json")
+    NOTEBOOKS_DATA_FILE = os.path.join(DATA_DIR, "notebooks.json")
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
+    os.makedirs(os.path.join(DATA_DIR, "notebooks"), exist_ok=True)
     logger.info(f"Initialized with workdir: {WORKDIR}")
     # Change the current working directory to the workdir
     os.chdir(WORKDIR)
@@ -226,6 +231,18 @@ class WildLoopConfigRequest(BaseModel):
     custom_condition: Optional[str] = None
 
 
+class NotebookCreate(BaseModel):
+    name: str = "Notebook"
+    workdir: Optional[str] = None
+    python_command: Optional[str] = None
+    venv_path: Optional[str] = None
+
+
+class NotebookExecuteRequest(BaseModel):
+    code: str
+    timeout_seconds: int = 30
+
+
 # =============================================================================
 # State
 # =============================================================================
@@ -252,6 +269,7 @@ wild_loop_state: dict = {
 }
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
+notebooks: Dict[str, dict] = {}
 
 
 def save_chat_state():
@@ -347,6 +365,27 @@ def load_settings_state():
             logger.error(f"Error loading settings state: {e}")
 
 
+def save_notebooks_state():
+    """Persist notebook sessions to disk."""
+    try:
+        with open(NOTEBOOKS_DATA_FILE, "w") as f:
+            json.dump({"notebooks": notebooks}, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving notebooks state: {e}")
+
+
+def load_notebooks_state():
+    """Load notebook sessions from disk."""
+    global notebooks
+    if os.path.exists(NOTEBOOKS_DATA_FILE):
+        try:
+            with open(NOTEBOOKS_DATA_FILE, "r") as f:
+                data = json.load(f)
+                notebooks = data.get("notebooks", {})
+        except Exception as e:
+            logger.error(f"Error loading notebooks state: {e}")
+
+
 # =============================================================================
 # Tmux Helpers
 # =============================================================================
@@ -433,6 +472,111 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     run_data["launched_at"] = time.time()
     
     return tmux_window_name
+
+
+def launch_notebook_in_tmux(notebook_id: str, notebook_data: dict) -> tuple[str, str]:
+    """Launch a persistent Python notebook kernel in a tmux window."""
+    session = get_or_create_session()
+    if not session:
+        raise Exception("Tmux session not available. Start tmux first.")
+
+    tmux_window_name = f"nb-{notebook_id[:8]}"
+    logger.info(f"Launching notebook {notebook_id} in window {tmux_window_name}")
+
+    window = session.new_window(window_name=tmux_window_name, attach=False)
+    pane = window.active_pane
+
+    notebook_dir = os.path.join(DATA_DIR, "notebooks", notebook_id)
+    os.makedirs(notebook_dir, exist_ok=True)
+
+    kernel_log_path = os.path.join(notebook_dir, "kernel.log")
+    try:
+        pane.cmd("pipe-pane", f"cat >> {kernel_log_path}")
+    except Exception as e:
+        logger.warning(f"Failed to setup notebook pipe-pane: {e}")
+
+    server_dir = os.path.dirname(os.path.abspath(__file__))
+    kernel_script = os.path.join(server_dir, "notebook_kernel.py")
+
+    run_workdir = notebook_data.get("workdir") or WORKDIR
+    python_command = (notebook_data.get("python_command") or "python").strip()
+    venv_path = (notebook_data.get("venv_path") or "").strip()
+
+    activate_cmd = ""
+    if venv_path:
+        activate_script = os.path.join(venv_path, "bin", "activate")
+        activate_cmd = f"source {shlex.quote(activate_script)} && "
+
+    launch_cmd = (
+        f"cd {shlex.quote(run_workdir)} && "
+        f"{activate_cmd}"
+        f"{python_command} -u {shlex.quote(kernel_script)}"
+    )
+
+    logger.info(f"Notebook kernel command: {launch_cmd}")
+    pane.send_keys(launch_cmd)
+
+    notebook_data["status"] = "running"
+    notebook_data["tmux_window"] = tmux_window_name
+    notebook_data["tmux_pane"] = pane.pane_id
+    notebook_data["run_dir"] = notebook_dir
+    notebook_data["last_activity_at"] = time.time()
+    notebook_data["error"] = None
+
+    return tmux_window_name, pane.pane_id
+
+
+def get_tmux_window(session, window_name: str):
+    """Get a tmux window by name if it exists."""
+    try:
+        return session.windows.get(window_name=window_name, default=None)
+    except Exception:
+        return None
+
+
+def capture_tmux_pane_text(pane_id: str, history_lines: int = 500) -> str:
+    """Capture recent output from a tmux pane."""
+    try:
+        proc = subprocess.run(
+            [
+                "tmux",
+                "capture-pane",
+                "-pt",
+                pane_id,
+                "-J",
+                "-S",
+                f"-{history_lines}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return proc.stdout
+    except Exception as e:
+        logger.warning(f"Failed to capture tmux pane {pane_id}: {e}")
+        return ""
+
+
+def find_notebook_response(pane_id: str, exec_id: str) -> Optional[dict]:
+    """Scan recent pane output for a notebook response payload."""
+    output = capture_tmux_pane_text(pane_id)
+    if not output:
+        return None
+
+    for line in reversed(output.splitlines()):
+        idx = line.find(NOTEBOOK_RESPONSE_PREFIX)
+        if idx == -1:
+            continue
+        payload_text = line[idx + len(NOTEBOOK_RESPONSE_PREFIX):].strip()
+        if not payload_text:
+            continue
+        try:
+            payload = json.loads(payload_text)
+        except Exception:
+            continue
+        if payload.get("id") == exec_id:
+            return payload
+    return None
 
 
 # =============================================================================
@@ -1283,6 +1427,158 @@ async def configure_wild_loop(req: WildLoopConfigRequest):
     return wild_loop_state
 
 
+@app.get("/notebooks")
+async def list_notebooks(limit: int = Query(50, description="Max notebook sessions to return")):
+    """List notebook sessions."""
+    result = [{"id": notebook_id, **notebook} for notebook_id, notebook in notebooks.items()]
+    result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return result[:limit]
+
+
+@app.post("/notebooks")
+async def create_notebook(req: NotebookCreate):
+    """Create and launch a notebook kernel in tmux."""
+    notebook_id = uuid.uuid4().hex[:12]
+    notebook_data = {
+        "name": req.name or "Notebook",
+        "kernel": "python",
+        "status": "starting",
+        "workdir": req.workdir or WORKDIR,
+        "python_command": req.python_command or "python",
+        "venv_path": req.venv_path,
+        "created_at": time.time(),
+        "last_activity_at": time.time(),
+        "last_execution_count": 0,
+        "tmux_window": None,
+        "tmux_pane": None,
+        "run_dir": None,
+        "error": None,
+    }
+
+    notebooks[notebook_id] = notebook_data
+
+    try:
+        tmux_window, tmux_pane = launch_notebook_in_tmux(notebook_id, notebook_data)
+        notebook_data["tmux_window"] = tmux_window
+        notebook_data["tmux_pane"] = tmux_pane
+        notebook_data["status"] = "running"
+        notebook_data["last_activity_at"] = time.time()
+    except Exception as e:
+        notebook_data["status"] = "error"
+        notebook_data["error"] = str(e)
+        save_notebooks_state()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    save_notebooks_state()
+    return {"id": notebook_id, **notebook_data}
+
+
+@app.get("/notebooks/{notebook_id}")
+async def get_notebook(notebook_id: str):
+    """Get notebook session details."""
+    notebook = notebooks.get(notebook_id)
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    return {"id": notebook_id, **notebook}
+
+
+@app.post("/notebooks/{notebook_id}/execute")
+async def execute_notebook_cell(notebook_id: str, req: NotebookExecuteRequest):
+    """Execute a code cell in a running notebook kernel."""
+    notebook = notebooks.get(notebook_id)
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    if notebook.get("status") not in ["running", "starting"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Notebook is not running (status: {notebook.get('status')})",
+        )
+
+    tmux_window = notebook.get("tmux_window")
+    tmux_pane = notebook.get("tmux_pane")
+    if not tmux_window or not tmux_pane:
+        raise HTTPException(status_code=400, detail="Notebook tmux window is not available")
+
+    session = get_or_create_session()
+    if not session:
+        raise HTTPException(status_code=500, detail="Tmux session not available")
+
+    window = get_tmux_window(session, tmux_window)
+    if not window:
+        notebook["status"] = "error"
+        notebook["error"] = f"Tmux window {tmux_window} not found"
+        save_notebooks_state()
+        raise HTTPException(status_code=500, detail=notebook["error"])
+
+    pane = next((p for p in window.panes if p.pane_id == tmux_pane), None) or window.active_pane
+    pane_id = pane.pane_id
+    notebook["tmux_pane"] = pane_id
+
+    exec_id = uuid.uuid4().hex[:12]
+    timeout_seconds = max(1, min(int(req.timeout_seconds), 120))
+    payload = json.dumps({"id": exec_id, "code": req.code}, ensure_ascii=True)
+
+    started_at = time.time()
+    pane.send_keys(payload)
+
+    result = None
+    while (time.time() - started_at) < timeout_seconds:
+        result = find_notebook_response(pane_id, exec_id)
+        if result is not None:
+            break
+        await asyncio.sleep(0.1)
+
+    if result is None:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Notebook execution timed out after {timeout_seconds} seconds",
+        )
+
+    execution_count = int(notebook.get("last_execution_count", 0)) + 1
+    notebook["last_execution_count"] = execution_count
+    notebook["last_activity_at"] = time.time()
+    notebook["status"] = "running"
+    notebook["error"] = None
+    save_notebooks_state()
+
+    duration_ms = int((time.time() - started_at) * 1000)
+
+    return {
+        "id": exec_id,
+        "execution_count": execution_count,
+        "stdout": result.get("stdout", ""),
+        "stderr": result.get("stderr", ""),
+        "result": result.get("result"),
+        "error": result.get("error"),
+        "duration_ms": duration_ms,
+    }
+
+
+@app.post("/notebooks/{notebook_id}/stop")
+async def stop_notebook(notebook_id: str):
+    """Stop a notebook kernel and kill its tmux window."""
+    notebook = notebooks.get(notebook_id)
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    tmux_window = notebook.get("tmux_window")
+    session = get_or_create_session()
+    if session and tmux_window:
+        window = get_tmux_window(session, tmux_window)
+        if window:
+            try:
+                window.kill()
+            except Exception as e:
+                logger.warning(f"Failed to kill notebook window {tmux_window}: {e}")
+
+    notebook["status"] = "stopped"
+    notebook["stopped_at"] = time.time()
+    notebook["last_activity_at"] = time.time()
+    save_notebooks_state()
+    return {"message": "Notebook stopped"}
+
+
 def _build_experiment_context() -> str:
     """Build a summary of current experiment state for the wild mode prompt."""
     lines = ["\n--- Current Experiment State ---"]
@@ -1677,8 +1973,6 @@ async def list_artifacts(run_id: str):
 # Main
 # =============================================================================
 
-import subprocess
-
 def start_opencode_server_subprocess(args):
     # Start OpenCode server subprocess
     opencode_process = subprocess.Popen(
@@ -1731,6 +2025,7 @@ def main():
     load_runs_state()
     load_alerts_state()
     load_settings_state()
+    load_notebooks_state()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
     logger.info(f"Working directory: {WORKDIR}")
