@@ -2,6 +2,9 @@
   "name": "research-agent-cli",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "bin": {
     "research-agent": "./cli/research-agent.mjs"
   },

@@ -21,7 +21,7 @@ An AI-powered research assistant for ML experiment tracking. Provides a mobile-f
 
 ## Prerequisites
 
-- **Node.js** 18+ and **npm**
+- **Node.js** 20.9+ and **npm**
 - **Python** 3.10+
 - **tmux** (for background job execution)
 - **OpenCode** CLI (`npm install -g opencode`), auto-attempted by installer
