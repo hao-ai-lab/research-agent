@@ -9,6 +9,7 @@ Contains:
 - Wild mode prompt builder
 """
 
+import copy
 import heapq
 import logging
 import time
@@ -387,10 +388,10 @@ def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str)
 # =============================================================================
 
 def get_serializable_state() -> dict:
-    """Return state dict suitable for JSON serialization."""
+    """Return state dict suitable for JSON serialization (deep copied)."""
     return {
         "wild_mode": wild_mode_enabled,
-        "wild_loop": wild_loop_state,
+        "wild_loop": copy.deepcopy(wild_loop_state),
     }
 
 
