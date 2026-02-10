@@ -11,6 +11,7 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
+from dataclasses import dataclass
 import json
 import math
 import os
@@ -24,7 +25,21 @@ import asyncio
 import shutil
 import socket
 import subprocess
-from typing import Any, Dict, Optional, AsyncIterator, List
+from typing import Any, Callable, Dict, Optional, AsyncIterator, List
+
+from wild_loop import (
+    WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest,
+    WildEventQueue, wild_event_queue,
+    wild_loop_state,
+    get_wild_mode_state, set_wild_mode_state,
+    get_loop_status, update_loop_status, configure_loop,
+    enqueue_event, dequeue_event, get_queue_state,
+    auto_enqueue_alert, auto_enqueue_run_terminal,
+    build_experiment_context, build_wild_prompt,
+    get_serializable_state as get_wild_serializable_state,
+    load_from_saved as load_wild_from_saved,
+)
+import wild_loop as wild_loop_mod
 
 import httpx
 import uvicorn
@@ -192,7 +207,10 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    mode: str = "agent"  # "agent" | "wild" | "plan" | "sweep"
+    # Backward compat: accept old boolean fields and convert
     wild_mode: bool = False
+    plan_mode: bool = False
 
 
 class CreateSessionRequest(BaseModel):
@@ -282,17 +300,8 @@ class RunRerunRequest(BaseModel):
     origin_alert_id: Optional[str] = None
 
 
-class WildModeRequest(BaseModel):
-    enabled: bool
-
-
-class WildLoopConfigRequest(BaseModel):
-    goal: Optional[str] = None
-    session_id: Optional[str] = None
-    max_iterations: Optional[int] = None
-    max_time_seconds: Optional[int] = None
-    max_tokens: Optional[int] = None
-    custom_condition: Optional[str] = None
+# WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest
+# → imported from wild_loop module
 
 
 class ClusterUpdateRequest(BaseModel):
@@ -520,24 +529,13 @@ chat_sessions: Dict[str, dict] = {}
 runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
-wild_mode_enabled: bool = False
-wild_loop_state: dict = {
-    "phase": "idle",
-    "iteration": 0,
-    "goal": None,
-    "session_id": None,
-    "started_at": None,
-    "is_paused": False,
-    "sweep_id": None,
-    "termination": {
-        "max_iterations": None,
-        "max_time_seconds": None,
-        "max_tokens": None,
-        "custom_condition": None,
-    }
-}
+# wild_mode_enabled, wild_loop_state → imported from wild_loop module
+# Access via wild_loop_mod.wild_mode_enabled / wild_loop_state (imported ref)
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
+
+
+# WildEventQueue class + wild_event_queue instance → imported from wild_loop module
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
 
@@ -763,11 +761,11 @@ def _normalize_cluster_state(raw_state: Any) -> dict:
 def save_settings_state():
     """Persist settings to disk."""
     try:
+        wild_state = get_wild_serializable_state()
         with open(SETTINGS_DATA_FILE, "w") as f:
             json.dump(
                 {
-                    "wild_mode": wild_mode_enabled,
-                    "wild_loop": wild_loop_state,
+                    **wild_state,
                     "cluster": cluster_state,
                 },
                 f,
@@ -780,15 +778,12 @@ def save_settings_state():
 
 def load_settings_state():
     """Load settings from disk."""
-    global wild_mode_enabled, wild_loop_state, cluster_state
+    global cluster_state
     if os.path.exists(SETTINGS_DATA_FILE):
         try:
             with open(SETTINGS_DATA_FILE, "r") as f:
                 data = json.load(f)
-                wild_mode_enabled = bool(data.get("wild_mode", False))
-                saved_loop = data.get("wild_loop")
-                if saved_loop and isinstance(saved_loop, dict):
-                    wild_loop_state.update(saved_loop)
+                load_wild_from_saved(data)
                 cluster_state = _normalize_cluster_state(data.get("cluster"))
         except Exception as e:
             logger.error(f"Error loading settings state: {e}")
@@ -2575,81 +2570,55 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
     return {"system_prompt": req.system_prompt}
 
 
-def _build_chat_prompt(session: dict, message: str, wild_mode: bool) -> str:
-    wild_mode_note = ""
-    if wild_mode:
-        # Build Ralph-style loop prompt using prompt skill templates
-        iteration = wild_loop_state.get("iteration", 0) + 1
-        goal = wild_loop_state.get("goal") or "No specific goal set"
-        max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
-        custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
+# ---------------------------------------------------------------------------
+# Mode Registry: data-driven prompt builder
+# ---------------------------------------------------------------------------
 
-        # Build experiment state summary
-        experiment_context = _build_experiment_context()
+@dataclass
+class ModeConfig:
+    """Declares how to build a mode-specific prompt preamble."""
+    skill_id: str
+    build_state: Callable[[str], dict]  # (message) -> template variables
 
-        iter_display = f"{iteration}"
-        if max_iter:
-            iter_display += f" / {max_iter}"
+
+def _build_plan_state(message: str) -> dict:
+    """Build template variables for plan mode."""
+    return {
+        "goal": message,
+        "experiment_context": _build_experiment_context(),
+    }
+
+
+# NOTE: wild mode uses build_wild_prompt() from wild_loop module directly,
+# because it has its own iteration/sweep/condition logic. We register it
+# with a special sentinel so the generic path delegates correctly.
+_WILD_SENTINEL = "__wild__"
+
+MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "plan": ModeConfig(skill_id="ra_mode_plan", build_state=_build_plan_state),
+    "wild": ModeConfig(skill_id=_WILD_SENTINEL, build_state=lambda _msg: {}),
+}
+
+
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> str:
+    """Build the full prompt for a chat turn, prepending mode-specific preamble."""
+    mode_note = ""
+
+    config = MODE_REGISTRY.get(mode)
+    if config:
+        if config.skill_id == _WILD_SENTINEL:
+            # Delegate to wild_loop module
+            experiment_context = _build_experiment_context()
+            mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context)
         else:
-            iter_display += " (unlimited)"
+            variables = config.build_state(message)
+            rendered = prompt_skill_manager.render(config.skill_id, variables)
+            if rendered:
+                mode_note = rendered + "\n\n"
+            else:
+                logger.warning(f"{config.skill_id} prompt skill not found — sending raw message")
 
-        # Include sweep_id so the agent associates runs with this wild loop
-        sweep_id = wild_loop_state.get("sweep_id")
-        sweep_note = ""
-        if sweep_id:
-            sweep_note = (
-                f"\n## Active Wild Sweep\n"
-                f"Sweep ID: `{sweep_id}` — When creating new runs, use `sweep_id=\"{sweep_id}\"` "
-                f"so they are tracked as part of this wild loop session.\n"
-            )
-
-        custom_condition_text = ""
-        if custom_cond:
-            custom_condition_text = f"- Custom stop condition: {custom_cond}"
-
-        # Try template-based rendering first, fall back to inline
-        rendered = prompt_skill_manager.render("wild_system", {
-            "iteration": iter_display,
-            "max_iterations": str(max_iter) if max_iter else "unlimited",
-            "goal": goal,
-            "experiment_context": experiment_context,
-            "sweep_note": sweep_note,
-            "custom_condition": custom_condition_text,
-        })
-        if rendered:
-            wild_mode_note = rendered + "\n\n"
-        else:
-            # Fallback: inline prompt (in case template file is missing)
-            logger.warning("wild_system prompt skill not found, using inline fallback")
-            wild_mode_note = (
-                f"# Wild Loop — Iteration {iter_display}\n\n"
-                f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
-                f"## Your Goal\n{goal}\n\n"
-                f"{experiment_context}\n"
-                f"{sweep_note}"
-                f"## Instructions\n"
-                f"1. Read the current state of runs, sweeps, and alerts above\n"
-                f"2. Plan what work remains to achieve the goal\n"
-                f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
-                f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
-                f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
-                f"6. At the END of your response, output exactly ONE promise tag:\n"
-                f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
-                f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
-                f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
-                f"## Critical Rules\n"
-                f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
-                f"- Creating or launching runs is NOT completion — you must check their results\n"
-                f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
-                f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
-                f"- If stuck, try a different approach\n"
-                f"- The loop will continue until you succeed or are stopped\n"
-            )
-            if custom_cond:
-                wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
-            wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
-
-    content = f"{wild_mode_note}[USER] {message}"
+    content = f"{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
@@ -2782,7 +2751,14 @@ async def chat_endpoint(req: ChatRequest):
 
     save_chat_state()
 
-    content = _build_chat_prompt(session, req.message, req.wild_mode)
+    # Resolve mode: prefer explicit mode field, fall back to legacy booleans
+    effective_mode = req.mode
+    if effective_mode == "agent":
+        if req.wild_mode:
+            effective_mode = "wild"
+        elif req.plan_mode:
+            effective_mode = "plan"
+    content = _build_chat_prompt(session, req.message, effective_mode)
     runtime = await _start_chat_worker(session_id, content)
     return StreamingResponse(
         _stream_runtime_events(session_id, from_seq=1, run_id=runtime.run_id),
@@ -3074,6 +3050,12 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
     elif next_status in RUN_STATUS_TERMINAL:
         run["ended_at"] = time.time()
 
+    # Auto-enqueue wild event on terminal run status (delegated to wild_loop module)
+    auto_enqueue_run_terminal(
+        run_id=run_id, run_name=run.get("name", run_id),
+        status=next_status, exit_code=run.get("exit_code"), error=run.get("error"),
+    )
+
     if run.get("sweep_id"):
         recompute_sweep_state(run["sweep_id"])
     save_runs_state()
@@ -3106,7 +3088,14 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
 
     alert_payload = alert.model_dump()
 
-    if wild_mode_enabled:
+    # Auto-enqueue wild event for this alert (delegated to wild_loop module)
+    auto_enqueue_alert(
+        alert_id=alert_id, run_id=run_id,
+        run_name=runs[run_id].get("name", run_id),
+        severity=severity, message=req.message, choices=req.choices,
+    )
+
+    if wild_loop_mod.wild_mode_enabled:
         session_id = uuid.uuid4().hex[:12]
         chat_sessions[session_id] = {
             "title": f"Alert: {runs[run_id].get('name', run_id)}",
@@ -3229,22 +3218,43 @@ async def respond_to_alert(alert_id: str, req: RespondAlertRequest):
 @app.get("/wild-mode")
 async def get_wild_mode():
     """Get current wild mode state."""
-    return {"enabled": wild_mode_enabled}
+    return get_wild_mode_state()
 
 
 @app.post("/wild-mode")
 async def set_wild_mode(req: WildModeRequest):
     """Enable or disable wild mode."""
-    global wild_mode_enabled
-    wild_mode_enabled = bool(req.enabled)
+    result = set_wild_mode_state(req.enabled)
     save_settings_state()
-    return {"enabled": wild_mode_enabled}
+    return result
+
+
+# =============================================================================
+# Wild Event Queue Endpoints (delegated to wild_loop module)
+# =============================================================================
+
+@app.post("/wild/events/enqueue")
+async def enqueue_wild_event(req: EnqueueEventRequest):
+    """Push an event into the wild event queue with priority."""
+    return enqueue_event(req)
+
+
+@app.get("/wild/events/next")
+async def dequeue_wild_event():
+    """Pop and return the highest-priority event from the queue."""
+    return dequeue_event()
+
+
+@app.get("/wild/events/queue")
+async def get_wild_event_queue_endpoint():
+    """Inspect the current queue state (for debugging/UI)."""
+    return get_queue_state()
 
 
 @app.get("/wild/status")
 async def get_wild_status():
     """Get the current wild loop state."""
-    return wild_loop_state
+    return get_loop_status()
 
 
 @app.post("/wild/status")
@@ -3252,42 +3262,18 @@ async def update_wild_status(phase: str = None, iteration: int = None,
                              goal: str = None, session_id: str = None,
                              is_paused: bool = None):
     """Update wild loop state from frontend."""
-    if phase is not None:
-        wild_loop_state["phase"] = phase
-    if iteration is not None:
-        wild_loop_state["iteration"] = iteration
-    if goal is not None:
-        wild_loop_state["goal"] = goal
-    if session_id is not None:
-        wild_loop_state["session_id"] = session_id
-    if is_paused is not None:
-        wild_loop_state["is_paused"] = is_paused
-    if phase == "idle":
-        wild_loop_state["started_at"] = None
-    elif wild_loop_state["started_at"] is None and phase not in ["idle", "complete"]:
-        wild_loop_state["started_at"] = time.time()
+    result = update_loop_status(phase=phase, iteration=iteration, goal=goal,
+                                session_id=session_id, is_paused=is_paused)
     save_settings_state()
-    return wild_loop_state
+    return result
 
 
 @app.post("/wild/configure")
-async def configure_wild_loop(req: WildLoopConfigRequest):
+async def configure_wild_loop_endpoint(req: WildLoopConfigRequest):
     """Configure wild loop termination conditions and goal."""
-    if req.goal is not None:
-        wild_loop_state["goal"] = req.goal
-    if req.session_id is not None:
-        wild_loop_state["session_id"] = req.session_id
-    termination = wild_loop_state["termination"]
-    if req.max_iterations is not None:
-        termination["max_iterations"] = req.max_iterations
-    if req.max_time_seconds is not None:
-        termination["max_time_seconds"] = req.max_time_seconds
-    if req.max_tokens is not None:
-        termination["max_tokens"] = req.max_tokens
-    if req.custom_condition is not None:
-        termination["custom_condition"] = req.custom_condition
+    result = configure_loop(req)
     save_settings_state()
-    return wild_loop_state
+    return result
 
 
 @app.get("/cluster")
@@ -3373,46 +3359,7 @@ async def update_cluster_state(req: ClusterUpdateRequest):
 
 def _build_experiment_context() -> str:
     """Build a summary of current experiment state for the wild mode prompt."""
-    lines = ["\n--- Current Experiment State ---"]
-    recompute_all_sweep_states()
-
-    # Active runs
-    active_runs = [{"id": rid, **r} for rid, r in runs.items()
-                   if r.get("status") in ["running", "queued", "launching"]]
-    finished_runs = [{"id": rid, **r} for rid, r in runs.items()
-                     if r.get("status") == "finished"]
-    failed_runs = [{"id": rid, **r} for rid, r in runs.items()
-                   if r.get("status") == "failed"]
-
-    lines.append(f"Active runs: {len(active_runs)}")
-    for r in active_runs[:5]:
-        lines.append(f"  - {r['id']}: {r.get('name', '?')} [{r.get('status')}] cmd={r.get('command', '')[:80]}")
-    lines.append(f"Finished runs: {len(finished_runs)} | Failed runs: {len(failed_runs)}")
-    for r in failed_runs[:3]:
-        lines.append(f"  - FAILED {r['id']}: {r.get('name', '?')} error={r.get('error', 'unknown')[:100]}")
-
-    # Sweeps
-    active_sweeps = [{"id": sid, **s} for sid, s in sweeps.items()]
-    if active_sweeps:
-        lines.append(f"Sweeps: {len(active_sweeps)}")
-        for s in active_sweeps[:3]:
-            p = s.get("progress", {})
-            lines.append(f"  - {s['id']}: {s.get('name', '?')} "
-                         f"[{p.get('completed', 0)}/{p.get('total', 0)} done, {p.get('failed', 0)} failed]")
-
-    # Pending alerts
-    pending_alerts = [a for a in active_alerts.values() if a.get("status") == "pending"]
-    if pending_alerts:
-        lines.append(f"Pending alerts: {len(pending_alerts)}")
-        for a in pending_alerts[:3]:
-            lines.append(f"  - {a['id']}: [{a.get('severity')}] {a.get('message', '')[:80]}")
-
-    # Goal
-    if wild_loop_state.get("goal"):
-        lines.append(f"Goal: {wild_loop_state['goal']}")
-
-    lines.append("--- End State ---\n")
-    return "\n".join(lines)
+    return build_experiment_context(runs, sweeps, active_alerts, recompute_all_sweep_states)
 
 
 # =============================================================================

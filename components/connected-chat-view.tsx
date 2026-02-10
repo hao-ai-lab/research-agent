@@ -6,6 +6,7 @@ import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
 import { StreamingMessage } from './streaming-message'
 import { WildLoopBanner } from './wild-loop-banner'
+import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff, Plus } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
@@ -373,41 +374,62 @@ export function ConnectedChatView({
     const hasConversation = displayMessages.length > 0 || streamingState.isStreaming
 
     const renderChatInput = (layout: 'docked' | 'centered') => (
-        <ChatInput
-            onSend={handleSend}
-            onStop={() => {
-                stopStreaming()
-                // Also pause wild loop if active
-                if (wildLoop?.isActive && !wildLoop.isPaused) {
-                    wildLoop.pause()
-                }
-            }}
-            mode={mode}
-            onModeChange={onModeChange}
-            runs={runs}
-            alerts={alerts}
-            sweeps={sweeps}
-            charts={charts}
-            messages={displayMessages}
-            isStreaming={streamingState.isStreaming}
-            onQueue={queueMessage}
-            queueCount={messageQueue.length}
-            queue={messageQueue}
-            onRemoveFromQueue={removeFromQueue}
-            insertDraft={effectiveInsertDraft}
-            insertReplyExcerpt={
-                starterReplyExcerptInsert && starterReplyExcerptInsert.sessionId === currentSessionId
-                    ? {
-                        id: starterReplyExcerptInsert.id,
-                        text: starterReplyExcerptInsert.text,
-                        fileName: starterReplyExcerptInsert.fileName,
+        <>
+            {wildLoop?.isActive && wildLoop.eventQueue.length > 0 && (
+                <EventQueuePanel
+                    events={wildLoop.eventQueue}
+                    onReorder={wildLoop.reorderQueue}
+                    onRemove={wildLoop.removeFromQueue}
+                    onInsert={wildLoop.insertIntoQueue}
+                />
+            )}
+            <ChatInput
+                onSend={handleSend}
+                onStop={() => {
+                    stopStreaming()
+                    // Also pause wild loop if active
+                    if (wildLoop?.isActive && !wildLoop.isPaused) {
+                        wildLoop.pause()
                     }
-                    : null
-            }
-            conversationKey={currentSessionId || 'new'}
-            layout={layout}
-            skills={skills}
-        />
+                }}
+                mode={mode}
+                onModeChange={onModeChange}
+                runs={runs}
+                alerts={alerts}
+                sweeps={sweeps}
+                charts={charts}
+                messages={displayMessages}
+                isStreaming={streamingState.isStreaming}
+                onQueue={queueMessage}
+                queueCount={messageQueue.length}
+                queue={messageQueue}
+                onRemoveFromQueue={removeFromQueue}
+                insertDraft={effectiveInsertDraft}
+                insertReplyExcerpt={
+                    starterReplyExcerptInsert && starterReplyExcerptInsert.sessionId === currentSessionId
+                        ? {
+                            id: starterReplyExcerptInsert.id,
+                            text: starterReplyExcerptInsert.text,
+                            fileName: starterReplyExcerptInsert.fileName,
+                        }
+                        : null
+                }
+                conversationKey={currentSessionId || 'new'}
+                layout={layout}
+                skills={skills}
+                isWildLoopActive={wildLoop?.isActive ?? false}
+                onSteer={wildLoop ? (msg, priority) => {
+                    wildLoop.insertIntoQueue({
+                        id: `steer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                        priority,
+                        title: msg.length > 50 ? msg.slice(0, 47) + '...' : msg,
+                        prompt: msg,
+                        type: 'steer',
+                        createdAt: Date.now(),
+                    }, 0) // Insert at front of queue
+                } : undefined}
+            />
+        </>
     )
 
     return (

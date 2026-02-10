@@ -23,6 +23,7 @@ import {
   ListPlus,
   Trash2,
   ChevronDown,
+  ClipboardList,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,7 +40,7 @@ import {
   type ReferenceTokenType,
 } from '@/lib/reference-token-colors'
 
-export type ChatMode = 'agent' | 'wild' | 'sweep'
+export type ChatMode = 'agent' | 'wild' | 'sweep' | 'plan'
 
 export type MentionType = ReferenceTokenType
 
@@ -90,6 +91,9 @@ interface ChatInputProps {
   conversationKey?: string
   layout?: 'docked' | 'centered'
   skills?: PromptSkill[]
+  // Wild loop steer support
+  isWildLoopActive?: boolean
+  onSteer?: (message: string, priority: number) => void
 }
 
 export function ChatInput({
@@ -114,6 +118,8 @@ export function ChatInput({
   conversationKey = 'default',
   layout = 'docked',
   skills = [],
+  isWildLoopActive = false,
+  onSteer,
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -132,6 +138,7 @@ export function ChatInput({
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [mentionFilter, setMentionFilter] = useState<MentionType | 'all'>('all')
   const [isQueueExpanded, setIsQueueExpanded] = useState(true)
+  const [steerPriority, setSteerPriority] = useState(10)
   const [dictationSupported, setDictationSupported] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -488,6 +495,8 @@ export function ChatInput({
       // If streaming and onQueue is provided, queue the message instead of sending
       if (isStreaming && onQueue && (message.trim() || replyExcerpt)) {
         onQueue(outgoingMessage.trim())
+      } else if (isWildLoopActive && onSteer && message.trim()) {
+        onSteer(message.trim(), steerPriority)
       } else {
         onSend(outgoingMessage, attachments, mode)
       }
@@ -1066,9 +1075,11 @@ export function ChatInput({
                 type="button"
                 className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                   mode === 'agent'
-                    ? 'border border-transparent bg-primary text-primary-foreground shadow-sm hover:bg-primary/92'
+                    ? 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
                     : mode === 'wild'
                     ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
+                    : mode === 'plan'
+                    ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
                     : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
                 }`}
               >
@@ -1076,10 +1087,12 @@ export function ChatInput({
                   <MessageSquare className="h-3 w-3" />
                 ) : mode === 'wild' ? (
                   <Zap className="h-3 w-3" />
+                ) : mode === 'plan' ? (
+                  <ClipboardList className="h-3 w-3" />
                 ) : (
                   <MessageSquare className="h-3 w-3" />
                 )}
-                {mode === 'wild' ? 'Wild' : 'Agent'}
+                {mode === 'wild' ? 'Wild' : mode === 'plan' ? 'Plan' : 'Agent'}
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-56 p-1.5">
@@ -1092,16 +1105,36 @@ export function ChatInput({
                   }}
                   className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
                     mode === 'agent'
-                      ? 'bg-primary/10 border border-primary/35 dark:bg-primary/18 dark:border-primary/45'
+                      ? 'bg-secondary border border-border/60'
                       : 'hover:bg-secondary'
                   }`}
                 >
                   <MessageSquare
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-primary' : 'text-muted-foreground'}`}
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-foreground' : 'text-muted-foreground'}`}
                   />
                   <div>
                     <p className="text-xs font-medium text-foreground">Agent Mode</p>
                     <p className="text-[10px] text-muted-foreground">Normal chat — ask and discuss</p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onModeChange('plan')
+                    setIsModeOpen(false)
+                  }}
+                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                    mode === 'plan'
+                      ? 'bg-orange-500/10 border border-orange-500/35 dark:bg-orange-500/18 dark:border-orange-400/45'
+                      : 'hover:bg-secondary'
+                  }`}
+                >
+                  <ClipboardList
+                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'plan' ? 'text-orange-600 dark:text-orange-300' : 'text-muted-foreground'}`}
+                  />
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Plan Mode</p>
+                    <p className="text-[10px] text-muted-foreground">Think first — propose a plan before acting</p>
                   </div>
                 </button>
                 <button
@@ -1241,6 +1274,77 @@ export function ChatInput({
               Stop
             </Button>
           )}
+
+          {/* Priority selector */}
+          {!isStreaming && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-9 items-center gap-0.5 rounded-lg border border-border/50 bg-secondary/60 px-2 text-[12px] font-medium text-foreground hover:bg-secondary/80 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  title="Message priority"
+                >
+                  <span className="text-muted-foreground/70 text-[10px]">P</span>
+                  <span>{steerPriority}</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                side="top"
+                align="end"
+                className="w-96 p-0"
+                sideOffset={8}
+              >
+                <div className="border-b border-border/40 px-4 py-2.5">
+                  <p className="text-sm font-semibold text-foreground">(Experimental) Message Priority</p>
+                  <p className="text-[11px] text-muted-foreground">Lower number = higher priority</p>
+                </div>
+                <div className="p-2 space-y-0.5">
+                  {[
+                    { value: 10, label: 'Steer', desc: 'Immediately steer LLM with your message' },
+                    { value: 15, label: 'Queued', desc: 'Normal user message.' },
+                    { value: 20, label: 'Critical alert', desc: 'Urgent failures' },
+                    { value: 30, label: 'Warning', desc: 'Non-critical alerts' },
+                    { value: 50, label: 'Event', desc: 'Run completions or normal event'},
+                    { value: 70, label: 'Analysis', desc: 'Post-sweep analysis' },
+                    { value: 90, label: 'Exploring', desc: 'Lowest — loop iterations' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setSteerPriority(opt.value)}
+                      className={`flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left hover:bg-secondary/80 transition-colors ${
+                        steerPriority === opt.value ? 'bg-secondary text-foreground' : 'text-foreground/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-7 shrink-0 font-mono text-sm font-bold text-muted-foreground tabular-nums">{opt.value}</span>
+                        <span className="font-semibold text-sm">{opt.label}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t border-border/40 px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] text-muted-foreground whitespace-nowrap">Custom:</label>
+                    <input
+                      type="number"
+                      min={-1000}
+                      max={1000}
+                      value={steerPriority}
+                      onChange={(e) => {
+                        // const v = parseInt(e.target.value, 10)
+                        const v = parseFloat(e.target.value)
+                        if (!isNaN(v) && v >= -1000 && v <= 1000) setSteerPriority(v)
+                      }}
+                      className="h-7 w-full rounded-md border border-border/40 bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+
           <Button
             onClick={handleSubmit}
             disabled={!message.trim() && attachments.length === 0 && !replyExcerpt}
@@ -1248,8 +1352,11 @@ export function ChatInput({
             className={`h-9 w-9 rounded-lg disabled:opacity-30 relative ${
               isStreaming && onQueue
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : isWildLoopActive && onSteer
+                  ? 'bg-orange-500 text-white hover:bg-orange-600'
+                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
             }`}
+            title={`Send with priority P${steerPriority}`}
           >
             {isStreaming && onQueue ? (
               <>
@@ -1260,10 +1367,14 @@ export function ChatInput({
                   </span>
                 )}
               </>
+            ) : isWildLoopActive && onSteer ? (
+              <Send className="h-3.5 w-3.5" />
             ) : (
               <Send className="h-3.5 w-3.5" />
             )}
-            <span className="sr-only">{isStreaming && onQueue ? 'Queue message' : 'Send message'}</span>
+            <span className="sr-only">
+              {isStreaming && onQueue ? 'Queue message' : isWildLoopActive && onSteer ? 'Steer agent' : 'Send message'}
+            </span>
           </Button>
         </div>
       </div>
