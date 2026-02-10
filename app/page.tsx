@@ -13,6 +13,7 @@ import { JourneyView } from '@/components/journey-view'
 import { ReportView, type ReportToolbarState } from '@/components/report-view'
 import { FileExplorerView } from '@/components/file-explorer-view'
 import { SettingsPageContent } from '@/components/settings-page-content'
+import { SkillsBrowserView } from '@/components/skills-browser-view'
 import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
@@ -26,6 +27,7 @@ import {
 } from '@/components/ui/dialog'
 import { useApiConfig } from '@/lib/api-config'
 import { getWildMode, setWildMode } from '@/lib/api-client'
+import { listPromptSkills, type PromptSkill } from '@/lib/api'
 import { useWildLoop } from '@/hooks/use-wild-loop'
 import { useAppSettings } from '@/lib/app-settings'
 import { useSweeps } from '@/hooks/use-sweeps'
@@ -230,6 +232,12 @@ export default function ResearchChat() {
 
   // Wild loop hook
   const wildLoop = useWildLoop()
+
+  // Load prompt skills for slash commands
+  const [promptSkills, setPromptSkills] = useState<PromptSkill[]>([])
+  useEffect(() => {
+    listPromptSkills().then(setPromptSkills).catch(() => {})
+  }, [])
 
   const events = useMemo<RunEvent[]>(() => {
     const toEvent = alerts.map((alert) => {
@@ -661,6 +669,7 @@ export default function ResearchChat() {
                 webNotificationsEnabled={settings.notifications.webNotificationsEnabled}
                 onOpenSettings={() => handleTabChange('settings')}
                 insertDraft={chatDraftInsert}
+                skills={promptSkills}
               />
             )}
             {activeTab === 'runs' && (
@@ -716,6 +725,9 @@ export default function ResearchChat() {
                 onToggleRule={handleToggleRule}
                 onAddRule={handleAddRule}
               />
+            )}
+            {activeTab === 'skills' && (
+              <SkillsBrowserView />
             )}
             {activeTab === 'report' && (
               <ReportView runs={runs} onToolbarChange={setReportToolbar} />

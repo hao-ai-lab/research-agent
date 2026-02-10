@@ -7,6 +7,7 @@ import {
   Lightbulb,
   MessageSquare,
   Orbit,
+  Wand2,
   type LucideIcon,
 } from 'lucide-react'
 import type { HomeTab } from '@/lib/navigation'
@@ -44,6 +45,11 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     tab: 'memory',
     label: 'Memory',
     icon: Lightbulb,
+  },
+  {
+    tab: 'skills',
+    label: 'Skills',
+    icon: Wand2,
   },
   {
     tab: 'report',

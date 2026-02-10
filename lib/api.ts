@@ -710,6 +710,123 @@ export async function configureWildLoop(config: {
     return response.json()
 }
 
+// =============================================================================
+// Prompt Skill Functions  
+// =============================================================================
+
+export interface PromptSkill {
+    id: string
+    name: string
+    description: string
+    template: string
+    variables: string[]
+    built_in: boolean
+}
+
+export interface SkillFileEntry {
+    name: string
+    path: string
+    type: 'file' | 'directory'
+    size?: number
+}
+
+/**
+ * List all available prompt skills
+ */
+export async function listPromptSkills(): Promise<PromptSkill[]> {
+    const response = await fetch(`${API_URL()}/prompt-skills`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list prompt skills: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get a single prompt skill by ID
+ */
+export async function getPromptSkill(id: string): Promise<PromptSkill> {
+    const response = await fetch(`${API_URL()}/prompt-skills/${id}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get prompt skill: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update a prompt skill's template
+ */
+export async function updatePromptSkill(id: string, template: string): Promise<PromptSkill> {
+    const response = await fetch(`${API_URL()}/prompt-skills/${id}`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify({ template }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to update prompt skill: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Reload all prompt skills from disk
+ */
+export async function reloadPromptSkills(): Promise<{ message: string; count: number }> {
+    const response = await fetch(`${API_URL()}/prompt-skills/reload`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to reload prompt skills: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * List all files in a skill's folder
+ */
+export async function listSkillFiles(id: string): Promise<SkillFileEntry[]> {
+    const response = await fetch(`${API_URL()}/prompt-skills/${id}/files`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list skill files: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Read a file from a skill's folder
+ */
+export async function readSkillFile(id: string, path: string): Promise<{ path: string; content: string }> {
+    const response = await fetch(`${API_URL()}/prompt-skills/${id}/files/${encodeURIComponent(path)}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to read skill file: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Write a file in a skill's folder
+ */
+export async function writeSkillFile(id: string, path: string, content: string): Promise<{ message: string; path: string }> {
+    const response = await fetch(`${API_URL()}/prompt-skills/${id}/files/${encodeURIComponent(path)}`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify({ content }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to write skill file: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+
 /**
  * Add a standalone run to an existing sweep
  */

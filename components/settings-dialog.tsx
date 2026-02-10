@@ -23,6 +23,7 @@ import {
   RotateCcw,
   LayoutDashboard,
   LayoutGrid,
+  FileText,
 } from 'lucide-react'
 import {
   Dialog,
@@ -38,6 +39,7 @@ import { Separator } from '@/components/ui/separator'
 import { useApiConfig } from '@/lib/api-config'
 import type { AppSettings } from '@/lib/types'
 import { LeftPanelConfig } from '@/components/left-panel-config'
+import { PromptSkillEditor } from '@/components/prompt-skill-editor'
 
 interface SettingsDialogProps {
   open: boolean
@@ -58,7 +60,7 @@ export function SettingsDialog({
   focusAuthToken = false,
   onRefresh,
 }: SettingsDialogProps) {
-  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'devMode' | 'about'>('api')
+  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'devMode' | 'promptSkills' | 'about'>('api')
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
   const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
@@ -231,6 +233,19 @@ export function SettingsDialog({
           label: 'Left Panel Items',
           description: 'Reorder and toggle navigation items',
           icon: LayoutDashboard,
+          type: 'custom' as const,
+        },
+      ],
+    },
+    {
+      id: 'promptSkills',
+      title: 'Prompt Skills',
+      items: [
+        {
+          id: 'promptSkillEditor',
+          label: 'Prompt Templates',
+          description: 'Edit Wild Loop prompt templates',
+          icon: FileText,
           type: 'custom' as const,
         },
       ],
@@ -713,6 +728,10 @@ export function SettingsDialog({
 
         if (item.id === 'leftPanelConfig') {
           return <LeftPanelConfig settings={settings} onSettingsChange={onSettingsChange} />
+        }
+
+        if (item.id === 'promptSkillEditor') {
+          return <PromptSkillEditor />
         }
 
         return null
