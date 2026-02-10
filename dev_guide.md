@@ -1,3 +1,4 @@
+````md
 # Onboarding for Hao’s Capstone Group
 
 This guide walks you through setting up and running the research agent locally, connecting it to OpenCode, and getting ready to work on wishlist items.
@@ -8,6 +9,7 @@ This guide walks you through setting up and running the research agent locally, 
 
 ```bash
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
+````
 
 ---
 
@@ -16,7 +18,7 @@ git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 ```bash
 cd server
 ./generate_auth_token.sh --export
-```/
+```
 
 **Important:**
 Save the auth token somewhere safe. You will need it later.
@@ -37,10 +39,12 @@ From the root of the repo:
 
 ```bash
 npm install
+
 uv venv .ra-venv
 uv pip install --python .ra-venv/bin/python -r server/requirements.txt
 
-export RESEARCH_AGENT_USER_AUTH_TOKEN="$(openssl rand -hex 16)"
+# Use the auth token generated in Step 2
+export RESEARCH_AGENT_USER_AUTH_TOKEN="<PASTE_YOUR_AUTH_TOKEN_HERE>"
 export OPENCODE_CONFIG="$(pwd)/server/opencode.json"
 
 opencode serve
@@ -60,7 +64,7 @@ cd server
 **Note:**
 `/path/to/your/research/project` should point to:
 
-```
+```text
 tests/story/alerts
 ```
 
@@ -71,7 +75,9 @@ tests/story/alerts
 ## 6. Start the Frontend (Terminal 3)
 
 ```bash
-NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000
+NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 \
+NEXT_PUBLIC_USE_MOCK=false \
+npm run dev -- --port 3000
 ```
 
 This will give you a local link hosting the research agent UI.
@@ -80,7 +86,7 @@ This will give you a local link hosting the research agent UI.
 
 ## 7. Connect the UI to the Research Agent
 
-1. Open the link from `localhost:3000`
+1. Open the link at `http://localhost:3000`
 2. Click the bottom-left menu where **“Research Lab”** is shown
 3. Click **Settings**
 4. Paste your **AUTH key**
@@ -93,15 +99,18 @@ This will give you a local link hosting the research agent UI.
 
 ## 8. Verify Streaming with OpenCode
 
-OpenCode is the **ground truth** for the research agent, so this step is important.
+OpenCode is the **source of truth for agent execution and streaming**, so this step is important.
 
 1. Go to the terminal where you ran:
 
    ```bash
    opencode serve
    ```
+
 2. Follow the OpenCode link shown in that terminal
+
 3. In OpenCode’s search bar, enter the path where your `localhost:3000` app is running
+
 4. Once inside that path:
 
    * On the **left sidebar**, you should see every chat conversation you start with the research agent **while OpenCode is running**
@@ -135,13 +144,13 @@ Once everything above is set up:
 
 ## 10. Taking Another Wishlist Item
 
-If you want to work on another wishlist item, you must start again from:
+If you want to work on another wishlist item, start again from:
 
 ```bash
 npm install
 ```
 
-You will not need to reinstall opencode and generate an AUTH_TOKEN however
+You will **not** need to reinstall OpenCode or generate a new AUTH_TOKEN.
 
 We are actively working on making this process more streamlined so you don’t have to repeat all of these steps every time.
 
