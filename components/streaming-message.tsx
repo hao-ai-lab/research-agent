@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { CodeOutputBox } from '@/components/code-output-box'
 
 interface StreamingMessageProps {
     streamingState: StreamingState
@@ -245,34 +246,131 @@ function formatDuration(durationMs?: number, startedAt?: number, endedAt?: numbe
     return `${(derived / 1000).toFixed(2)}s`
 }
 
+function parseTaggedCodeBlock(content: string): { language: string; code: string } | null {
+    const trimmed = content.trim()
+    const match = trimmed.match(/^<(backend|frontend)(?:\s+lang=["']?([A-Za-z0-9_+-]+)["']?)?>\n?([\s\S]*?)\n?<\/\1>$/i)
+    if (!match) return null
+
+    return {
+        language: (match[2] || match[1]).toLowerCase(),
+        code: match[3],
+    }
+}
+
+function detectStandaloneCode(content: string): { language: string; code: string } | null {
+    const trimmed = content.trim()
+    if (!trimmed || trimmed.includes('```')) return null
+
+    const lines = trimmed.split('\n')
+    if (lines.length < 2) return null
+
+    const htmlLike = /^<(?:!doctype|html|head|body|main|section|article|div|script|style|template)\b/i.test(trimmed) && /<\/[a-z]/i.test(trimmed)
+    if (htmlLike) {
+        return { language: 'html', code: trimmed }
+    }
+
+    const jsPattern = /^\s*(?:const|let|var|function|import|export|if|for|while|return|class)\b|=>|[{};]/
+    const pyPattern = /^\s*(?:def|class|import|from|if|for|while|return|with|try|except)\b|:\s*$/
+    const jsonLike = /^[\[{][\s\S]*[\]}]$/.test(trimmed) && /":\s*/.test(trimmed)
+
+    const jsLines = lines.filter((line) => jsPattern.test(line)).length
+    const pyLines = lines.filter((line) => pyPattern.test(line)).length
+    const threshold = Math.max(2, Math.floor(lines.length * 0.6))
+
+    if (jsonLike) return { language: 'json', code: trimmed }
+    if (jsLines >= threshold) return { language: 'javascript', code: trimmed }
+    if (pyLines >= threshold) return { language: 'python', code: trimmed }
+
+    return null
+}
+
 /**
  * Simple streaming text renderer - handles basic markdown
  */
 function renderStreamingText(text: string): React.ReactNode {
+    const taggedCode = parseTaggedCodeBlock(text)
+    if (taggedCode) {
+        return <CodeOutputBox language={taggedCode.language} code={taggedCode.code} />
+    }
+
+    const standaloneCode = detectStandaloneCode(text)
+    if (standaloneCode) {
+        return <CodeOutputBox language={standaloneCode.language} code={standaloneCode.code} />
+    }
+
     const lines = text.split('\n')
-    return lines.map((line, i) => {
+    const elements: React.ReactNode[] = []
+    let inCodeBlock = false
+    let codeContent = ''
+    let codeLanguage = ''
+    let codeKey = 0
+
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i]
+
+        if (line.startsWith('```')) {
+            if (inCodeBlock) {
+                const key = `code-${codeKey++}`
+                elements.push(
+                    <CodeOutputBox
+                        key={key}
+                        language={codeLanguage}
+                        code={codeContent.replace(/\n$/, '')}
+                    />
+                )
+                inCodeBlock = false
+                codeContent = ''
+                codeLanguage = ''
+            } else {
+                inCodeBlock = true
+                codeLanguage = line.slice(3).trim()
+            }
+            continue
+        }
+
+        if (inCodeBlock) {
+            codeContent += `${line}\n`
+            continue
+        }
+
         if (line.startsWith('**') && line.endsWith('**')) {
-            return (
+            elements.push(
                 <p key={i} className="mt-3 mb-1 font-semibold text-foreground">
                     {line.slice(2, -2)}
                 </p>
             )
+            continue
         }
         if (line.startsWith('- ') || line.startsWith('* ')) {
-            return (
+            elements.push(
                 <li key={i} className="ml-4 text-foreground/90">
                     {line.slice(2)}
                 </li>
             )
+            continue
         }
         if (line.trim() === '') {
-            return <br key={i} />
+            elements.push(<br key={i} />)
+            continue
         }
-        return (
+        elements.push(
             <span key={i}>
                 {line}
                 {i < lines.length - 1 && <br />}
             </span>
         )
-    })
+    }
+
+    if (inCodeBlock && codeContent) {
+        const key = `code-${codeKey++}`
+        elements.push(
+            <CodeOutputBox
+                key={key}
+                language={codeLanguage}
+                code={codeContent.replace(/\n$/, '')}
+            />
+        )
+    }
+
+    return elements
 }

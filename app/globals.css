@@ -258,6 +258,100 @@ html[data-button-size='default'] {
   }
 }
 
+.code-output-box code {
+  color: oklch(0.24 0.02 250);
+}
+
+.dark .code-output-box code {
+  color: oklch(0.9 0.01 250);
+}
+
+.code-output-box .token.comment,
+.code-output-box .token.prolog,
+.code-output-box .token.doctype,
+.code-output-box .token.cdata {
+  color: oklch(0.56 0.01 250);
+}
+
+.dark .code-output-box .token.comment,
+.dark .code-output-box .token.prolog,
+.dark .code-output-box .token.doctype,
+.dark .code-output-box .token.cdata {
+  color: oklch(0.66 0.01 250);
+}
+
+.code-output-box .token.punctuation {
+  color: oklch(0.43 0.01 250);
+}
+
+.dark .code-output-box .token.punctuation {
+  color: oklch(0.76 0.01 250);
+}
+
+.code-output-box .token.property,
+.code-output-box .token.tag,
+.code-output-box .token.constant,
+.code-output-box .token.symbol,
+.code-output-box .token.deleted {
+  color: oklch(0.61 0.19 25);
+}
+
+.code-output-box .token.boolean,
+.code-output-box .token.number {
+  color: oklch(0.65 0.13 245);
+}
+
+.code-output-box .token.selector,
+.code-output-box .token.attr-name,
+.code-output-box .token.string,
+.code-output-box .token.char,
+.code-output-box .token.builtin,
+.code-output-box .token.inserted {
+  color: oklch(0.54 0.14 150);
+}
+
+.code-output-box .token.operator,
+.code-output-box .token.entity,
+.code-output-box .token.url,
+.code-output-box .token.variable {
+  color: oklch(0.46 0.02 250);
+}
+
+.dark .code-output-box .token.operator,
+.dark .code-output-box .token.entity,
+.dark .code-output-box .token.url,
+.dark .code-output-box .token.variable {
+  color: oklch(0.82 0.01 250);
+}
+
+.code-output-box .token.atrule,
+.code-output-box .token.attr-value,
+.code-output-box .token.function,
+.code-output-box .token.class-name {
+  color: oklch(0.62 0.17 70);
+}
+
+.code-output-box .token.keyword {
+  color: oklch(0.62 0.19 285);
+}
+
+.dark .code-output-box .token.keyword {
+  color: oklch(0.77 0.14 285);
+}
+
+.code-output-box .token.regex,
+.code-output-box .token.important {
+  color: oklch(0.71 0.16 88);
+}
+
+.code-output-box .token.bold {
+  font-weight: 700;
+}
+
+.code-output-box .token.italic {
+  font-style: italic;
+}
+
 .chat-toolbar-icon {
   height: var(--app-chat-toolbar-btn-size) !important;
   width: var(--app-chat-toolbar-btn-size) !important;

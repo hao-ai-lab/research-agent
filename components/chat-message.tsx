@@ -18,6 +18,7 @@ import { LossChart } from './loss-chart'
 import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } from '@/lib/types'
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
+import { CodeOutputBox } from './code-output-box'
 import type { ExperimentRun } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import {
@@ -39,6 +40,44 @@ interface ChatMessageProps {
   onRunClick?: (run: ExperimentRun) => void
   /** Content of the user message that prompted this assistant response (for context extraction) */
   previousUserContent?: string
+}
+
+function parseTaggedCodeBlock(content: string): { language: string; code: string } | null {
+  const trimmed = content.trim()
+  const match = trimmed.match(/^<(backend|frontend)(?:\s+lang=["']?([A-Za-z0-9_+-]+)["']?)?>\n?([\s\S]*?)\n?<\/\1>$/i)
+  if (!match) return null
+
+  return {
+    language: (match[2] || match[1]).toLowerCase(),
+    code: match[3],
+  }
+}
+
+function detectStandaloneCode(content: string): { language: string; code: string } | null {
+  const trimmed = content.trim()
+  if (!trimmed || trimmed.includes('```')) return null
+
+  const lines = trimmed.split('\n')
+  if (lines.length < 2) return null
+
+  const htmlLike = /^<(?:!doctype|html|head|body|main|section|article|div|script|style|template)\b/i.test(trimmed) && /<\/[a-z]/i.test(trimmed)
+  if (htmlLike) {
+    return { language: 'html', code: trimmed }
+  }
+
+  const jsPattern = /^\s*(?:const|let|var|function|import|export|if|for|while|return|class)\b|=>|[{};]/
+  const pyPattern = /^\s*(?:def|class|import|from|if|for|while|return|with|try|except)\b|:\s*$/
+  const jsonLike = /^[\[{][\s\S]*[\]}]$/.test(trimmed) && /":\s*/.test(trimmed)
+
+  const jsLines = lines.filter((line) => jsPattern.test(line)).length
+  const pyLines = lines.filter((line) => pyPattern.test(line)).length
+  const threshold = Math.max(2, Math.floor(lines.length * 0.6))
+
+  if (jsonLike) return { language: 'json', code: trimmed }
+  if (jsLines >= threshold) return { language: 'javascript', code: trimmed }
+  if (pyLines >= threshold) return { language: 'python', code: trimmed }
+
+  return null
 }
 
 export function ChatMessage({ 
@@ -179,11 +218,22 @@ export function ChatMessage({
   }
 
   const renderMarkdown = (content: string) => {
+    const taggedCode = parseTaggedCodeBlock(content)
+    if (taggedCode) {
+      return [<CodeOutputBox key="tagged-code" language={taggedCode.language} code={taggedCode.code} />]
+    }
+
+    const standaloneCode = detectStandaloneCode(content)
+    if (standaloneCode) {
+      return [<CodeOutputBox key="detected-code" language={standaloneCode.language} code={standaloneCode.code} />]
+    }
+
     // Simple markdown rendering
     const lines = content.split('\n')
     const elements: React.ReactNode[] = []
     let inCodeBlock = false
     let codeContent = ''
+    let codeLanguage = ''
     let codeKey = 0
 
     for (let i = 0; i < lines.length; i++) {
@@ -192,17 +242,18 @@ export function ChatMessage({
       if (line.startsWith('```')) {
         if (inCodeBlock) {
           elements.push(
-            <pre
+            <CodeOutputBox
               key={`code-${codeKey++}`}
-              className="my-2 overflow-hidden whitespace-pre-wrap break-all rounded-lg bg-background p-3 text-sm"
-            >
-              <code>{codeContent.trim()}</code>
-            </pre>
+              language={codeLanguage}
+              code={codeContent.replace(/\n$/, '')}
+            />
           )
           codeContent = ''
+          codeLanguage = ''
           inCodeBlock = false
         } else {
           inCodeBlock = true
+          codeLanguage = line.slice(3).trim()
         }
         continue
       }
@@ -239,6 +290,16 @@ export function ChatMessage({
           </p>
         )
       }
+    }
+
+    if (inCodeBlock && codeContent) {
+      elements.push(
+        <CodeOutputBox
+          key={`code-${codeKey++}`}
+          language={codeLanguage}
+          code={codeContent.replace(/\n$/, '')}
+        />
+      )
     }
 
     return elements
