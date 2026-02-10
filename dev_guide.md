@@ -4,7 +4,6 @@ This guide walks you through setting up and running the research agent locally, 
 
 ---
 
-
 ## 1. Clone the Repository
 
 ```bash
@@ -14,7 +13,7 @@ git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 
 ## 2. Generate an Auth Token
 
-```
+```bash
 cd server
 ./generate_auth_token.sh --export
 ```/
