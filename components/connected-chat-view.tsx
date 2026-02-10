@@ -28,6 +28,7 @@ import type {
     InsightChart,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
+import type { PromptSkill } from '@/lib/api'
 
 interface ConnectedChatViewProps {
     runs: ExperimentRun[]
@@ -52,6 +53,7 @@ interface ConnectedChatViewProps {
     insertDraft?: { id: number; text: string } | null
     injectedMessages?: ChatMessageType[]
     onUserMessage?: (message: string) => void
+    skills?: PromptSkill[]
 }
 
 /**
@@ -78,6 +80,7 @@ export function ConnectedChatView({
     insertDraft,
     injectedMessages = [],
     onUserMessage,
+    skills = [],
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
@@ -377,6 +380,7 @@ export function ConnectedChatView({
             onRemoveFromQueue={removeFromQueue}
             insertDraft={effectiveInsertDraft}
             layout={layout}
+            skills={skills}
         />
     )
 

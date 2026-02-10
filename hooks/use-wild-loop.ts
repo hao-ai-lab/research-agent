@@ -5,8 +5,9 @@ import { WildLoopPhase, TerminationConditions } from '@/lib/types'
 import {
   updateWildLoopStatus, configureWildLoop, setWildMode,
   getSweep, listSweeps, listAlerts, listRuns, startSweep, getRunLogs,
-  createSweep, respondToAlert,
+  createSweep, respondToAlert, listPromptSkills,
 } from '@/lib/api'
+import type { PromptSkill } from '@/lib/api'
 import type { Alert, Run, Sweep, CreateSweepRequest } from '@/lib/api'
 
 export interface WildLoopSignal {
@@ -103,10 +104,31 @@ function parseAlertResolution(text: string): { alertId: string; choice: string }
 }
 
 // ============================================================
-// Prompt Builders (frontend-constructed)
+// Template Rendering Utility
 // ============================================================
 
-function buildExploringPrompt(goal: string, iteration: number): string {
+/**
+ * Render a template string by replacing {{variable}} placeholders.
+ * Any unresolved placeholders are removed.
+ */
+function renderTemplate(template: string, variables: Record<string, string>): string {
+  let result = template
+  for (const [key, value] of Object.entries(variables)) {
+    result = result.replaceAll(`{{${key}}}`, value)
+  }
+  // Clean up unreplaced variables
+  return result.replace(/\{\{[a-zA-Z_]+\}\}/g, '')
+}
+
+// ============================================================
+// Prompt Builders (template-aware, with hardcoded fallbacks)
+// ============================================================
+
+function buildExploringPrompt(goal: string, iteration: number, template?: string): string {
+  if (template) {
+    return renderTemplate(template, { goal, iteration: String(iteration) })
+  }
+  // Fallback: original hardcoded prompt
   return [
     `# Wild Loop — Iteration ${iteration} (Exploring)`,
     '',
@@ -148,8 +170,26 @@ function buildExploringPrompt(goal: string, iteration: number): string {
   ].join('\n')
 }
 
-function buildRunEventPrompt(goal: string, run: Run, logTail: string, sweepSummary: string): string {
+function buildRunEventPrompt(goal: string, run: Run, logTail: string, sweepSummary: string, template?: string): string {
   const statusEmoji = run.status === 'failed' ? '❌' : '✅'
+  const runInstructions = run.status === 'failed'
+    ? `- This run FAILED. Diagnose the issue from the logs above.\n- Take corrective action: fix code, adjust parameters, or create a new run.\n- You can rerun this specific run after fixing the issue.`
+    : `- This run SUCCEEDED. Check if the results look correct.\n- If results are suspicious, investigate further.`
+
+  if (template) {
+    return renderTemplate(template, {
+      goal,
+      run_name: run.name,
+      run_id: run.id,
+      run_status: run.status,
+      run_command: run.command,
+      log_tail: logTail.slice(-1000),
+      sweep_summary: sweepSummary,
+      status_emoji: statusEmoji,
+      run_instructions: runInstructions,
+    })
+  }
+  // Fallback
   return [
     `# Wild Loop — Run Event (Monitoring)`,
     '',
@@ -170,14 +210,27 @@ function buildRunEventPrompt(goal: string, run: Run, logTail: string, sweepSumma
     sweepSummary,
     '',
     `## Instructions`,
-    run.status === 'failed'
-      ? `- This run FAILED. Diagnose the issue from the logs above.\n- Take corrective action: fix code, adjust parameters, or create a new run.\n- You can rerun this specific run after fixing the issue.`
-      : `- This run SUCCEEDED. Check if the results look correct.\n- If results are suspicious, investigate further.`,
+    runInstructions,
     `- End with \`<promise>CONTINUE</promise>\``,
   ].join('\n')
 }
 
-function buildAlertPrompt(goal: string, alert: Alert, runName: string): string {
+function buildAlertPrompt(goal: string, alert: Alert, runName: string, template?: string): string {
+  const alertChoices = alert.choices.map(c => `\`${c}\``).join(', ')
+  const resolveExample = `{"alert_id": "${alert.id}", "choice": "ONE_OF_THE_CHOICES_ABOVE"}`
+
+  if (template) {
+    return renderTemplate(template, {
+      goal,
+      run_name: runName,
+      alert_id: alert.id,
+      alert_severity: alert.severity,
+      alert_message: alert.message,
+      alert_choices: alertChoices,
+      alert_resolve_example: resolveExample,
+    })
+  }
+  // Fallback
   return [
     `# Wild Loop — Alert`,
     '',
@@ -188,14 +241,14 @@ function buildAlertPrompt(goal: string, alert: Alert, runName: string): string {
     `- **Alert ID**: ${alert.id}`,
     `- **Severity**: ${alert.severity}`,
     `- **Message**: ${alert.message}`,
-    `- **Available Choices**: ${alert.choices.map(c => `\`${c}\``).join(', ')}`,
+    `- **Available Choices**: ${alertChoices}`,
     '',
     `## How to Resolve This Alert`,
     `You MUST resolve this alert by outputting a \`<resolve_alert>\` tag with your chosen action:`,
     '',
     '```',
     `<resolve_alert>`,
-    `{"alert_id": "${alert.id}", "choice": "ONE_OF_THE_CHOICES_ABOVE"}`,
+    resolveExample,
     `</resolve_alert>`,
     '```',
     '',
@@ -207,13 +260,24 @@ function buildAlertPrompt(goal: string, alert: Alert, runName: string): string {
   ].join('\n')
 }
 
-function buildAnalysisPrompt(goal: string, runs: Run[], sweepName: string): string {
+function buildAnalysisPrompt(goal: string, runs: Run[], sweepName: string, template?: string): string {
   const runSummaries = runs.map(r =>
     `- **${r.name}**: ${r.status}${r.status === 'failed' ? ' ❌' : ' ✅'}`
   ).join('\n')
   const passed = runs.filter(r => r.status === 'finished').length
   const failed = runs.filter(r => r.status === 'failed').length
 
+  if (template) {
+    return renderTemplate(template, {
+      goal,
+      sweep_name: sweepName,
+      total_runs: String(runs.length),
+      passed_runs: String(passed),
+      failed_runs: String(failed),
+      run_summaries: runSummaries,
+    })
+  }
+  // Fallback
   return [
     `# Wild Loop — Analysis (All Runs Complete)`,
     '',
@@ -268,6 +332,21 @@ export function useWildLoop(): UseWildLoopResult {
   const [trackedSweepId, setTrackedSweepId] = useState<string | null>(null)
   const [runStats, setRunStats] = useState<RunStats>(emptyRunStats)
   const [activeAlerts, setActiveAlerts] = useState<Alert[]>([])
+
+  // Prompt skill template cache (loaded once on mount)
+  const templateCacheRef = useRef<Record<string, string>>({})
+  useEffect(() => {
+    listPromptSkills()
+      .then(skills => {
+        const cache: Record<string, string> = {}
+        for (const skill of skills) {
+          cache[skill.id] = skill.template
+        }
+        templateCacheRef.current = cache
+        console.log('[wild-loop] Loaded prompt skill templates:', Object.keys(cache))
+      })
+      .catch(err => console.warn('[wild-loop] Failed to load prompt skills, using fallbacks:', err))
+  }, [])
 
   // Refs for callbacks (avoid stale closures)
   const isActiveRef = useRef(isActive)
@@ -336,7 +415,8 @@ export function useWildLoop(): UseWildLoopResult {
             const prompt = buildAlertPrompt(
               goalRef.current || '',
               alert,
-              run?.name || alert.run_id
+              run?.name || alert.run_id,
+              templateCacheRef.current['wild_alert']
             )
             console.log('[wild-loop] New alert event:', alert.id)
             isBusyRef.current = true
@@ -361,7 +441,8 @@ export function useWildLoop(): UseWildLoopResult {
               goalRef.current || '',
               run,
               logTail,
-              buildSweepSummary(sweepRuns)
+              buildSweepSummary(sweepRuns),
+              templateCacheRef.current['wild_monitoring']
             )
             console.log('[wild-loop] Run event:', run.id, run.status)
             isBusyRef.current = true
@@ -385,7 +466,8 @@ export function useWildLoop(): UseWildLoopResult {
           const prompt = buildAnalysisPrompt(
             goalRef.current || '',
             sweepRuns,
-            sweep.name || trackedSweepId
+            sweep.name || trackedSweepId,
+            templateCacheRef.current['wild_analyzing']
           )
           isBusyRef.current = true
           setPendingPrompt(prompt)
@@ -455,7 +537,7 @@ export function useWildLoop(): UseWildLoopResult {
     isBusyRef.current = false
     if (currentStage === 'exploring') {
       const currentGoal = goalRef.current || 'Continue working'
-      setPendingPrompt(buildExploringPrompt(currentGoal, iterationRef.current + 1))
+      setPendingPrompt(buildExploringPrompt(currentGoal, iterationRef.current + 1, templateCacheRef.current['wild_exploring']))
     }
     // In running stage, polling will pick up next event
     updateWildLoopStatus({ phase: p, is_paused: false }).catch(console.error)
@@ -545,7 +627,7 @@ export function useWildLoop(): UseWildLoopResult {
           setTimeout(() => {
             if (isActiveRef.current && !isPausedRef.current) {
               isBusyRef.current = true
-              setPendingPrompt(buildExploringPrompt(currentGoal, nextIteration + 1))
+              setPendingPrompt(buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']))
             }
           }, 3000)
         })
@@ -558,7 +640,7 @@ export function useWildLoop(): UseWildLoopResult {
       setTimeout(() => {
         if (isActiveRef.current && !isPausedRef.current && stageRef.current === 'exploring') {
           isBusyRef.current = true
-          setPendingPrompt(buildExploringPrompt(currentGoal, nextIteration + 1))
+          setPendingPrompt(buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']))
         }
       }, delay)
     } else if (currentStage === 'running') {
@@ -597,7 +679,7 @@ export function useWildLoop(): UseWildLoopResult {
         setTimeout(() => {
           if (isActiveRef.current && !isPausedRef.current) {
             isBusyRef.current = true
-            setPendingPrompt(buildExploringPrompt(currentGoal, nextIteration + 1))
+            setPendingPrompt(buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']))
           }
         }, 3000)
       }

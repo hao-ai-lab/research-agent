@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/popover'
 import type { ExperimentRun, Artifact, InsightChart, ChatMessage, Sweep } from '@/lib/types'
 import type { Alert as ApiAlert } from '@/lib/api-client'
+import type { PromptSkill } from '@/lib/api'
 import {
   REFERENCE_TYPE_BACKGROUND_MAP,
   REFERENCE_TYPE_COLOR_MAP,
@@ -52,9 +53,10 @@ export interface MentionItem {
 }
 
 interface SlashCommandItem {
-  command: '/launch' | '/analyze' | '/compare' | '/sweep' | '/develop'
+  command: string
   description: string
   color: string
+  isSkill?: boolean
 }
 
 const SLASH_COMMANDS: SlashCommandItem[] = [
@@ -85,6 +87,7 @@ interface ChatInputProps {
   onRemoveFromQueue?: (index: number) => void
   insertDraft?: { id: number; text: string } | null
   layout?: 'docked' | 'centered'
+  skills?: PromptSkill[]
 }
 
 export function ChatInput({
@@ -106,6 +109,7 @@ export function ChatInput({
   onRemoveFromQueue,
   insertDraft = null,
   layout = 'docked',
+  skills = [],
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -273,22 +277,32 @@ export function ChatInput({
     return items.slice(0, 8) // Limit to 8 results
   }, [mentionItems, mentionQuery, mentionFilter])
 
+  const allSlashCommands = useMemo(() => {
+    const skillItems: SlashCommandItem[] = skills.map((s) => ({
+      command: `/${s.id}`,
+      description: s.description || s.name,
+      color: '#8b5cf6',
+      isSkill: true,
+    }))
+    return [...SLASH_COMMANDS, ...skillItems]
+  }, [skills])
+
   const filteredSlashCommands = useMemo(() => {
     const query = slashQuery.trim().toLowerCase()
-    if (!query) return SLASH_COMMANDS
-    return SLASH_COMMANDS.filter((item) => {
+    if (!query) return allSlashCommands
+    return allSlashCommands.filter((item) => {
       const commandName = item.command.slice(1).toLowerCase()
       return commandName.includes(query) || item.description.toLowerCase().includes(query)
     })
-  }, [slashQuery])
+  }, [slashQuery, allSlashCommands])
 
   const commandColorMap = useMemo(() => {
     const map = new Map<string, string>()
-    SLASH_COMMANDS.forEach((item) => {
+    allSlashCommands.forEach((item) => {
       map.set(item.command.toLowerCase(), item.color)
     })
     return map
-  }, [])
+  }, [allSlashCommands])
 
   const mentionTypeColorMap = REFERENCE_TYPE_COLOR_MAP
   const mentionTypeBackgroundMap = REFERENCE_TYPE_BACKGROUND_MAP

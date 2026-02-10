@@ -6,6 +6,7 @@ export type HomeTab =
   | 'charts'
   | 'memory'
   | 'events'
+  | 'skills'
   | 'journey'
   | 'report'
   | 'explorer'
@@ -22,6 +23,7 @@ const HOME_TABS: readonly HomeTab[] = [
   'charts',
   'memory',
   'events',
+  'skills',
   'journey',
   'report',
   'explorer',

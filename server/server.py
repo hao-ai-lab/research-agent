@@ -311,6 +311,208 @@ class ClusterDetectRequest(BaseModel):
 
 
 # =============================================================================
+# Prompt Skill Manager
+# =============================================================================
+
+import yaml
+
+class PromptSkillManager:
+    """Manages prompt template files (markdown with YAML frontmatter).
+    
+    Skills are Codex-standard folders: prompt_skills/<name>/SKILL.md
+    with YAML frontmatter and {{variable}} placeholders.
+    """
+
+    def __init__(self, skills_dir: Optional[str] = None):
+        self.skills_dir = skills_dir or os.path.join(_SERVER_FILE_DIR, "prompt_skills")
+        self._skills: Dict[str, dict] = {}
+        self.load_all()
+
+    def load_all(self) -> None:
+        """Load all SKILL.md files from skill subdirectories."""
+        self._skills.clear()
+        if not os.path.isdir(self.skills_dir):
+            logger.warning(f"Prompt skills directory not found: {self.skills_dir}")
+            return
+        for entry in sorted(os.listdir(self.skills_dir)):
+            skill_dir = os.path.join(self.skills_dir, entry)
+            if not os.path.isdir(skill_dir):
+                continue
+            skill_md = os.path.join(skill_dir, "SKILL.md")
+            if not os.path.isfile(skill_md):
+                continue
+            try:
+                skill = self._parse_file(skill_md, entry)
+                self._skills[skill["id"]] = skill
+            except Exception as e:
+                logger.error(f"Failed to parse prompt skill {entry}: {e}")
+
+    def _parse_file(self, filepath: str, folder_name: str) -> dict:
+        """Parse a SKILL.md file with YAML frontmatter."""
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Split YAML frontmatter from body
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter = yaml.safe_load(parts[1]) or {}
+                template = parts[2].strip()
+            else:
+                frontmatter = {}
+                template = content
+        else:
+            frontmatter = {}
+            template = content
+
+        skill_id = folder_name
+        return {
+            "id": skill_id,
+            "name": frontmatter.get("name", skill_id),
+            "description": frontmatter.get("description", ""),
+            "template": template,
+            "variables": frontmatter.get("variables", []),
+            "built_in": True,
+            "filepath": filepath,
+            "folder": os.path.dirname(filepath),
+        }
+
+    def list(self) -> list:
+        """Return all skills (without internal paths)."""
+        exclude = {"filepath", "folder"}
+        return [
+            {k: v for k, v in skill.items() if k not in exclude}
+            for skill in self._skills.values()
+        ]
+
+    def get(self, skill_id: str) -> Optional[dict]:
+        """Get a single skill by ID."""
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return None
+        exclude = {"filepath", "folder"}
+        return {k: v for k, v in skill.items() if k not in exclude}
+
+    def update(self, skill_id: str, template: str) -> Optional[dict]:
+        """Update a skill's template and write back to disk."""
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return None
+
+        # Rebuild the file content with original frontmatter + new template
+        filepath = skill["filepath"]
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Extract original frontmatter
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter_text = parts[1]
+            else:
+                frontmatter_text = ""
+        else:
+            frontmatter_text = ""
+
+        # Write back
+        new_content = f"---{frontmatter_text}---\n{template}\n"
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+        # Update in-memory cache
+        skill["template"] = template
+        exclude = {"filepath", "folder"}
+        return {k: v for k, v in skill.items() if k not in exclude}
+
+    def list_files(self, skill_id: str) -> Optional[list]:
+        """List all files in a skill's folder."""
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return None
+        folder = skill["folder"]
+        entries = []
+        for root, dirs, files in os.walk(folder):
+            rel_root = os.path.relpath(root, folder)
+            if rel_root == ".":
+                rel_root = ""
+            for d in sorted(dirs):
+                entries.append({
+                    "name": d,
+                    "path": os.path.join(rel_root, d) if rel_root else d,
+                    "type": "directory",
+                })
+            for fname in sorted(files):
+                fpath = os.path.join(root, fname)
+                entries.append({
+                    "name": fname,
+                    "path": os.path.join(rel_root, fname) if rel_root else fname,
+                    "type": "file",
+                    "size": os.path.getsize(fpath),
+                })
+        return entries
+
+    def read_file(self, skill_id: str, file_path: str) -> Optional[str]:
+        """Read a file from a skill's folder."""
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return None
+        full_path = os.path.join(skill["folder"], file_path)
+        # Security: ensure path doesn't escape skill folder
+        real_folder = os.path.realpath(skill["folder"])
+        real_path = os.path.realpath(full_path)
+        if not real_path.startswith(real_folder):
+            return None
+        if not os.path.isfile(real_path):
+            return None
+        with open(real_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def write_file(self, skill_id: str, file_path: str, content: str) -> Optional[bool]:
+        """Write a file in a skill's folder."""
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return None
+        full_path = os.path.join(skill["folder"], file_path)
+        # Security: ensure path doesn't escape skill folder
+        real_folder = os.path.realpath(skill["folder"])
+        real_path = os.path.realpath(full_path)
+        if not real_path.startswith(real_folder):
+            return None
+        os.makedirs(os.path.dirname(real_path), exist_ok=True)
+        with open(real_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        # Re-parse if SKILL.md was updated
+        if os.path.basename(file_path) == "SKILL.md":
+            try:
+                updated = self._parse_file(real_path, skill_id)
+                self._skills[skill_id] = updated
+            except Exception as e:
+                logger.error(f"Failed to re-parse SKILL.md for {skill_id}: {e}")
+        return True
+
+    def render(self, skill_id: str, variables: Dict[str, str]) -> Optional[str]:
+        """Render a skill template with the given variables.
+        
+        Replaces {{variable_name}} with the provided value.
+        Missing variables are left as empty strings.
+        """
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return None
+        result = skill["template"]
+        for var_name, value in variables.items():
+            result = result.replace("{{" + var_name + "}}", str(value))
+        # Clean up any remaining unreplaced variables
+        import re as _re
+        result = _re.sub(r"\{\{[a-zA-Z_]+\}\}", "", result)
+        return result
+
+
+# Initialize the prompt skill manager
+prompt_skill_manager = PromptSkillManager()
+
+
+# =============================================================================
 # State
 # =============================================================================
 
@@ -2376,7 +2578,7 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
 def _build_chat_prompt(session: dict, message: str, wild_mode: bool) -> str:
     wild_mode_note = ""
     if wild_mode:
-        # Build Ralph-style loop prompt
+        # Build Ralph-style loop prompt using prompt skill templates
         iteration = wild_loop_state.get("iteration", 0) + 1
         goal = wild_loop_state.get("goal") or "No specific goal set"
         max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
@@ -2401,33 +2603,51 @@ def _build_chat_prompt(session: dict, message: str, wild_mode: bool) -> str:
                 f"so they are tracked as part of this wild loop session.\n"
             )
 
-        wild_mode_note = (
-            f"# Wild Loop — Iteration {iter_display}\n\n"
-            f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
-            f"## Your Goal\n{goal}\n\n"
-            f"{experiment_context}\n"
-            f"{sweep_note}"
-            f"## Instructions\n"
-            f"1. Read the current state of runs, sweeps, and alerts above\n"
-            f"2. Plan what work remains to achieve the goal\n"
-            f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
-            f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
-            f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
-            f"6. At the END of your response, output exactly ONE promise tag:\n"
-            f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
-            f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
-            f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
-            f"## Critical Rules\n"
-            f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
-            f"- Creating or launching runs is NOT completion — you must check their results\n"
-            f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
-            f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
-            f"- If stuck, try a different approach\n"
-            f"- The loop will continue until you succeed or are stopped\n"
-        )
+        custom_condition_text = ""
         if custom_cond:
-            wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
-        wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
+            custom_condition_text = f"- Custom stop condition: {custom_cond}"
+
+        # Try template-based rendering first, fall back to inline
+        rendered = prompt_skill_manager.render("wild_system", {
+            "iteration": iter_display,
+            "max_iterations": str(max_iter) if max_iter else "unlimited",
+            "goal": goal,
+            "experiment_context": experiment_context,
+            "sweep_note": sweep_note,
+            "custom_condition": custom_condition_text,
+        })
+        if rendered:
+            wild_mode_note = rendered + "\n\n"
+        else:
+            # Fallback: inline prompt (in case template file is missing)
+            logger.warning("wild_system prompt skill not found, using inline fallback")
+            wild_mode_note = (
+                f"# Wild Loop — Iteration {iter_display}\n\n"
+                f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
+                f"## Your Goal\n{goal}\n\n"
+                f"{experiment_context}\n"
+                f"{sweep_note}"
+                f"## Instructions\n"
+                f"1. Read the current state of runs, sweeps, and alerts above\n"
+                f"2. Plan what work remains to achieve the goal\n"
+                f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
+                f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
+                f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
+                f"6. At the END of your response, output exactly ONE promise tag:\n"
+                f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
+                f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
+                f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
+                f"## Critical Rules\n"
+                f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
+                f"- Creating or launching runs is NOT completion — you must check their results\n"
+                f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
+                f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
+                f"- If stuck, try a different approach\n"
+                f"- The loop will continue until you succeed or are stopped\n"
+            )
+            if custom_cond:
+                wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
+            wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
 
     content = f"{wild_mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
@@ -3193,6 +3413,85 @@ def _build_experiment_context() -> str:
 
     lines.append("--- End State ---\n")
     return "\n".join(lines)
+
+
+# =============================================================================
+# Prompt Skill Endpoints
+# =============================================================================
+
+class PromptSkillUpdate(BaseModel):
+    template: str
+
+
+@app.get("/prompt-skills")
+async def list_prompt_skills():
+    """List all available prompt skills."""
+    return prompt_skill_manager.list()
+
+
+@app.get("/prompt-skills/{skill_id}")
+async def get_prompt_skill(skill_id: str):
+    """Get a single prompt skill by ID."""
+    skill = prompt_skill_manager.get(skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
+    return skill
+
+
+@app.put("/prompt-skills/{skill_id}")
+async def update_prompt_skill(skill_id: str, req: PromptSkillUpdate):
+    """Update a prompt skill's template."""
+    updated = prompt_skill_manager.update(skill_id, req.template)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
+    return updated
+
+
+@app.post("/prompt-skills/{skill_id}/render")
+async def render_prompt_skill(skill_id: str, variables: Dict[str, str]):
+    """Render a prompt skill template with the given variables."""
+    rendered = prompt_skill_manager.render(skill_id, variables)
+    if rendered is None:
+        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
+    return {"rendered": rendered}
+
+
+@app.post("/prompt-skills/reload")
+async def reload_prompt_skills():
+    """Reload all prompt skills from disk."""
+    prompt_skill_manager.load_all()
+    return {"message": "Prompt skills reloaded", "count": len(prompt_skill_manager.list())}
+
+
+class SkillFileWrite(BaseModel):
+    content: str
+
+
+@app.get("/prompt-skills/{skill_id}/files")
+async def list_skill_files(skill_id: str):
+    """List all files in a skill's folder."""
+    files = prompt_skill_manager.list_files(skill_id)
+    if files is None:
+        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
+    return files
+
+
+@app.get("/prompt-skills/{skill_id}/files/{file_path:path}")
+async def read_skill_file(skill_id: str, file_path: str):
+    """Read a file from a skill's folder."""
+    content = prompt_skill_manager.read_file(skill_id, file_path)
+    if content is None:
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+    return {"path": file_path, "content": content}
+
+
+@app.put("/prompt-skills/{skill_id}/files/{file_path:path}")
+async def write_skill_file(skill_id: str, file_path: str, req: SkillFileWrite):
+    """Write a file in a skill's folder."""
+    result = prompt_skill_manager.write_file(skill_id, file_path, req.content)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Skill or path not found: {skill_id}/{file_path}")
+    return {"message": "File saved", "path": file_path}
 
 
 # =============================================================================
