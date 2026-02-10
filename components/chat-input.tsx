@@ -1239,7 +1239,7 @@ export function ChatInput({
                 sideOffset={8}
               >
                 <div className="border-b border-border/40 px-4 py-2.5">
-                  <p className="text-sm font-semibold text-foreground">Message Priority</p>
+                  <p className="text-sm font-semibold text-foreground">(Experimental) Message Priority</p>
                   <p className="text-[11px] text-muted-foreground">Lower number = higher priority</p>
                 </div>
                 <div className="p-2 space-y-0.5">
@@ -1273,12 +1273,13 @@ export function ChatInput({
                     <label className="text-[10px] text-muted-foreground whitespace-nowrap">Custom:</label>
                     <input
                       type="number"
-                      min={1}
-                      max={100}
+                      min={-1000}
+                      max={1000}
                       value={steerPriority}
                       onChange={(e) => {
-                        const v = parseInt(e.target.value, 10)
-                        if (!isNaN(v) && v >= 1 && v <= 100) setSteerPriority(v)
+                        // const v = parseInt(e.target.value, 10)
+                        const v = parseFloat(e.target.value)
+                        if (!isNaN(v) && v >= -1000 && v <= 1000) setSteerPriority(v)
                       }}
                       className="h-7 w-full rounded-md border border-border/40 bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
                     />

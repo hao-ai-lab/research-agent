@@ -5,7 +5,7 @@ import { WildLoopPhase, TerminationConditions } from '@/lib/types'
 import {
   updateWildLoopStatus, configureWildLoop, setWildMode,
   getSweep, listSweeps, listAlerts, listRuns, startSweep, getRunLogs,
-  createSweep, respondToAlert, listPromptSkills,
+  createSweep, respondToAlert, listPromptSkills, enqueueWildEvent,
 } from '@/lib/api'
 import type { PromptSkill } from '@/lib/api'
 import type { Alert, Run, Sweep, CreateSweepRequest } from '@/lib/api'
@@ -336,10 +336,17 @@ export function useWildLoop(): UseWildLoopResult {
   const queueRef = useRef(new EventQueue())
   const [queueSnapshot, setQueueSnapshot] = useState<QueuedEvent[]>([])
 
-  // Helper: enqueue + update snapshot
+  // Helper: enqueue + update snapshot + mirror to backend
   const enqueueEvent = useCallback((event: QueuedEvent) => {
     if (queueRef.current.enqueue(event)) {
       setQueueSnapshot([...queueRef.current.items])
+      // Fire-and-forget: mirror to backend queue for Step 6 readiness
+      enqueueWildEvent({
+        priority: event.priority,
+        title: event.title,
+        prompt: event.prompt,
+        type: event.type,
+      }).catch(err => console.warn('[wild-loop] Failed to mirror event to backend:', err))
     }
   }, [])
 
