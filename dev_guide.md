@@ -14,10 +14,10 @@ git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 
 ## 2. Generate an Auth Token
 
-```bash
+```
 cd server
 ./generate_auth_token.sh --export
-```
+```/
 
 **Important:**
 Save the auth token somewhere safe. You will need it later.
@@ -141,6 +141,8 @@ If you want to work on another wishlist item, you must start again from:
 ```bash
 npm install
 ```
+
+You will not need to reinstall opencode and generate an AUTH_TOKEN however
 
 We are actively working on making this process more streamlined so you don’t have to repeat all of these steps every time.
 
