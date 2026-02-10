@@ -86,6 +86,12 @@ export function ConnectedChatView({
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
+    const [starterReplyExcerptInsert, setStarterReplyExcerptInsert] = useState<{
+        id: number
+        text: string
+        fileName?: string
+        sessionId: string
+    } | null>(null)
     const { settings, setSettings } = useAppSettings()
     const showStarterCards = settings.appearance.showStarterCards !== false
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
@@ -314,6 +320,16 @@ export function ConnectedChatView({
         await sendMessage(message, effectiveMode, sessionId)
     }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage])
 
+    const handleReplyToSelection = useCallback((selectedText: string) => {
+        if (!currentSessionId) return
+        setStarterReplyExcerptInsert({
+            id: Date.now(),
+            text: selectedText,
+            fileName: 'excerpt_from_previous_message.txt',
+            sessionId: currentSessionId,
+        })
+    }, [currentSessionId])
+
     // Connection error state
     if (!isConnected && !isLoading) {
         return (
@@ -389,6 +405,16 @@ export function ConnectedChatView({
                 queue={messageQueue}
                 onRemoveFromQueue={removeFromQueue}
                 insertDraft={effectiveInsertDraft}
+                insertReplyExcerpt={
+                    starterReplyExcerptInsert && starterReplyExcerptInsert.sessionId === currentSessionId
+                        ? {
+                            id: starterReplyExcerptInsert.id,
+                            text: starterReplyExcerptInsert.text,
+                            fileName: starterReplyExcerptInsert.fileName,
+                        }
+                        : null
+                }
+                conversationKey={currentSessionId || 'new'}
                 layout={layout}
                 skills={skills}
                 isWildLoopActive={wildLoop?.isActive ?? false}
@@ -514,6 +540,7 @@ export function ConnectedChatView({
                                                 onEditSweep={onEditSweep}
                                                 onLaunchSweep={onLaunchSweep}
                                                 onRunClick={onRunClick}
+                                                onReplyToSelection={handleReplyToSelection}
                                             />
                                         ))
                                         : displayMessages.map((message, index) => {
@@ -545,6 +572,7 @@ export function ConnectedChatView({
                                                     onEditSweep={onEditSweep}
                                                     onLaunchSweep={onLaunchSweep}
                                                     onRunClick={onRunClick}
+                                                    onReplyToSelection={handleReplyToSelection}
                                                     previousUserContent={prevUserContent}
                                                 />
                                             </div>
@@ -591,6 +619,7 @@ function CollapsedChatPair({
     onEditSweep,
     onLaunchSweep,
     onRunClick,
+    onReplyToSelection,
 }: {
     pair: { user: ChatMessageType; assistant?: ChatMessageType }
     collapseArtifacts: boolean
@@ -600,6 +629,7 @@ function CollapsedChatPair({
     onEditSweep?: (config: SweepConfig) => void
     onLaunchSweep?: (config: SweepConfig) => void
     onRunClick: (run: ExperimentRun) => void
+    onReplyToSelection?: (text: string) => void
 }) {
     const [expanded, setExpanded] = useState(false)
 
@@ -650,6 +680,7 @@ function CollapsedChatPair({
                             onEditSweep={onEditSweep}
                             onLaunchSweep={onLaunchSweep}
                             onRunClick={onRunClick}
+                            onReplyToSelection={onReplyToSelection}
                             previousUserContent={pair.user.content}
                         />
                     )}
