@@ -153,7 +153,8 @@ export async function* streamChat(
     sessionId: string,
     message: string,
     wildMode: boolean = false,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    planMode: boolean = false,
 ): AsyncGenerator<StreamEvent, void, unknown> {
     const response = await fetch(`${API_URL()}/chat`, {
         method: 'POST',
@@ -162,6 +163,7 @@ export async function* streamChat(
             session_id: sessionId,
             message,
             wild_mode: wildMode,
+            plan_mode: planMode,
         }),
         signal,
     })
@@ -706,6 +708,65 @@ export async function configureWildLoop(config: {
     })
     if (!response.ok) {
         throw new Error(`Failed to configure wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+// =============================================================================
+// Wild Event Queue Functions
+// =============================================================================
+
+export interface WildEventQueueItem {
+    id: string
+    priority: number
+    title: string
+    prompt: string
+    type: string
+    created_at: number
+}
+
+/**
+ * Enqueue a wild event with priority
+ */
+export async function enqueueWildEvent(event: {
+    priority?: number
+    title: string
+    prompt: string
+    type?: string
+}): Promise<{ added: boolean; event: WildEventQueueItem; queue_size: number }> {
+    const response = await fetch(`${API_URL()}/wild/events/enqueue`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(event),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to enqueue wild event: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Dequeue the highest-priority wild event
+ */
+export async function dequeueWildEvent(): Promise<{ event: WildEventQueueItem | null; queue_size: number }> {
+    const response = await fetch(`${API_URL()}/wild/events/next`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to dequeue wild event: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get the current wild event queue state
+ */
+export async function getWildEventQueue(): Promise<{ queue_size: number; events: WildEventQueueItem[] }> {
+    const response = await fetch(`${API_URL()}/wild/events/queue`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get wild event queue: ${response.statusText}`)
     }
     return response.json()
 }

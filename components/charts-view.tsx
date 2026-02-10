@@ -5,6 +5,7 @@ import {
   BarChart3,
   ChevronDown,
   ChevronRight,
+  Eye,
   GripVertical,
   Layers,
   Pin,
@@ -53,6 +54,7 @@ import { VisibilityManageView } from './visibility-manage-view'
 import { cn } from '@/lib/utils'
 import type { InsightChart, MetricVisualization, ExperimentRun, VisibilityGroup } from '@/lib/types'
 import { defaultMetricVisualizations } from '@/lib/mock-data'
+import { VisualComparisonGrid } from '@/components/visual-comparison-grid'
 
 interface ChartsViewProps {
   runs: ExperimentRun[]
@@ -263,7 +265,7 @@ function buildMetricData(
 }
 
 export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, onUpdateRun, onShowVisibilityManageChange }: ChartsViewProps) {
-  const [activeSection, setActiveSection] = useState<'standard' | 'custom'>('standard')
+  const [activeSection, setActiveSection] = useState<'standard' | 'custom' | 'videoCompare'>('standard')
   const [metrics, setMetrics] = useState<MetricVisualization[]>(defaultMetricVisualizations)
   const [selectedLayer, setSelectedLayer] = useState<Record<string, number>>({})
   const [showVisibilityManage, setShowVisibilityManageInternal] = useState(false)
@@ -783,6 +785,17 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
               <BarChart3 className="h-3.5 w-3.5" />
               <span className="truncate">Custom</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('videoCompare')}
+              className={cn(
+                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
+                activeSection === 'videoCompare' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Eye className="h-3.5 w-3.5" />
+              <span className="truncate">Video Compare</span>
+            </button>
           </div>
 
           <Popover open={settingsOpen} onOpenChange={handleOpenSettings}>
@@ -923,6 +936,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
         </div>
       )}
 
+      {activeSection !== 'videoCompare' && (
       <div className="min-h-0 flex-1 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="space-y-4 p-3">
@@ -938,7 +952,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
                   </div>
                 )}
               </>
-            ) : (
+            ) : activeSection === 'custom' ? (
               <div>
                 <div className="mb-3 flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-accent/30 bg-accent/10">
@@ -953,10 +967,18 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
                   {customCharts.map(renderCustomChart)}
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </ScrollArea>
       </div>
+      )}
+
+      {/* Video Compare (full-height, outside ScrollArea) */}
+      {activeSection === 'videoCompare' && (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <VisualComparisonGrid runs={runs} />
+        </div>
+      )}
     </div>
   )
 }

@@ -6,15 +6,15 @@
 
 The v3 frontend-driven wild loop (`use-wild-loop.ts`) works, but has fundamental fragility:
 
-| Problem                                | Root Cause                                                                                            |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Browser-bound**                      | Loop dies on tab close/refresh — no persistence                                                       |
-| **Stale closures**                     | 15+ `useRef` mirrors for every piece of state, all manually synced                                    |
-| **Prompt logic spread across FE + BE** | `buildExploringPrompt()` in frontend, `_build_chat_prompt()` in backend — both inject context         |
-| **Single-slot prompt queue**           | `pendingPrompt` is a single `string                                                                   |
-| **No planning phase**                  | Agent jumps straight into action; no user review of the plan before execution                         |
-| **Prompt hardcoded**                   | Markdown templates are string literals in TS — impossible for users to customize without code changes |
-| **No priority**                        | Alerts and run events processed in arrival order, not by importance                                   |
+| Problem                                | Root Cause                                                                                    |
+| -------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Browser-bound**                      | Loop dies on tab close/refresh — no persistence                                               |
+| **Stale closures**                     | 15+ `useRef` mirrors for every piece of state, all manually synced                            |
+| **Prompt logic spread across FE + BE** | `buildExploringPrompt()` in frontend, `_build_chat_prompt()` in backend — both inject context |
+
+| **No planning phase** | Agent jumps straight into action; no user review of the plan before execution |
+| **Prompt hardcoded** | Markdown templates are string literals in TS — impossible for users to customize without code changes |
+| **No priority** | Alerts and run events processed in arrival order, not by importance |
 
 ## Approach: Incremental Steps
 
@@ -126,13 +126,13 @@ interface QueuedEvent {
 
 Priority levels:
 
-- **0** — User interrupt / NEEDS_HUMAN
-- **1** — Critical alerts
-- **2** — Warning alerts
-- **3** — Run failure events
-- **5** — Run completion events
-- **7** — Analysis prompts
-- **9** — Exploring prompts / periodic check-ins
+- **10** — User interrupt / NEEDS_HUMAN
+- **20** — Critical alerts
+- **30** — Warning alerts
+- **40** — Run failure events
+- **50** — Run completion events
+- **70** — Analysis prompts
+- **90** — Exploring prompts / periodic check-ins
 
 ### Changes
 
@@ -290,6 +290,201 @@ The backend runs an `asyncio.Task` that:
 
 ---
 
+## Step 8 — Code Cleanup: Data-Driven Mode Prompt Builder
+
+**Goal**: Refactor `_build_chat_prompt()` to eliminate per-mode `if/elif` branches. Each mode should be a declarative entry mapping a **skill ID** to a **state builder** function — not a bespoke code path.
+
+### Problem
+
+Today `_build_chat_prompt()` has mode-specific logic inline:
+
+```python
+if plan_mode:
+    # 10 lines: build variables, call render("ra_mode_plan", {...})
+elif wild_mode:
+    # 40 lines: build iteration, sweep_note, experiment_context, call render("wild_system", {...})
+```
+
+Adding a new mode means adding another `elif` with its own variable-construction code. This doesn't scale.
+
+### Design: Mode Registry
+
+```python
+# Each mode declares: skill template ID + a function that produces the template variables
+MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "plan": ModeConfig(
+        skill_id="ra_mode_plan",
+        build_state=_build_plan_state,   # returns {"goal": ..., "experiment_context": ...}
+    ),
+    "wild": ModeConfig(
+        skill_id="wild_system",
+        build_state=_build_wild_state,   # returns {"iteration": ..., "goal": ..., ...}
+    ),
+}
+```
+
+Then `_build_chat_prompt()` becomes:
+
+```python
+def _build_chat_prompt(session, message, mode="agent"):
+    mode_note = ""
+    config = MODE_REGISTRY.get(mode)
+    if config:
+        variables = config.build_state(message)
+        rendered = prompt_skill_manager.render(config.skill_id, variables)
+        if rendered:
+            mode_note = rendered + "\n\n"
+        else:
+            logger.warning(f"{config.skill_id} skill not found")
+    content = f"{mode_note}[USER] {message}"
+    ...
+```
+
+### Changes
+
+- **[MODIFY] [server.py](file:///Users/mike/Project/GitHub/v0-research-agent-mobile/server/server.py)**
+  - Replace `wild_mode: bool` + `plan_mode: bool` with `mode: str = "agent"` in `ChatRequest`
+  - Extract `_build_plan_state(message)` and `_build_wild_state(message)` as standalone functions
+  - Create `MODE_REGISTRY` dict
+  - Simplify `_build_chat_prompt()` to a generic loop over the registry
+
+- **[MODIFY] Frontend data flow**
+  - Send `mode: "plan" | "wild" | "agent"` as a string instead of separate boolean flags
+
+### Verification
+
+- Manual: All three modes (agent, plan, wild) still produce correct prompts
+- Adding a hypothetical new mode should only require: 1 skill template + 1 state builder function + 1 registry entry
+
+---
+
+## Step 9 — Multi-Loop Support
+
+**Goal**: Refactor all singleton wild-loop assumptions so that multiple independent wild loops can run concurrently, each with its own goal, queue, session, and lifecycle.
+
+### Problem: Singleton Assumptions Everywhere
+
+Today the system assumes exactly one wild loop exists:
+
+| Layer                      | Singleton                                                     | Implications                                                                                |
+| -------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| **Backend global state**   | `wild_mode_enabled: bool`                                     | A single on/off flag for the entire server — can't have one loop active and another stopped |
+| **Backend global state**   | `wild_loop_state: dict`                                       | One dict holding phase, iteration, goal, session_id, termination — shared by everything     |
+| **Backend global state**   | `wild_event_queue = WildEventQueue()`                         | One queue — events from different loops/sweeps all mix together                             |
+| **Backend persistence**    | `save_settings_state()` serializes a single `wild_loop` key   | Only one loop survives a server restart                                                     |
+| **Backend auto-enqueue**   | `create_alert` / `update_run_status` push to the global queue | No way to route an alert to the correct loop's queue                                        |
+| **Backend prompt builder** | `_build_chat_prompt()` reads `wild_loop_state["goal"]` etc.   | Only one goal is visible when building prompts                                              |
+| **Frontend hook**          | `useWildLoop()` is a singleton hook                           | Only one component can drive a loop at a time                                               |
+| **Frontend hook**          | `queueRef`, `trackedSweepId`, `stageRef` are single-valued    | No concept of "which loop am I driving"                                                     |
+| **Frontend UI**            | `WildLoopBanner` reads from the single hook                   | Only one banner can exist                                                                   |
+| **API endpoints**          | `GET/POST /wild/status` — no loop-id parameter                | Status is global, not per-loop                                                              |
+| **API endpoints**          | `GET/POST /wild/events/*` — no loop-id parameter              | Events are global, not per-loop                                                             |
+
+### Design: Loop Registry
+
+Introduce a **loop ID** (`wild_loop_id: str`) that scopes everything:
+
+```python
+# Backend: Dict[loop_id, WildLoopInstance]
+class WildLoopInstance:
+    id: str
+    goal: str
+    session_id: str
+    phase: str                    # idle | exploring | monitoring | analyzing | paused
+    iteration: int
+    started_at: float | None
+    is_paused: bool
+    termination: dict
+    sweep_id: str | None
+    event_queue: WildEventQueue   # each loop gets its own queue
+
+wild_loops: Dict[str, WildLoopInstance] = {}
+```
+
+```typescript
+// Frontend: pass loop_id into the hook
+function useWildLoop(loopId: string): UseWildLoopResult;
+```
+
+### Changes Required
+
+#### Backend (`server.py` / `wild_loop.py`)
+
+1. **Replace globals with registry**:
+   - `wild_mode_enabled: bool` → derived: `any(loop.phase != "idle" for loop in wild_loops.values())`
+   - `wild_loop_state: dict` → `wild_loops[loop_id]`
+   - `wild_event_queue` → `wild_loops[loop_id].event_queue`
+
+2. **Scope all endpoints by loop_id**:
+   - `GET /wild/status` → `GET /wild/{loop_id}/status`
+   - `POST /wild/events/enqueue` → `POST /wild/{loop_id}/events/enqueue`
+   - `GET /wild/events/queue` → `GET /wild/{loop_id}/events/queue`
+   - `GET /wild/events/next` → `GET /wild/{loop_id}/events/next`
+   - New: `POST /wild/loops` — create a new loop instance
+   - New: `GET /wild/loops` — list all active loops
+   - New: `DELETE /wild/{loop_id}` — stop and remove a loop
+
+3. **Route auto-enqueue by sweep/run association**:
+   - When a run finishes/fails, look up which loop owns the sweep that contains that run
+   - When an alert fires, route to the loop that owns the run's sweep
+   - Fallback: if no loop owns the run, enqueue to a "global unassigned" queue or broadcast to all
+
+4. **Persistence**: `save_settings_state()` serializes `wild_loops` dict instead of a single loop
+
+#### Frontend
+
+5. **`useWildLoop(loopId)` parameterized hook**:
+   - All refs/state scoped by `loopId`
+   - `start()` calls `POST /wild/loops` to create a backend loop instance and receives a `loop_id`
+   - All subsequent API calls include `loop_id`
+
+6. **UI components**:
+   - `WildLoopBanner` → accepts `loopId` prop, renders per-loop status
+   - `EventQueuePanel` → accepts `loopId` prop, shows that loop's queue
+   - New: `WildLoopList` panel showing all active loops with status
+
+7. **Chat session association**:
+   - Each chat session can be associated with a specific loop_id
+   - The `connected-chat-view.tsx` passes the active loop_id when in wild mode
+
+### Migration Strategy
+
+> [!IMPORTANT]
+> This refactor touches every layer. Use these phases to minimize blast radius:
+
+**Phase A — Backend registry (no API changes)**:
+
+- Internally replace globals with `wild_loops` dict
+- Keep old endpoints working by reading `wild_loops.get("default", ...)`
+- Auto-create a `"default"` loop on server start for backward compat
+
+**Phase B — Scoped API endpoints**:
+
+- Add new `/{loop_id}/` endpoints alongside old ones
+- Old endpoints delegate to `loop_id="default"`
+- Frontend can migrate incrementally
+
+**Phase C — Frontend multi-loop**:
+
+- Parameterize `useWildLoop(loopId)`
+- Add loop creation UI
+- Update banner/queue panel to accept loopId
+
+**Phase D — Remove legacy**:
+
+- Remove old unscoped endpoints
+- Remove `"default"` fallback
+- Clean up single-loop code paths
+
+### Verification
+
+- Manual: Start two loops with different goals, verify they track independently
+- Manual: Alert from loop A's sweep should not appear in loop B's queue
+- Manual: Stop loop A, verify loop B continues
+- Manual: Server restart preserves both loops
+
+---
+
 ## Implementation Order & Dependencies
 
 ```mermaid
@@ -300,20 +495,24 @@ graph LR
     S4 --> S5["5. Server Cleanup"]
     S5 --> S6["6. Backend-Driven Loop"]
     S6 --> S7["7. Test All Interrupts"]
+    S1 --> S8["8. Code Cleanup"]
+    S7 --> S9["9. Multi-Loop Support"]
 ```
 
-Each step can be merged independently. Steps 1–3 are purely additive. Steps 4–5 are refactors. Step 6 is the big architectural shift. Step 7 is validation.
+Each step can be merged independently. Steps 1–3 are purely additive. Steps 4–5 are refactors. Step 6 is the big architectural shift. Step 7 is validation. Step 8 can happen any time after Step 1. Step 9 is a deep refactor that requires the backend-driven loop (Step 6) to be stable first.
 
 ---
 
 ## Estimated Effort
 
-| Step                   | Effort                          | Risk                                  |
-| ---------------------- | ------------------------------- | ------------------------------------- |
-| 1. Plan Mode           | Small (1–2 files)               | Low                                   |
-| 2. Prompt Skills       | Medium (new API + editor UI)    | Medium — template engine design       |
-| 3. FE Priority Queue   | Medium (rewrite hook internals) | Medium — must not break existing flow |
-| 4. BE Priority Queue   | Small (new endpoints)           | Low                                   |
-| 5. Server Cleanup      | Medium (extract module)         | Low — refactor only                   |
-| 6. Backend-Driven Loop | Large (new runner, gut FE)      | High — core architecture change       |
-| 7. Testing             | Medium                          | Low                                   |
+| Step                   | Effort                          | Risk                                                       |
+| ---------------------- | ------------------------------- | ---------------------------------------------------------- |
+| 1. Plan Mode           | Small (1–2 files)               | Low                                                        |
+| 2. Prompt Skills       | Medium (new API + editor UI)    | Medium — template engine design                            |
+| 3. FE Priority Queue   | Medium (rewrite hook internals) | Medium — must not break existing flow                      |
+| 4. BE Priority Queue   | Small (new endpoints)           | Low                                                        |
+| 5. Server Cleanup      | Medium (extract module)         | Low — refactor only                                        |
+| 6. Backend-Driven Loop | Large (new runner, gut FE)      | High — core architecture change                            |
+| 7. Testing             | Medium                          | Low                                                        |
+| 8. Code Cleanup        | Small (refactor only)           | Low — pure refactor, no new features                       |
+| 9. Multi-Loop Support  | Large (full-stack refactor)     | High — touches every layer, needs careful phased migration |
