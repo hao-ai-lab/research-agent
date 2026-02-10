@@ -818,10 +818,6 @@ export function useChatSession(): UseChatSessionResult {
             streamController = new AbortController()
             abortControllerRef.current = streamController
 
-            // Stream the response
-            const wildMode = mode === 'wild'
-            const planMode = mode === 'plan'
-
             // Stream inactivity timeout: abort if no events for 60s (prevents stuck streams)
             // Note: OpenCode can take 30-40s to start responding, so 60s is the minimum safe value
             let lastEventTime = Date.now()
@@ -834,7 +830,7 @@ export function useChatSession(): UseChatSessionResult {
             }, 5_000)
 
             try {
-            for await (const event of streamChat(targetSessionId, content, wildMode, streamController!.signal, planMode)) {
+            for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal)) {
                 lastEventTime = Date.now()
 
                 // Debug logging for stream events

@@ -11,6 +11,7 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
+from dataclasses import dataclass
 import json
 import math
 import os
@@ -24,7 +25,7 @@ import asyncio
 import shutil
 import socket
 import subprocess
-from typing import Any, Dict, Optional, AsyncIterator, List
+from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
 from wild_loop import (
     WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest,
@@ -206,6 +207,8 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    mode: str = "agent"  # "agent" | "wild" | "plan" | "sweep"
+    # Backward compat: accept old boolean fields and convert
     wild_mode: bool = False
     plan_mode: bool = False
 
@@ -2566,28 +2569,56 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
     save_chat_state()
     return {"system_prompt": req.system_prompt}
 
-# Wild mode and plan mode are mutually exclusive. Try to write the code to make it modular.
-def _build_chat_prompt(session: dict, message: str, wild_mode: bool, plan_mode: bool = False) -> str:
-    wild_mode_note = ""
-    plan_mode_note = ""
 
-    if plan_mode:
-        # Build plan-mode preamble using prompt skill template
-        experiment_context = _build_experiment_context()
-        rendered = prompt_skill_manager.render("ra_mode_plan", {
-            "goal": message,
-            "experiment_context": experiment_context,
-        })
-        if rendered:
-            plan_mode_note = rendered + "\n\n"
+# ---------------------------------------------------------------------------
+# Mode Registry: data-driven prompt builder
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ModeConfig:
+    """Declares how to build a mode-specific prompt preamble."""
+    skill_id: str
+    build_state: Callable[[str], dict]  # (message) -> template variables
+
+
+def _build_plan_state(message: str) -> dict:
+    """Build template variables for plan mode."""
+    return {
+        "goal": message,
+        "experiment_context": _build_experiment_context(),
+    }
+
+
+# NOTE: wild mode uses build_wild_prompt() from wild_loop module directly,
+# because it has its own iteration/sweep/condition logic. We register it
+# with a special sentinel so the generic path delegates correctly.
+_WILD_SENTINEL = "__wild__"
+
+MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "plan": ModeConfig(skill_id="ra_mode_plan", build_state=_build_plan_state),
+    "wild": ModeConfig(skill_id=_WILD_SENTINEL, build_state=lambda _msg: {}),
+}
+
+
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> str:
+    """Build the full prompt for a chat turn, prepending mode-specific preamble."""
+    mode_note = ""
+
+    config = MODE_REGISTRY.get(mode)
+    if config:
+        if config.skill_id == _WILD_SENTINEL:
+            # Delegate to wild_loop module
+            experiment_context = _build_experiment_context()
+            mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context)
         else:
-            logger.warning("ra_mode_plan prompt skill not found — sending raw message")
-    elif wild_mode:
-        # Delegate to wild_loop module
-        experiment_context = _build_experiment_context()
-        wild_mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context)
+            variables = config.build_state(message)
+            rendered = prompt_skill_manager.render(config.skill_id, variables)
+            if rendered:
+                mode_note = rendered + "\n\n"
+            else:
+                logger.warning(f"{config.skill_id} prompt skill not found — sending raw message")
 
-    content = f"{plan_mode_note}{wild_mode_note}[USER] {message}"
+    content = f"{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
@@ -2720,7 +2751,14 @@ async def chat_endpoint(req: ChatRequest):
 
     save_chat_state()
 
-    content = _build_chat_prompt(session, req.message, req.wild_mode, req.plan_mode)
+    # Resolve mode: prefer explicit mode field, fall back to legacy booleans
+    effective_mode = req.mode
+    if effective_mode == "agent":
+        if req.wild_mode:
+            effective_mode = "wild"
+        elif req.plan_mode:
+            effective_mode = "plan"
+    content = _build_chat_prompt(session, req.message, effective_mode)
     runtime = await _start_chat_worker(session_id, content)
     return StreamingResponse(
         _stream_runtime_events(session_id, from_seq=1, run_id=runtime.run_id),
