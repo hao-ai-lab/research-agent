@@ -1,10 +1,9 @@
-````md
+md
 # Onboarding for Hao’s Capstone Group
 
 This guide walks you through setting up and running the research agent locally, connecting it to OpenCode, and getting ready to work on wishlist items.
 
 ---
-````
 
 
 ## 1. Clone the Repository
