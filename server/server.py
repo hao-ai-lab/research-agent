@@ -193,6 +193,7 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     wild_mode: bool = False
+    plan_mode: bool = False
 
 
 class CreateSessionRequest(BaseModel):
@@ -2574,10 +2575,23 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
     save_chat_state()
     return {"system_prompt": req.system_prompt}
 
-
-def _build_chat_prompt(session: dict, message: str, wild_mode: bool) -> str:
+# Wild mode and plan mode are mutually exclusive. Try to write the code to make it modular.
+def _build_chat_prompt(session: dict, message: str, wild_mode: bool, plan_mode: bool = False) -> str:
     wild_mode_note = ""
-    if wild_mode:
+    plan_mode_note = ""
+
+    if plan_mode:
+        # Build plan-mode preamble using prompt skill template
+        experiment_context = _build_experiment_context()
+        rendered = prompt_skill_manager.render("ra_mode_plan", {
+            "goal": message,
+            "experiment_context": experiment_context,
+        })
+        if rendered:
+            plan_mode_note = rendered + "\n\n"
+        else:
+            logger.warning("ra_mode_plan prompt skill not found — sending raw message")
+    elif wild_mode:
         # Build Ralph-style loop prompt using prompt skill templates
         iteration = wild_loop_state.get("iteration", 0) + 1
         goal = wild_loop_state.get("goal") or "No specific goal set"
@@ -2619,37 +2633,9 @@ def _build_chat_prompt(session: dict, message: str, wild_mode: bool) -> str:
         if rendered:
             wild_mode_note = rendered + "\n\n"
         else:
-            # Fallback: inline prompt (in case template file is missing)
-            logger.warning("wild_system prompt skill not found, using inline fallback")
-            wild_mode_note = (
-                f"# Wild Loop — Iteration {iter_display}\n\n"
-                f"You are in an autonomous experiment loop. Work on the goal below until you can genuinely complete it.\n\n"
-                f"## Your Goal\n{goal}\n\n"
-                f"{experiment_context}\n"
-                f"{sweep_note}"
-                f"## Instructions\n"
-                f"1. Read the current state of runs, sweeps, and alerts above\n"
-                f"2. Plan what work remains to achieve the goal\n"
-                f"3. Take action: create runs, start sweeps, analyze results, fix failures\n"
-                f"4. If you launched runs, WAIT for them — output CONTINUE and check results next iteration\n"
-                f"5. Run verification: check logs, metrics, and run status before claiming completion\n"
-                f"6. At the END of your response, output exactly ONE promise tag:\n"
-                f"   - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results\n"
-                f"   - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence\n"
-                f"   - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention\n\n"
-                f"## Critical Rules\n"
-                f"- When in doubt, output CONTINUE. It is always safe to continue.\n"
-                f"- Creating or launching runs is NOT completion — you must check their results\n"
-                f"- ONLY output COMPLETE when you have verified evidence the goal is achieved\n"
-                f"- Do NOT declare COMPLETE just because you took an action — verify it worked\n"
-                f"- If stuck, try a different approach\n"
-                f"- The loop will continue until you succeed or are stopped\n"
-            )
-            if custom_cond:
-                wild_mode_note += f"- Custom stop condition: {custom_cond}\n"
-            wild_mode_note += "\nNow, work on the goal. Good luck!\n\n"
+            logger.warning("wild_system prompt skill not found — sending raw message")
 
-    content = f"{wild_mode_note}[USER] {message}"
+    content = f"{plan_mode_note}{wild_mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
@@ -2782,7 +2768,7 @@ async def chat_endpoint(req: ChatRequest):
 
     save_chat_state()
 
-    content = _build_chat_prompt(session, req.message, req.wild_mode)
+    content = _build_chat_prompt(session, req.message, req.wild_mode, req.plan_mode)
     runtime = await _start_chat_worker(session_id, content)
     return StreamingResponse(
         _stream_runtime_events(session_id, from_seq=1, run_id=runtime.run_id),
