@@ -1235,14 +1235,14 @@ export function ChatInput({
               <PopoverContent
                 side="top"
                 align="end"
-                className="w-56 p-0"
-                sideOffset={6}
+                className="w-96 p-0"
+                sideOffset={8}
               >
-                <div className="border-b border-border/40 px-3 py-2">
-                  <p className="text-xs font-medium text-foreground">Message Priority</p>
-                  <p className="text-[10px] text-muted-foreground">Lower number = higher priority</p>
+                <div className="border-b border-border/40 px-4 py-2.5">
+                  <p className="text-sm font-semibold text-foreground">Message Priority</p>
+                  <p className="text-[11px] text-muted-foreground">Lower number = higher priority</p>
                 </div>
-                <div className="p-1.5 space-y-0.5">
+                <div className="p-2 space-y-0.5">
                   {[
                     { value: 10, label: 'Steer', desc: 'Immediately steer LLM with your message' },
                     { value: 15, label: 'Queued', desc: 'Normal user message.' },
@@ -1256,13 +1256,15 @@ export function ChatInput({
                       key={opt.value}
                       type="button"
                       onClick={() => setSteerPriority(opt.value)}
-                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-secondary/80 ${
+                      className={`flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left hover:bg-secondary/80 transition-colors ${
                         steerPriority === opt.value ? 'bg-secondary text-foreground' : 'text-foreground/80'
                       }`}
                     >
-                      <span className="w-7 shrink-0 font-mono text-[11px] font-semibold text-muted-foreground">{opt.value}</span>
-                      <span className="flex-1 font-medium">{opt.label}</span>
-                      <span className="text-[10px] text-muted-foreground">{opt.desc}</span>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-7 shrink-0 font-mono text-sm font-bold text-muted-foreground tabular-nums">{opt.value}</span>
+                        <span className="font-semibold text-sm">{opt.label}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{opt.desc}</span>
                     </button>
                   ))}
                 </div>
