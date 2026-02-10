@@ -314,6 +314,28 @@ export function ChatInput({
   const mentionTypeColorMap = REFERENCE_TYPE_COLOR_MAP
   const mentionTypeBackgroundMap = REFERENCE_TYPE_BACKGROUND_MAP
 
+  const selectMentionToken = useCallback((start: number, end: number) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(start, end)
+  }, [])
+
+  const findMentionTokenAtPosition = useCallback((text: string, position: number) => {
+    const mentionRegex = /@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
+    let match: RegExpExecArray | null
+
+    while ((match = mentionRegex.exec(text)) !== null) {
+      const start = match.index
+      const end = start + match[0].length
+      if (position > start && position <= end) {
+        return { start, end }
+      }
+    }
+
+    return null
+  }, [])
+
   const highlightedMessage = useMemo(() => {
     if (!message) return null
     const parts: React.ReactNode[] = []
@@ -619,6 +641,15 @@ export function ChatInput({
     setSlashStartIndex(null)
     setSlashQuery('')
   }
+
+  const handleTextareaMouseUp = useCallback((e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const textarea = e.currentTarget
+    if (textarea.selectionStart !== textarea.selectionEnd) return
+    const cursorPos = textarea.selectionStart ?? 0
+    const tokenRange = findMentionTokenAtPosition(message, cursorPos)
+    if (!tokenRange) return
+    selectMentionToken(tokenRange.start, tokenRange.end)
+  }, [findMentionTokenAtPosition, message, selectMentionToken])
 
   const insertMention = useCallback((item: MentionItem) => {
     if (mentionStartIndex === null) return
@@ -974,16 +1005,17 @@ export function ChatInput({
                 highlightRef.current.scrollTop = e.currentTarget.scrollTop
               }
             }}
+            onMouseUp={handleTextareaMouseUp}
             placeholder="Message Research Assistant... (type @ or /)"
             disabled={disabled}
             rows={1}
-            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
+            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
               minHeight: '58px',
               maxHeight: '170px',
               caretColor: 'hsl(var(--foreground))',
-              color: 'transparent',
-              WebkitTextFillColor: 'transparent',
+              color: 'hsl(var(--foreground) / 0.01)',
+              WebkitTextFillColor: 'hsl(var(--foreground) / 0.01)',
             }}
           />
           <Button
