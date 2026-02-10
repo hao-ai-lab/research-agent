@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2 } from 'lucide-react'
 import {
   Collapsible,
@@ -38,8 +38,33 @@ interface ChatMessageProps {
   onEditSweep?: (config: SweepConfig) => void
   onLaunchSweep?: (config: SweepConfig) => void
   onRunClick?: (run: ExperimentRun) => void
+  onReplyToSelection?: (text: string) => void
   /** Content of the user message that prompted this assistant response (for context extraction) */
   previousUserContent?: string
+}
+
+function extractLeadingQuoteBlock(content: string): { excerpt: string | null; body: string } {
+  const lines = content.split('\n')
+  const excerptLines: string[] = []
+  let cursor = 0
+
+  while (cursor < lines.length && /^>\s?/.test(lines[cursor])) {
+    excerptLines.push(lines[cursor].replace(/^>\s?/, ''))
+    cursor += 1
+  }
+
+  if (excerptLines.length === 0) {
+    return { excerpt: null, body: content }
+  }
+
+  while (cursor < lines.length && lines[cursor].trim() === '') {
+    cursor += 1
+  }
+
+  return {
+    excerpt: excerptLines.join('\n').trim(),
+    body: lines.slice(cursor).join('\n'),
+  }
 }
 
 function parseTaggedCodeBlock(content: string): { language: string; code: string } | null {
@@ -89,11 +114,18 @@ export function ChatMessage({
   onEditSweep,
   onLaunchSweep,
   onRunClick,
+  onReplyToSelection,
   previousUserContent,
 }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
+  const [selectionReplyUi, setSelectionReplyUi] = useState<{
+    text: string
+    x: number
+    y: number
+  } | null>(null)
   const isUser = message.role === 'user'
+  const assistantContainerRef = useRef<HTMLDivElement>(null)
 
   // Extract context references from the current round (user question + assistant answer)
   const contextReferences = useMemo(() => {
@@ -112,6 +144,52 @@ export function ChatMessage({
     const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return `${dateStr}, ${timeStr}`
   }
+
+  useEffect(() => {
+    if (isUser || !onReplyToSelection) return
+
+    const updateSelectionReply = () => {
+      const selection = window.getSelection()
+      const root = assistantContainerRef.current
+      if (!selection || !root || selection.rangeCount === 0 || selection.isCollapsed) {
+        setSelectionReplyUi(null)
+        return
+      }
+
+      const anchorNode = selection.anchorNode
+      const focusNode = selection.focusNode
+      if (!anchorNode || !focusNode || !root.contains(anchorNode) || !root.contains(focusNode)) {
+        setSelectionReplyUi(null)
+        return
+      }
+
+      const text = selection.toString().trim()
+      if (!text) {
+        setSelectionReplyUi(null)
+        return
+      }
+
+      const rect = selection.getRangeAt(0).getBoundingClientRect()
+      if (rect.width === 0 && rect.height === 0) {
+        setSelectionReplyUi(null)
+        return
+      }
+
+      const x = Math.min(Math.max(rect.left + rect.width / 2, 56), window.innerWidth - 56)
+      const y = Math.max(rect.top - 10, 12)
+      setSelectionReplyUi({ text, x, y })
+    }
+
+    const clearSelectionReply = () => setSelectionReplyUi(null)
+
+    document.addEventListener('selectionchange', updateSelectionReply)
+    window.addEventListener('scroll', clearSelectionReply, true)
+
+    return () => {
+      document.removeEventListener('selectionchange', updateSelectionReply)
+      window.removeEventListener('scroll', clearSelectionReply, true)
+    }
+  }, [isUser, onReplyToSelection])
 
   const renderReferenceToken = (reference: string, key: string) => {
     const [type, ...idParts] = reference.split(':')
@@ -339,17 +417,37 @@ export function ChatMessage({
   }
 
   if (isUser) {
+    const parsedUserReply = extractLeadingQuoteBlock(message.content)
+    const hasExcerptCard = Boolean(parsedUserReply.excerpt)
+    const userBody = hasExcerptCard ? parsedUserReply.body : message.content
+    const excerptLineCount = parsedUserReply.excerpt ? parsedUserReply.excerpt.split('\n').length : 0
+
     return (
       <div className="px-0.5 py-2 min-w-0 overflow-hidden">
+        {hasExcerptCard && parsedUserReply.excerpt && (
+          <div className="mb-2 flex justify-start">
+            <div className="w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
+              <p className="text-sm font-medium leading-tight text-foreground break-words">
+                excerpt_from_previous_message.txt
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {excerptLineCount} line{excerptLineCount === 1 ? '' : 's'}
+              </p>
+              <span className="mt-2 inline-flex rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                TXT
+              </span>
+            </div>
+          </div>
+        )}
         <div className="border-l-4 border-primary px-3 py-1">
-          <p className="text-base leading-relaxed text-foreground break-words">{renderInlineMarkdown(message.content)}</p>
+          <p className="text-base leading-relaxed text-foreground break-words">{renderInlineMarkdown(userBody)}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="px-0.5 py-2 min-w-0 overflow-hidden">
+    <div ref={assistantContainerRef} className="px-0.5 py-2 min-w-0 overflow-hidden">
       <div className="space-y-2 min-w-0">
           {/* Parts-based rendering (new) vs legacy thinking field */}
           {message.parts && message.parts.length > 0 ? (
@@ -459,6 +557,27 @@ export function ChatMessage({
             {formatDateTime(message.timestamp)}
           </span>
       </div>
+      {selectionReplyUi && (
+        <button
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault()
+          }}
+          onClick={() => {
+            onReplyToSelection?.(selectionReplyUi.text)
+            setSelectionReplyUi(null)
+            window.getSelection()?.removeAllRanges()
+          }}
+          className="fixed z-50 rounded-md border border-black bg-black px-2.5 py-1 text-xs font-medium text-white shadow-md transition-colors hover:bg-black/90"
+          style={{
+            left: selectionReplyUi.x,
+            top: selectionReplyUi.y,
+            transform: 'translate(-50%, -100%)',
+          }}
+        >
+          Reply
+        </button>
+      )}
     </div>
   )
 }

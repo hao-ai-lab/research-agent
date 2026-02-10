@@ -87,11 +87,14 @@ interface ChatInputProps {
   queue?: string[]
   onRemoveFromQueue?: (index: number) => void
   insertDraft?: { id: number; text: string } | null
+  insertReplyExcerpt?: { id: number; text: string; fileName?: string } | null
+  conversationKey?: string
   layout?: 'docked' | 'centered'
   skills?: PromptSkill[]
   // Wild loop steer support
   isWildLoopActive?: boolean
   onSteer?: (message: string, priority: number) => void
+  onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void
 }
 
 export function ChatInput({
@@ -112,13 +115,17 @@ export function ChatInput({
   queue = [],
   onRemoveFromQueue,
   insertDraft = null,
+  insertReplyExcerpt = null,
+  conversationKey = 'default',
   layout = 'docked',
   skills = [],
   isWildLoopActive = false,
   onSteer,
+  onOpenReplyExcerpt,
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
+  const [replyExcerpt, setReplyExcerpt] = useState<{ text: string; fileName: string } | null>(null)
   const [isAttachOpen, setIsAttachOpen] = useState(false)
   const [isModeOpen, setIsModeOpen] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
@@ -314,28 +321,6 @@ export function ChatInput({
   const mentionTypeColorMap = REFERENCE_TYPE_COLOR_MAP
   const mentionTypeBackgroundMap = REFERENCE_TYPE_BACKGROUND_MAP
 
-  const selectMentionToken = useCallback((start: number, end: number) => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    textarea.focus()
-    textarea.setSelectionRange(start, end)
-  }, [])
-
-  const findMentionTokenAtPosition = useCallback((text: string, position: number) => {
-    const mentionRegex = /@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
-    let match: RegExpExecArray | null
-
-    while ((match = mentionRegex.exec(text)) !== null) {
-      const start = match.index
-      const end = start + match[0].length
-      if (position > start && position <= end) {
-        return { start, end }
-      }
-    }
-
-    return null
-  }, [])
-
   const highlightedMessage = useMemo(() => {
     if (!message) return null
     const parts: React.ReactNode[] = []
@@ -478,18 +463,48 @@ export function ChatInput({
     }, 0)
   }, [insertDraft?.id, insertDraft?.text])
 
+  useEffect(() => {
+    if (!insertReplyExcerpt?.text) return
+    setReplyExcerpt({
+      text: insertReplyExcerpt.text,
+      fileName: insertReplyExcerpt.fileName || 'excerpt_from_previous_message.txt',
+    })
+    setTimeout(() => {
+      textareaRef.current?.focus()
+    }, 0)
+  }, [insertReplyExcerpt?.id, insertReplyExcerpt?.text, insertReplyExcerpt?.fileName])
+
+  useEffect(() => {
+    setReplyExcerpt(null)
+  }, [conversationKey])
+
+  const buildOutgoingMessage = useCallback(() => {
+    const baseMessage = message.trim()
+    if (!replyExcerpt) {
+      return message
+    }
+    const quoteBlock = replyExcerpt.text
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n')
+    return baseMessage ? `${quoteBlock}\n\n${message}` : quoteBlock
+  }, [message, replyExcerpt])
+
   const handleSubmit = () => {
-    if (message.trim() || attachments.length > 0) {
+    const outgoingMessage = buildOutgoingMessage()
+    const canSubmit = Boolean(message.trim() || attachments.length > 0 || replyExcerpt)
+    if (canSubmit) {
       // If streaming and onQueue is provided, queue the message instead of sending
-      if (isStreaming && onQueue && message.trim()) {
-        onQueue(message.trim())
+      if (isStreaming && onQueue && (message.trim() || replyExcerpt)) {
+        onQueue(outgoingMessage.trim())
       } else if (isWildLoopActive && onSteer && message.trim()) {
         onSteer(message.trim(), steerPriority)
       } else {
-        onSend(message, attachments, mode)
+        onSend(outgoingMessage, attachments, mode)
       }
       setMessage('')
       setAttachments([])
+      setReplyExcerpt(null)
       setIsMentionOpen(false)
       setMentionStartIndex(null)
       setMentionQuery('')
@@ -642,15 +657,6 @@ export function ChatInput({
     setSlashQuery('')
   }
 
-  const handleTextareaMouseUp = useCallback((e: React.MouseEvent<HTMLTextAreaElement>) => {
-    const textarea = e.currentTarget
-    if (textarea.selectionStart !== textarea.selectionEnd) return
-    const cursorPos = textarea.selectionStart ?? 0
-    const tokenRange = findMentionTokenAtPosition(message, cursorPos)
-    if (!tokenRange) return
-    selectMentionToken(tokenRange.start, tokenRange.end)
-  }, [findMentionTokenAtPosition, message, selectMentionToken])
-
   const insertMention = useCallback((item: MentionItem) => {
     if (mentionStartIndex === null) return
     
@@ -767,8 +773,44 @@ export function ChatInput({
       }
     >
       {/* Attachments preview */}
-      {attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-1.5">
+      {(replyExcerpt || attachments.length > 0) && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {replyExcerpt && (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenReplyExcerpt?.(replyExcerpt)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onOpenReplyExcerpt?.(replyExcerpt)
+                }
+              }}
+              className="group relative w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 text-left shadow-sm transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              title="Open excerpt preview"
+            >
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setReplyExcerpt(null)
+                }}
+                className="absolute right-2 top-2 z-10 text-muted-foreground hover:text-foreground"
+                aria-label="Remove quoted excerpt"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+              <p className="pr-5 text-sm font-medium leading-tight text-foreground break-words group-hover:text-primary">
+                {replyExcerpt.fileName}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {replyExcerpt.text.split('\n').length} lines
+              </p>
+              <span className="mt-2 inline-flex rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                TXT
+              </span>
+            </div>
+          )}
           {attachments.map((file, index) => (
             <div
               key={index}
@@ -1005,17 +1047,16 @@ export function ChatInput({
                 highlightRef.current.scrollTop = e.currentTarget.scrollTop
               }
             }}
-            onMouseUp={handleTextareaMouseUp}
             placeholder="Message Research Assistant... (type @ or /)"
             disabled={disabled}
             rows={1}
-            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
+            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
               minHeight: '58px',
               maxHeight: '170px',
               caretColor: 'hsl(var(--foreground))',
-              color: 'hsl(var(--foreground) / 0.01)',
-              WebkitTextFillColor: 'hsl(var(--foreground) / 0.01)',
+              color: 'transparent',
+              WebkitTextFillColor: 'transparent',
             }}
           />
           <Button
@@ -1323,7 +1364,7 @@ export function ChatInput({
 
           <Button
             onClick={handleSubmit}
-            disabled={!message.trim() && attachments.length === 0}
+            disabled={!message.trim() && attachments.length === 0 && !replyExcerpt}
             size="icon"
             className={`h-9 w-9 rounded-lg disabled:opacity-30 relative ${
               isStreaming && onQueue

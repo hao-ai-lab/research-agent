@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
+import { Fragment, useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
@@ -10,6 +10,13 @@ import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff, Plus } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+} from '@/components/ui/sheet'
 import { useAppSettings } from '@/lib/app-settings'
 import { useChatSession } from '@/hooks/use-chat-session'
 import { useWebNotification } from '@/hooks/use-web-notification'
@@ -86,6 +93,14 @@ export function ConnectedChatView({
     const scrollRef = useRef<HTMLDivElement>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
+    const [starterReplyExcerptInsert, setStarterReplyExcerptInsert] = useState<{
+        id: number
+        text: string
+        fileName?: string
+        sessionId: string
+    } | null>(null)
+    const [excerptPreview, setExcerptPreview] = useState<{ fileName: string; text: string } | null>(null)
+    const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
     const { settings, setSettings } = useAppSettings()
     const showStarterCards = settings.appearance.showStarterCards !== false
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
@@ -314,6 +329,21 @@ export function ConnectedChatView({
         await sendMessage(message, effectiveMode, sessionId)
     }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage])
 
+    const handleReplyToSelection = useCallback((selectedText: string) => {
+        if (!currentSessionId) return
+        setStarterReplyExcerptInsert({
+            id: Date.now(),
+            text: selectedText,
+            fileName: 'excerpt_from_previous_message.txt',
+            sessionId: currentSessionId,
+        })
+    }, [currentSessionId])
+
+    const handleOpenReplyExcerpt = useCallback((excerpt: { fileName: string; text: string }) => {
+        setExcerptPreview(excerpt)
+        setIsExcerptPreviewOpen(true)
+    }, [])
+
     // Connection error state
     if (!isConnected && !isLoading) {
         return (
@@ -389,6 +419,16 @@ export function ConnectedChatView({
                 queue={messageQueue}
                 onRemoveFromQueue={removeFromQueue}
                 insertDraft={effectiveInsertDraft}
+                insertReplyExcerpt={
+                    starterReplyExcerptInsert && starterReplyExcerptInsert.sessionId === currentSessionId
+                        ? {
+                            id: starterReplyExcerptInsert.id,
+                            text: starterReplyExcerptInsert.text,
+                            fileName: starterReplyExcerptInsert.fileName,
+                        }
+                        : null
+                }
+                conversationKey={currentSessionId || 'new'}
                 layout={layout}
                 skills={skills}
                 isWildLoopActive={wildLoop?.isActive ?? false}
@@ -402,6 +442,7 @@ export function ConnectedChatView({
                         createdAt: Date.now(),
                     }, 0) // Insert at front of queue
                 } : undefined}
+                onOpenReplyExcerpt={handleOpenReplyExcerpt}
             />
         </>
     )
@@ -514,6 +555,7 @@ export function ConnectedChatView({
                                                 onEditSweep={onEditSweep}
                                                 onLaunchSweep={onLaunchSweep}
                                                 onRunClick={onRunClick}
+                                                onReplyToSelection={handleReplyToSelection}
                                             />
                                         ))
                                         : displayMessages.map((message, index) => {
@@ -545,6 +587,7 @@ export function ConnectedChatView({
                                                     onEditSweep={onEditSweep}
                                                     onLaunchSweep={onLaunchSweep}
                                                     onRunClick={onRunClick}
+                                                    onReplyToSelection={handleReplyToSelection}
                                                     previousUserContent={prevUserContent}
                                                 />
                                             </div>
@@ -575,6 +618,42 @@ export function ConnectedChatView({
                     onSave={wildLoop.setTerminationConditions}
                 />
             )}
+
+            <Sheet open={isExcerptPreviewOpen} onOpenChange={setIsExcerptPreviewOpen}>
+                <SheetContent side="right" className="w-[92vw] p-0 sm:max-w-2xl">
+                    <SheetHeader className="border-b border-border/60 px-4 py-3">
+                        <SheetTitle className="truncate text-xl font-semibold">
+                            {excerptPreview?.fileName || 'excerpt_from_previous_message.txt'}
+                        </SheetTitle>
+                        <SheetDescription className="text-xs">
+                            {(() => {
+                                const text = excerptPreview?.text ?? ''
+                                const bytes = new TextEncoder().encode(text).length
+                                const lineCount = text ? text.split('\n').length : 0
+                                const kb = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(2)} KB`
+                                const linesLabel = `${lineCount} line${lineCount === 1 ? '' : 's'}`
+                                return `${kb} • ${linesLabel} • Formatting may be inconsistent from source`
+                            })()}
+                        </SheetDescription>
+                    </SheetHeader>
+                    <div className="h-[calc(100vh-84px)] overflow-auto p-3">
+                        <div className="overflow-hidden rounded-lg border border-border/70 bg-card/60">
+                            <div className="grid grid-cols-[auto_minmax(0,1fr)] text-sm font-mono leading-6">
+                                {(excerptPreview?.text || '').split('\n').map((line, index) => (
+                                    <Fragment key={`excerpt-line-${index + 1}`}>
+                                        <span className="select-none border-r border-border/40 bg-background/70 px-3 text-right text-[11px] text-muted-foreground">
+                                            {index + 1}
+                                        </span>
+                                        <span className="border-b border-border/30 px-3 whitespace-pre-wrap break-words text-foreground/90">
+                                            {line || ' '}
+                                        </span>
+                                    </Fragment>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </SheetContent>
+            </Sheet>
         </div>
     )
 }
@@ -591,6 +670,7 @@ function CollapsedChatPair({
     onEditSweep,
     onLaunchSweep,
     onRunClick,
+    onReplyToSelection,
 }: {
     pair: { user: ChatMessageType; assistant?: ChatMessageType }
     collapseArtifacts: boolean
@@ -600,6 +680,7 @@ function CollapsedChatPair({
     onEditSweep?: (config: SweepConfig) => void
     onLaunchSweep?: (config: SweepConfig) => void
     onRunClick: (run: ExperimentRun) => void
+    onReplyToSelection?: (text: string) => void
 }) {
     const [expanded, setExpanded] = useState(false)
 
@@ -650,6 +731,7 @@ function CollapsedChatPair({
                             onEditSweep={onEditSweep}
                             onLaunchSweep={onLaunchSweep}
                             onRunClick={onRunClick}
+                            onReplyToSelection={onReplyToSelection}
                             previousUserContent={pair.user.content}
                         />
                     )}
