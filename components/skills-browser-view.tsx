@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import Prism from 'prismjs'
+import 'prismjs/components/prism-markdown'
 import {
   ChevronDown,
   ChevronRight,
@@ -195,6 +197,35 @@ export function SkillsBrowserView() {
   // --------------------------------------------------------------------------
 
   const isDirty = editorContent !== originalContent
+  const highlightedMarkdown = useMemo(() => {
+    const grammar = Prism.languages.markdown
+    if (!grammar) return editorContent
+    return Prism.highlight(editorContent, grammar, 'markdown')
+  }, [editorContent])
+
+  const renderEditorWithPreview = (placeholder?: string) => (
+    <div className="flex h-full min-h-0 flex-col gap-3 lg:flex-row">
+      <textarea
+        ref={textareaRef}
+        value={editorContent}
+        onChange={(e) => setEditorContent(e.target.value)}
+        className="h-1/2 w-full rounded-lg border border-border/50 bg-background/50 p-4 text-[13px] font-mono text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/30 leading-relaxed lg:h-full lg:w-1/2"
+        spellCheck={false}
+        placeholder={placeholder}
+      />
+      <div className="code-output-box h-1/2 w-full overflow-auto rounded-lg border border-border/50 bg-background/30 lg:h-full lg:w-1/2">
+        <div className="border-b border-border/40 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          Markdown Preview
+        </div>
+        <pre className="m-0 p-4 text-[13px] leading-relaxed font-mono whitespace-pre-wrap break-words">
+          <code
+            className="language-markdown"
+            dangerouslySetInnerHTML={{ __html: highlightedMarkdown }}
+          />
+        </pre>
+      </div>
+    </div>
+  )
 
   const handleSave = useCallback(async () => {
     if (!selected || !isDirty) return
@@ -251,9 +282,9 @@ export function SkillsBrowserView() {
       <div key={node.id}>
         <button
           type="button"
-          className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+          className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-base transition-colors ${
             isSelected
-              ? 'bg-accent/15 text-accent'
+              ? 'bg-violet-500/20 text-foreground ring-1 ring-violet-400/40'
               : 'text-foreground/80 hover:bg-secondary/60'
           }`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
@@ -290,10 +321,10 @@ export function SkillsBrowserView() {
             <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
 
-          <span className="truncate">{node.label}</span>
+          <span className={`truncate ${isSelected ? 'font-medium' : ''}`}>{node.label}</span>
 
           {node.type === 'file' && node.fileEntry?.size != null && (
-            <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+            <span className="ml-auto text-xs text-muted-foreground tabular-nums">
               {node.fileEntry.size < 1024
                 ? `${node.fileEntry.size}B`
                 : `${(node.fileEntry.size / 1024).toFixed(1)}KB`}
@@ -378,14 +409,7 @@ export function SkillsBrowserView() {
             </div>
           </div>
           <div className="flex-1 min-h-0 p-3">
-            <textarea
-              ref={textareaRef}
-              value={editorContent}
-              onChange={(e) => setEditorContent(e.target.value)}
-              className="h-full w-full rounded-lg border border-border/50 bg-background/50 p-4 text-[13px] font-mono text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/30 leading-relaxed"
-              spellCheck={false}
-              placeholder="Template content..."
-            />
+            {renderEditorWithPreview('Template content...')}
           </div>
         </div>
 
@@ -443,13 +467,7 @@ export function SkillsBrowserView() {
 
         {/* Editor */}
         <div className="flex-1 min-h-0 p-3">
-          <textarea
-            ref={textareaRef}
-            value={editorContent}
-            onChange={(e) => setEditorContent(e.target.value)}
-            className="h-full w-full rounded-lg border border-border/50 bg-background/50 p-4 text-[13px] font-mono text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/30 leading-relaxed"
-            spellCheck={false}
-          />
+          {renderEditorWithPreview()}
         </div>
 
         {/* Actions */}
@@ -492,8 +510,8 @@ export function SkillsBrowserView() {
         <div className="flex items-center justify-between border-b border-border/40 px-3 py-2.5">
           <div className="flex items-center gap-2">
             <Wand2 className="h-4 w-4 text-violet-400" />
-            <span className="text-sm font-semibold text-foreground">Skills</span>
-            <span className="text-[10px] text-muted-foreground tabular-nums">
+            <span className="text-base font-semibold text-foreground">Skills</span>
+            <span className="text-xs text-muted-foreground tabular-nums">
               {skills.length}
             </span>
           </div>
@@ -517,7 +535,7 @@ export function SkillsBrowserView() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search skills…"
-              className="h-8 w-full rounded-md border border-border/50 bg-secondary/30 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+              className="h-9 w-full rounded-md border border-border/50 bg-secondary/30 pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
             />
             {search && (
               <button
