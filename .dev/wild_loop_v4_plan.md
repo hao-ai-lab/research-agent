@@ -126,13 +126,13 @@ interface QueuedEvent {
 
 Priority levels:
 
-- **0** — User interrupt / NEEDS_HUMAN
-- **1** — Critical alerts
-- **2** — Warning alerts
-- **3** — Run failure events
-- **5** — Run completion events
-- **7** — Analysis prompts
-- **9** — Exploring prompts / periodic check-ins
+- **10** — User interrupt / NEEDS_HUMAN
+- **20** — Critical alerts
+- **30** — Warning alerts
+- **40** — Run failure events
+- **50** — Run completion events
+- **70** — Analysis prompts
+- **90** — Exploring prompts / periodic check-ins
 
 ### Changes
 
