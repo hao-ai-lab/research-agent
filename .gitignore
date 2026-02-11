@@ -42,5 +42,8 @@ server/.uv-cache
 server/dist
 server/build
 
+# modal
+.modal/
+
 # worktree
 .worktree-initialized

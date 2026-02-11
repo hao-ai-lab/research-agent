@@ -1,0 +1,71 @@
+name: Modal Preview
+
+on:
+  push:
+    branches: ['**']
+  delete:
+
+concurrency:
+  group: modal-preview-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Deploy a per-branch preview on every push
+  # ------------------------------------------------------------------
+  deploy:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Modal client
+        run: pip install modal
+
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_DEPLOY_BRANCH: ${{ github.ref_name }}
+        run: |
+          modal deploy modal_app.py 2>&1 | tee /tmp/modal-deploy.log
+
+          # Extract the preview URL from Modal output
+          PREVIEW_URL=$(grep -oP 'https://[^\s]+\.modal\.run' /tmp/modal-deploy.log | head -1 || true)
+
+          echo "## 🚀 Preview Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PREVIEW_URL" ]; then
+            echo "**URL:** $PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ------------------------------------------------------------------
+  # Tear down the preview when a branch is deleted
+  # ------------------------------------------------------------------
+  teardown:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Modal client
+        run: pip install modal
+
+      - name: Stop Modal app
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          # Replicate the slug logic from modal_app.py
+          BRANCH="${{ github.event.ref }}"
+          SLUG=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | head -c 40 | sed 's/^-*//;s/-*$//')
+          APP_NAME="research-agent-${SLUG}"
+          echo "Stopping Modal app: $APP_NAME"
+          modal app stop "$APP_NAME" || true
