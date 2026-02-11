@@ -123,6 +123,16 @@ export function ChatInput({
   onSteer,
   onOpenReplyExcerpt,
 }: ChatInputProps) {
+  const referenceMentionRegex = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
+  const genericMentionRegex = /(?<!\S)@[A-Za-z0-9:._-]*/g
+
+  type MentionRange = {
+    start: number
+    end: number
+    token: string
+    isReference: boolean
+  }
+
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
   const [replyExcerpt, setReplyExcerpt] = useState<{ text: string; fileName: string } | null>(null)
@@ -321,10 +331,46 @@ export function ChatInput({
   const mentionTypeColorMap = REFERENCE_TYPE_COLOR_MAP
   const mentionTypeBackgroundMap = REFERENCE_TYPE_BACKGROUND_MAP
 
+  const getMentionRanges = useCallback((text: string): MentionRange[] => {
+    const ranges: MentionRange[] = []
+    const occupied = new Set<number>()
+
+    let refMatch: RegExpExecArray | null
+    const refRegex = new RegExp(referenceMentionRegex.source, 'g')
+    while ((refMatch = refRegex.exec(text)) !== null) {
+      const start = refMatch.index
+      const token = refMatch[0]
+      const end = start + token.length
+      for (let i = start; i < end; i++) occupied.add(i)
+      ranges.push({ start, end, token, isReference: true })
+    }
+
+    let genericMatch: RegExpExecArray | null
+    const genericRegex = new RegExp(genericMentionRegex.source, 'g')
+    while ((genericMatch = genericRegex.exec(text)) !== null) {
+      const start = genericMatch.index
+      const token = genericMatch[0]
+      const end = start + token.length
+      if (token.length === 0) continue
+      let overlaps = false
+      for (let i = start; i < end; i++) {
+        if (occupied.has(i)) {
+          overlaps = true
+          break
+        }
+      }
+      if (!overlaps) {
+        ranges.push({ start, end, token, isReference: false })
+      }
+    }
+
+    return ranges.sort((a, b) => a.start - b.start)
+  }, [genericMentionRegex.source, referenceMentionRegex.source])
+
   const highlightedMessage = useMemo(() => {
     if (!message) return null
     const parts: React.ReactNode[] = []
-    const tokenRegex = /(@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+|\/[a-zA-Z][\w-]*)/g
+    const tokenRegex = /((?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+|(?<!\S)@[A-Za-z0-9:._-]*|(?<!\S)\/[a-zA-Z][\w-]*)/g
     let cursor = 0
     let match: RegExpExecArray | null
     let keyIndex = 0
@@ -350,13 +396,14 @@ export function ChatInput({
           </span>
         )
       } else {
-        const mentionType = token.slice(1).split(':')[0] as MentionType
-        const mentionColor = mentionTypeColorMap[mentionType]
-        const mentionBackground = mentionTypeBackgroundMap[mentionType]
+        const maybeType = token.slice(1).split(':')[0] as MentionType
+        const mentionType = maybeType in mentionTypeColorMap ? maybeType : null
+        const mentionColor = mentionType ? mentionTypeColorMap[mentionType] : 'hsl(var(--foreground))'
+        const mentionBackground = mentionType ? mentionTypeBackgroundMap[mentionType] : 'hsl(var(--secondary))'
         parts.push(
           <span
             key={`mention-${keyIndex++}`}
-            className="rounded-md px-1 py-0.5"
+            className="rounded-[6px]"
             style={{
               color: mentionColor,
               backgroundColor: mentionBackground,
@@ -574,6 +621,61 @@ export function ChatInput({
         setIsSlashOpen(false)
         setSlashStartIndex(null)
         setSlashQuery('')
+        return
+      }
+    }
+
+    const textarea = textareaRef.current
+    const selectionStart = textarea?.selectionStart ?? 0
+    const selectionEnd = textarea?.selectionEnd ?? selectionStart
+
+    if (e.key === 'Backspace' && selectionStart === selectionEnd) {
+      const ranges = getMentionRanges(message)
+      const cursor = selectionStart
+
+      // Delete mention chip with one backspace when cursor is right after "<mention> ".
+      if (cursor > 0 && message[cursor - 1] === ' ') {
+        const rangeBefore = ranges.find((range) => range.end === cursor - 1)
+        if (rangeBefore) {
+          e.preventDefault()
+          const nextMessage = message.slice(0, rangeBefore.start) + message.slice(cursor)
+          setMessage(nextMessage)
+          setTimeout(() => {
+            textareaRef.current?.focus()
+            textareaRef.current?.setSelectionRange(rangeBefore.start, rangeBefore.start)
+          }, 0)
+          return
+        }
+      }
+
+      // If caret is inside a mention chip, delete the whole chip.
+      const activeRange = ranges.find((range) => cursor > range.start && cursor <= range.end)
+      if (activeRange) {
+        e.preventDefault()
+        const removeUntil = message[activeRange.end] === ' ' ? activeRange.end + 1 : activeRange.end
+        const nextMessage = message.slice(0, activeRange.start) + message.slice(removeUntil)
+        setMessage(nextMessage)
+        setTimeout(() => {
+          textareaRef.current?.focus()
+          textareaRef.current?.setSelectionRange(activeRange.start, activeRange.start)
+        }, 0)
+        return
+      }
+    }
+
+    if (e.key === 'Delete' && selectionStart === selectionEnd) {
+      const ranges = getMentionRanges(message)
+      const cursor = selectionStart
+      const activeRange = ranges.find((range) => cursor >= range.start && cursor < range.end)
+      if (activeRange) {
+        e.preventDefault()
+        const removeUntil = message[activeRange.end] === ' ' ? activeRange.end + 1 : activeRange.end
+        const nextMessage = message.slice(0, activeRange.start) + message.slice(removeUntil)
+        setMessage(nextMessage)
+        setTimeout(() => {
+          textareaRef.current?.focus()
+          textareaRef.current?.setSelectionRange(activeRange.start, activeRange.start)
+        }, 0)
         return
       }
     }
@@ -1042,6 +1144,15 @@ export function ChatInput({
             value={message}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
+            onSelect={(e) => {
+              const input = e.currentTarget
+              if (input.selectionStart !== input.selectionEnd) return
+              // Keep caret pinned to the far-right end of text.
+              requestAnimationFrame(() => {
+                const end = input.value.length
+                input.setSelectionRange(end, end)
+              })
+            }}
             onScroll={(e) => {
               if (highlightRef.current) {
                 highlightRef.current.scrollTop = e.currentTarget.scrollTop
@@ -1054,9 +1165,8 @@ export function ChatInput({
             style={{
               minHeight: '58px',
               maxHeight: '170px',
-              caretColor: 'hsl(var(--foreground))',
+              caretColor: 'var(--foreground)',
               color: 'transparent',
-              WebkitTextFillColor: 'transparent',
             }}
           />
           <Button
