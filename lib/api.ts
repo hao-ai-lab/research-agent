@@ -70,7 +70,7 @@ export interface SessionWithMessages extends ChatSession {
     active_stream?: ActiveSessionStream | null
 }
 
-export type StreamEventType = 'part_delta' | 'part_update' | 'session_status' | 'error'
+export type StreamEventType = 'part_delta' | 'part_update' | 'session_status' | 'error' | 'provenance'
 
 export interface StreamEvent {
     type: StreamEventType
@@ -88,6 +88,14 @@ export interface StreamEvent {
     tool_duration_ms?: number
     status?: string
     message?: string
+    // Provenance event fields (type === 'provenance')
+    rendered?: string
+    user_input?: string
+    skill_id?: string | null
+    skill_name?: string | null
+    template?: string | null
+    variables?: Record<string, string>
+    prompt_type?: string
 }
 
 // API Functions
@@ -155,15 +163,20 @@ export async function* streamChat(
     message: string,
     mode: string = 'agent',
     signal?: AbortSignal,
+    promptOverride?: string,
 ): AsyncGenerator<StreamEvent, void, unknown> {
+    const body: Record<string, unknown> = {
+        session_id: sessionId,
+        message,
+        mode,
+    }
+    if (promptOverride) {
+        body.prompt_override = promptOverride
+    }
     const response = await fetch(`${API_URL()}/chat`, {
         method: 'POST',
         headers: getHeaders(true),
-        body: JSON.stringify({
-            session_id: sessionId,
-            message,
-            mode,
-        }),
+        body: JSON.stringify(body),
         signal,
     })
 
@@ -781,6 +794,7 @@ export interface BuildWildPromptRequest {
     prompt_type: 'exploring' | 'run_event' | 'alert' | 'analysis'
     goal?: string
     iteration?: number
+    max_iterations?: number
     // run_event
     run_id?: string
     run_name?: string
@@ -830,6 +844,7 @@ export interface PromptSkill {
     description: string
     template: string
     variables: string[]
+    category: 'prompt' | 'skill'  // "prompt" = template only, "skill" = has logic/tools
     built_in: boolean
 }
 

@@ -10,6 +10,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Save,
+  ScrollText,
   Search,
   Wand2,
   X,
@@ -279,9 +280,11 @@ export function SkillsBrowserView() {
             <span className="w-3.5 shrink-0" />
           )}
 
-          {/* Icon */}
-          {node.type === 'skill' ? (
+          {/* Icon — prompt templates get ScrollText/cyan, skills get Wand2/violet */}
+          {node.type === 'skill' && node.skill?.category === 'skill' ? (
             <Wand2 className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+          ) : node.type === 'skill' ? (
+            <ScrollText className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
           ) : node.type === 'directory' ? (
             <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-400" />
           ) : node.label === 'SKILL.md' ? (
@@ -318,11 +321,26 @@ export function SkillsBrowserView() {
         {/* Header */}
         <div className="border-b border-border/40 px-5 py-4">
           <div className="flex items-center gap-3 mb-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10">
-              <Wand2 className="h-4.5 w-4.5 text-violet-400" />
-            </div>
+            {selectedSkill.category === 'skill' ? (
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10">
+                <Wand2 className="h-4.5 w-4.5 text-violet-400" />
+              </div>
+            ) : (
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-500/10">
+                <ScrollText className="h-4.5 w-4.5 text-cyan-400" />
+              </div>
+            )}
             <div className="min-w-0 flex-1">
-              <h2 className="text-base font-semibold text-foreground truncate">{selectedSkill.name}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-foreground truncate">{selectedSkill.name}</h2>
+                <span className={`text-[10px] rounded-full px-1.5 py-0.5 font-medium ${
+                  selectedSkill.category === 'skill'
+                    ? 'bg-violet-500/15 text-violet-400'
+                    : 'bg-cyan-500/15 text-cyan-400'
+                }`}>
+                  {selectedSkill.category === 'skill' ? 'Skill' : 'Prompt'}
+                </span>
+              </div>
               <p className="text-xs text-muted-foreground font-mono">{selectedSkill.id}</p>
             </div>
           </div>

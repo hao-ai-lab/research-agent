@@ -4,6 +4,8 @@ description: "Run event monitoring prompt. Triggered when a run finishes or fail
 variables:
   [
     "goal",
+    "iteration",
+    "max_iteration",
     "run_name",
     "run_id",
     "run_status",
@@ -15,7 +17,7 @@ variables:
   ]
 ---
 
-# Wild Loop — Run Event (Monitoring)
+# Wild Loop — Iteration {{iteration}}/{{max_iteration}} — Run Event (Monitoring)
 
 ## Your Goal
 

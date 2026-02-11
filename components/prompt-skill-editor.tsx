@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, ChevronRight, Save, RotateCcw, FileText, RefreshCcw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Save, RotateCcw, FileText, RefreshCcw, ScrollText, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { listPromptSkills, updatePromptSkill, reloadPromptSkills, type PromptSkill } from '@/lib/api'
 
@@ -116,7 +116,19 @@ export function PromptSkillEditor() {
                 ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               }
+              {skill.category === 'skill' ? (
+                <Wand2 className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+              ) : (
+                <ScrollText className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
+              )}
               <span className="text-sm font-medium flex-1">{skill.name}</span>
+              <span className={`text-[10px] rounded-full px-1.5 py-0.5 font-medium ${
+                skill.category === 'skill'
+                  ? 'bg-violet-500/15 text-violet-400'
+                  : 'bg-cyan-500/15 text-cyan-400'
+              }`}>
+                {skill.category === 'skill' ? 'Skill' : 'Prompt'}
+              </span>
               {dirty && (
                 <span className="text-[10px] bg-amber-500/20 text-amber-500 rounded-full px-1.5 py-0.5">
                   unsaved

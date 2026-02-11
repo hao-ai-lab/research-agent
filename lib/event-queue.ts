@@ -13,6 +13,7 @@ export interface QueuedEvent {
   priority: number          // 10=user, 20=critical alert, 30=warning, 50=run event, 70=analysis, 90=exploring
   title: string             // Short label for UI display
   prompt: string            // Full prompt text sent to agent
+  displayMessage?: string   // Short message stored as user-visible chat content (prompt goes via prompt_override)
   type: 'steer' | 'alert' | 'run_event' | 'analysis' | 'exploring'
   createdAt: number         // Date.now()
   provenance?: PromptProvenance  // Server-side prompt construction metadata

@@ -48,6 +48,7 @@ export interface UseWildLoopResult {
   onResponseComplete: (responseText: string) => void
   pendingPrompt: string | null
   pendingProvenance: PromptProvenance | null
+  pendingDisplayMessage: string | null
   consumePrompt: () => void
   // Queue API
   eventQueue: QueuedEvent[]
@@ -359,6 +360,8 @@ export function useWildLoop(): UseWildLoopResult {
   const pendingPrompt = queueSnapshot.length > 0 ? queueSnapshot[0].prompt : null
   // Provenance of the current pending prompt (for UI transparency)
   const pendingProvenance = queueSnapshot.length > 0 ? (queueSnapshot[0].provenance ?? null) : null
+  // Short display message for the chat UI (when set, prompt goes via prompt_override)
+  const pendingDisplayMessage = queueSnapshot.length > 0 ? (queueSnapshot[0].displayMessage ?? null) : null
   const [terminationConditions, setTerminationConditionsState] = useState<TerminationConditions>({})
 
   // Sweep tracking
@@ -392,14 +395,22 @@ export function useWildLoop(): UseWildLoopResult {
     eventType: QueuedEvent['type'],
     req: BuildWildPromptRequest,
     fallbackPrompt?: string,
+    displayMessage?: string,
   ) => {
+    // Inject iteration and max_iterations into every request
+    const enrichedReq: BuildWildPromptRequest = {
+      ...req,
+      iteration: req.iteration ?? iterationRef.current,
+      max_iterations: req.max_iterations ?? terminationRef.current.maxIterations ?? undefined,
+    }
     try {
-      const provenance = await buildWildPrompt(req)
+      const provenance = await buildWildPrompt(enrichedReq)
       enqueueEvent({
         id: eventId,
         priority,
         title,
         prompt: provenance.rendered,
+        displayMessage,
         type: eventType,
         createdAt: Date.now(),
         provenance,
@@ -408,8 +419,8 @@ export function useWildLoop(): UseWildLoopResult {
       console.warn('[wild-loop] Backend buildWildPrompt failed, using fallback:', err)
       // Fallback: use the deprecated frontend-built prompt
       const prompt = fallbackPrompt || buildExploringPrompt(
-        req.goal || 'Continue working',
-        req.iteration || 0,
+        enrichedReq.goal || 'Continue working',
+        enrichedReq.iteration || 0,
         templateCacheRef.current['wild_exploring'],
       )
       enqueueEvent({
@@ -417,6 +428,7 @@ export function useWildLoop(): UseWildLoopResult {
         priority,
         title,
         prompt,
+        displayMessage,
         type: eventType,
         createdAt: Date.now(),
       })
@@ -486,10 +498,11 @@ export function useWildLoop(): UseWildLoopResult {
             processedAlertIdsRef.current.add(alert.id)
             const run = sweepRuns.find(r => r.id === alert.run_id)
             console.log('[wild-loop] Queuing alert event:', alert.id)
+            const alertRunLabel = run?.name || alert.run_id
             enqueueFromBackend(
               `alert-${alert.id}`,
               20,
-              `Alert: ${run?.name || alert.run_id}`,
+              `Alert: ${alertRunLabel}`,
               'alert',
               {
                 prompt_type: 'alert',
@@ -498,9 +511,10 @@ export function useWildLoop(): UseWildLoopResult {
                 alert_severity: alert.severity,
                 alert_message: alert.message,
                 alert_choices: alert.choices,
-                run_name: run?.name || alert.run_id,
+                run_name: alertRunLabel,
               },
-              buildAlertPrompt(goalRef.current || '', alert, run?.name || alert.run_id, templateCacheRef.current['wild_alert']),
+              buildAlertPrompt(goalRef.current || '', alert, alertRunLabel, templateCacheRef.current['wild_alert']),
+              `@alert:${alertRunLabel} [${alert.severity}] ${alert.message}`,
             )
           }
         }
@@ -519,10 +533,12 @@ export function useWildLoop(): UseWildLoopResult {
 
             console.log('[wild-loop] Queuing run event:', run.id, run.status)
             const sweepSummary = buildSweepSummary(sweepRuns)
+            const runLabel = run.name || run.id
+            const runDisplayMsg = `@run:${runLabel} ${run.status}`
             enqueueFromBackend(
               `run-${run.id}-${run.status}`,
               run.status === 'failed' ? 40 : 50,
-              `${run.status === 'failed' ? '❌' : '✅'} Run: ${run.name || run.id}`,
+              `${run.status === 'failed' ? '❌' : '✅'} Run: ${runLabel}`,
               'run_event',
               {
                 prompt_type: 'run_event',
@@ -535,6 +551,7 @@ export function useWildLoop(): UseWildLoopResult {
                 sweep_summary: sweepSummary,
               },
               buildRunEventPrompt(goalRef.current || '', run, logTail, sweepSummary, templateCacheRef.current['wild_monitoring']),
+              runDisplayMsg,
             )
           }
           seenRunStatusesRef.current.set(run.id, run.status)
@@ -852,7 +869,7 @@ export function useWildLoop(): UseWildLoopResult {
     isActive, isPaused, phase, stage, iteration, goal, startedAt,
     terminationConditions, sweepId: trackedSweepId, runStats, activeAlerts,
     start, pause, resume, stop, setTerminationConditions,
-    onResponseComplete, pendingPrompt, pendingProvenance, consumePrompt,
+    onResponseComplete, pendingPrompt, pendingProvenance, pendingDisplayMessage, consumePrompt,
     eventQueue: queueSnapshot, reorderQueue, removeFromQueue, insertIntoQueue,
   }
 }
