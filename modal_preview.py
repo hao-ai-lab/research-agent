@@ -76,7 +76,7 @@ OPENCODE_BIN = "/usr/local/bin/opencode"
     memory=8 * 1024,  # 8GB
 )
 @modal.concurrent(max_inputs=100)
-@modal.web_server(port=8080, startup_timeout=120)
+@modal.web_server(port=[8080, 10000], startup_timeout=120)
 def preview_server():
     """Start the full Research Agent stack inside Modal (dev mode)."""
     os.chdir("/app")
