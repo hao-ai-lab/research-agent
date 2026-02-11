@@ -93,6 +93,7 @@ export interface AppSettings {
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
     showStarterCards?: boolean;
+    showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
   };
   integrations: {

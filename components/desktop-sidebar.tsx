@@ -13,6 +13,7 @@ import {
   FlaskConical,
   PanelLeftClose,
   Play,
+  Plus,
   Settings,
   Star,
   XCircle,
@@ -35,6 +36,7 @@ import { getStatusBadgeClass as getStatusBadgeClassUtil } from '@/lib/status-uti
 import type { AppTab, HomeTab } from '@/lib/navigation'
 import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
 import { NavTabButton } from '@/components/navigation/nav-tab-button'
+import { useAppSettings } from '@/lib/app-settings'
 
 const ICON_RAIL_WIDTH = 72
 const ICON_RAIL_TRIGGER_WIDTH = 136
@@ -164,6 +166,8 @@ export function DesktopSidebar({
     [sweeps]
   )
   const { useMock: isDemoMode } = useApiConfig()
+  const { settings } = useAppSettings()
+  const showSidebarNewChatButton = settings.appearance.showSidebarNewChatButton === true
   const [isResizing, setIsResizing] = useState(false)
   const resizeStartXRef = useRef(0)
   const resizeStartWidthRef = useRef(width)
@@ -258,6 +262,22 @@ export function DesktopSidebar({
                 </p>
               )}
               <div className="space-y-1">
+                {showSidebarNewChatButton && (
+                  <Button
+                    type="button"
+                    title="New Chat"
+                    variant="ghost"
+                    size={isIconRail ? 'icon-sm' : 'sm'}
+                    onClick={() => {
+                      void onNewChat()
+                    }}
+                    className={isIconRail ? 'h-[var(--app-btn-icon-sm)] w-full' : 'h-[var(--app-btn-h-sm)] w-full justify-start px-2.5'}
+                  >
+                    <Plus className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
+                    {!isIconRail && 'New Chat'}
+                    <span className="sr-only">New Chat</span>
+                  </Button>
+                )}
                 {PRIMARY_NAV_ITEMS.map((item) => (
                   <NavTabButton
                     key={item.tab}

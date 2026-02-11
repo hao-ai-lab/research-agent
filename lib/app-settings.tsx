@@ -23,6 +23,7 @@ export const defaultAppSettings: AppSettings = {
     customButtonScalePercent: null,
     chatToolbarButtonSizePx: null,
     showStarterCards: false,
+    showSidebarNewChatButton: false,
   },
   integrations: {},
   notifications: {
@@ -170,6 +171,7 @@ function readStoredSettings(): AppSettings {
         customButtonScalePercent: sanitizePositiveNumber(storedCustomButtonScalePercent) ?? customButtonScalePercentFromBlob ?? defaultAppSettings.appearance.customButtonScalePercent,
         chatToolbarButtonSizePx: sanitizePositiveNumber(storedChatToolbarButtonSizePx) ?? chatToolbarButtonSizePxFromBlob ?? defaultAppSettings.appearance.chatToolbarButtonSizePx,
         showStarterCards: parsed?.appearance?.showStarterCards ?? defaultAppSettings.appearance.showStarterCards,
+        showSidebarNewChatButton: parsed?.appearance?.showSidebarNewChatButton ?? defaultAppSettings.appearance.showSidebarNewChatButton,
         starterCardTemplates: parsed?.appearance?.starterCardTemplates ?? {},
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,

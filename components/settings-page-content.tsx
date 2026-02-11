@@ -485,6 +485,18 @@ export function SettingsPageContent({
 
               {appearanceAdvancedOpen && (
                 <div className="mt-4 space-y-3 border-t border-border pt-4">
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
+                    <div>
+                      <Label htmlFor="sidebar-new-chat-toggle" className="text-xs">Sidebar New Chat Button</Label>
+                      <p className="text-[11px] text-muted-foreground">Show or hide the New Chat button in the desktop sidebar</p>
+                    </div>
+                    <Switch
+                      id="sidebar-new-chat-toggle"
+                      checked={settings.appearance.showSidebarNewChatButton === true}
+                      onCheckedChange={(checked) => updateAppearanceSettings({ showSidebarNewChatButton: checked })}
+                    />
+                  </div>
+
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="custom-font-size" className="text-xs">Font Size (px)</Label>
