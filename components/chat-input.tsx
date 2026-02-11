@@ -94,6 +94,7 @@ interface ChatInputProps {
   // Wild loop steer support
   isWildLoopActive?: boolean
   onSteer?: (message: string, priority: number) => void
+  onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void
 }
 
 export function ChatInput({
@@ -120,6 +121,7 @@ export function ChatInput({
   skills = [],
   isWildLoopActive = false,
   onSteer,
+  onOpenReplyExcerpt,
 }: ChatInputProps) {
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -774,16 +776,31 @@ export function ChatInput({
       {(replyExcerpt || attachments.length > 0) && (
         <div className="mb-2 flex flex-wrap gap-2">
           {replyExcerpt && (
-            <div className="relative w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenReplyExcerpt?.(replyExcerpt)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onOpenReplyExcerpt?.(replyExcerpt)
+                }
+              }}
+              className="group relative w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 text-left shadow-sm transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              title="Open excerpt preview"
+            >
               <button
                 type="button"
-                onClick={() => setReplyExcerpt(null)}
-                className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setReplyExcerpt(null)
+                }}
+                className="absolute right-2 top-2 z-10 text-muted-foreground hover:text-foreground"
                 aria-label="Remove quoted excerpt"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
-              <p className="pr-5 text-sm font-medium leading-tight text-foreground break-words">
+              <p className="pr-5 text-sm font-medium leading-tight text-foreground break-words group-hover:text-primary">
                 {replyExcerpt.fileName}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
