@@ -65,10 +65,10 @@ app = modal.App("research-agent-preview")
     image=image,
     secrets=[modal.Secret.from_name("research-agent-preview-secrets")],
     timeout=7200,  # 2 hours max
-    allow_concurrent_inputs=100,
     cpu=2.0,
     memory=2048,
 )
+@modal.concurrent(max_inputs=100)
 @modal.web_server(port=10000, startup_timeout=120)
 def preview_server():
     """Start the full Research Agent stack inside Modal."""
