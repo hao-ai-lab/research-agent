@@ -41,6 +41,10 @@ interface ChatMessageProps {
   onReplyToSelection?: (text: string) => void
   /** Content of the user message that prompted this assistant response (for context extraction) */
   previousUserContent?: string
+  /** When true, show suggested follow-up prompt pills (only pass for the last assistant message) */
+  showFollowUpPrompts?: boolean
+  /** Called when user clicks a follow-up pill; send the prompt as the next message */
+  onFollowUpClick?: (prompt: string) => void
 }
 
 function extractLeadingQuoteBlock(content: string): { excerpt: string | null; body: string } {
@@ -116,6 +120,8 @@ export function ChatMessage({
   onRunClick,
   onReplyToSelection,
   previousUserContent,
+  showFollowUpPrompts = false,
+  onFollowUpClick,
 }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
@@ -551,6 +557,22 @@ export function ChatMessage({
               onLaunchSweep={onLaunchSweep}
               onRunClick={onRunClick}
             />
+          )}
+
+          {/* Suggested follow-up prompts (only shown when showFollowUpPrompts is true, e.g. last assistant message) */}
+          {showFollowUpPrompts && message.suggestedFollowUps && message.suggestedFollowUps.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {message.suggestedFollowUps.map((prompt, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onFollowUpClick?.(prompt)}
+                  className="rounded-full border border-border/80 bg-secondary/50 px-3 py-1.5 text-xs text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           )}
 
           <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>

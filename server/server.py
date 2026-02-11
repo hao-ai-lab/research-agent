@@ -2638,6 +2638,50 @@ def _log_background_chat_task(task: asyncio.Task) -> None:
         logger.error("Background chat worker failed: %s", exc, exc_info=(type(exc), exc, exc.__traceback__))
 
 
+async def _generate_followup_suggestions(last_user_content: str, assistant_content: str) -> List[str]:
+    """Call OpenCode with a one-off prompt to get 2-4 short follow-up suggestions. Returns empty list on any error."""
+    if not last_user_content and not assistant_content:
+        return []
+    prompt = (
+        "Based on the following conversation, suggest 2-4 short follow-up questions the user might ask next. "
+        "Reply with ONLY a JSON array of strings, nothing else. No markdown, no explanation. "
+        "Each string should be under 60 characters.\n\n"
+        f"[USER] {last_user_content[:2000]}\n\n[ASSISTANT] {assistant_content[:3000]}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{OPENCODE_URL}/session", json={}, auth=get_auth())
+            resp.raise_for_status()
+            temp_session_id = resp.json().get("id")
+            if not temp_session_id:
+                return []
+            await send_prompt_to_opencode(client, temp_session_id, prompt)
+            collected = ""
+            async for event, text_delta, _thinking_delta, _tool_update in stream_opencode_events(client, temp_session_id):
+                if isinstance(text_delta, str):
+                    collected += text_delta
+            collected = collected.strip()
+            if not collected:
+                return []
+            raw = collected
+            if raw.startswith("```"):
+                raw = re.sub(r"^```\w*\n?", "", raw)
+                raw = re.sub(r"\n?```\s*$", "", raw)
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list):
+                return []
+            out = []
+            for item in parsed:
+                if isinstance(item, str) and item.strip():
+                    out.append(item.strip()[:60])
+                if len(out) >= 4:
+                    break
+            return out[:4]
+    except Exception as e:
+        logger.debug("Follow-up suggestions failed: %s", e)
+        return []
+
+
 async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime) -> None:
     """Run the OpenCode stream for a chat session independent of HTTP clients."""
     session_stop_flags.pop(session_id, None)
@@ -2671,6 +2715,7 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
         await _append_runtime_event(runtime, {"type": "error", "message": str(e)})
     finally:
         parts = runtime.parts_accumulator.finalize()
+        suggested_followups: List[str] = []
         if runtime.full_text or runtime.full_thinking or parts:
             session = chat_sessions.get(session_id)
             if isinstance(session, dict):
@@ -2678,13 +2723,23 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
                 start_parts = parts if parts else []
                 final_parts = [p for p in start_parts if p.get("type") != "text"]
 
+                assistant_content = runtime.full_text.strip()
+                last_user_content = ""
+                messages = session.get("messages", [])
+                if messages and isinstance(messages[-1], dict) and messages[-1].get("role") == "user":
+                    last_user_content = str(messages[-1].get("content", "")) or ""
+
+                suggested_followups = await _generate_followup_suggestions(last_user_content, assistant_content)
+
                 assistant_msg = {
                     "role": "assistant",
-                    "content": runtime.full_text.strip(),
+                    "content": assistant_content,
                     "thinking": runtime.full_thinking.strip() if runtime.full_thinking else None,
                     "parts": final_parts if final_parts else None,
                     "timestamp": time.time(),
                 }
+                if suggested_followups:
+                    assistant_msg["suggested_followups"] = suggested_followups
                 session.setdefault("messages", []).append(assistant_msg)
 
         session = chat_sessions.get(session_id)
@@ -2692,7 +2747,10 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
             session.pop("active_stream", None)
         save_chat_state()
 
-        await _append_runtime_event(runtime, {"type": "session_status", "status": "idle"})
+        idle_event: Dict[str, Any] = {"type": "session_status", "status": "idle"}
+        if suggested_followups:
+            idle_event["suggested_followups"] = suggested_followups
+        await _append_runtime_event(runtime, idle_event)
         await _finalize_runtime(session_id, runtime)
 
         active_chat_tasks.pop(session_id, None)

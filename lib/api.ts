@@ -35,6 +35,7 @@ export interface ChatMessageData {
     thinking?: string | null
     parts?: MessagePartData[] | null  // NEW: ordered parts array
     timestamp: number
+    suggested_followups?: string[] | null
 }
 
 export interface ActiveSessionStream {
@@ -87,6 +88,7 @@ export interface StreamEvent {
     tool_duration_ms?: number
     status?: string
     message?: string
+    suggested_followups?: string[]
 }
 
 // API Functions

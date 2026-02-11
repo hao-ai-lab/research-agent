@@ -205,6 +205,7 @@ export interface ChatMessage {
   parts?: MessagePart[]; // NEW: ordered array of parts
   source?: ChatMessageSource; // 'agent_wild' = auto-sent by wild loop
   timestamp: Date;
+  suggestedFollowUps?: string[];
   attachments?: {
     name: string;
     type: string;

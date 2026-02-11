@@ -174,6 +174,7 @@ export function ConnectedChatView({
             })),
             timestamp: new Date(msg.timestamp * 1000),
             source: wildMessageIndices.has(idx) ? ('agent_wild' as const) : undefined,
+            suggestedFollowUps: Array.isArray(msg.suggested_followups) ? msg.suggested_followups : undefined,
         }))
     }, [messages, currentSessionId, wildMessageIndices])
 
@@ -507,41 +508,57 @@ export function ConnectedChatView({
                                                 onReplyToSelection={handleReplyToSelection}
                                             />
                                         ))
-                                        : displayMessages.map((message, index) => {
-                                            // Find the previous user message for context extraction
-                                            let prevUserContent: string | undefined
-                                            if (message.role === 'assistant') {
-                                                for (let i = index - 1; i >= 0; i--) {
-                                                    if (displayMessages[i].role === 'user') {
-                                                        prevUserContent = displayMessages[i].content
-                                                        break
+                                        : (() => {
+                                            const lastAssistantIdx = displayMessages.reduce(
+                                                (acc, m, i) => (m.role === 'assistant' ? i : acc),
+                                                -1
+                                            )
+                                            return displayMessages.map((message, index) => {
+                                                // Find the previous user message for context extraction
+                                                let prevUserContent: string | undefined
+                                                if (message.role === 'assistant') {
+                                                    for (let i = index - 1; i >= 0; i--) {
+                                                        if (displayMessages[i].role === 'user') {
+                                                            prevUserContent = displayMessages[i].content
+                                                            break
+                                                        }
                                                     }
                                                 }
-                                            }
-                                            return (
-                                                <div
-                                                    key={message.id}
-                                                    style={message.source === 'agent_wild' ? {
-                                                        borderLeft: '3px solid #a855f7',
-                                                        paddingLeft: '8px',
-                                                        marginLeft: '4px',
-                                                    } : undefined}
-                                                >
-                                                    <ChatMessage
-                                                        message={message}
-                                                        collapseArtifacts={collapseArtifactsInChat}
-                                                        sweeps={sweeps}
-                                                        runs={runs}
-                                                        alerts={alerts}
-                                                        onEditSweep={onEditSweep}
-                                                        onLaunchSweep={onLaunchSweep}
-                                                        onRunClick={onRunClick}
-                                                        onReplyToSelection={handleReplyToSelection}
-                                                        previousUserContent={prevUserContent}
-                                                    />
-                                                </div>
-                                            )
-                                        })}
+                                                const isLastAssistantMessage =
+                                                    !streamingState.isStreaming &&
+                                                    message.role === 'assistant' &&
+                                                    index === lastAssistantIdx
+                                                return (
+                                                    <div
+                                                        key={message.id}
+                                                        style={message.source === 'agent_wild' ? {
+                                                            borderLeft: '3px solid #a855f7',
+                                                            paddingLeft: '8px',
+                                                            marginLeft: '4px',
+                                                        } : undefined}
+                                                    >
+                                                        <ChatMessage
+                                                            message={message}
+                                                            collapseArtifacts={collapseArtifactsInChat}
+                                                            sweeps={sweeps}
+                                                            runs={runs}
+                                                            alerts={alerts}
+                                                            onEditSweep={onEditSweep}
+                                                            onLaunchSweep={onLaunchSweep}
+                                                            onRunClick={onRunClick}
+                                                            onReplyToSelection={handleReplyToSelection}
+                                                            previousUserContent={prevUserContent}
+                                                            showFollowUpPrompts={isLastAssistantMessage}
+                                                            onFollowUpClick={
+                                                                isLastAssistantMessage
+                                                                    ? (prompt) => handleSend(prompt)
+                                                                    : undefined
+                                                            }
+                                                        />
+                                                    </div>
+                                                )
+                                            })
+                                        })()}
 
                                     {/* Streaming message */}
                                     {streamingState.isStreaming && (
