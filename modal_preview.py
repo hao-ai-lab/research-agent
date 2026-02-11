@@ -43,8 +43,6 @@ image = (
         "requests>=2.31.0",
         "pyyaml>=6.0",
     )
-    # Copy the full repo into the image
-    .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
     # Install opencode CLI (always installs to $HOME/.opencode/bin)
     .run_commands(
         "curl -fsSL https://opencode.ai/install | bash",
@@ -52,10 +50,14 @@ image = (
         "mv /root/.opencode/bin/opencode /usr/local/bin/opencode",
         "which opencode"
     )
+    # Copy the full repo into the image
+    .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
     # Install frontend deps and build static export
     .run_commands(
-        "cd /app && npm install --prefer-offline 2>/dev/null || cd /app && npm install",
-        "cd /app && RESEARCH_AGENT_STATIC_EXPORT=true NEXT_PUBLIC_API_URL=auto NEXT_PUBLIC_USE_MOCK=false npm run build || true",
+        "npm install -g pnpm",
+        "cd /app && pnpm install --frozen-lockfile || cd /app && pnpm install",
+        "cd /app && RESEARCH_AGENT_STATIC_EXPORT=true NEXT_PUBLIC_API_URL=auto NEXT_PUBLIC_USE_MOCK=false pnpm run build",
+        "ls -la /app/out/index.html || echo 'ERROR: Frontend build did not produce /app/out'",
     )
 )
 
@@ -65,15 +67,15 @@ image = (
 
 app = modal.App("research-agent-preview")
 
-OPENCODE_BIN = "/root/.opencode/bin/opencode"
+OPENCODE_BIN = "/usr/local/bin/opencode"
 
 
 @app.function(
     image=image,
     secrets=[modal.Secret.from_name("research-agent-preview-secrets")],
     timeout=7200,  # 2 hours max
-    cpu=2.0,
-    memory=2048,
+    cpu=8.0,
+    memory=8 * 1024,  # 8GB
 )
 @modal.concurrent(max_inputs=100)
 @modal.web_server(port=10000, startup_timeout=120)
