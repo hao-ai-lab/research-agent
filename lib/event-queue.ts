@@ -5,6 +5,9 @@
  * Supports drag-reorder (manual override), dedup by id, and positional insert.
  */
 
+export type { PromptProvenance } from '@/lib/types'
+import type { PromptProvenance } from '@/lib/types'
+
 export interface QueuedEvent {
   id: string
   priority: number          // 10=user, 20=critical alert, 30=warning, 50=run event, 70=analysis, 90=exploring
@@ -12,6 +15,7 @@ export interface QueuedEvent {
   prompt: string            // Full prompt text sent to agent
   type: 'steer' | 'alert' | 'run_event' | 'analysis' | 'exploring'
   createdAt: number         // Date.now()
+  provenance?: PromptProvenance  // Server-side prompt construction metadata
 }
 
 export const PRIORITY_LABELS: Record<number, { label: string; color: string }> = {

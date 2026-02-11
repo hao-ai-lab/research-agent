@@ -54,6 +54,43 @@ class EnqueueEventRequest(BaseModel):
     type: str = "run_event"
 
 
+class BuildPromptRequest(BaseModel):
+    """Request to build a wild loop prompt server-side."""
+    prompt_type: str                              # "exploring" | "run_event" | "alert" | "analysis"
+    # Common
+    goal: Optional[str] = None
+    iteration: Optional[int] = None
+    # run_event fields
+    run_id: Optional[str] = None
+    run_name: Optional[str] = None
+    run_status: Optional[str] = None
+    run_command: Optional[str] = None
+    log_tail: Optional[str] = None
+    sweep_summary: Optional[str] = None
+    # alert fields
+    alert_id: Optional[str] = None
+    alert_severity: Optional[str] = None
+    alert_message: Optional[str] = None
+    alert_choices: Optional[list] = None
+    # analysis fields
+    sweep_name: Optional[str] = None
+    total_runs: Optional[int] = None
+    passed_runs: Optional[int] = None
+    failed_runs: Optional[int] = None
+    run_summaries: Optional[str] = None
+
+
+class BuildPromptResponse(BaseModel):
+    """Structured response with full transparency into prompt construction."""
+    rendered: str                                  # Final prompt sent to the agent
+    user_input: str                                # What the user originally submitted (goal)
+    skill_id: Optional[str] = None                 # Which skill template was used
+    skill_name: Optional[str] = None
+    template: Optional[str] = None                 # Raw template with {{placeholders}}
+    variables: dict = {}                           # Key→value map applied to the template
+    prompt_type: str = ""                          # Echo back the prompt type
+
+
 # =============================================================================
 # Wild Event Queue (Backend Priority Queue)
 # =============================================================================
@@ -337,6 +374,226 @@ def build_experiment_context(
 # =============================================================================
 # Wild Mode Prompt Builder
 # =============================================================================
+
+# Skill ID mapping per prompt_type
+_PROMPT_TYPE_SKILL_MAP = {
+    "exploring": "wild_exploring",
+    "run_event": "wild_monitoring",
+    "alert": "wild_alert",
+    "analysis": "wild_analyzing",
+}
+
+# Hardcoded fallback builders (kept for backward compat when skill is missing)
+_FALLBACK_EXPLORING = """# Wild Loop — Iteration {{iteration}} (Exploring)
+
+## Your Goal
+{{goal}}
+
+## Status
+No sweep has been created yet. You need to define one.
+
+## What You Should Do
+1. Explore the codebase and understand what experiments are needed
+2. When ready, output a sweep specification as a JSON block inside `<sweep>` tags
+3. The system will automatically create and start the sweep for you
+
+## How to Create a Sweep
+Output exactly this format (the system will parse it and call the API for you):
+
+```
+<sweep>
+{
+  "name": "My Experiment Sweep",
+  "base_command": "python train.py",
+  "parameters": {
+    "lr": [0.0001, 0.001, 0.01],
+    "batch_size": [32, 64]
+  },
+  "max_runs": 10
+}
+</sweep>
+```
+
+The `parameters` field defines a grid — the system will expand it into individual runs.
+The `base_command` is the shell command template. Parameters are appended as `--key=value`.
+
+## Rules
+- Do NOT run commands yourself. Output the `<sweep>` spec and the system handles execution.
+- If you need more info before creating a sweep, just explain what you need and output `<promise>CONTINUE</promise>`
+- Once you output a `<sweep>` tag, the system will create & start it automatically."""
+
+_FALLBACK_RUN_EVENT = """# Wild Loop — Run Event (Monitoring)
+
+## Your Goal
+{{goal}}
+
+## Event: Run "{{run_name}}" just {{run_status}}  {{status_emoji}}
+- **ID**: {{run_id}}
+- **Status**: {{run_status}}
+- **Command**: `{{run_command}}`
+
+### Log Tail (last 1000 chars)
+```
+{{log_tail}}
+```
+
+## Current Sweep Status
+{{sweep_summary}}
+
+## Instructions
+{{run_instructions}}
+- End with `<promise>CONTINUE</promise>`"""
+
+_FALLBACK_ALERT = """# Wild Loop — Alert
+
+## Your Goal
+{{goal}}
+
+## ⚠️ Alert from Run "{{run_name}}"
+- **Alert ID**: {{alert_id}}
+- **Severity**: {{alert_severity}}
+- **Message**: {{alert_message}}
+- **Available Choices**: {{alert_choices}}
+
+## How to Resolve This Alert
+You MUST resolve this alert by outputting a `<resolve_alert>` tag with your chosen action:
+
+```
+<resolve_alert>
+{{alert_resolve_example}}
+</resolve_alert>
+```
+
+## Instructions
+1. Analyze the alert and decide the best course of action
+2. Output the `<resolve_alert>` tag with your chosen response
+3. If the issue needs a code fix, explain what you'd change
+4. End with `<promise>CONTINUE</promise>`"""
+
+_FALLBACK_ANALYSIS = """# Wild Loop — Analysis (All Runs Complete)
+
+## Your Goal
+{{goal}}
+
+## Sweep "{{sweep_name}}" Results
+**{{total_runs}} total** — {{passed_runs}} passed, {{failed_runs}} failed
+
+{{run_summaries}}
+
+## Instructions
+- Review all run results above
+- Determine if the original goal has been fully achieved
+- Provide a clear summary report
+
+## Response
+- If goal is FULLY achieved with evidence: `<promise>COMPLETE</promise>`
+- If more experiments are needed: `<promise>CONTINUE</promise>` (will start a new exploration cycle)
+- If you need human input: `<promise>NEEDS_HUMAN</promise>`"""
+
+_FALLBACK_TEMPLATES = {
+    "exploring": _FALLBACK_EXPLORING,
+    "run_event": _FALLBACK_RUN_EVENT,
+    "alert": _FALLBACK_ALERT,
+    "analysis": _FALLBACK_ANALYSIS,
+}
+
+
+def _render_simple(template: str, variables: Dict[str, str]) -> str:
+    """Render a template by replacing {{key}} placeholders."""
+    import re as _re
+    result = template
+    for key, value in variables.items():
+        result = result.replace("{{" + key + "}}", str(value))
+    result = _re.sub(r"\{\{[a-zA-Z_]+\}\}", "", result)
+    return result
+
+
+def build_prompt_for_frontend(
+    req: BuildPromptRequest,
+    skill_get_fn: Callable,
+) -> dict:
+    """Build a wild loop prompt and return full provenance metadata.
+
+    skill_get_fn: function(skill_id) -> {"id", "name", "template", "variables", ...} or None
+    Returns a dict matching BuildPromptResponse shape.
+    """
+    prompt_type = req.prompt_type
+    goal = req.goal or wild_loop_state.get("goal") or "No specific goal set"
+    iteration = req.iteration if req.iteration is not None else (wild_loop_state.get("iteration", 0) + 1)
+
+    # Build variables dict based on prompt type
+    variables: Dict[str, str] = {"goal": goal, "iteration": str(iteration)}
+
+    if prompt_type == "run_event":
+        status_emoji = "❌" if req.run_status == "failed" else "✅"
+        run_instructions = (
+            "- This run FAILED. Diagnose the issue from the logs above.\n"
+            "- Take corrective action: fix code, adjust parameters, or create a new run.\n"
+            "- You can rerun this specific run after fixing the issue."
+        ) if req.run_status == "failed" else (
+            "- This run SUCCEEDED. Check if the results look correct.\n"
+            "- If results are suspicious, investigate further."
+        )
+        variables.update({
+            "run_name": req.run_name or "",
+            "run_id": req.run_id or "",
+            "run_status": req.run_status or "",
+            "run_command": req.run_command or "",
+            "log_tail": (req.log_tail or "")[-1000:],
+            "sweep_summary": req.sweep_summary or "",
+            "status_emoji": status_emoji,
+            "run_instructions": run_instructions,
+        })
+    elif prompt_type == "alert":
+        alert_choices = ", ".join(f"`{c}`" for c in (req.alert_choices or []))
+        resolve_example = '{"alert_id": "' + (req.alert_id or "") + '", "choice": "ONE_OF_THE_CHOICES_ABOVE"}'
+        variables.update({
+            "run_name": req.run_name or "",
+            "alert_id": req.alert_id or "",
+            "alert_severity": req.alert_severity or "",
+            "alert_message": req.alert_message or "",
+            "alert_choices": alert_choices,
+            "alert_resolve_example": resolve_example,
+        })
+    elif prompt_type == "analysis":
+        variables.update({
+            "sweep_name": req.sweep_name or "",
+            "total_runs": str(req.total_runs or 0),
+            "passed_runs": str(req.passed_runs or 0),
+            "failed_runs": str(req.failed_runs or 0),
+            "run_summaries": req.run_summaries or "",
+        })
+
+    # Try to use the prompt skill template
+    skill_id = _PROMPT_TYPE_SKILL_MAP.get(prompt_type)
+    skill = skill_get_fn(skill_id) if skill_id else None
+
+    if skill:
+        template_raw = skill["template"]
+        rendered = _render_simple(template_raw, variables)
+        return {
+            "rendered": rendered,
+            "user_input": goal,
+            "skill_id": skill["id"],
+            "skill_name": skill.get("name", skill["id"]),
+            "template": template_raw,
+            "variables": variables,
+            "prompt_type": prompt_type,
+        }
+
+    # Fallback to hardcoded templates
+    fallback = _FALLBACK_TEMPLATES.get(prompt_type, "")
+    rendered = _render_simple(fallback, variables)
+    return {
+        "rendered": rendered,
+        "user_input": goal,
+        "skill_id": None,
+        "skill_name": None,
+        "template": fallback,
+        "variables": variables,
+        "prompt_type": prompt_type,
+    }
+
 
 def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str) -> str:
     """Build the wild-mode preamble for _build_chat_prompt.

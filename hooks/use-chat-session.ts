@@ -833,14 +833,18 @@ export function useChatSession(): UseChatSessionResult {
             streamController = new AbortController()
             abortControllerRef.current = streamController
 
-            // Stream inactivity timeout: abort if no events for 60s (prevents stuck streams)
-            // Note: OpenCode can take 30-40s to start responding, so 60s is the minimum safe value
+            // Stream inactivity timeout: abort if no events for 180s (prevents stuck streams)
+            // Note: OpenCode tool calls can take 60-120s, so 180s is a safe value
             let lastEventTime = Date.now()
             const streamTimeoutId = setInterval(() => {
                 const elapsed = Date.now() - lastEventTime
-                if (elapsed > 60_000) {
+                if (elapsed > 180_000) {
                     console.warn(`[chat-session] Stream inactivity timeout (${Math.round(elapsed/1000)}s), aborting`)
                     streamController?.abort()
+                    // Also notify backend to clean up the runtime (prevents 409 on next request)
+                    stopSession(targetSessionId).catch(err =>
+                        console.warn('[chat-session] Failed to stop backend session after timeout:', err)
+                    )
                 }
             }, 5_000)
 
@@ -876,12 +880,28 @@ export function useChatSession(): UseChatSessionResult {
 
         } catch (err) {
             if (err instanceof DOMException && err.name === 'AbortError') {
-                // User-initiated stop: reload from backend to capture any partial persisted assistant message.
+                // Abort (user-initiated or inactivity timeout): stop backend + sync messages
+                try {
+                    await stopSession(targetSessionId)
+                } catch (stopErr) {
+                    console.warn('[chat-session] Failed to stop backend session after abort:', stopErr)
+                }
                 try {
                     const sessionData = await getSession(targetSessionId)
                     setMessages(sessionData.messages.map(normalizeMessage))
                 } catch (syncErr) {
                     console.warn('Failed to sync session after abort:', syncErr)
+                }
+            } else if (err instanceof Error && err.message.startsWith('Session busy')) {
+                // 409 Conflict: previous stream still running on backend — stop it and retry once
+                console.warn('[chat-session] Session busy (409), stopping previous stream and retrying...')
+                try {
+                    await stopSession(targetSessionId)
+                    // Brief delay for backend cleanup
+                    await new Promise(resolve => setTimeout(resolve, 1000))
+                    // Re-attempt is left to the caller (e.g. wild loop autoSend will re-trigger)
+                } catch (stopErr) {
+                    console.warn('[chat-session] Failed to stop busy session:', stopErr)
                 }
             } else {
                 console.error('Failed to send message:', err)

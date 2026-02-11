@@ -27,9 +27,11 @@ import type {
     Sweep,
     SweepConfig,
     InsightChart,
+    PromptProvenance,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
+import { buildWildPrompt } from '@/lib/api'
 
 interface ConnectedChatViewProps {
     runs: ExperimentRun[]
@@ -114,8 +116,12 @@ export function ConnectedChatView({
             },
         })
     }, [settings, setSettings])
-    // Track which messages were auto-sent by wild loop
-    const [wildMessageIndices, setWildMessageIndices] = useState<Set<number>>(new Set())
+    // Content-keyed provenance map: rendered prompt text → provenance metadata
+    // If a message's content is in this map, it's a wild loop auto-generated message.
+    // Ref avoids unnecessary re-renders; read during useMemo render pass.
+    const provenanceMapRef = useRef<Map<string, PromptProvenance>>(new Map())
+    // Counter to force re-render when provenance is added (ref alone won't trigger)
+    const [provenanceVersion, setProvenanceVersion] = useState(0)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
 
@@ -173,9 +179,11 @@ export function ConnectedChatView({
                 toolDurationMs: part.tool_duration_ms,
             })),
             timestamp: new Date(msg.timestamp * 1000),
-            source: wildMessageIndices.has(idx) ? ('agent_wild' as const) : undefined,
+            source: provenanceMapRef.current.has(msg.content) ? ('agent_wild' as const) : undefined,
+            provenance: provenanceMapRef.current.get(msg.content) ?? undefined,
         }))
-    }, [messages, currentSessionId, wildMessageIndices])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [messages, currentSessionId, provenanceVersion])
 
     const displayMessages: ChatMessageType[] = useMemo(() => {
         if (injectedMessages.length === 0) {
@@ -271,9 +279,12 @@ export function ConnectedChatView({
                 if (!sessionId) return
             }
 
-            // Mark this message index as wild-generated
-            const nextIdx = messages.length
-            setWildMessageIndices(prev => new Set(prev).add(nextIdx))
+            // Store provenance keyed by content (stable, index-independent)
+            const prov = wildLoop.pendingProvenance
+            if (prov) {
+                provenanceMapRef.current.set(wildLoop.pendingPrompt!, prov)
+                setProvenanceVersion(v => v + 1) // trigger re-render for useMemo
+            }
 
             // Send as 'agent' mode — frontend now constructs the full prompt,
             // so we skip backend's wild_mode prompt injection
@@ -303,6 +314,23 @@ export function ConnectedChatView({
         // If in wild mode and loop isn't active, start the loop on first message
         if (effectiveMode === 'wild' && wildLoop && !wildLoop.isActive) {
             wildLoop.start(message, sessionId)
+        }
+
+        // In wild mode, route through backend prompt builder for provenance
+        if (effectiveMode === 'wild') {
+            try {
+                const prov = await buildWildPrompt({
+                    prompt_type: 'exploring',
+                    goal: message,
+                    iteration: 0,
+                })
+                provenanceMapRef.current.set(prov.rendered, prov)
+                setProvenanceVersion(v => v + 1)
+                await sendMessage(prov.rendered, 'agent', sessionId)
+                return
+            } catch (err) {
+                console.warn('[chat] Backend buildWildPrompt failed for initial message, sending raw:', err)
+            }
         }
 
         await sendMessage(message, effectiveMode, sessionId)

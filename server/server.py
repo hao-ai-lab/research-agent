@@ -29,13 +29,14 @@ from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
 from wild_loop import (
     WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest,
+    BuildPromptRequest, BuildPromptResponse,
     WildEventQueue, wild_event_queue,
     wild_loop_state,
     get_wild_mode_state, set_wild_mode_state,
     get_loop_status, update_loop_status, configure_loop,
     enqueue_event, dequeue_event, get_queue_state,
     auto_enqueue_alert, auto_enqueue_run_terminal,
-    build_experiment_context, build_wild_prompt,
+    build_experiment_context, build_wild_prompt, build_prompt_for_frontend,
     get_serializable_state as get_wild_serializable_state,
     load_from_saved as load_wild_from_saved,
 )
@@ -3301,6 +3302,17 @@ async def configure_wild_loop_endpoint(req: WildLoopConfigRequest):
     """Configure wild loop termination conditions and goal."""
     result = configure_loop(req)
     save_settings_state()
+    return result
+
+
+@app.post("/wild/build-prompt")
+async def build_wild_loop_prompt(req: BuildPromptRequest):
+    """Build a wild loop prompt server-side and return full provenance metadata.
+
+    Returns the rendered prompt, the skill template used, the variables applied,
+    and the user's original input — giving the frontend full transparency.
+    """
+    result = build_prompt_for_frontend(req, prompt_skill_manager.get)
     return result
 
 

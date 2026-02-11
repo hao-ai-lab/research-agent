@@ -1,6 +1,7 @@
 'use client'
 
 import { getApiUrl, getAuthToken } from './api-config'
+import type { PromptProvenance } from '@/lib/types'
 
 // Get API URL dynamically at runtime (supports localStorage override)
 const API_URL = () => getApiUrl()
@@ -167,6 +168,9 @@ export async function* streamChat(
     })
 
     if (!response.ok) {
+        if (response.status === 409) {
+            throw new Error(`Session busy: ${response.statusText}`)
+        }
         throw new Error(`Failed to send message: ${response.statusText}`)
     }
 
@@ -765,6 +769,53 @@ export async function getWildEventQueue(): Promise<{ queue_size: number; events:
     })
     if (!response.ok) {
         throw new Error(`Failed to get wild event queue: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+// =============================================================================
+// Wild Prompt Builder (server-side construction with transparency)
+// =============================================================================
+
+export interface BuildWildPromptRequest {
+    prompt_type: 'exploring' | 'run_event' | 'alert' | 'analysis'
+    goal?: string
+    iteration?: number
+    // run_event
+    run_id?: string
+    run_name?: string
+    run_status?: string
+    run_command?: string
+    log_tail?: string
+    sweep_summary?: string
+    // alert
+    alert_id?: string
+    alert_severity?: string
+    alert_message?: string
+    alert_choices?: string[]
+    // analysis
+    sweep_name?: string
+    total_runs?: number
+    passed_runs?: number
+    failed_runs?: number
+    run_summaries?: string
+}
+
+// Re-export from canonical location
+export type { PromptProvenance } from '@/lib/types'
+
+/**
+ * Build a wild loop prompt server-side with full provenance metadata.
+ * Returns the rendered prompt, template used, variables applied, and user input.
+ */
+export async function buildWildPrompt(req: BuildWildPromptRequest): Promise<PromptProvenance> {
+    const response = await fetch(`${API_URL()}/wild/build-prompt`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(req),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to build wild prompt: ${response.statusText}`)
     }
     return response.json()
 }

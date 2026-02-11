@@ -28,6 +28,7 @@ import {
 } from '@/lib/reference-token-colors'
 import { extractContextReferences } from '@/lib/extract-context-references'
 import { ContextReferencesBar } from './context-references-bar'
+import { PromptProvenanceView } from './prompt-provenance-view'
 
 interface ChatMessageProps {
   message: ChatMessageType
@@ -417,6 +418,15 @@ export function ChatMessage({
   }
 
   if (isUser) {
+    // Wild loop auto-generated messages with provenance get the two-mode view
+    if (message.provenance) {
+      return (
+        <div className="px-0.5 py-2 min-w-0 overflow-hidden">
+          <PromptProvenanceView content={message.content} provenance={message.provenance} />
+        </div>
+      )
+    }
+
     const parsedUserReply = extractLeadingQuoteBlock(message.content)
     const hasExcerptCard = Boolean(parsedUserReply.excerpt)
     const userBody = hasExcerptCard ? parsedUserReply.body : message.content

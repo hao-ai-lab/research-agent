@@ -2,12 +2,14 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { WildLoopPhase, TerminationConditions } from '@/lib/types'
+import type { PromptProvenance } from '@/lib/types'
 import {
   updateWildLoopStatus, configureWildLoop, setWildMode,
   getSweep, listSweeps, listAlerts, listRuns, startSweep, getRunLogs,
   createSweep, respondToAlert, listPromptSkills, enqueueWildEvent,
+  buildWildPrompt,
 } from '@/lib/api'
-import type { PromptSkill } from '@/lib/api'
+import type { PromptSkill, BuildWildPromptRequest } from '@/lib/api'
 import type { Alert, Run, Sweep, CreateSweepRequest } from '@/lib/api'
 import { EventQueue } from '@/lib/event-queue'
 import type { QueuedEvent } from '@/lib/event-queue'
@@ -45,6 +47,7 @@ export interface UseWildLoopResult {
   setTerminationConditions: (conditions: TerminationConditions) => void
   onResponseComplete: (responseText: string) => void
   pendingPrompt: string | null
+  pendingProvenance: PromptProvenance | null
   consumePrompt: () => void
   // Queue API
   eventQueue: QueuedEvent[]
@@ -128,7 +131,9 @@ function renderTemplate(template: string, variables: Record<string, string>): st
 }
 
 // ============================================================
-// Prompt Builders (template-aware, with hardcoded fallbacks)
+// @deprecated — Prompt Builders (kept as fallback if backend /wild/build-prompt fails)
+// Prompt construction is now delegated to the backend via buildWildPrompt().
+// These will be removed once the backend endpoint is stable.
 // ============================================================
 
 function buildExploringPrompt(goal: string, iteration: number, template?: string): string {
@@ -352,6 +357,8 @@ export function useWildLoop(): UseWildLoopResult {
 
   // Derived pendingPrompt for backward compat with connected-chat-view autoSend
   const pendingPrompt = queueSnapshot.length > 0 ? queueSnapshot[0].prompt : null
+  // Provenance of the current pending prompt (for UI transparency)
+  const pendingProvenance = queueSnapshot.length > 0 ? (queueSnapshot[0].provenance ?? null) : null
   const [terminationConditions, setTerminationConditionsState] = useState<TerminationConditions>({})
 
   // Sweep tracking
@@ -359,7 +366,7 @@ export function useWildLoop(): UseWildLoopResult {
   const [runStats, setRunStats] = useState<RunStats>(emptyRunStats)
   const [activeAlerts, setActiveAlerts] = useState<Alert[]>([])
 
-  // Prompt skill template cache (loaded once on mount)
+  // @deprecated — Template cache kept only as fallback if backend buildWildPrompt fails
   const templateCacheRef = useRef<Record<string, string>>({})
   useEffect(() => {
     listPromptSkills()
@@ -369,10 +376,52 @@ export function useWildLoop(): UseWildLoopResult {
           cache[skill.id] = skill.template
         }
         templateCacheRef.current = cache
-        console.log('[wild-loop] Loaded prompt skill templates:', Object.keys(cache))
+        console.log('[wild-loop] Loaded prompt skill templates (fallback):', Object.keys(cache))
       })
       .catch(err => console.warn('[wild-loop] Failed to load prompt skills, using fallbacks:', err))
   }, [])
+
+  /**
+   * Build a prompt via backend and enqueue it with full provenance.
+   * Falls back to the deprecated frontend builders if the backend call fails.
+   */
+  const enqueueFromBackend = useCallback(async (
+    eventId: string,
+    priority: number,
+    title: string,
+    eventType: QueuedEvent['type'],
+    req: BuildWildPromptRequest,
+    fallbackPrompt?: string,
+  ) => {
+    try {
+      const provenance = await buildWildPrompt(req)
+      enqueueEvent({
+        id: eventId,
+        priority,
+        title,
+        prompt: provenance.rendered,
+        type: eventType,
+        createdAt: Date.now(),
+        provenance,
+      })
+    } catch (err) {
+      console.warn('[wild-loop] Backend buildWildPrompt failed, using fallback:', err)
+      // Fallback: use the deprecated frontend-built prompt
+      const prompt = fallbackPrompt || buildExploringPrompt(
+        req.goal || 'Continue working',
+        req.iteration || 0,
+        templateCacheRef.current['wild_exploring'],
+      )
+      enqueueEvent({
+        id: eventId,
+        priority,
+        title,
+        prompt,
+        type: eventType,
+        createdAt: Date.now(),
+      })
+    }
+  }, [enqueueEvent])
 
   // Refs for callbacks (avoid stale closures)
   const isActiveRef = useRef(isActive)
@@ -435,21 +484,23 @@ export function useWildLoop(): UseWildLoopResult {
           if (!processedAlertIdsRef.current.has(alert.id)) {
             processedAlertIdsRef.current.add(alert.id)
             const run = sweepRuns.find(r => r.id === alert.run_id)
-            const prompt = buildAlertPrompt(
-              goalRef.current || '',
-              alert,
-              run?.name || alert.run_id,
-              templateCacheRef.current['wild_alert']
-            )
             console.log('[wild-loop] Queuing alert event:', alert.id)
-            enqueueEvent({
-              id: `alert-${alert.id}`,
-              priority: 20,
-              title: `Alert: ${run?.name || alert.run_id}`,
-              prompt,
-              type: 'alert',
-              createdAt: Date.now(),
-            })
+            enqueueFromBackend(
+              `alert-${alert.id}`,
+              20,
+              `Alert: ${run?.name || alert.run_id}`,
+              'alert',
+              {
+                prompt_type: 'alert',
+                goal: goalRef.current || '',
+                alert_id: alert.id,
+                alert_severity: alert.severity,
+                alert_message: alert.message,
+                alert_choices: alert.choices,
+                run_name: run?.name || alert.run_id,
+              },
+              buildAlertPrompt(goalRef.current || '', alert, run?.name || alert.run_id, templateCacheRef.current['wild_alert']),
+            )
           }
         }
 
@@ -465,22 +516,25 @@ export function useWildLoop(): UseWildLoopResult {
               logTail = logs.content || 'Empty'
             } catch { /* ignore */ }
 
-            const prompt = buildRunEventPrompt(
-              goalRef.current || '',
-              run,
-              logTail,
-              buildSweepSummary(sweepRuns),
-              templateCacheRef.current['wild_monitoring']
-            )
             console.log('[wild-loop] Queuing run event:', run.id, run.status)
-            enqueueEvent({
-              id: `run-${run.id}-${run.status}`,
-              priority: run.status === 'failed' ? 40 : 50,
-              title: `${run.status === 'failed' ? '❌' : '✅'} Run: ${run.name || run.id}`,
-              prompt,
-              type: 'run_event',
-              createdAt: Date.now(),
-            })
+            const sweepSummary = buildSweepSummary(sweepRuns)
+            enqueueFromBackend(
+              `run-${run.id}-${run.status}`,
+              run.status === 'failed' ? 40 : 50,
+              `${run.status === 'failed' ? '❌' : '✅'} Run: ${run.name || run.id}`,
+              'run_event',
+              {
+                prompt_type: 'run_event',
+                goal: goalRef.current || '',
+                run_id: run.id,
+                run_name: run.name,
+                run_status: run.status,
+                run_command: run.command,
+                log_tail: logTail,
+                sweep_summary: sweepSummary,
+              },
+              buildRunEventPrompt(goalRef.current || '', run, logTail, sweepSummary, templateCacheRef.current['wild_monitoring']),
+            )
           }
           seenRunStatusesRef.current.set(run.id, run.status)
         }
@@ -496,20 +550,27 @@ export function useWildLoop(): UseWildLoopResult {
           console.log('[wild-loop] All runs terminal, no pending alerts → ANALYZING')
           setStage('analyzing')
           setPhase('analyzing')
-          const prompt = buildAnalysisPrompt(
-            goalRef.current || '',
-            sweepRuns,
-            sweep.name || trackedSweepId,
-            templateCacheRef.current['wild_analyzing']
+          const runSummaries = sweepRuns.map(r =>
+            `- **${r.name}**: ${r.status}${r.status === 'failed' ? ' ❌' : ' ✅'}`
+          ).join('\n')
+          const passed = sweepRuns.filter(r => r.status === 'finished').length
+          const failed = sweepRuns.filter(r => r.status === 'failed').length
+          enqueueFromBackend(
+            `analysis-${trackedSweepId}-${Date.now()}`,
+            70,
+            `Analysis: ${sweep.name || trackedSweepId}`,
+            'analysis',
+            {
+              prompt_type: 'analysis',
+              goal: goalRef.current || '',
+              sweep_name: sweep.name || trackedSweepId,
+              total_runs: sweepRuns.length,
+              passed_runs: passed,
+              failed_runs: failed,
+              run_summaries: runSummaries,
+            },
+            buildAnalysisPrompt(goalRef.current || '', sweepRuns, sweep.name || trackedSweepId, templateCacheRef.current['wild_analyzing']),
           )
-          enqueueEvent({
-            id: `analysis-${trackedSweepId}-${Date.now()}`,
-            priority: 70,
-            title: `Analysis: ${sweep.name || trackedSweepId}`,
-            prompt,
-            type: 'analysis',
-            createdAt: Date.now(),
-          })
         }
       } catch (err) {
         console.warn('[wild-loop] Failed to poll run events:', err)
@@ -577,18 +638,19 @@ export function useWildLoop(): UseWildLoopResult {
     isBusyRef.current = false
     if (currentStage === 'exploring' && queueRef.current.size === 0) {
       const currentGoal = goalRef.current || 'Continue working'
-      enqueueEvent({
-        id: `explore-resume-${Date.now()}`,
-        priority: 90,
-        title: 'Resume exploring',
-        prompt: buildExploringPrompt(currentGoal, iterationRef.current + 1, templateCacheRef.current['wild_exploring']),
-        type: 'exploring',
-        createdAt: Date.now(),
-      })
+      const nextIter = iterationRef.current + 1
+      enqueueFromBackend(
+        `explore-resume-${Date.now()}`,
+        90,
+        'Resume exploring',
+        'exploring',
+        { prompt_type: 'exploring', goal: currentGoal, iteration: nextIter },
+        buildExploringPrompt(currentGoal, nextIter, templateCacheRef.current['wild_exploring']),
+      )
     }
     // If queue has items or running stage, auto-send / polling will pick up
     updateWildLoopStatus({ phase: p, is_paused: false }).catch(console.error)
-  }, [enqueueEvent])
+  }, [enqueueEvent, enqueueFromBackend])
 
   const stop = useCallback(() => {
     setIsActive(false)
@@ -676,14 +738,14 @@ export function useWildLoop(): UseWildLoopResult {
           const currentGoal = goalRef.current || 'Continue working'
           setTimeout(() => {
             if (isActiveRef.current && !isPausedRef.current) {
-              enqueueEvent({
-                id: `explore-retry-${Date.now()}`,
-                priority: 90,
-                title: 'Retry exploring',
-                prompt: buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']),
-                type: 'exploring',
-                createdAt: Date.now(),
-              })
+              enqueueFromBackend(
+                `explore-retry-${Date.now()}`,
+                90,
+                'Retry exploring',
+                'exploring',
+                { prompt_type: 'exploring', goal: currentGoal, iteration: nextIteration + 1 },
+                buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']),
+              )
             }
           }, 3000)
         })
@@ -695,14 +757,14 @@ export function useWildLoop(): UseWildLoopResult {
       const delay = nextIteration <= 1 ? 1500 : 3000
       setTimeout(() => {
         if (isActiveRef.current && !isPausedRef.current && stageRef.current === 'exploring') {
-          enqueueEvent({
-            id: `explore-${nextIteration + 1}-${Date.now()}`,
-            priority: 90,
-            title: `Exploring (iteration ${nextIteration + 1})`,
-            prompt: buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']),
-            type: 'exploring',
-            createdAt: Date.now(),
-          })
+          enqueueFromBackend(
+            `explore-${nextIteration + 1}-${Date.now()}`,
+            90,
+            `Exploring (iteration ${nextIteration + 1})`,
+            'exploring',
+            { prompt_type: 'exploring', goal: currentGoal, iteration: nextIteration + 1 },
+            buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']),
+          )
         }
       }, delay)
     } else if (currentStage === 'running') {
@@ -740,19 +802,19 @@ export function useWildLoop(): UseWildLoopResult {
         const currentGoal = goalRef.current || 'Continue working'
         setTimeout(() => {
           if (isActiveRef.current && !isPausedRef.current) {
-            enqueueEvent({
-              id: `explore-cycle-${Date.now()}`,
-              priority: 90,
-              title: `Exploring (post-analysis)`,
-              prompt: buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']),
-              type: 'exploring',
-              createdAt: Date.now(),
-            })
+            enqueueFromBackend(
+              `explore-cycle-${Date.now()}`,
+              90,
+              `Exploring (post-analysis)`,
+              'exploring',
+              { prompt_type: 'exploring', goal: currentGoal, iteration: nextIteration + 1 },
+              buildExploringPrompt(currentGoal, nextIteration + 1, templateCacheRef.current['wild_exploring']),
+            )
           }
         }, 3000)
       }
     }
-  }, [checkTermination, stop, pause, enqueueEvent])
+  }, [checkTermination, stop, pause, enqueueEvent, enqueueFromBackend])
 
   // Queue mutation callbacks for UI
   const reorderQueue = useCallback((orderedIds: string[]) => {
@@ -778,7 +840,7 @@ export function useWildLoop(): UseWildLoopResult {
     isActive, isPaused, phase, stage, iteration, goal, startedAt,
     terminationConditions, sweepId: trackedSweepId, runStats, activeAlerts,
     start, pause, resume, stop, setTerminationConditions,
-    onResponseComplete, pendingPrompt, consumePrompt,
+    onResponseComplete, pendingPrompt, pendingProvenance, consumePrompt,
     eventQueue: queueSnapshot, reorderQueue, removeFromQueue, insertIntoQueue,
   }
 }
