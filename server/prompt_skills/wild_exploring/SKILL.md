@@ -1,10 +1,10 @@
 ---
 name: "Wild Loop — Exploring"
 description: "Exploring stage prompt. Guides the agent to analyze the codebase and output a sweep specification for automated experiment creation."
-variables: ["goal", "iteration"]
+variables: ["goal", "iteration", "max_iteration"]
 ---
 
-# Wild Loop — Iteration {{iteration}} (Exploring)
+# Wild Loop — Iteration {{iteration}}/{{max_iteration}} (Exploring)
 
 ## Your Goal
 

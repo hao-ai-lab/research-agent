@@ -16,6 +16,7 @@ import {
     type StreamEvent,
 } from '@/lib/api-client'
 import type { MessagePartData } from '@/lib/api'
+import type { PromptProvenance } from '@/lib/types'
 import type { ChatMode } from '@/components/chat-input'
 
 export interface ToolCallState {
@@ -83,7 +84,8 @@ export interface UseChatSessionResult {
     streamingState: StreamingState
 
     // Send message - optional sessionId override for newly created sessions
-    sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string) => Promise<void>
+    // promptOverride: when set, this full prompt is sent to the LLM while `content` is stored as the visible user message
+    sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string) => Promise<void>
     stopStreaming: () => Promise<void>
 
     // Message queue - for queuing messages during streaming
@@ -91,6 +93,10 @@ export interface UseChatSessionResult {
     queueMessage: (content: string) => void
     removeFromQueue: (index: number) => void
     clearQueue: () => void
+
+    // Prompt provenance (content-keyed map for all modes)
+    provenanceMap: Map<string, PromptProvenance>
+    provenanceVersion: number
 }
 
 const initialStreamingState: StreamingState = {
@@ -433,6 +439,10 @@ export function useChatSession(): UseChatSessionResult {
     // Abort controller for cancelling streams
     const abortControllerRef = useRef<AbortController | null>(null)
 
+    // Prompt provenance: content-keyed map populated from SSE provenance events
+    const provenanceMapRef = useRef<Map<string, PromptProvenance>>(new Map())
+    const [provenanceVersion, setProvenanceVersion] = useState(0)
+
     // Get current session object
     const currentSession = sessions.find(s => s.id === currentSessionId) || null
 
@@ -768,7 +778,7 @@ export function useChatSession(): UseChatSessionResult {
     }, [])
 
     // Send a message - accepts optional sessionIdOverride for newly created sessions
-    const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string) => {
+    const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string) => {
         const targetSessionId = sessionIdOverride || currentSessionId
         if (!targetSessionId) {
             setError('No active session. Please create or select a chat.')
@@ -849,7 +859,7 @@ export function useChatSession(): UseChatSessionResult {
             }, 5_000)
 
             try {
-            for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal)) {
+            for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal, promptOverride)) {
                 lastEventTime = Date.now()
 
                 // Debug logging for stream events
@@ -862,6 +872,11 @@ export function useChatSession(): UseChatSessionResult {
                 finalThinking += update.thinkingDelta
                 if (update.sawToolPart) {
                     sawToolPart = true
+                }
+                // Capture provenance event and store keyed by user_input
+                if (update.provenance) {
+                    provenanceMapRef.current.set(update.provenance.user_input || content, update.provenance)
+                    setProvenanceVersion(v => v + 1)
                 }
                 if (update.done) {
                     break
@@ -978,5 +993,7 @@ export function useChatSession(): UseChatSessionResult {
         queueMessage,
         removeFromQueue,
         clearQueue,
+        provenanceMap: provenanceMapRef.current,
+        provenanceVersion,
     }
 }

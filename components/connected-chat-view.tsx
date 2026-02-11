@@ -5,7 +5,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input'
 import { StreamingMessage } from './streaming-message'
-import { WildLoopBanner } from './wild-loop-banner'
 import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
@@ -330,16 +329,23 @@ export function ConnectedChatView({
                 if (!sessionId) return
             }
 
-            // Store provenance keyed by content (stable, index-independent)
+            const fullPrompt = wildLoop.pendingPrompt!
+            const displayMsg = wildLoop.pendingDisplayMessage
+            // The visible message is the short display message (if set), otherwise the full prompt
+            const visibleContent = displayMsg || fullPrompt
+            // When display message differs from prompt, pass full prompt as override for the LLM
+            const promptOverride = displayMsg ? fullPrompt : undefined
+
+            // Store provenance keyed by visible content (stable, index-independent)
             const prov = wildLoop.pendingProvenance
             if (prov) {
-                provenanceMapRef.current.set(wildLoop.pendingPrompt!, prov)
+                provenanceMapRef.current.set(visibleContent, prov)
                 setProvenanceVersion(v => v + 1) // trigger re-render for useMemo
             }
 
             // Send as 'agent' mode — frontend now constructs the full prompt,
             // so we skip backend's wild_mode prompt injection
-            await sendMessage(wildLoop.pendingPrompt!, 'agent', sessionId)
+            await sendMessage(visibleContent, 'agent', sessionId, promptOverride)
             wildLoop.consumePrompt()
         }
 
@@ -507,24 +513,6 @@ export function ConnectedChatView({
 
     return (
         <div className="flex h-full flex-col overflow-hidden">
-            {/* Wild Loop Banner */}
-            {wildLoop?.isActive && (
-                <WildLoopBanner
-                    phase={wildLoop.phase}
-                    iteration={wildLoop.iteration}
-                    goal={wildLoop.goal}
-                    startedAt={wildLoop.startedAt}
-                    isPaused={wildLoop.isPaused}
-                    terminationConditions={wildLoop.terminationConditions}
-                    onPause={wildLoop.pause}
-                    onResume={wildLoop.resume}
-                    onStop={wildLoop.stop}
-                    onConfigureTermination={() => setShowTerminationDialog(true)}
-                    runStats={wildLoop.runStats}
-                    activeAlerts={wildLoop.activeAlerts}
-                />
-            )}
-
             {/* Error banner */}
             {error && (
                 <div className="shrink-0 bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 text-sm text-destructive">

@@ -4,6 +4,8 @@ description: "Analysis stage prompt. Triggered when all sweep runs are complete.
 variables:
   [
     "goal",
+    "iteration",
+    "max_iteration",
     "sweep_name",
     "total_runs",
     "passed_runs",
@@ -11,8 +13,7 @@ variables:
     "run_summaries",
   ]
 ---
-
-# Wild Loop — Analysis (All Runs Complete)
+# Wild Loop — Iteration {{iteration}}/{{max_iteration}} — Analysis (All Runs Complete)
 
 ## Your Goal
 

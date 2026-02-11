@@ -679,6 +679,19 @@ export default function ResearchChat() {
             sessions={sessions}
             onSessionChange={handleSessionChange}
             contextTokenCount={contextTokenCount}
+            wildLoop={wildLoop.isActive ? {
+              isActive: wildLoop.isActive,
+              isPaused: wildLoop.isPaused,
+              phase: wildLoop.phase,
+              iteration: wildLoop.iteration,
+              goal: wildLoop.goal,
+              startedAt: wildLoop.startedAt,
+              runStats: wildLoop.runStats,
+              activeAlerts: wildLoop.activeAlerts,
+              onPause: wildLoop.pause,
+              onResume: wildLoop.resume,
+              onStop: wildLoop.stop,
+            } : null}
             reportIsPreviewMode={reportToolbar?.isPreviewMode ?? true}
             onReportPreviewModeChange={reportToolbar?.setPreviewMode}
             onReportAddCell={reportToolbar?.addCell}

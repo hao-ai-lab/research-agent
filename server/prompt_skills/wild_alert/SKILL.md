@@ -4,6 +4,8 @@ description: "Alert handling prompt. Guides the agent to analyze and resolve exp
 variables:
   [
     "goal",
+    "iteration",
+    "max_iteration",
     "run_name",
     "alert_id",
     "alert_severity",
@@ -13,7 +15,7 @@ variables:
   ]
 ---
 
-# Wild Loop — Alert
+# Wild Loop — Iteration {{iteration}}/{{max_iteration}} — Alert
 
 ## Your Goal
 

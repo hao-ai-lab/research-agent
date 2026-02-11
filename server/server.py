@@ -209,6 +209,9 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     mode: str = "agent"  # "agent" | "wild" | "plan" | "sweep"
+    # When provided, this is used for LLM prompt construction instead of message.
+    # `message` is still stored as the user-visible content in the session history.
+    prompt_override: Optional[str] = None
     # Backward compat: accept old boolean fields and convert
     wild_mode: bool = False
     plan_mode: bool = False
@@ -382,6 +385,7 @@ class PromptSkillManager:
             "description": frontmatter.get("description", ""),
             "template": template,
             "variables": frontmatter.get("variables", []),
+            "category": frontmatter.get("category", "prompt"),  # "prompt" | "skill"
             "built_in": True,
             "filepath": filepath,
             "folder": os.path.dirname(filepath),
@@ -2619,9 +2623,14 @@ MODE_REGISTRY: Dict[str, ModeConfig] = {
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> str:
-    """Build the full prompt for a chat turn, prepending mode-specific preamble."""
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tuple:
+    """Build the full prompt for a chat turn, prepending mode-specific preamble.
+
+    Returns (content: str, provenance: dict | None).
+    provenance follows the PromptProvenance shape used by the frontend.
+    """
     mode_note = ""
+    provenance = None
 
     config = MODE_REGISTRY.get(mode)
     if config:
@@ -2629,19 +2638,42 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> str:
             # Delegate to wild_loop module
             experiment_context = _build_experiment_context()
             mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context)
+            # Wild mode provenance is handled by the frontend's wild loop
         else:
             variables = config.build_state(message)
+            skill = prompt_skill_manager.get(config.skill_id)
             rendered = prompt_skill_manager.render(config.skill_id, variables)
             if rendered:
                 mode_note = rendered + "\n\n"
+                provenance = {
+                    "rendered": rendered,
+                    "user_input": message,
+                    "skill_id": config.skill_id,
+                    "skill_name": skill.get("name", config.skill_id) if skill else config.skill_id,
+                    "template": skill.get("template") if skill else None,
+                    "variables": variables,
+                    "prompt_type": mode,
+                }
             else:
                 logger.warning(f"{config.skill_id} prompt skill not found — sending raw message")
+
+    # For agent mode (no config / no skill), build a simple provenance
+    if provenance is None and mode != "wild":
+        provenance = {
+            "rendered": message,
+            "user_input": message,
+            "skill_id": None,
+            "skill_name": None,
+            "template": None,
+            "variables": {},
+            "prompt_type": mode,
+        }
 
     content = f"{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
-    return content
+    return content, provenance
 
 
 def _log_background_chat_task(task: asyncio.Task) -> None:
@@ -2787,8 +2819,14 @@ async def chat_endpoint(req: ChatRequest):
             effective_mode = "wild"
         elif req.plan_mode:
             effective_mode = "plan"
-    content = _build_chat_prompt(session, req.message, effective_mode)
+    llm_input = req.prompt_override if req.prompt_override else req.message
+    content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
     runtime = await _start_chat_worker(session_id, content)
+
+    # Emit provenance as the first SSE event so the frontend can attach it
+    if provenance:
+        await _append_runtime_event(runtime, {"type": "provenance", **provenance})
+
     return StreamingResponse(
         _stream_runtime_events(session_id, from_seq=1, run_id=runtime.run_id),
         media_type="application/x-ndjson",

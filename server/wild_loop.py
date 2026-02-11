@@ -60,6 +60,7 @@ class BuildPromptRequest(BaseModel):
     # Common
     goal: Optional[str] = None
     iteration: Optional[int] = None
+    max_iterations: Optional[int] = None
     # run_event fields
     run_id: Optional[str] = None
     run_name: Optional[str] = None
@@ -522,7 +523,9 @@ def build_prompt_for_frontend(
     iteration = req.iteration if req.iteration is not None else (wild_loop_state.get("iteration", 0) + 1)
 
     # Build variables dict based on prompt type
-    variables: Dict[str, str] = {"goal": goal, "iteration": str(iteration)}
+    max_iter = req.max_iterations or wild_loop_state.get("termination", {}).get("max_iterations")
+    max_iter_display = str(max_iter) if max_iter else "∞"
+    variables: Dict[str, str] = {"goal": goal, "iteration": str(iteration), "max_iteration": max_iter_display}
 
     if prompt_type == "run_event":
         status_emoji = "❌" if req.run_status == "failed" else "✅"
