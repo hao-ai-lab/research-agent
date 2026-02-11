@@ -43,10 +43,11 @@ image = (
         "requests>=2.31.0",
         "pyyaml>=6.0",
     )
-    # Install opencode CLI — export dir so the piped bash script sees it
+    # Install opencode CLI to /root/bin
     .run_commands(
-        "export OPENCODE_INSTALL_DIR=/usr/local/bin && curl -fsSL https://opencode.ai/install | bash",
-        "ls -la /usr/local/bin/opencode && /usr/local/bin/opencode --version || echo 'opencode install failed'",
+        "mkdir -p /root/bin",
+        "export OPENCODE_INSTALL_DIR=/root/bin && curl -fsSL https://opencode.ai/install | bash",
+        "ls -la /root/bin/opencode && /root/bin/opencode --version || echo 'opencode install failed'",
     )
     # Copy the full repo into the image
     .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
@@ -63,7 +64,7 @@ image = (
 
 app = modal.App("research-agent-preview")
 
-OPENCODE_BIN = "/usr/local/bin/opencode"
+OPENCODE_BIN = "/root/bin/opencode"
 
 
 @app.function(
