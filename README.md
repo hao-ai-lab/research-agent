@@ -51,8 +51,6 @@ export OPENCODE_CONFIG="$(pwd)/server/opencode.json"
 opencode serve
 ```
 
-edit
-
 Then in another terminal:
 
 ```bash
