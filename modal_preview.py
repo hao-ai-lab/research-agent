@@ -44,7 +44,8 @@ image = (
         "pyyaml>=6.0",
     )
     # Install opencode CLI
-    .run_commands("npm install -g opencode || true")
+    .run_commands("OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash")
+    .env({"PATH": "/usr/local/bin:$PATH"})
     # Copy the full repo into the image
     .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
     # Install frontend deps and build static export
