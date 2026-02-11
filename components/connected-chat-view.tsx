@@ -27,6 +27,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+import { Progress } from '@/components/ui/progress'
 import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
 import type {
     ChatMessage as ChatMessageType,
@@ -206,6 +207,26 @@ export function ConnectedChatView({
             (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
         )
     }, [apiDisplayMessages, injectedMessages])
+
+    const contextTokenCount = useMemo(() => {
+        const historyTokens = displayMessages.reduce((acc, msg) => {
+            const textLen = msg.content?.length || 0
+            const thinkingLen = msg.thinking?.length || 0
+            return acc + Math.ceil((textLen + thinkingLen) / 4)
+        }, 0)
+
+        if (streamingState.isStreaming) {
+            const streamTextLen = streamingState.textContent.length
+            const streamThinkLen = streamingState.thinkingContent.length
+            return historyTokens + Math.ceil((streamTextLen + streamThinkLen) / 4)
+        }
+        return historyTokens
+    }, [displayMessages, streamingState])
+
+    const formatTokenCount = (count: number) => {
+        if (count >= 1000) return `${(count / 1000).toFixed(1)}k`
+        return count.toString()
+    }
 
     const messagePairs = useMemo(() => {
         const pairs: { user: ChatMessageType; assistant?: ChatMessageType }[] = []
@@ -450,39 +471,52 @@ export function ConnectedChatView({
     return (
         <div className="flex h-full flex-col overflow-hidden">
             {/* Title Header with Session Selector */}
-            <div className="shrink-0 border-b border-border bg-background px-6 py-4">
-                <Select
-                    value={currentSessionId || 'new'}
-                    onValueChange={handleSessionChange}
-                >
-                    <SelectTrigger className="w-full max-w-md border-0 px-3 py-2 shadow-none focus:ring-0 bg-secondary/100 hover:bg-secondary/80 rounded-lg transition-colors">
-                        <SelectValue>
-                            <h1 className="text-2xl font-semibold text-foreground">
-                                {sessionTitle}
-                            </h1>
-                        </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="new">
-                            <div className="flex items-center gap-2">
-                                <Plus className="h-4 w-4" />
-                                <span className="font-medium">New Chat</span>
-                            </div>
-                        </SelectItem>
-                        {sessions
-                            .sort((a, b) => b.created_at - a.created_at)
-                            .map((session) => (
-                                <SelectItem key={session.id} value={session.id}>
-                                    <div className="flex flex-col">
-                                        <span className="font-medium">{session.title}</span>
-                                        <span className="text-xs text-muted-foreground">
-                                            {session.message_count} message{session.message_count !== 1 ? 's' : ''}
-                                        </span>
-                                    </div>
-                                </SelectItem>
-                            ))}
-                    </SelectContent>
-                </Select>
+            <div className="shrink-0 border-b border-border bg-background px-6 py-4 flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0 max-w-lg">
+                    <Select
+                        value={currentSessionId || 'new'}
+                        onValueChange={handleSessionChange}
+                    >
+                        <SelectTrigger className="w-full border-0 px-3 py-2 shadow-none focus:ring-0 bg-secondary/100 hover:bg-secondary/80 rounded-lg transition-colors">
+                            <SelectValue>
+                                <h1 className="text-2xl font-semibold text-foreground truncate">
+                                    {sessionTitle}
+                                </h1>
+                            </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="new">
+                                <div className="flex items-center gap-2">
+                                    <Plus className="h-4 w-4" />
+                                    <span className="font-medium">New Chat</span>
+                                </div>
+                            </SelectItem>
+                            {sessions
+                                .sort((a, b) => b.created_at - a.created_at)
+                                .map((session) => (
+                                    <SelectItem key={session.id} value={session.id}>
+                                        <div className="flex flex-col">
+                                            <span className="font-medium">{session.title}</span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {session.message_count} message{session.message_count !== 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                {/* Context Usage Indicator */}
+                <div className="flex flex-col items-end gap-1.5 min-w-[140px]">
+                    <div className="flex items-center justify-between w-full text-xs text-muted-foreground">
+                        <span>Context Usage </span>
+                        <span className="font-mono tabular-nums">
+                            : {formatTokenCount(contextTokenCount)} / 200k
+                        </span>
+                    </div>
+                    <Progress value={Math.min((contextTokenCount / 200000) * 100, 100)} className="h-1.5 w-full" />
+                </div>
             </div>
 
             {/* Wild Loop Banner */}
@@ -570,28 +604,29 @@ export function ConnectedChatView({
                                                 }
                                             }
                                             return (
-                                            <div
-                                                key={message.id}
-                                                style={message.source === 'agent_wild' ? {
-                                                    borderLeft: '3px solid #a855f7',
-                                                    paddingLeft: '8px',
-                                                    marginLeft: '4px',
-                                                } : undefined}
-                                            >
-                                                <ChatMessage
-                                                    message={message}
-                                                    collapseArtifacts={collapseArtifactsInChat}
-                                                    sweeps={sweeps}
-                                                    runs={runs}
-                                                    alerts={alerts}
-                                                    onEditSweep={onEditSweep}
-                                                    onLaunchSweep={onLaunchSweep}
-                                                    onRunClick={onRunClick}
-                                                    onReplyToSelection={handleReplyToSelection}
-                                                    previousUserContent={prevUserContent}
-                                                />
-                                            </div>
-                                        )})}
+                                                <div
+                                                    key={message.id}
+                                                    style={message.source === 'agent_wild' ? {
+                                                        borderLeft: '3px solid #a855f7',
+                                                        paddingLeft: '8px',
+                                                        marginLeft: '4px',
+                                                    } : undefined}
+                                                >
+                                                    <ChatMessage
+                                                        message={message}
+                                                        collapseArtifacts={collapseArtifactsInChat}
+                                                        sweeps={sweeps}
+                                                        runs={runs}
+                                                        alerts={alerts}
+                                                        onEditSweep={onEditSweep}
+                                                        onLaunchSweep={onLaunchSweep}
+                                                        onRunClick={onRunClick}
+                                                        onReplyToSelection={handleReplyToSelection}
+                                                        previousUserContent={prevUserContent}
+                                                    />
+                                                </div>
+                                            )
+                                        })}
 
                                     {/* Streaming message */}
                                     {streamingState.isStreaming && (
