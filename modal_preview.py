@@ -128,8 +128,10 @@ def preview_server():
     )
 
     # Start the Next.js frontend dev server on port 8080 (exposed via Modal)
+    # NEXT_PUBLIC_API_URL=auto → resolves to window.location.origin in browser
+    # Next.js rewrites in next.config.mjs proxy API calls to backend on 10000
     print("Starting frontend dev server on port 8080...")
-    frontend_env = {**env, "NEXT_PUBLIC_API_URL": "http://localhost:10000", "PORT": "8080"}
+    frontend_env = {**env, "NEXT_PUBLIC_API_URL": "auto", "PORT": "8080"}
     subprocess.Popen(
         ["npx", "next", "dev", "-p", "8080"],
         env=frontend_env,
