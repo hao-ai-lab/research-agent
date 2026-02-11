@@ -58,6 +58,7 @@ export default function ContextualChatPage() {
     savedSessionIds,
     messages,
     createNewSession,
+    startNewChat,
     selectSession,
     saveSession,
     unsaveSession,
@@ -188,8 +189,8 @@ export default function ContextualChatPage() {
           sweeps={uiSweeps}
           pendingAlertsByRun={pendingAlertsByRun}
           onTabChange={navigateFromSidebar}
-          onNewChat={async () => {
-            await createNewSession()
+          onNewChat={() => {
+            startNewChat()
           }}
           onSelectSession={async (sessionId) => {
             await selectSession(sessionId)
@@ -562,8 +563,8 @@ export default function ContextualChatPage() {
             journeySubTab={journeySubTab}
             onTabChange={navigateFromSidebar}
             onJourneySubTabChange={setJourneySubTab}
-            onNewChat={async () => {
-              await createNewSession()
+            onNewChat={() => {
+              startNewChat()
             }}
             sessions={sessions}
             onSelectSession={async (sessionId) => {

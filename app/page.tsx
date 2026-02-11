@@ -221,12 +221,15 @@ export default function ResearchChat() {
   const chatSession = useChatSession()
   const {
     createNewSession,
+    startNewChat,
     sessions,
     savedSessionIds,
     selectSession,
     saveSession,
     unsaveSession,
     archiveSession,
+    currentSessionId,
+    currentSession,
   } = chatSession
   const { sendMessage } = chatSession
 
@@ -589,6 +592,32 @@ export default function ResearchChat() {
     window.localStorage.setItem(STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH, String(sidebarWidthRef.current))
   }, [])
 
+  // Handle session change from FloatingNav
+  const handleSessionChange = useCallback(async (sessionId: string) => {
+    if (sessionId === 'new') {
+      startNewChat()  // Just clear state, session created when message is sent
+    } else {
+      await selectSession(sessionId)
+    }
+  }, [startNewChat, selectSession])
+
+  // Compute context token count from chat session messages
+  const contextTokenCount = useMemo(() => {
+    const { messages, streamingState } = chatSession
+    const historyTokens = messages.reduce((acc, msg) => {
+      const textLen = msg.content?.length || 0
+      const thinkingLen = msg.thinking?.length || 0
+      return acc + Math.ceil((textLen + thinkingLen) / 4)
+    }, 0)
+
+    if (streamingState.isStreaming) {
+      const streamTextLen = streamingState.textContent.length
+      const streamThinkLen = streamingState.thinkingContent.length
+      return historyTokens + Math.ceil((streamTextLen + streamThinkLen) / 4)
+    }
+    return historyTokens
+  }, [chatSession])
+
   return (
     <div className="w-screen h-dvh overflow-hidden bg-background">
       <main className="flex h-full w-full overflow-hidden bg-background">
@@ -604,8 +633,8 @@ export default function ResearchChat() {
           sweeps={sweeps}
           pendingAlertsByRun={pendingAlertsByRun}
           onTabChange={handleTabChange}
-          onNewChat={async () => {
-            await createNewSession()
+          onNewChat={() => {
+            startNewChat()  // Just clear state, session created when message is sent
             handleTabChange('chat')
           }}
           onSelectSession={async (sessionId) => {
@@ -645,6 +674,11 @@ export default function ResearchChat() {
             onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
             collapseArtifactsInChat={collapseArtifactsInChat}
             onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
+            sessionTitle={currentSession?.title || 'New Chat'}
+            currentSessionId={currentSessionId}
+            sessions={sessions}
+            onSessionChange={handleSessionChange}
+            contextTokenCount={contextTokenCount}
             reportIsPreviewMode={reportToolbar?.isPreviewMode ?? true}
             onReportPreviewModeChange={reportToolbar?.setPreviewMode}
             onReportAddCell={reportToolbar?.addCell}
@@ -762,8 +796,8 @@ export default function ResearchChat() {
             journeySubTab={journeySubTab}
             onTabChange={handleTabChange}
             onJourneySubTabChange={setJourneySubTab}
-            onNewChat={async () => {
-              await createNewSession()
+            onNewChat={() => {
+              startNewChat()  // Just clear state, session created when message is sent
               handleTabChange('chat')
             }}
             sessions={sessions}
