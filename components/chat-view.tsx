@@ -14,6 +14,8 @@ import type {
   InsightChart,
 } from '@/lib/types'
 
+const SCROLL_BOTTOM_THRESHOLD_PX = 64
+
 interface ChatViewProps {
   messages: ChatMessageType[]
   runs: ExperimentRun[]
@@ -46,12 +48,35 @@ export function ChatView({
   collapseArtifactsInChat = false,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const autoScrollEnabledRef = useRef(true)
+
+  const getScrollViewport = () => {
+    if (!scrollRef.current) return null
+    return scrollRef.current.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')
+  }
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const viewport = getScrollViewport()
+    if (!viewport) return
+
+    const updateAutoScrollState = () => {
+      const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+      autoScrollEnabledRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX
     }
-  }, [messages])
+
+    viewport.addEventListener('scroll', updateAutoScrollState, { passive: true })
+    return () => viewport.removeEventListener('scroll', updateAutoScrollState)
+  }, [messages.length, collapseChats])
+
+  useEffect(() => {
+    if (!autoScrollEnabledRef.current) return
+    const viewport = getScrollViewport()
+    if (!viewport) return
+    const frame = requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [messages, collapseChats])
 
   // Collect all artifacts from runs
   const allArtifacts = useMemo(() => {

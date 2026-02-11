@@ -31,6 +31,8 @@ import type {
 import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
 
+const SCROLL_BOTTOM_THRESHOLD_PX = 64
+
 interface ConnectedChatViewProps {
     runs: ExperimentRun[]
     alerts?: Alert[]
@@ -84,6 +86,7 @@ export function ConnectedChatView({
     skills = [],
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
+    const autoScrollEnabledRef = useRef(true)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
     const [starterReplyExcerptInsert, setStarterReplyExcerptInsert] = useState<{
@@ -149,12 +152,54 @@ export function ConnectedChatView({
         onSessionChange?.(currentSessionId)
     }, [currentSessionId, onSessionChange])
 
-    // Auto-scroll when messages or streaming content changes
+    const getScrollViewport = useCallback((): HTMLDivElement | null => {
+        if (!scrollRef.current) return null
+        return scrollRef.current.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')
+    }, [])
+
+    // Reset to sticky auto-scroll when opening/switching sessions.
     useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        autoScrollEnabledRef.current = true
+    }, [currentSessionId])
+
+    // Track whether user is near bottom. If not, pause auto-scroll.
+    useEffect(() => {
+        const viewport = getScrollViewport()
+        if (!viewport) return
+
+        const updateAutoScrollState = () => {
+            const distanceFromBottom =
+                viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+            autoScrollEnabledRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX
         }
-    }, [messages, streamingState.textContent, streamingState.thinkingContent])
+
+        viewport.addEventListener('scroll', updateAutoScrollState, { passive: true })
+        return () => {
+            viewport.removeEventListener('scroll', updateAutoScrollState)
+        }
+    }, [getScrollViewport, messages.length, injectedMessages.length, streamingState.isStreaming, collapseChats])
+
+    // Auto-scroll only while sticky mode is enabled.
+    useEffect(() => {
+        if (!autoScrollEnabledRef.current) return
+
+        const viewport = getScrollViewport()
+        if (!viewport) return
+
+        const frame = requestAnimationFrame(() => {
+            viewport.scrollTop = viewport.scrollHeight
+        })
+
+        return () => cancelAnimationFrame(frame)
+    }, [
+        currentSessionId,
+        getScrollViewport,
+        messages,
+        streamingState.textContent,
+        streamingState.thinkingContent,
+        streamingState.parts,
+        collapseChats,
+    ])
 
     // Convert API messages to the ChatMessage type expected by components
     const apiDisplayMessages: ChatMessageType[] = useMemo(() => {
