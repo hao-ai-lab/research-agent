@@ -46,7 +46,7 @@ image = (
     # Install opencode CLI
     .run_commands("npm install -g opencode || true")
     # Copy the full repo into the image
-    .copy_local_dir(".", "/app", ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
+    .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
     # Install frontend deps and build static export
     .run_commands(
         "cd /app && npm install --prefer-offline 2>/dev/null || cd /app && npm install",

@@ -18,7 +18,7 @@ import sys
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("fastapi>=0.104.0", "uvicorn>=0.24.0", "httpx>=0.25.0", "pydantic>=2.0.0")
-    .copy_local_dir("hub", "/hub")
+    .add_local_dir("hub", "/hub", copy=True)
 )
 
 app = modal.App("research-agent-hub")
