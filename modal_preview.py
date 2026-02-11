@@ -76,7 +76,7 @@ OPENCODE_BIN = "/usr/local/bin/opencode"
     memory=8 * 1024,  # 8GB
 )
 @modal.concurrent(max_inputs=100)
-@modal.web_server(port=8080, startup_timeout=120)
+@modal.web_server(port=10000, startup_timeout=120)
 def preview_server():
     """Start the full Research Agent stack inside Modal (dev mode)."""
     os.chdir("/app")
@@ -126,6 +126,26 @@ def preview_server():
         env=env,
         cwd="/app/server",
     )
+
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name("research-agent-preview-secrets")],
+    timeout=7200,  # 2 hours max
+    cpu=8.0,
+    memory=8 * 1024,  # 8GB
+)
+@modal.concurrent(max_inputs=100)
+@modal.web_server(port=8080, startup_timeout=120)
+def preview_app():
+    os.chdir("/app")
+
+    env = {**os.environ}
+    auth_token = env.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "preview-token")
+    env["RESEARCH_AGENT_USER_AUTH_TOKEN"] = auth_token
+
+    # Prepare workdir
+    workdir = "/app"
+    os.makedirs(os.path.join(workdir, ".agents"), exist_ok=True)
 
     # Start the Next.js frontend dev server on port 8080 (exposed via Modal)
     # NEXT_PUBLIC_API_URL=auto → resolves to window.location.origin in browser
