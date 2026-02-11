@@ -185,8 +185,8 @@ function getRunStatusIcon(status: ExperimentRun['status']) {
 function formatMetricSnapshot(run: ExperimentRun | undefined) {
   if (!run) return undefined
 
-  if (run.metrics) {
-    return `Loss ${run.metrics.loss.toFixed(4)} · Acc ${run.metrics.accuracy.toFixed(3)} · Epoch ${run.metrics.epoch}`
+  if (run.metrics && typeof run.metrics.loss === 'number' && typeof run.metrics.accuracy === 'number') {
+    return `Loss ${run.metrics.loss.toFixed(4)} · Acc ${run.metrics.accuracy.toFixed(3)} · Epoch ${run.metrics.epoch ?? '?'}`
   }
 
   const latestPoint = run.lossHistory?.at(-1)
