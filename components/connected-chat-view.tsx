@@ -190,7 +190,6 @@ export function ConnectedChatView({
             autoScrollEnabledRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX
         }
 
-        updateAutoScrollState()
         viewport.addEventListener('scroll', updateAutoScrollState, { passive: true })
         return () => {
             viewport.removeEventListener('scroll', updateAutoScrollState)
@@ -210,6 +209,7 @@ export function ConnectedChatView({
 
         return () => cancelAnimationFrame(frame)
     }, [
+        currentSessionId,
         getScrollViewport,
         messages,
         streamingState.textContent,

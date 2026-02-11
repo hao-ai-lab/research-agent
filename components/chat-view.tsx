@@ -64,7 +64,6 @@ export function ChatView({
       autoScrollEnabledRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX
     }
 
-    updateAutoScrollState()
     viewport.addEventListener('scroll', updateAutoScrollState, { passive: true })
     return () => viewport.removeEventListener('scroll', updateAutoScrollState)
   }, [messages.length, collapseChats])
