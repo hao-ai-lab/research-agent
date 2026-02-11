@@ -2,15 +2,6 @@
 
 set -euo pipefail
 
-# ── parse flags ─────────────────────────────────────────────
-IDE=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --ide) IDE="${2:-}"; shift 2 ;;
-    *) echo "Unknown option: $1"; exit 1 ;;
-  esac
-done
-
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKTREE_NAME="$(basename "$ROOT_DIR")"
 WORKTREE_HASH="$(printf "%s" "$ROOT_DIR" | shasum | awk '{print $1}')"
@@ -27,34 +18,11 @@ START_BACKEND="${START_BACKEND:-1}"
 export NEXT_PUBLIC_API_URL="http://127.0.0.1:${BACKEND_PORT}"
 export RESEARCH_AGENT_TMUX_SESSION="${TMUX_SESSION_NAME}"
 
-echo "Worktree:  ${WORKTREE_NAME}"
-echo "Directory: ${ROOT_DIR}"
-echo "Frontend:  http://127.0.0.1:${FRONTEND_PORT}"
-echo "Backend:   http://127.0.0.1:${BACKEND_PORT}"
-echo "Tmux:      ${TMUX_SESSION_NAME}"
+echo "Worktree: ${WORKTREE_NAME}"
+echo "Frontend: http://127.0.0.1:${FRONTEND_PORT}"
+echo "Backend:  http://127.0.0.1:${BACKEND_PORT}"
+echo "Tmux:     ${TMUX_SESSION_NAME}"
 echo ""
-
-# ── open IDE if requested ───────────────────────────────────
-if [ -n "${IDE}" ]; then
-  case "${IDE}" in
-    agy|antigravity)
-      if command -v agy &>/dev/null; then
-        echo "Opening worktree in Antigravity…"
-        agy "${ROOT_DIR}" &
-      else
-        echo "Error: 'agy' not found in PATH." >&2
-        exit 1
-      fi
-      ;;
-    code|vscode)
-      code "${ROOT_DIR}" &
-      ;;
-    *)
-      echo "Unknown IDE: ${IDE}. Supported: agy, code" >&2
-      exit 1
-      ;;
-  esac
-fi
 
 pids=()
 
