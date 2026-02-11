@@ -49,6 +49,8 @@ image = (
     .run_commands(
         "curl -fsSL https://opencode.ai/install | bash",
         "ls -la /root/.opencode/bin/opencode && /root/.opencode/bin/opencode --version || echo 'opencode install failed'",
+        "mv /root/.opencode/bin/opencode /usr/local/bin/opencode",
+        "which opencode"
     )
     # Install frontend deps and build static export
     .run_commands(
