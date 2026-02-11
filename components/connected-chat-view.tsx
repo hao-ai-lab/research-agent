@@ -140,6 +140,10 @@ export function ConnectedChatView({
         removeFromQueue,
     } = externalChatSession || internalChatSession
 
+    // Always-current messages ref so streaming-end effect reads latest without re-triggering
+    const messagesRef = useRef(messages)
+    messagesRef.current = messages
+
     // Notify parent of session changes
     useEffect(() => {
         onSessionChange?.(currentSessionId)
@@ -229,7 +233,8 @@ export function ConnectedChatView({
         if (prevStreamingRef.current && !streamingState.isStreaming && wildLoop?.isActive) {
             // Small delay to ensure messages state has settled (assistant message added)
             const timer = setTimeout(() => {
-                const lastMsg = messages[messages.length - 1]
+                const msgs = messagesRef.current
+                const lastMsg = msgs[msgs.length - 1]
                 if (lastMsg?.role === 'assistant') {
                     console.log('[wild-loop] Stream finished, calling onResponseComplete, msg length:', lastMsg.content.length)
                     wildLoop.onResponseComplete(lastMsg.content)
@@ -250,7 +255,8 @@ export function ConnectedChatView({
 
         // Non-wild-loop: send notification when streaming ends with a response
         if (prevStreamingRef.current && !streamingState.isStreaming && !wildLoop?.isActive) {
-            const lastMsg = messages[messages.length - 1]
+            const msgs = messagesRef.current
+            const lastMsg = msgs[msgs.length - 1]
             if (lastMsg?.role === 'assistant') {
                 const preview = lastMsg.content.slice(0, 120).replace(/\n/g, ' ')
                 notify('🔬 Bot Response', preview || 'Bot finished responding')
@@ -258,7 +264,7 @@ export function ConnectedChatView({
         }
 
         prevStreamingRef.current = streamingState.isStreaming
-    }, [streamingState.isStreaming, messages, wildLoop, notify])
+    }, [streamingState.isStreaming, wildLoop, notify])
 
     // When wild loop has a pending prompt, auto-send it
     useEffect(() => {

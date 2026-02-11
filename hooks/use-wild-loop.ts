@@ -389,6 +389,7 @@ export function useWildLoop(): UseWildLoopResult {
   const seenRunStatusesRef = useRef<Map<string, string>>(new Map())
   const processedAlertIdsRef = useRef<Set<string>>(new Set())
   const isBusyRef = useRef(false) // prevents auto-send overlap
+  const analysisQueuedRef = useRef(false) // prevents duplicate analysis enqueue from polling race
 
   // Sync refs
   useEffect(() => { isActiveRef.current = isActive }, [isActive])
@@ -492,7 +493,8 @@ export function useWildLoop(): UseWildLoopResult {
         const hasUnprocessedAlerts = pendingAlerts.some(
           a => !processedAlertIdsRef.current.has(a.id)
         )
-        if (allTerminal && !hasUnprocessedAlerts && pendingAlerts.length === 0) {
+        if (allTerminal && !hasUnprocessedAlerts && pendingAlerts.length === 0 && !analysisQueuedRef.current) {
+          analysisQueuedRef.current = true
           console.log('[wild-loop] All runs terminal, no pending alerts → ANALYZING')
           setStage('analyzing')
           setPhase('analyzing')
@@ -543,6 +545,7 @@ export function useWildLoop(): UseWildLoopResult {
     seenRunStatusesRef.current.clear()
     processedAlertIdsRef.current.clear()
     isBusyRef.current = false
+    analysisQueuedRef.current = false
 
     // Snapshot existing sweep IDs so we can detect new ones
     try {
@@ -605,6 +608,7 @@ export function useWildLoop(): UseWildLoopResult {
     setRunStats(emptyRunStats)
     setActiveAlerts([])
     isBusyRef.current = false
+    analysisQueuedRef.current = false
 
     setWildMode(false).catch(console.error)
     updateWildLoopStatus({ phase: 'idle', iteration: 0, is_paused: false }).catch(console.error)
@@ -651,6 +655,18 @@ export function useWildLoop(): UseWildLoopResult {
     updateWildLoopStatus({ iteration: nextIteration }).catch(console.error)
 
     if (checkTermination()) { stop(); return }
+
+    // Bug 2 fix: Respect COMPLETE/NEEDS_HUMAN signals regardless of stage
+    if (signal?.type === 'COMPLETE') {
+      console.log('[wild-loop] Signal COMPLETE received in stage:', currentStage)
+      stop()
+      return
+    }
+    if (signal?.type === 'NEEDS_HUMAN') {
+      console.log('[wild-loop] Signal NEEDS_HUMAN received in stage:', currentStage)
+      pause()
+      return
+    }
 
     if (currentStage === 'exploring') {
       // Check if agent output a <sweep> spec
@@ -719,14 +735,10 @@ export function useWildLoop(): UseWildLoopResult {
       // Event-driven: don't auto-queue. Polling will trigger next prompt.
       // isBusyRef is already false, so next poll can queue events.
     } else if (currentStage === 'analyzing') {
-      if (signal?.type === 'NEEDS_HUMAN') {
-        pause()
-      } else if (signal?.type === 'COMPLETE') {
-        // Analysis confirms goal is met
-        console.log('[wild-loop] Analysis confirms COMPLETE')
-        stop()
-      } else {
-        // CONTINUE or no signal: back to exploring for another cycle
+      // COMPLETE and NEEDS_HUMAN already handled above.
+      // CONTINUE or no signal: back to exploring for another cycle
+      {
+        analysisQueuedRef.current = false // reset guard for next cycle
         console.log('[wild-loop] Analysis says more work needed, cycling back to exploring')
         setStage('exploring')
         setPhase('exploring')
