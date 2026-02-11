@@ -1631,6 +1631,24 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         return opencode_id
 
 
+async def fetch_opencode_session_title(opencode_session_id: str) -> Optional[str]:
+    """Fetch the auto-generated title from an OpenCode session."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+            resp = await client.get(
+                f"{OPENCODE_URL}/session/{opencode_session_id}",
+                auth=get_auth(),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            title = data.get("title")
+            if title and isinstance(title, str) and title.strip():
+                return title.strip()
+    except Exception as e:
+        logger.warning("Failed to fetch OpenCode session title for %s: %s", opencode_session_id, e)
+    return None
+
+
 async def send_prompt_to_opencode(client: httpx.AsyncClient, session_id: str, content: str):
     """Send a prompt to an OpenCode session."""
     prompt_payload = {
@@ -2686,6 +2704,16 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
                     "timestamp": time.time(),
                 }
                 session.setdefault("messages", []).append(assistant_msg)
+
+        # Auto-name: fetch title from OpenCode only once (after the first exchange)
+        session = chat_sessions.get(session_id)
+        if isinstance(session, dict) and not session.get("title"):
+            opencode_sid = session.get("opencode_session_id")
+            if opencode_sid:
+                oc_title = await fetch_opencode_session_title(opencode_sid)
+                if oc_title:
+                    session["title"] = oc_title
+                    logger.info("Auto-named chat %s from OpenCode: %s", session_id, oc_title)
 
         session = chat_sessions.get(session_id)
         if isinstance(session, dict):
