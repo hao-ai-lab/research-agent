@@ -68,6 +68,7 @@ export interface UseChatSessionResult {
     currentSessionId: string | null
     currentSession: ChatSession | null
     createNewSession: () => Promise<string | null>
+    startNewChat: () => void  
     selectSession: (sessionId: string) => Promise<void>
     saveSession: (sessionId: string) => Promise<void>
     unsaveSession: (sessionId: string) => Promise<void>
@@ -668,6 +669,20 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [])
 
+    // Start new chat - clears current session without creating backend session
+    // Session will be created when user sends first message
+    const startNewChat = useCallback(() => {
+        // Cancel any ongoing stream
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+            abortControllerRef.current = null
+        }
+        setError(null)
+        setCurrentSessionId(null)
+        setMessages([])
+        setStreamingState(initialStreamingState)
+    }, [])
+
     // Select a session
     const selectSession = useCallback(async (sessionId: string) => {
         if (archivedSessionIds.includes(sessionId)) {
@@ -928,6 +943,7 @@ export function useChatSession(): UseChatSessionResult {
         currentSessionId,
         currentSession,
         createNewSession,
+        startNewChat,
         selectSession,
         saveSession,
         unsaveSession,
