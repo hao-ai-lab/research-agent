@@ -43,11 +43,10 @@ image = (
         "requests>=2.31.0",
         "pyyaml>=6.0",
     )
-    # Install opencode CLI and verify it exists
+    # Install opencode CLI — export dir so the piped bash script sees it
     .run_commands(
-        "OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash",
-        "ls -la /usr/local/bin/opencode || echo 'WARNING: opencode not found at /usr/local/bin'",
-        "which opencode || ln -sf /usr/local/bin/opencode /usr/bin/opencode || true",
+        "export OPENCODE_INSTALL_DIR=/usr/local/bin && curl -fsSL https://opencode.ai/install | bash",
+        "ls -la /usr/local/bin/opencode && /usr/local/bin/opencode --version || echo 'opencode install failed'",
     )
     # Copy the full repo into the image
     .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
