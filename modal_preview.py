@@ -43,9 +43,12 @@ image = (
         "requests>=2.31.0",
         "pyyaml>=6.0",
     )
-    # Install opencode CLI
-    .run_commands("OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash")
-    .env({"PATH": "/usr/local/bin:$PATH"})
+    # Install opencode CLI and verify it exists
+    .run_commands(
+        "OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash",
+        "ls -la /usr/local/bin/opencode || echo 'WARNING: opencode not found at /usr/local/bin'",
+        "which opencode || ln -sf /usr/local/bin/opencode /usr/bin/opencode || true",
+    )
     # Copy the full repo into the image
     .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
     # Install frontend deps and build static export
@@ -60,6 +63,8 @@ image = (
 # ---------------------------------------------------------------------------
 
 app = modal.App("research-agent-preview")
+
+OPENCODE_BIN = "/usr/local/bin/opencode"
 
 
 @app.function(
@@ -86,19 +91,29 @@ def preview_server():
     else:
         print(f"WARNING: Static frontend not found at {frontend_dir}, backend will run without UI")
 
-    # Start a tmux server for job execution support
-    subprocess.Popen(["tmux", "new-session", "-d", "-s", "research-agent"], env=env)
+    # Start a tmux server for job execution support (best-effort)
+    try:
+        subprocess.Popen(["tmux", "new-session", "-d", "-s", "research-agent"], env=env)
+    except Exception as e:
+        print(f"WARNING: tmux failed to start: {e}")
 
-    # Start opencode in background (best-effort)
+    # Start opencode in background (best-effort, non-fatal)
     opencode_config = "/app/server/opencode.json"
     if os.path.isfile(opencode_config):
         env["OPENCODE_CONFIG"] = opencode_config
-    subprocess.Popen(
-        ["opencode", "serve"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        if os.path.isfile(OPENCODE_BIN):
+            subprocess.Popen(
+                [OPENCODE_BIN, "serve"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("opencode server started")
+        else:
+            print(f"WARNING: opencode binary not found at {OPENCODE_BIN}, skipping")
+    except Exception as e:
+        print(f"WARNING: opencode failed to start: {e}")
 
     # Prepare workdir
     workdir = "/app"
