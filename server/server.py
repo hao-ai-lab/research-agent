@@ -2705,15 +2705,15 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
                 }
                 session.setdefault("messages", []).append(assistant_msg)
 
-        # Fetch the auto-generated title from OpenCode after each exchange
+        # Auto-name: fetch title from OpenCode only once (after the first exchange)
         session = chat_sessions.get(session_id)
-        if isinstance(session, dict):
+        if isinstance(session, dict) and not session.get("title"):
             opencode_sid = session.get("opencode_session_id")
             if opencode_sid:
                 oc_title = await fetch_opencode_session_title(opencode_sid)
                 if oc_title:
                     session["title"] = oc_title
-                    logger.info("Updated chat %s title from OpenCode: %s", session_id, oc_title)
+                    logger.info("Auto-named chat %s from OpenCode: %s", session_id, oc_title)
 
         session = chat_sessions.get(session_id)
         if isinstance(session, dict):
