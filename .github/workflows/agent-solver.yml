@@ -1,0 +1,100 @@
+name: Agent Issue Solver
+
+on:
+  issues:
+    types: [opened, labeled]
+
+# Only one solver per issue at a time
+concurrency:
+  group: solver-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  solve-issue:
+    # Only trigger when an issue has the 'agent-solve' label
+    if: contains(github.event.issue.labels.*.name, 'agent-solve')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install modal httpx
+
+      - name: Write issue body to file
+        run: |
+          cat > /tmp/issue_body.txt << 'ISSUE_BODY_EOF'
+          ${{ github.event.issue.body }}
+          ISSUE_BODY_EOF
+
+      - name: Comment that the agent is working
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: [
+                '🤖 **Agent Solver Started**',
+                '',
+                `Working on issue #${context.payload.issue.number}...`,
+                `Commit: \`${context.sha.slice(0,7)}\``,
+                `Time: ${new Date().toISOString()}`,
+              ].join('\n'),
+            });
+
+      - name: Run agent solver
+        id: solver
+        run: |
+          python agent_solver.py \
+            --issue-number "${{ github.event.issue.number }}" \
+            --issue-title "${{ github.event.issue.title }}" \
+            --issue-body-file /tmp/issue_body.txt \
+            --repo "${{ github.repository }}" \
+            --base-branch "${{ github.event.repository.default_branch }}"
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RESEARCH_AGENT_KEY: ${{ secrets.RESEARCH_AGENT_KEY }}
+
+      - name: Comment result on issue
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const outcome = '${{ steps.solver.outcome }}';
+            const issueNumber = context.payload.issue.number;
+            let body;
+            if (outcome === 'success') {
+              body = [
+                '✅ **Agent Solver Completed**',
+                '',
+                `A PR has been created for issue #${issueNumber}.`,
+                `Check the pull requests tab for branch \`agent/issue-${issueNumber}\`.`,
+              ].join('\n');
+            } else {
+              body = [
+                '❌ **Agent Solver Failed**',
+                '',
+                'The automated solver encountered an error.',
+                'Check the [Actions log](' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions) for details.',
+              ].join('\n');
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body,
+            });
