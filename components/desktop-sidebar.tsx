@@ -13,7 +13,6 @@ import {
   FlaskConical,
   PanelLeftClose,
   Play,
-  Plus,
   Settings,
   Star,
   XCircle,
@@ -259,20 +258,6 @@ export function DesktopSidebar({
                 </p>
               )}
               <div className="space-y-1">
-                <Button
-                  type="button"
-                  title="New Chat"
-                  variant="ghost"
-                  size={isIconRail ? 'icon-sm' : 'sm'}
-                  onClick={() => {
-                    void onNewChat()
-                  }}
-                  className={isIconRail ? 'h-[var(--app-btn-icon-sm)] w-full' : 'h-[var(--app-btn-h-sm)] w-full justify-start px-2.5'}
-                >
-                  <Plus className={`h-4 w-4 shrink-0 ${isIconRail ? '' : 'mr-2'}`} />
-                  {!isIconRail && 'New Chat'}
-                  <span className="sr-only">New Chat</span>
-                </Button>
                 {PRIMARY_NAV_ITEMS.map((item) => (
                   <NavTabButton
                     key={item.tab}
