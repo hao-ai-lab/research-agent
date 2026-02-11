@@ -457,6 +457,12 @@ export function ConnectedChatView({
             {!hasConversation ? (
                 <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
                     <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
+                        {/* Welcome message for new chat */}
+                        <div className="mb-6 text-center">
+                            <h2 className="text-2xl font-semibold text-foreground mb-2">
+                                What can I help you with?
+                            </h2>
+                        </div>
                         <div className="w-full max-w-3xl">
                             {renderChatInput('centered')}
                         </div>
