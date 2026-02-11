@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Research Agent Hub – Kanban &amp; Feedback</title>
+    <meta
+      name="description"
+      content="Kanban board and feedback hub for Research Agent CI pipeline"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ===== Reset & Tokens ===== */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0a0a0f;
+        --bg-card: rgba(255, 255, 255, 0.04);
+        --bg-card-hover: rgba(255, 255, 255, 0.08);
+        --bg-column: rgba(255, 255, 255, 0.02);
+        --bg-input: rgba(255, 255, 255, 0.06);
+        --bg-glass: rgba(255, 255, 255, 0.05);
+        --border: rgba(255, 255, 255, 0.08);
+        --border-focus: rgba(99, 102, 241, 0.5);
+        --text: #e4e4e7;
+        --text-muted: #71717a;
+        --text-dim: #52525b;
+        --accent: #6366f1;
+        --accent-glow: rgba(99, 102, 241, 0.15);
+        --green: #22c55e;
+        --yellow: #eab308;
+        --red: #ef4444;
+        --blue: #3b82f6;
+        --purple: #a855f7;
+        --orange: #f97316;
+        --radius: 12px;
+        --radius-sm: 8px;
+        --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      body {
+        font-family:
+          "Inter",
+          -apple-system,
+          system-ui,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        overflow: hidden;
+      }
+
+      /* ===== Layout ===== */
+      .app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: blur(20px);
+        background: rgba(10, 10, 15, 0.8);
+        z-index: 10;
+      }
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .header-logo {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), var(--purple));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .header-title {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .header-subtitle {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .header-stat {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        background: var(--bg-glass);
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .header-stat .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+      }
+      .dot-green {
+        background: var(--green);
+      }
+      .dot-blue {
+        background: var(--blue);
+      }
+
+      .main-content {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
+
+      /* ===== Kanban Board ===== */
+      .kanban {
+        flex: 1;
+        display: flex;
+        gap: 16px;
+        padding: 20px 24px;
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+
+      .column {
+        min-width: 280px;
+        max-width: 320px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-column);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+
+      .column-header {
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--border);
+      }
+      .column-title {
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+      }
+      .column-count {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: var(--bg-glass);
+        color: var(--text-dim);
+      }
+
+      .column-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .column-body::-webkit-scrollbar {
+        width: 4px;
+      }
+      .column-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .column-body::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+      }
+
+      /* ===== Kanban Card ===== */
+      .card {
+        padding: 12px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        transition: all var(--transition);
+      }
+      .card:hover {
+        background: var(--bg-card-hover);
+        border-color: rgba(255, 255, 255, 0.12);
+        transform: translateY(-1px);
+      }
+
+      .card-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .card-id {
+        font-size: 11px;
+        color: var(--text-dim);
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .card-title {
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.4;
+        margin-bottom: 8px;
+      }
+      .card-body-text {
+        font-size: 11px;
+        color: var(--text-muted);
+        line-height: 1.4;
+        margin-bottom: 8px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .card-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .tag {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+      }
+      .tag-feedback {
+        background: rgba(249, 115, 22, 0.15);
+        color: var(--orange);
+      }
+      .tag-agent {
+        background: rgba(168, 85, 247, 0.15);
+        color: var(--purple);
+      }
+      .tag-bug {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--red);
+      }
+      .tag-default {
+        background: var(--bg-glass);
+        color: var(--text-muted);
+      }
+
+      .card-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .card-meta {
+        font-size: 10px;
+        color: var(--text-dim);
+      }
+      .card-actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .card-link {
+        font-size: 10px;
+        color: var(--accent);
+        text-decoration: none;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: var(--accent-glow);
+        white-space: nowrap;
+        transition: all var(--transition);
+      }
+      .card-link:hover {
+        background: rgba(99, 102, 241, 0.25);
+      }
+
+      .card-pr-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(34, 197, 94, 0.12);
+        color: var(--green);
+      }
+      .card-pr-badge.draft {
+        background: rgba(234, 179, 8, 0.12);
+        color: var(--yellow);
+      }
+
+      /* ===== Chat Panel ===== */
+      .chat-panel {
+        width: 360px;
+        min-width: 360px;
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        background: rgba(10, 10, 15, 0.6);
+        backdrop-filter: blur(20px);
+      }
+
+      .chat-header {
+        padding: 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .chat-header-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, var(--green), var(--blue));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+      }
+      .chat-header-text h3 {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .chat-header-text p {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .chat-messages::-webkit-scrollbar {
+        width: 4px;
+      }
+      .chat-messages::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+      }
+
+      .chat-msg {
+        padding: 10px 14px;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        line-height: 1.5;
+        max-width: 90%;
+      }
+      .chat-msg-user {
+        background: var(--accent);
+        color: white;
+        align-self: flex-end;
+        border-bottom-right-radius: 4px;
+      }
+      .chat-msg-system {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        align-self: flex-start;
+        border-bottom-left-radius: 4px;
+      }
+      .chat-msg-time {
+        font-size: 10px;
+        color: var(--text-dim);
+        margin-top: 4px;
+      }
+
+      .chat-input-area {
+        padding: 16px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .chat-route-select {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 12px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color var(--transition);
+      }
+      .chat-route-select:focus {
+        border-color: var(--border-focus);
+      }
+
+      .chat-input-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .chat-input {
+        flex: 1;
+        padding: 10px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+        resize: none;
+        min-height: 40px;
+        max-height: 120px;
+        transition: border-color var(--transition);
+      }
+      .chat-input:focus {
+        border-color: var(--border-focus);
+      }
+      .chat-input::placeholder {
+        color: var(--text-dim);
+      }
+
+      .chat-send {
+        padding: 10px 16px;
+        border-radius: var(--radius-sm);
+        background: var(--accent);
+        color: white;
+        border: none;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all var(--transition);
+        white-space: nowrap;
+      }
+      .chat-send:hover {
+        filter: brightness(1.1);
+        transform: translateY(-1px);
+      }
+      .chat-send:active {
+        transform: translateY(0);
+      }
+      .chat-send:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      /* ===== Loading & Empty ===== */
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+      .spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin-right: 10px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100px;
+        color: var(--text-dim);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      /* ===== Auth Modal ===== */
+      .auth-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        backdrop-filter: blur(10px);
+      }
+      .auth-modal {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 32px;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: var(--shadow);
+      }
+      .auth-modal h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .auth-modal p {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 20px;
+      }
+      .auth-modal input {
+        width: 100%;
+        padding: 10px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+        margin-bottom: 12px;
+      }
+      .auth-modal input:focus {
+        border-color: var(--border-focus);
+      }
+      .auth-modal button {
+        width: 100%;
+        padding: 10px;
+        border-radius: var(--radius-sm);
+        background: var(--accent);
+        color: white;
+        border: none;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .auth-error {
+        color: var(--red);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
+      /* ===== Responsive ===== */
+      @media (max-width: 900px) {
+        .chat-panel {
+          display: none;
+        }
+        .kanban {
+          padding: 12px;
+          gap: 12px;
+        }
+        .column {
+          min-width: 240px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app" id="app"></div>
+
+    <script>
+      // =====================================================================
+      // State
+      // =====================================================================
+      const state = {
+        authenticated: false,
+        token: localStorage.getItem("hub_token") || "",
+        kanban: null,
+        prs: [],
+        messages: [
+          {
+            role: "system",
+            text: "Welcome! Describe any issues or feedback about the app, and I'll create a GitHub issue for you.",
+            time: new Date(),
+          },
+        ],
+        loading: true,
+        sending: false,
+        routeToPr: "",
+      };
+
+      const API_BASE = window.location.origin;
+
+      // =====================================================================
+      // API
+      // =====================================================================
+      async function apiFetch(path, options = {}) {
+        const headers = {
+          "Content-Type": "application/json",
+          "X-Auth-Token": state.token,
+          ...(options.headers || {}),
+        };
+        const resp = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        if (resp.status === 401) {
+          state.authenticated = false;
+          render();
+          throw new Error("Unauthorized");
+        }
+        if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+        return resp.json();
+      }
+
+      async function loadKanban() {
+        state.loading = true;
+        render();
+        try {
+          state.kanban = await apiFetch("/api/kanban");
+          const prs = await apiFetch("/api/prs");
+          state.prs = prs;
+        } catch (e) {
+          console.error("Failed to load kanban:", e);
+        }
+        state.loading = false;
+        render();
+      }
+
+      async function submitFeedback(message) {
+        state.sending = true;
+        render();
+        try {
+          const result = await apiFetch("/api/feedback", {
+            method: "POST",
+            body: JSON.stringify({
+              message,
+              route_to_pr: state.routeToPr ? parseInt(state.routeToPr) : null,
+              labels: ["feedback", "agent-solve"],
+            }),
+          });
+          state.messages.push({
+            role: "user",
+            text: message,
+            time: new Date(),
+          });
+          state.messages.push({
+            role: "system",
+            text: `✅ Created issue #${result.issue_number}${result.routed_to_pr ? ` (routed to PR #${result.routed_to_pr})` : ""}. The agent solver will start working on it shortly.`,
+            time: new Date(),
+          });
+          state.routeToPr = "";
+          loadKanban(); // Refresh
+        } catch (e) {
+          state.messages.push({
+            role: "system",
+            text: `❌ Error: ${e.message}`,
+            time: new Date(),
+          });
+        }
+        state.sending = false;
+        render();
+      }
+
+      async function testAuth(token) {
+        state.token = token;
+        try {
+          await apiFetch("/api/health");
+          state.authenticated = true;
+          localStorage.setItem("hub_token", token);
+          loadKanban();
+        } catch (e) {
+          state.authenticated = false;
+          throw e;
+        }
+      }
+
+      // =====================================================================
+      // Rendering
+      // =====================================================================
+      function timeAgo(date) {
+        const s = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+        if (s < 60) return "just now";
+        if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+        if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+        return `${Math.floor(s / 86400)}d ago`;
+      }
+
+      function tagClass(label) {
+        const l = label.toLowerCase();
+        if (l.includes("feedback")) return "tag-feedback";
+        if (l.includes("agent")) return "tag-agent";
+        if (l.includes("bug")) return "tag-bug";
+        return "tag-default";
+      }
+
+      function renderCard(card) {
+        const tags = (card.labels || [])
+          .map((l) => `<span class="tag ${tagClass(l)}">${l}</span>`)
+          .join("");
+        const linked = card.linked_pr
+          ? `<a class="card-link" href="${card.linked_pr.url}" target="_blank">PR #${card.linked_pr.number}</a>`
+          : "";
+        const preview = card.preview_url
+          ? `<a class="card-link" href="${card.preview_url}" target="_blank">Preview</a>`
+          : "";
+        const prBadge = card.is_pr
+          ? `<span class="card-pr-badge ${card.draft ? "draft" : ""}">PR ${card.draft ? "(Draft)" : ""}</span>`
+          : "";
+        const id = card.is_pr
+          ? `PR #${String(card.id).replace("pr-", "")}`
+          : `#${card.id}`;
+
+        return `
+        <div class="card" onclick="window.open('${card.url}','_blank')">
+          <div class="card-header">
+            <span class="card-id">${id}</span>
+            ${prBadge}
+            ${card.agent_solving ? '<span class="tag tag-agent">🤖 agent</span>' : ""}
+          </div>
+          <div class="card-title">${card.title}</div>
+          ${card.body ? `<div class="card-body-text">${card.body}</div>` : ""}
+          ${tags ? `<div class="card-tags">${tags}</div>` : ""}
+          <div class="card-footer">
+            <span class="card-meta">${card.assignee ? `@${card.assignee} · ` : ""}${timeAgo(card.updated_at)}</span>
+            <div class="card-actions">${linked}${preview}</div>
+          </div>
+        </div>
+      `;
+      }
+
+      function renderColumn(title, cards) {
+        const empty =
+          cards.length === 0 ? '<div class="empty-state">No items</div>' : "";
+        return `
+        <div class="column">
+          <div class="column-header">
+            <span class="column-title">${title}</span>
+            <span class="column-count">${cards.length}</span>
+          </div>
+          <div class="column-body">
+            ${empty}
+            ${cards.map(renderCard).join("")}
+          </div>
+        </div>
+      `;
+      }
+
+      function renderMessages() {
+        return state.messages
+          .map(
+            (m) => `
+        <div class="chat-msg chat-msg-${m.role}">
+          ${m.text}
+          <div class="chat-msg-time">${m.time.toLocaleTimeString()}</div>
+        </div>
+      `,
+          )
+          .join("");
+      }
+
+      function render() {
+        const app = document.getElementById("app");
+
+        // Auth screen
+        if (!state.authenticated) {
+          app.innerHTML = `
+          <div class="auth-overlay">
+            <div class="auth-modal">
+              <h2>🔐 Research Agent Hub</h2>
+              <p>Enter your auth token to access the kanban board and feedback system.</p>
+              <div id="auth-error" class="auth-error" style="display:none"></div>
+              <input id="auth-input" type="password" placeholder="Auth token" value="${state.token}" />
+              <button id="auth-btn">Connect</button>
+            </div>
+          </div>
+        `;
+          const btn = document.getElementById("auth-btn");
+          const input = document.getElementById("auth-input");
+          btn.onclick = async () => {
+            btn.textContent = "Connecting...";
+            btn.disabled = true;
+            try {
+              await testAuth(input.value);
+            } catch (e) {
+              const err = document.getElementById("auth-error");
+              err.style.display = "block";
+              err.textContent = "Invalid token or connection error";
+              btn.textContent = "Connect";
+              btn.disabled = false;
+            }
+          };
+          input.onkeydown = (e) => {
+            if (e.key === "Enter") btn.click();
+          };
+          return;
+        }
+
+        const columns = state.kanban?.columns || {
+          backlog: [],
+          in_progress: [],
+          review: [],
+          done: [],
+        };
+        const totalIssues = state.kanban?.total_issues || 0;
+        const totalPRs = state.kanban?.total_prs || 0;
+
+        const prOptions = state.prs
+          .map(
+            (pr) =>
+              `<option value="${pr.number}">PR #${pr.number}: ${pr.title}</option>`,
+          )
+          .join("");
+
+        app.innerHTML = `
+        <div class="header">
+          <div class="header-left">
+            <div class="header-logo">RA</div>
+            <div>
+              <div class="header-title">Research Agent Hub</div>
+              <div class="header-subtitle">Kanban · Feedback · Agent Pipeline</div>
+            </div>
+          </div>
+          <div class="header-right">
+            <div class="header-stat"><div class="dot dot-green"></div>${totalIssues} issues</div>
+            <div class="header-stat"><div class="dot dot-blue"></div>${totalPRs} PRs</div>
+            <button class="chat-send" onclick="loadKanban()" style="padding:6px 12px;font-size:11px">↻ Refresh</button>
+          </div>
+        </div>
+        <div class="main-content">
+          <div class="kanban">
+            ${
+              state.loading
+                ? '<div class="loading"><div class="spinner"></div>Loading board...</div>'
+                : `
+              ${renderColumn("Backlog", columns.backlog)}
+              ${renderColumn("In Progress", columns.in_progress)}
+              ${renderColumn("In Review", columns.review)}
+              ${renderColumn("Done", columns.done.slice(0, 10))}
+            `
+            }
+          </div>
+          <div class="chat-panel">
+            <div class="chat-header">
+              <div class="chat-header-icon">💬</div>
+              <div class="chat-header-text">
+                <h3>Feedback</h3>
+                <p>Report issues or suggest improvements</p>
+              </div>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+              ${renderMessages()}
+            </div>
+            <div class="chat-input-area">
+              <select class="chat-route-select" id="route-select">
+                <option value="">Create new issue</option>
+                <option value="" disabled>── Route to PR ──</option>
+                ${prOptions}
+              </select>
+              <div class="chat-input-row">
+                <textarea class="chat-input" id="chat-input" placeholder="Describe the issue or feedback..." rows="2"></textarea>
+                <button class="chat-send" id="send-btn" ${state.sending ? "disabled" : ""}>
+                  ${state.sending ? "..." : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+        // Scroll chat to bottom
+        const chatEl = document.getElementById("chat-messages");
+        if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+
+        // Wire up send
+        const sendBtn = document.getElementById("send-btn");
+        const chatInput = document.getElementById("chat-input");
+        const routeSelect = document.getElementById("route-select");
+
+        if (sendBtn && chatInput) {
+          sendBtn.onclick = () => {
+            const msg = chatInput.value.trim();
+            if (!msg) return;
+            state.routeToPr = routeSelect ? routeSelect.value : "";
+            chatInput.value = "";
+            submitFeedback(msg);
+          };
+          chatInput.onkeydown = (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendBtn.click();
+            }
+          };
+        }
+      }
+
+      // =====================================================================
+      // Init
+      // =====================================================================
+      (async function init() {
+        if (state.token) {
+          try {
+            await testAuth(state.token);
+          } catch (_) {
+            render();
+          }
+        } else {
+          render();
+        }
+      })();
+    </script>
+  </body>
+</html>

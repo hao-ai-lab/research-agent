@@ -1,0 +1,137 @@
+name: PR Preview Deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+# Cancel in-progress runs for the same PR (only keep latest)
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Deploy preview on PR open / update
+  # -----------------------------------------------------------------------
+  deploy-preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Deploy preview to Modal
+        run: |
+          modal deploy modal_preview.py \
+            --name "research-agent-preview-pr-${{ github.event.pull_request.number }}"
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+      - name: Comment preview URL on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const sha = context.sha.slice(0, 7);
+            const appSlug = `research-agent-preview-pr-${prNumber}`;
+            const previewUrl = `https://${context.repo.owner}--${appSlug}-preview-server.modal.run`;
+
+            // Look for an existing preview bot comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('<!-- preview-bot -->')
+            );
+
+            const body = [
+              '<!-- preview-bot -->',
+              '## 🚀 Preview Deployed',
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| **Preview** | [Open App](${previewUrl}) |`,
+              `| **Commit** | \`${sha}\` |`,
+              `| **Status** | ✅ Deployed |`,
+              '',
+              `> Updated at ${new Date().toISOString()}`,
+            ].join('\n');
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
+  # -----------------------------------------------------------------------
+  # Tear down preview when PR is closed or merged
+  # -----------------------------------------------------------------------
+  teardown-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Stop preview app
+        run: |
+          modal app stop "research-agent-preview-pr-${{ github.event.pull_request.number }}" || true
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+      - name: Update PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('<!-- preview-bot -->')
+            );
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: [
+                  '<!-- preview-bot -->',
+                  '## 🚀 Preview Torn Down',
+                  '',
+                  `Preview for PR #${prNumber} has been stopped.`,
+                ].join('\n'),
+              });
+            }
