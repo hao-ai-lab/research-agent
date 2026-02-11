@@ -181,6 +181,16 @@ export type WildLoopPhase =
 
 export type ChatMessageSource = "user" | "agent_wild";
 
+export interface PromptProvenance {
+  rendered: string;
+  user_input: string;
+  skill_id: string | null;
+  skill_name: string | null;
+  template: string | null;
+  variables: Record<string, string>;
+  prompt_type: string;
+}
+
 export interface TerminationConditions {
   maxIterations?: number | null;
   maxTimeSeconds?: number | null;
@@ -205,6 +215,7 @@ export interface ChatMessage {
   thinking?: string; // Legacy: combined thinking (backward compat)
   parts?: MessagePart[]; // NEW: ordered array of parts
   source?: ChatMessageSource; // 'agent_wild' = auto-sent by wild loop
+  provenance?: PromptProvenance; // How this prompt was constructed (wild loop transparency)
   timestamp: Date;
   attachments?: {
     name: string;
