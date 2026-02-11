@@ -43,14 +43,13 @@ image = (
         "requests>=2.31.0",
         "pyyaml>=6.0",
     )
-    # Install opencode CLI to /root/bin
-    .run_commands(
-        "mkdir -p /root/bin",
-        "export OPENCODE_INSTALL_DIR=/root/bin && curl -fsSL https://opencode.ai/install | bash",
-        "ls -la /root/bin/opencode && /root/bin/opencode --version || echo 'opencode install failed'",
-    )
     # Copy the full repo into the image
     .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
+    # Install opencode CLI (always installs to $HOME/.opencode/bin)
+    .run_commands(
+        "curl -fsSL https://opencode.ai/install | bash",
+        "ls -la /root/.opencode/bin/opencode && /root/.opencode/bin/opencode --version || echo 'opencode install failed'",
+    )
     # Install frontend deps and build static export
     .run_commands(
         "cd /app && npm install --prefer-offline 2>/dev/null || cd /app && npm install",
@@ -64,7 +63,7 @@ image = (
 
 app = modal.App("research-agent-preview")
 
-OPENCODE_BIN = "/root/bin/opencode"
+OPENCODE_BIN = "/root/.opencode/bin/opencode"
 
 
 @app.function(
