@@ -806,8 +806,151 @@ export const mockSweepConfigs: SweepConfig[] = [
   },
 ]
 
+// Model Type Comparison Sweep - helps find the best architecture
+export const modelTypeComparisonSweepConfig: SweepConfig = {
+  id: `sweep-config-model-comparison-${Date.now()}`,
+  name: 'Model Type Comparison Sweep',
+  description: 'Compare different model architectures to find the best type for this task. Tests encoder-only (BERT/RoBERTa), decoder-only (GPT/LLaMA/Mistral), code models (CodeLLaMA), and vision transformers.',
+  goal: 'Identify which model architecture achieves the best validation performance with optimal convergence speed',
+  command: 'python train.py --model {model_type} --lr {learning_rate} --batch-size {batch_size} --dropout {dropout} --epochs 25',
+  hyperparameters: [
+    // Model type - the key parameter we're sweeping
+    {
+      name: 'model_type',
+      type: 'choice',
+      values: [
+        'bert-base-uncased',
+        'roberta-base',
+        'gpt-4-base',
+        'llama-7b',
+        'mistral-7b',
+      ],
+    },
+    // Learning rate tuned per model family
+    {
+      name: 'learning_rate',
+      type: 'choice',
+      values: [1e-5, 3e-5, 5e-5, 1e-4, 2e-4],
+    },
+    // Batch size - smaller for larger models
+    {
+      name: 'batch_size',
+      type: 'choice',
+      values: [8, 16, 32],
+    },
+    // Dropout for regularization
+    {
+      name: 'dropout',
+      type: 'choice',
+      values: [0.0, 0.1, 0.2],
+    },
+    // Optimizer choice
+    {
+      name: 'optimizer',
+      type: 'choice',
+      values: ['Adam', 'AdamW'],
+    },
+    // Warmup steps
+    {
+      name: 'warmup_steps',
+      type: 'choice',
+      values: [100, 500, 1000],
+    },
+  ],
+  metrics: [
+    { name: 'Validation Loss', path: 'val/loss', goal: 'minimize', isPrimary: true },
+    { name: 'Validation Accuracy', path: 'val/accuracy', goal: 'maximize', isPrimary: true },
+    { name: 'Training Loss', path: 'train/loss', goal: 'minimize', isPrimary: false },
+    { name: 'F1 Score', path: 'val/f1', goal: 'maximize', isPrimary: false },
+    { name: 'Convergence Epoch', path: 'train/epoch', goal: 'minimize', isPrimary: false },
+    { name: 'GPU Memory (GB)', path: 'system/gpu_memory_gb', goal: 'minimize', isPrimary: false },
+  ],
+  insights: [
+    {
+      id: 'oom-large-models',
+      type: 'failure',
+      condition: 'model_type in ["llama-7b", "mistral-7b"] and system/gpu_memory_gb > 22',
+      description: 'Large decoder models consuming excessive memory',
+      action: 'Consider gradient checkpointing or smaller batch sizes',
+    },
+    {
+      id: 'bert-fast-converge',
+      type: 'review',
+      condition: 'model_type in ["bert-base-uncased", "roberta-base"] and val/loss < 0.5 and train/epoch < 10',
+      description: 'Encoder model showing fast convergence - good for quick iteration',
+      action: 'Note as efficient baseline',
+    },
+    {
+      id: 'decoder-high-perf',
+      type: 'review',
+      condition: 'model_type in ["gpt-4-base", "llama-7b", "mistral-7b"] and val/accuracy > 0.90',
+      description: 'Large decoder model achieving high accuracy',
+      action: 'Strong candidate for production if compute permits',
+    },
+    {
+      id: 'divergence-check',
+      type: 'failure',
+      condition: 'train/loss > 5 or is_nan(val/loss)',
+      description: 'Training divergence detected',
+      action: 'Stop run - learning rate too high for this model',
+    },
+    {
+      id: 'overfitting-alert',
+      type: 'suspicious',
+      condition: 'val/loss increases for 3 consecutive epochs',
+      description: 'Overfitting detected',
+      action: 'Consider increasing dropout or reducing model capacity',
+    },
+    {
+      id: 'compute-efficiency',
+      type: 'review',
+      condition: 'val/accuracy > 0.85 and system/gpu_memory_gb < 12',
+      description: 'Good performance with moderate memory usage',
+      action: 'Optimal efficiency point found',
+    },
+  ],
+  maxRuns: 30,
+  parallelRuns: 3,
+  earlyStoppingEnabled: true,
+  earlyStoppingPatience: 5,
+  notes: 'Model comparison sweep: Tests 5 architectures (BERT, RoBERTa, GPT-4, LLaMA, Mistral) with varying hyperparameters. Primary metric: validation accuracy. Will identify best model type for this specific task.',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+}
+
+// Add to mock configs
+mockSweepConfigs.push(modelTypeComparisonSweepConfig)
+
 // Mock Sweeps
 export const mockSweeps: Sweep[] = [
+  {
+    id: 'sweep-model-comparison',
+    config: modelTypeComparisonSweepConfig,
+    creationContext: {
+      name: modelTypeComparisonSweepConfig.name,
+      goal: modelTypeComparisonSweepConfig.goal,
+      description: modelTypeComparisonSweepConfig.description,
+      command: modelTypeComparisonSweepConfig.command,
+      notes: modelTypeComparisonSweepConfig.notes || null,
+      maxRuns: modelTypeComparisonSweepConfig.maxRuns || null,
+      parallelRuns: modelTypeComparisonSweepConfig.parallelRuns || null,
+      earlyStoppingEnabled: modelTypeComparisonSweepConfig.earlyStoppingEnabled ?? null,
+      earlyStoppingPatience: modelTypeComparisonSweepConfig.earlyStoppingPatience || null,
+      hyperparameterCount: modelTypeComparisonSweepConfig.hyperparameters.length,
+      metricCount: modelTypeComparisonSweepConfig.metrics.length,
+      insightCount: modelTypeComparisonSweepConfig.insights.length,
+      createdAt: modelTypeComparisonSweepConfig.createdAt,
+    },
+    status: 'draft',
+    runIds: [],
+    createdAt: modelTypeComparisonSweepConfig.createdAt,
+    progress: {
+      completed: 0,
+      total: 30,
+      failed: 0,
+      running: 0,
+    },
+  },
   {
     id: 'sweep-1',
     config: mockSweepConfigs[0],
