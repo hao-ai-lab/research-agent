@@ -19,7 +19,8 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
-    "dev:worktree": "bash scripts/dev-worktree.sh"
+    "dev:worktree": "bash scripts/dev-worktree.sh",
+    "worktree:new": "bash scripts/worktree-new.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

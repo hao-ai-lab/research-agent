@@ -41,3 +41,7 @@ server/.build-venv
 server/.uv-cache
 server/dist
 server/build
+
+# worktree
+.worktree-initialized
+.env.worktree
