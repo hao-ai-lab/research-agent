@@ -52,12 +52,10 @@ image = (
     )
     # Copy the full repo into the image
     .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
-    # Install frontend deps and build static export
+    # Install frontend deps (dev mode, no static export needed)
     .run_commands(
         "npm install -g pnpm",
         "cd /app && pnpm install --frozen-lockfile || cd /app && pnpm install",
-        "cd /app && RESEARCH_AGENT_STATIC_EXPORT=true NEXT_PUBLIC_API_URL=auto NEXT_PUBLIC_USE_MOCK=false pnpm run build",
-        "ls -la /app/out/index.html || echo 'ERROR: Frontend build did not produce /app/out'",
     )
 )
 
@@ -78,21 +76,18 @@ OPENCODE_BIN = "/usr/local/bin/opencode"
     memory=8 * 1024,  # 8GB
 )
 @modal.concurrent(max_inputs=100)
-@modal.web_server(port=10000, startup_timeout=120)
+@modal.web_server(port=8080, startup_timeout=120)
 def preview_server():
-    """Start the full Research Agent stack inside Modal."""
+    """Start the full Research Agent stack inside Modal (dev mode)."""
     os.chdir("/app")
 
     env = {**os.environ}
     auth_token = env.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "preview-token")
     env["RESEARCH_AGENT_USER_AUTH_TOKEN"] = auth_token
 
-    # Determine frontend dir (static export)
-    frontend_dir = "/app/out"
-    if os.path.isdir(frontend_dir) and os.path.isfile(os.path.join(frontend_dir, "index.html")):
-        env["RESEARCH_AGENT_FRONTEND_DIR"] = frontend_dir
-    else:
-        print(f"WARNING: Static frontend not found at {frontend_dir}, backend will run without UI")
+    # Prepare workdir
+    workdir = "/app"
+    os.makedirs(os.path.join(workdir, ".agents"), exist_ok=True)
 
     # Start a tmux server for job execution support (best-effort)
     try:
@@ -118,12 +113,9 @@ def preview_server():
     except Exception as e:
         print(f"WARNING: opencode failed to start: {e}")
 
-    # Prepare workdir
-    workdir = "/app"
-    os.makedirs(os.path.join(workdir, ".agents"), exist_ok=True)
-
-    # Start the FastAPI backend (blocking – this is the main process)
-    subprocess.run(
+    # Start the FastAPI backend on port 10000 (internal, not exposed)
+    print("Starting backend on port 10000...")
+    subprocess.Popen(
         [
             sys.executable, "/app/server/server.py",
             "--workdir", workdir,
@@ -134,3 +126,13 @@ def preview_server():
         env=env,
         cwd="/app/server",
     )
+
+    # Start the Next.js frontend dev server on port 8080 (exposed via Modal)
+    print("Starting frontend dev server on port 8080...")
+    frontend_env = {**env, "NEXT_PUBLIC_API_URL": "http://localhost:10000", "PORT": "8080"}
+    subprocess.Popen(
+        ["npx", "next", "dev", "-p", "8080"],
+        env=frontend_env,
+        cwd="/app",
+    )
+
