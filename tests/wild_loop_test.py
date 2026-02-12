@@ -23,9 +23,13 @@ import wild_loop as wl
 from wild_loop import (
     WildEventQueue,
     WildEvent,
+    WildStepPlan,
+    WildPlan,
+    WildStartRequest,
     EnqueueEventRequest,
     WildModeRequest,
     WildLoopConfigRequest,
+    WildLoopEngine,
     enqueue_event,
     dequeue_event,
     get_queue_state,
@@ -40,6 +44,10 @@ from wild_loop import (
     build_wild_prompt,
     get_serializable_state,
     load_from_saved,
+    parse_signal,
+    parse_plan,
+    parse_next_step,
+    parse_sweep_spec,
 )
 
 
@@ -53,12 +61,16 @@ def reset_wild_state():
     wl.wild_mode_enabled = False
     wl.wild_loop_state.update({
         "phase": "idle",
+        "stage": "exploring",
+        "is_active": False,
         "iteration": 0,
         "goal": None,
         "session_id": None,
         "started_at": None,
         "is_paused": False,
         "sweep_id": None,
+        "plan": None,
+        "step_goal": None,
         "termination": {
             "max_iterations": None,
             "max_time_seconds": None,
@@ -760,3 +772,333 @@ class TestEdgeCases:
         result = build_wild_prompt(mock_render, "ctx")
         # Empty string is falsy, so build_wild_prompt logs warning and returns ""
         assert result == ""
+
+
+# ===========================================================================
+# 10. Signal Parser Tests (parse_plan, parse_next_step)
+# ===========================================================================
+
+class TestParsePlan:
+    """Tests for parse_plan() signal parser."""
+
+    def test_valid_plan(self):
+        text = """Here is my plan:
+<plan>
+[
+  {"step": 1, "goal": "Prepare dataset"},
+  {"step": 2, "goal": "Train baseline model"},
+  {"step": 3, "goal": "Evaluate results"}
+]
+</plan>
+<promise>CONTINUE</promise>"""
+        result = parse_plan(text)
+        assert result is not None
+        assert len(result) == 3
+        assert result[0]["step"] == 1
+        assert result[0]["goal"] == "Prepare dataset"
+        assert result[2]["goal"] == "Evaluate results"
+
+    def test_plan_without_step_number(self):
+        """Steps without explicit step numbers should auto-index."""
+        text = '<plan>[{"goal": "First"}, {"goal": "Second"}]</plan>'
+        result = parse_plan(text)
+        assert result is not None
+        assert len(result) == 2
+        assert result[0]["step"] == 1
+        assert result[1]["step"] == 2
+
+    def test_invalid_json(self):
+        text = "<plan>not valid json</plan>"
+        result = parse_plan(text)
+        assert result is None
+
+    def test_empty_plan(self):
+        text = "<plan>[]</plan>"
+        result = parse_plan(text)
+        assert result is None
+
+    def test_no_plan_tag(self):
+        text = "Just a regular response with no plan tag."
+        result = parse_plan(text)
+        assert result is None
+
+    def test_plan_with_extra_fields(self):
+        """Extra fields should be ignored, only step and goal kept."""
+        text = '<plan>[{"step": 1, "goal": "Do X", "notes": "extra"}]</plan>'
+        result = parse_plan(text)
+        assert result is not None
+        assert len(result) == 1
+        assert "notes" not in result[0]
+
+    def test_plan_missing_goal(self):
+        """Steps without a goal should be filtered out."""
+        text = '<plan>[{"step": 1}, {"step": 2, "goal": "Valid"}]</plan>'
+        result = parse_plan(text)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["goal"] == "Valid"
+
+
+class TestParseNextStep:
+    """Tests for parse_next_step() signal parser."""
+
+    def test_valid_next_step(self):
+        text = "Done with this step.\n<next_step>Analyze training curves</next_step>"
+        result = parse_next_step(text)
+        assert result == "Analyze training curves"
+
+    def test_no_tag(self):
+        text = "Just regular output."
+        result = parse_next_step(text)
+        assert result is None
+
+    def test_empty_tag(self):
+        text = "<next_step></next_step>"
+        result = parse_next_step(text)
+        assert result is None
+
+    def test_whitespace_only_tag(self):
+        text = "<next_step>   </next_step>"
+        result = parse_next_step(text)
+        assert result is None
+
+    def test_multiline_next_step(self):
+        text = "<next_step>\nRun evaluation sweep\nwith best hyperparams\n</next_step>"
+        result = parse_next_step(text)
+        assert result is not None
+        assert "Run evaluation sweep" in result
+
+
+# ===========================================================================
+# 11. Planning Stage Engine Integration Tests
+# ===========================================================================
+
+class TestPlanningStageEngine:
+    """Tests for the WildLoopEngine planning stage workflow."""
+
+    @pytest.fixture
+    def engine(self):
+        """Create a fresh engine instance with mock callbacks."""
+        e = WildLoopEngine()
+        e.set_callbacks(
+            get_runs=lambda: {},
+            get_sweeps=lambda: {},
+            get_alerts=lambda: {},
+            get_run_logs=lambda rid: "",
+            create_sweep=lambda spec: {"id": "test-sweep"},
+            start_sweep=lambda sid, n: None,
+            respond_to_alert=lambda aid, choice: None,
+            recompute_sweep_state=lambda sid: None,
+            skill_get_fn=None,  # No skills — use fallback templates
+            save_settings=lambda: None,
+        )
+        return e
+
+    def test_start_enters_planning_stage(self, engine):
+        """start() should set stage to 'planning' and enqueue a planning prompt."""
+        req = WildStartRequest(goal="Train MNIST to 99%", session_id="s1")
+        state = engine.start(req)
+
+        assert state["stage"] == "planning"
+        assert state["phase"] == "planning"
+        assert state["is_active"] is True
+        assert state["goal"] == "Train MNIST to 99%"
+        assert state["plan"] is None
+        assert state["step_goal"] is None
+
+        # Should have a planning event in queue
+        assert wl.wild_event_queue.size == 1
+        event = wl.wild_event_queue.peek()
+        assert event["type"] == "planning"
+        assert "Planning" in event["title"]
+
+        engine.stop()
+
+    def test_planning_response_creates_plan(self, engine):
+        """After planning prompt, agent response with <plan> tag creates the plan."""
+        req = WildStartRequest(goal="Optimize hyperparams", session_id="s2")
+        engine.start(req)
+
+        # Consume the planning prompt
+        wl.wild_event_queue.dequeue()
+
+        # Simulate agent response with a plan
+        plan_response = """
+Here's my plan:
+<plan>
+[
+  {"step": 1, "goal": "Run baseline experiment"},
+  {"step": 2, "goal": "Grid search learning rates"},
+  {"step": 3, "goal": "Evaluate best config"}
+]
+</plan>
+<promise>CONTINUE</promise>
+"""
+        state = engine.on_response_complete(plan_response)
+
+        # Should transition to exploring
+        assert state["stage"] == "exploring"
+        assert state["phase"] == "exploring"
+
+        # Plan should be stored
+        plan = state["plan"]
+        assert plan is not None
+        assert len(plan["steps"]) == 3
+        assert plan["current_step"] == 0
+        assert plan["steps"][0]["status"] == "in_progress"
+        assert plan["steps"][1]["status"] == "pending"
+
+        # Step goal should be set to first step
+        assert state["step_goal"] == "Run baseline experiment"
+
+        # Should have an exploring event in queue
+        assert wl.wild_event_queue.size == 1
+        event = wl.wild_event_queue.peek()
+        assert event["type"] == "exploring"
+
+        engine.stop()
+
+    def test_planning_response_without_plan(self, engine):
+        """If agent doesn't provide a <plan> tag, uses goal as step_goal."""
+        req = WildStartRequest(goal="Do research", session_id="s3")
+        engine.start(req)
+        wl.wild_event_queue.dequeue()
+
+        # Response without plan tag
+        state = engine.on_response_complete("I'm not sure what to plan.\n<promise>CONTINUE</promise>")
+
+        assert state["stage"] == "exploring"
+        assert state["step_goal"] == "Do research"
+        assert state["plan"] is None
+
+        engine.stop()
+
+    def test_step_advancement_via_next_step(self, engine):
+        """<next_step> tag advances the current step in the plan."""
+        req = WildStartRequest(goal="Full pipeline", session_id="s4")
+        engine.start(req)
+        wl.wild_event_queue.dequeue()
+
+        # Plan response
+        plan_response = """
+<plan>[
+  {"step": 1, "goal": "Step one"},
+  {"step": 2, "goal": "Step two"},
+  {"step": 3, "goal": "Step three"}
+]</plan>
+<promise>CONTINUE</promise>"""
+        engine.on_response_complete(plan_response)
+        wl.wild_event_queue.dequeue()
+
+        # Step 1 exploring response with next_step
+        state = engine.on_response_complete(
+            "Did step one work.\n<next_step>Moving to step two</next_step>\n<promise>CONTINUE</promise>"
+        )
+
+        plan = state["plan"]
+        assert plan["current_step"] == 1
+        assert plan["steps"][0]["status"] == "done"
+        assert plan["steps"][1]["status"] == "in_progress"
+        assert state["step_goal"] == "Step two"
+
+        engine.stop()
+
+    def test_step_advancement_past_last_step(self, engine):
+        """When all plan steps are done, uses dynamic step goal."""
+        req = WildStartRequest(goal="Quick test", session_id="s5")
+        engine.start(req)
+        wl.wild_event_queue.dequeue()
+
+        # Single-step plan
+        plan_response = '<plan>[{"step": 1, "goal": "Only step"}]</plan>\n<promise>CONTINUE</promise>'
+        engine.on_response_complete(plan_response)
+        wl.wild_event_queue.dequeue()
+
+        # Advance past the last step
+        state = engine.on_response_complete(
+            "Done!\n<next_step>Run validation checks</next_step>\n<promise>CONTINUE</promise>"
+        )
+
+        assert state["plan"]["steps"][0]["status"] == "done"
+        assert state["step_goal"] == "Run validation checks"
+
+        engine.stop()
+
+    def test_dynamic_step_goal_without_plan(self, engine):
+        """<next_step> without plan creates a dynamic step goal."""
+        req = WildStartRequest(goal="Ad-hoc work", session_id="s6")
+        engine.start(req)
+        wl.wild_event_queue.dequeue()
+
+        # No plan response
+        engine.on_response_complete("Just starting.\n<promise>CONTINUE</promise>")
+        wl.wild_event_queue.dequeue()
+
+        # Next_step sets dynamic step goal
+        state = engine.on_response_complete(
+            "Exploring.\n<next_step>Focus on data prep</next_step>\n<promise>CONTINUE</promise>"
+        )
+
+        assert state["plan"] is None
+        assert state["step_goal"] == "Focus on data prep"
+
+        engine.stop()
+
+    def test_stop_clears_plan_state(self, engine):
+        """Stopping the engine clears plan and step_goal."""
+        req = WildStartRequest(goal="Test cleanup", session_id="s7")
+        engine.start(req)
+        wl.wild_event_queue.dequeue()
+
+        plan_response = '<plan>[{"step": 1, "goal": "Do something"}]</plan>\n<promise>CONTINUE</promise>'
+        engine.on_response_complete(plan_response)
+
+        assert wl.wild_loop_state["plan"] is not None
+        assert wl.wild_loop_state["step_goal"] is not None
+
+        engine.stop()
+
+        assert wl.wild_loop_state["plan"] is None
+        assert wl.wild_loop_state["step_goal"] is None
+        assert wl.wild_loop_state["is_active"] is False
+
+    def test_complete_signal_stops_loop(self, engine):
+        """COMPLETE signal stops the loop even during planning."""
+        req = WildStartRequest(goal="Already done", session_id="s8")
+        engine.start(req)
+        wl.wild_event_queue.dequeue()
+
+        state = engine.on_response_complete("<promise>COMPLETE</promise>")
+        assert state["is_active"] is False
+
+    def test_exploring_prompt_includes_step_goal(self, engine):
+        """Exploring prompts should include the step goal in the text."""
+        req = WildStartRequest(goal="Meta goal", session_id="s9")
+        engine.start(req)
+        wl.wild_event_queue.dequeue()
+
+        plan_response = '<plan>[{"step": 1, "goal": "Specific step task"}]</plan>\n<promise>CONTINUE</promise>'
+        engine.on_response_complete(plan_response)
+
+        # The exploring event should contain the step goal
+        event = wl.wild_event_queue.peek()
+        assert event is not None
+        assert event["type"] == "exploring"
+        # The fallback template includes step_goal
+        assert "Specific step task" in event["prompt"]
+
+        engine.stop()
+
+    def test_get_next_prompt_includes_step_goal(self, engine):
+        """get_next_prompt() should return step_goal field."""
+        req = WildStartRequest(goal="Prompt test", session_id="s10")
+        engine.start(req)
+
+        # Set a step_goal manually for this test
+        wl.wild_loop_state["step_goal"] = "Focus on X"
+
+        prompt = engine.get_next_prompt()
+        assert prompt["has_prompt"] is True
+        assert prompt["step_goal"] == "Focus on X"
+
+        engine.stop()
