@@ -611,6 +611,24 @@ class TestWildPromptBuilder:
         build_wild_prompt(mock_render, "ctx")
         assert "unlimited" in variables_captured.get("iteration", "")
 
+    def test_setup_state_in_prompt_variables(self):
+        """autonomy_level, queue_modify_enabled, away_duration should appear in prompt variables."""
+        configure_loop(WildLoopConfigRequest(
+            autonomy_level="full",
+            queue_modify_enabled=False,
+            max_time_seconds=21600,  # 6 hours
+        ))
+
+        variables_captured = {}
+        def mock_render(skill_id, variables):
+            variables_captured.update(variables)
+            return "rendered"
+
+        build_wild_prompt(mock_render, "ctx")
+        assert variables_captured["autonomy_level"] == "full"
+        assert variables_captured["queue_modify_enabled"] == "No"
+        assert variables_captured["away_duration"] == "6 hours"
+
 
 # ===========================================================================
 # 8. Integration: Full Lifecycle Tests
