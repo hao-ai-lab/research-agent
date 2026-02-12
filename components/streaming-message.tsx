@@ -113,6 +113,7 @@ function StreamingThinkingPart({ part }: { part: StreamingPart }) {
     const [isOpen, setIsOpen] = useState(true)
     const [isDone, setIsDone] = useState(false)
     const prevContentRef = useRef(part.content)
+    const length_to_show = 150
 
     // Detect when thinking stops (content unchanged for 400ms)
     useEffect(() => {
@@ -135,7 +136,7 @@ function StreamingThinkingPart({ part }: { part: StreamingPart }) {
                 <span>{isDone ? 'Thought' : 'Thinking...'}</span>
                 {!isOpen && isDone && part.content && (
                     <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.content.split('\n')[0]}>
-                        — {part.content.split('\n')[0].slice(0, 60)}{part.content.split('\n')[0].length > 60 ? '…' : ''}
+                        — {part.content.split('\n')[0].slice(0, length_to_show)}{part.content.split('\n')[0].length > length_to_show ? '…' : ''}
                     </span>
                 )}
             </CollapsibleTrigger>
@@ -157,6 +158,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
     const [isOpen, setIsOpen] = useState(true)
     const state = part.toolState || 'pending'
     const durationLabel = formatDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
+    const length_to_show = 150
 
     // Auto-collapse when tool finishes (completed or error)
     useEffect(() => {
@@ -181,7 +183,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                 {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
                 {!isOpen && (part.toolDescription || part.toolInput) && (
                     <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.toolDescription || part.toolInput}>
-                        — {(part.toolDescription || part.toolInput || '').slice(0, 60)}{(part.toolDescription || part.toolInput || '').length > 60 ? '…' : ''}
+                        — {(part.toolDescription || part.toolInput || '').slice(0, length_to_show)}{(part.toolDescription || part.toolInput || '').length > length_to_show ? '…' : ''}
                     </span>
                 )}
             </CollapsibleTrigger>
