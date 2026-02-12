@@ -194,22 +194,7 @@
       "enabled": true
     }
   },
-  "permission": {
-    "read": "allow",
-    "write": "allow",
-    "edit": "allow",
-    "bash": "allow",
-    "grep": "allow",
-    "glob": "allow",
-    "list": "allow",
-    "webfetch": "allow",
-    "skill": "allow",
-    "patch": "allow",
-    "task": "allow",
-    "question": "allow",
-    "todowrite": "allow",
-    "todoread": "allow"
-  },
+  "permission": "allow",
   "tools": {
     "read": true,
     "write": true,
