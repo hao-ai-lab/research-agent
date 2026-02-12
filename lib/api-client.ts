@@ -67,6 +67,9 @@ export const renameSession = (...args: Parameters<typeof realApi.renameSession>)
 export const deleteSession = (...args: Parameters<typeof realApi.deleteSession>) =>
     getApi().deleteSession(...args)
 
+export const rewindSession = (...args: Parameters<typeof realApi.rewindSession>) =>
+    getApi().rewindSession(...args)
+
 export const streamChat = (...args: Parameters<typeof realApi.streamChat>) =>
     getApi().streamChat(...args)
 

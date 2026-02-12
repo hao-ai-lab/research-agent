@@ -170,6 +170,21 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * Rewind a session to just before a previous user message index.
+ */
+export async function rewindSession(sessionId: string, messageIndex: number): Promise<SessionWithMessages> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/rewind`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ message_index: messageIndex }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to rewind session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
  * Stream chat response
  * Returns an async generator that yields stream events
  */

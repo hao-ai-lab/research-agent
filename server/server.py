@@ -229,6 +229,10 @@ class SystemPromptUpdate(BaseModel):
     system_prompt: str = ""
 
 
+class RewindSessionRequest(BaseModel):
+    message_index: int
+
+
 # Run Models
 # Run State Machine: ready -> queued -> launching -> running -> finished/failed/stopped
 # - ready: Created but not submitted for execution
@@ -2569,6 +2573,67 @@ async def get_session(session_id: str):
     }
 
 
+def _render_history_seed(messages: list) -> str:
+    """Render session history into a compact role-tagged text block."""
+    lines: List[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role_raw = str(message.get("role", "")).strip().lower()
+        content = str(message.get("content", "")).strip()
+        if not content:
+            continue
+        role = "USER" if role_raw == "user" else "ASSISTANT"
+        lines.append(f"[{role}] {content}")
+    return "\n\n".join(lines)
+
+
+@app.post("/sessions/{session_id}/rewind")
+async def rewind_session(session_id: str, req: RewindSessionRequest):
+    """Rewind a session to just before a prior user message."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    runtime = active_chat_streams.get(session_id)
+    if runtime and runtime.status == "running":
+        raise HTTPException(status_code=409, detail="Session already has an active response")
+
+    session = chat_sessions[session_id]
+    messages = session.get("messages", [])
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=500, detail="Invalid session message history")
+
+    target_index = req.message_index
+    if target_index < 0 or target_index >= len(messages):
+        raise HTTPException(status_code=400, detail="message_index is out of range")
+
+    target_message = messages[target_index]
+    if not isinstance(target_message, dict) or target_message.get("role") != "user":
+        raise HTTPException(status_code=400, detail="message_index must point to a user message")
+
+    retained_messages = messages[:target_index]
+    session["messages"] = retained_messages
+    session.pop("active_stream", None)
+    session["opencode_session_id"] = None
+
+    # Seed the next prompt with retained transcript so branch context is preserved.
+    history_seed = _render_history_seed(retained_messages)
+    if history_seed:
+        session["rewind_seed"] = history_seed
+    else:
+        session.pop("rewind_seed", None)
+
+    save_chat_state()
+    return {
+        "id": session_id,
+        "title": session.get("title", "New Chat"),
+        "created_at": session.get("created_at"),
+        "messages": session.get("messages", []),
+        "system_prompt": session.get("system_prompt", ""),
+        "active_stream": None,
+    }
+
+
 @app.patch("/sessions/{session_id}")
 async def update_session(session_id: str, req: UpdateSessionRequest):
     """Update a chat session (e.g. rename)."""
@@ -2643,7 +2708,12 @@ MODE_REGISTRY: Dict[str, ModeConfig] = {
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tuple:
+def _build_chat_prompt(
+    session: dict,
+    message: str,
+    mode: str = "agent",
+    history_seed: Optional[str] = None,
+) -> tuple:
     """Build the full prompt for a chat turn, prepending mode-specific preamble.
 
     Returns (content: str, provenance: dict | None).
@@ -2689,7 +2759,11 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tupl
             "prompt_type": mode,
         }
 
-    content = f"{mode_note}[USER] {message}"
+    history_block = ""
+    if history_seed:
+        history_block = f"[CONVERSATION CONTEXT]\n{history_seed}\n[/CONVERSATION CONTEXT]\n\n"
+
+    content = f"{mode_note}{history_block}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
@@ -2830,6 +2904,7 @@ async def chat_endpoint(req: ChatRequest):
     if session.get("title") == "New Chat" and len(messages) == 1:
         session["title"] = req.message[:50] + ("..." if len(req.message) > 50 else "")
 
+    history_seed = session.pop("rewind_seed", None)
     save_chat_state()
 
     # Resolve mode: prefer explicit mode field, fall back to legacy booleans
@@ -2840,7 +2915,7 @@ async def chat_endpoint(req: ChatRequest):
         elif req.plan_mode:
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
-    content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
+    content, provenance = _build_chat_prompt(session, llm_input, effective_mode, history_seed=history_seed)
     runtime = await _start_chat_worker(session_id, content)
 
     # Emit provenance as the first SSE event so the frontend can attach it

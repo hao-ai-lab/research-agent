@@ -140,6 +140,7 @@ export function ConnectedChatView({
         messages,
         streamingState,
         sendMessage,
+        rewindSession,
         createNewSession,
         selectSession,
         stopStreaming,
@@ -403,6 +404,34 @@ export function ConnectedChatView({
         })
     }, [currentSessionId])
 
+    const getSessionMessageIndex = useCallback((targetMessage: ChatMessageType): number | null => {
+        if (!currentSessionId) return null
+        const idPrefix = `${currentSessionId}-`
+        if (targetMessage.id.startsWith(idPrefix)) {
+            const index = Number.parseInt(targetMessage.id.slice(idPrefix.length), 10)
+            if (Number.isInteger(index) && index >= 0) {
+                return index
+            }
+        }
+
+        const fallbackIndex = apiDisplayMessages.findIndex((message) => message.id === targetMessage.id)
+        return fallbackIndex >= 0 ? fallbackIndex : null
+    }, [apiDisplayMessages, currentSessionId])
+
+    const handleSubmitEditedUserMessage = useCallback(async (targetMessage: ChatMessageType, editedContent: string) => {
+        if (streamingState.isStreaming || !currentSessionId) return
+        const nextContent = editedContent.trim()
+        if (!nextContent) return
+
+        const targetIndex = getSessionMessageIndex(targetMessage)
+        if (targetIndex === null) return
+
+        const targetSessionId = await rewindSession(targetIndex)
+        if (!targetSessionId) return
+
+        await sendMessage(nextContent, mode, targetSessionId)
+    }, [currentSessionId, getSessionMessageIndex, mode, rewindSession, sendMessage, streamingState.isStreaming])
+
     const handleOpenReplyExcerpt = useCallback((excerpt: { fileName: string; text: string }) => {
         setExcerptPreview(excerpt)
         setIsExcerptPreviewOpen(true)
@@ -572,6 +601,7 @@ export function ConnectedChatView({
                                                 onLaunchSweep={onLaunchSweep}
                                                 onRunClick={onRunClick}
                                                 onReplyToSelection={handleReplyToSelection}
+                                                onSubmitEditedUserMessage={streamingState.isStreaming ? undefined : handleSubmitEditedUserMessage}
                                             />
                                         ))
                                         : displayMessages.map((message, index) => {
@@ -604,6 +634,7 @@ export function ConnectedChatView({
                                                         onLaunchSweep={onLaunchSweep}
                                                         onRunClick={onRunClick}
                                                         onReplyToSelection={handleReplyToSelection}
+                                                        onSubmitEditedUserMessage={streamingState.isStreaming ? undefined : handleSubmitEditedUserMessage}
                                                         previousUserContent={prevUserContent}
                                                     />
                                                 </div>
@@ -688,6 +719,7 @@ function CollapsedChatPair({
     onLaunchSweep,
     onRunClick,
     onReplyToSelection,
+    onSubmitEditedUserMessage,
 }: {
     pair: { user: ChatMessageType; assistant?: ChatMessageType }
     collapseArtifacts: boolean
@@ -698,6 +730,7 @@ function CollapsedChatPair({
     onLaunchSweep?: (config: SweepConfig) => void
     onRunClick: (run: ExperimentRun) => void
     onReplyToSelection?: (text: string) => void
+    onSubmitEditedUserMessage?: (message: ChatMessageType, editedContent: string) => void
 }) {
     const [expanded, setExpanded] = useState(false)
 
@@ -737,6 +770,7 @@ function CollapsedChatPair({
                         onEditSweep={onEditSweep}
                         onLaunchSweep={onLaunchSweep}
                         onRunClick={onRunClick}
+                        onSubmitEditedUserMessage={onSubmitEditedUserMessage}
                     />
                     {pair.assistant && (
                         <ChatMessage

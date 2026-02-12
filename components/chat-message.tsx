@@ -3,7 +3,7 @@
 import React from "react"
 
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Brain, Wrench, Check, AlertCircle, Loader2, Pencil, Copy } from 'lucide-react'
 import {
   Collapsible,
   CollapsibleContent,
@@ -29,6 +29,7 @@ import {
 import { extractContextReferences } from '@/lib/extract-context-references'
 import { ContextReferencesBar } from './context-references-bar'
 import { PromptProvenanceView } from './prompt-provenance-view'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface ChatMessageProps {
   message: ChatMessageType
@@ -40,6 +41,7 @@ interface ChatMessageProps {
   onLaunchSweep?: (config: SweepConfig) => void
   onRunClick?: (run: ExperimentRun) => void
   onReplyToSelection?: (text: string) => void
+  onSubmitEditedUserMessage?: (message: ChatMessageType, editedContent: string) => void
   /** Content of the user message that prompted this assistant response (for context extraction) */
   previousUserContent?: string
 }
@@ -116,6 +118,7 @@ export function ChatMessage({
   onLaunchSweep,
   onRunClick,
   onReplyToSelection,
+  onSubmitEditedUserMessage,
   previousUserContent,
 }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
@@ -125,8 +128,13 @@ export function ChatMessage({
     x: number
     y: number
   } | null>(null)
+  const [copiedUserMessage, setCopiedUserMessage] = useState(false)
+  const [isEditingUserMessage, setIsEditingUserMessage] = useState(false)
+  const [editedUserMessage, setEditedUserMessage] = useState(message.content)
   const isUser = message.role === 'user'
   const assistantContainerRef = useRef<HTMLDivElement>(null)
+  const copyResetTimerRef = useRef<number | null>(null)
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Extract context references from the current round (user question + assistant answer)
   const contextReferences = useMemo(() => {
@@ -145,6 +153,29 @@ export function ChatMessage({
     const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return `${dateStr}, ${timeStr}`
   }
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isUser) return
+    setIsEditingUserMessage(false)
+    setEditedUserMessage(message.content)
+  }, [isUser, message.content, message.id])
+
+  useEffect(() => {
+    if (!isEditingUserMessage) return
+    const textarea = editTextareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    const cursor = textarea.value.length
+    textarea.setSelectionRange(cursor, cursor)
+  }, [isEditingUserMessage])
 
   useEffect(() => {
     if (isUser || !onReplyToSelection) return
@@ -191,6 +222,65 @@ export function ChatMessage({
       window.removeEventListener('scroll', clearSelectionReply, true)
     }
   }, [isUser, onReplyToSelection])
+
+  const handleCopyUserMessage = async () => {
+    const text = message.content
+    if (!text) return
+
+    const fallbackCopy = () => {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        fallbackCopy()
+      }
+      setCopiedUserMessage(true)
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current)
+      }
+      copyResetTimerRef.current = window.setTimeout(() => {
+        setCopiedUserMessage(false)
+      }, 1400)
+    } catch {
+      fallbackCopy()
+      setCopiedUserMessage(true)
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current)
+      }
+      copyResetTimerRef.current = window.setTimeout(() => {
+        setCopiedUserMessage(false)
+      }, 1400)
+    }
+  }
+
+  const handleStartEditingUserMessage = () => {
+    if (!onSubmitEditedUserMessage) return
+    setEditedUserMessage(message.content)
+    setIsEditingUserMessage(true)
+  }
+
+  const handleCancelEditingUserMessage = () => {
+    setEditedUserMessage(message.content)
+    setIsEditingUserMessage(false)
+  }
+
+  const handleSubmitEditedUserMessage = () => {
+    const nextContent = editedUserMessage.trim()
+    if (!nextContent || !onSubmitEditedUserMessage) return
+    onSubmitEditedUserMessage(message, nextContent)
+    setIsEditingUserMessage(false)
+  }
 
   const renderReferenceToken = (reference: string, key: string) => {
     const [type, ...idParts] = reference.split(':')
@@ -431,10 +521,11 @@ export function ChatMessage({
     const hasExcerptCard = Boolean(parsedUserReply.excerpt)
     const userBody = hasExcerptCard ? parsedUserReply.body : message.content
     const excerptLineCount = parsedUserReply.excerpt ? parsedUserReply.excerpt.split('\n').length : 0
+    const canSubmitEditedMessage = Boolean(editedUserMessage.trim() && onSubmitEditedUserMessage)
 
     return (
       <div className="px-0.5 py-2 min-w-0 overflow-hidden">
-        {hasExcerptCard && parsedUserReply.excerpt && (
+        {!isEditingUserMessage && hasExcerptCard && parsedUserReply.excerpt && (
           <div className="mb-2 flex justify-start">
             <div className="w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
               <p className="text-sm font-medium leading-tight text-foreground break-words">
@@ -449,8 +540,80 @@ export function ChatMessage({
             </div>
           </div>
         )}
-        <div className="border-l-4 border-primary px-3 py-1">
-          <p className="text-base leading-relaxed text-foreground break-words">{renderInlineMarkdown(userBody)}</p>
+        <div className="group/user relative">
+          {!isEditingUserMessage && (
+            <div className="absolute -top-3 right-1 z-20 flex items-center gap-1 rounded-md border border-border/70 bg-background/95 p-1 opacity-100 shadow-sm transition-opacity md:pointer-events-none md:opacity-0 md:group-hover/user:pointer-events-auto md:group-hover/user:opacity-100 md:group-focus-within/user:pointer-events-auto md:group-focus-within/user:opacity-100">
+              {onSubmitEditedUserMessage && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Edit message"
+                      onClick={handleStartEditingUserMessage}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>Edit</TooltipContent>
+                </Tooltip>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={copiedUserMessage ? 'Copied message' : 'Copy message'}
+                    onClick={handleCopyUserMessage}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    {copiedUserMessage ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{copiedUserMessage ? 'Copied' : 'Copy'}</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+          <div className="border-l-4 border-primary px-3 py-1">
+            {isEditingUserMessage ? (
+              <div className="space-y-2">
+                <textarea
+                  ref={editTextareaRef}
+                  value={editedUserMessage}
+                  onChange={(event) => setEditedUserMessage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault()
+                      handleSubmitEditedUserMessage()
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      handleCancelEditingUserMessage()
+                    }
+                  }}
+                  rows={4}
+                  className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelEditingUserMessage}
+                    className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmitEditedUserMessage}
+                    disabled={!canSubmitEditedMessage}
+                    className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-base leading-relaxed text-foreground break-words">{renderInlineMarkdown(userBody)}</p>
+            )}
+          </div>
         </div>
       </div>
     )
