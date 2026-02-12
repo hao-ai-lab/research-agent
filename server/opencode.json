@@ -1,74 +1,95 @@
 {
-    "$schema": "https://opencode.ai/config.json",
-    "provider": {
-        "research-agent": {
-            "npm": "@ai-sdk/anthropic",
-            "name": "ResearchAgent",
-            "options": {
-                "baseURL": "https://hao-ai-lab--anthropic-gateway-api.modal.run/v1",
-                "apiKey": "{env:RESEARCH_AGENT_KEY}"
-            },
-            "models": {
-                "claude-3-5-haiku-latest": {
-                    "name": "Claude 3.5 Haiku",
-                    "limit": {
-                        "context": 200000,
-                        "output": 8192
-                    }
-                },
-                "claude-3-5-haiku-20241022": {
-                    "name": "Claude 3.5 Haiku (Oct 2024)",
-                    "limit": {
-                        "context": 200000,
-                        "output": 8192
-                    }
-                },
-                "claude-3-5-sonnet-latest": {
-                    "name": "Claude 3.5 Sonnet",
-                    "limit": {
-                        "context": 200000,
-                        "output": 8192
-                    }
-                },
-                "claude-3-5-sonnet-20241022": {
-                    "name": "Claude 3.5 Sonnet (Oct 2024)",
-                    "limit": {
-                        "context": 200000,
-                        "output": 8192
-                    }
-                },
-                "claude-3-7-sonnet-latest": {
-                    "name": "Claude 3.7 Sonnet",
-                    "limit": {
-                        "context": 200000,
-                        "output": 16384
-                    }
-                },
-                "claude-3-7-sonnet-20250219": {
-                    "name": "Claude 3.7 Sonnet (Feb 2025)",
-                    "limit": {
-                        "context": 200000,
-                        "output": 16384
-                    }
-                },
-                "claude-sonnet-4-20250514": {
-                    "name": "Claude Sonnet 4",
-                    "limit": {
-                        "context": 200000,
-                        "output": 16384
-                    }
-                },
-                "claude-opus-4-20250514": {
-                    "name": "Claude Opus 4",
-                    "limit": {
-                        "context": 200000,
-                        "output": 16384
-                    }
-                }
-            }
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "research-agent": {
+      "npm": "@ai-sdk/anthropic",
+      "name": "ResearchAgent",
+      "options": {
+        "baseURL": "https://hao-ai-lab--anthropic-gateway-api.modal.run/v1",
+        "apiKey": "{env:RESEARCH_AGENT_KEY}"
+      },
+      "models": {
+        "claude-3-5-haiku-latest": {
+          "name": "Claude 3.5 Haiku",
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        },
+        "claude-3-5-haiku-20241022": {
+          "name": "Claude 3.5 Haiku (Oct 2024)",
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        },
+        "claude-3-5-sonnet-latest": {
+          "name": "Claude 3.5 Sonnet",
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        },
+        "claude-3-5-sonnet-20241022": {
+          "name": "Claude 3.5 Sonnet (Oct 2024)",
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        },
+        "claude-3-7-sonnet-latest": {
+          "name": "Claude 3.7 Sonnet",
+          "limit": {
+            "context": 200000,
+            "output": 16384
+          }
+        },
+        "claude-3-7-sonnet-20250219": {
+          "name": "Claude 3.7 Sonnet (Feb 2025)",
+          "limit": {
+            "context": 200000,
+            "output": 16384
+          }
+        },
+        "claude-sonnet-4-20250514": {
+          "name": "Claude Sonnet 4",
+          "limit": {
+            "context": 200000,
+            "output": 16384
+          }
+        },
+        "claude-opus-4-20250514": {
+          "name": "Claude Opus 4",
+          "limit": {
+            "context": 200000,
+            "output": 16384
+          }
+        },
+        "claude-haiku-4-5-20251015": {
+          "name": "Claude Haiku 4.5 (Oct 2025)",
+          "limit": {
+            "context": 200000,
+            "output": 16384
+          }
+        },
+        "claude-sonnet-4-5-20250929": {
+          "name": "Claude Sonnet 4.5 (Sep 2025)",
+          "limit": {
+            "context": 200000,
+            "output": 16384
+          }
+        },
+        "claude-opus-4-6-20260205": {
+          "name": "Claude Opus 4.6 (Feb 2026)",
+          "limit": {
+            "context": 1000000,
+            "output": 16384
+          }
         }
-    },
-    "command": {
+      }
+    }
+  },
+  "command": {
     "test-browser": {
       "description": "Run browser tests on pages affected by current PR or branch",
       "template": "# Browser Test Command\n\n<command_purpose>Run end-to-end browser tests on pages affected by a PR or branch changes using agent-browser CLI.</command_purpose>\n\n## CRITICAL: Use agent-browser CLI Only\n\n**DO NOT use Chrome MCP tools (mcp__claude-in-chrome__*).**\n\nThis command uses the `agent-browser` CLI exclusively. The agent-browser CLI is a Bash-based tool from Vercel that runs headless Chromium. It is NOT the same as Chrome browser automation via MCP.\n\nIf you find yourself calling `mcp__claude-in-chrome__*` tools, STOP. Use `agent-browser` Bash commands instead.\n\n## Introduction\n\n<role>QA Engineer specializing in browser-based end-to-end testing</role>\n\nThis command tests affected pages in a real browser, catching issues that unit tests miss:\n- JavaScript integration bugs\n- CSS/layout regressions\n- User workflow breakages\n- Console errors\n\n## Prerequisites\n\n<requirements>\n- Local development server running (e.g., `bin/dev`, `rails server`, `npm run dev`)\n- agent-browser CLI installed (see Setup below)\n- Git repository with changes to test\n</requirements>\n\n## Setup\n\n**Check installation:**\n```bash\ncommand -v agent-browser >/dev/null 2>&1 && echo \"Installed\" || echo \"NOT INSTALLED\"\n```\n\n**Install if needed:**\n```bash\nnpm install -g agent-browser\nagent-browser install  # Downloads Chromium (~160MB)\n```\n\nSee the `agent-browser` skill for detailed usage.\n\n## Main Tasks\n\n### 0. Verify agent-browser Installation\n\nBefore starting ANY browser testing, verify agent-browser is installed:\n\n```bash\ncommand -v agent-browser >/dev/null 2>&1 && echo \"Ready\" || (echo \"Installing...\" && npm install -g agent-browser && agent-browser install)\n```\n\nIf installation fails, inform the user and stop.\n\n### 1. Ask Browser Mode\n\n<ask_browser_mode>\n\nBefore starting tests, ask user if they want to watch the browser:\n\nUse AskUserQuestion with:\n- Question: \"Do you want to watch the browser tests run?\"\n- Options:\n  1. **Headed (watch)** - Opens visible browser window so you can see tests run\n  2. **Headless (faster)** - Runs in background, faster but invisible\n\nStore the choice and use `--headed` flag when user selects \"Headed\".\n\n</ask_browser_mode>\n\n### 2. Determine Test Scope\n\n<test_target> $ARGUMENTS </test_target>\n\n<determine_scope>\n\n**If PR number provided:**\n```bash\ngh pr view [number] --json files -q '.files[].path'\n```\n\n**If 'current' or empty:**\n```bash\ngit diff --name-only main...HEAD\n```\n\n**If branch name provided:**\n```bash\ngit diff --name-only main...[branch]\n```\n\n</determine_scope>\n\n### 3. Map Files to Routes\n\n<file_to_route_mapping>\n\nMap changed files to testable routes:\n\n| File Pattern | Route(s) |\n|-------------|----------|\n| `app/views/users/*` | `/users`, `/users/:id`, `/users/new` |\n| `app/controllers/settings_controller.rb` | `/settings` |\n| `app/javascript/controllers/*_controller.js` | Pages using that Stimulus controller |\n| `app/components/*_component.rb` | Pages rendering that component |\n| `app/views/layouts/*` | All pages (test homepage at minimum) |\n| `app/assets/stylesheets/*` | Visual regression on key pages |\n| `app/helpers/*_helper.rb` | Pages using that helper |\n| `src/app/*` (Next.js) | Corresponding routes |\n| `src/components/*` | Pages using those components |\n\nBuild a list of URLs to test based on the mapping.\n\n</file_to_route_mapping>\n\n### 4. Verify Server is Running\n\n<check_server>\n\nBefore testing, verify the local server is accessible:\n\n```bash\nagent-browser open http://localhost:3000\nagent-browser snapshot -i\n```\n\nIf server is not running, inform user:\n```markdown\n**Server not running**\n\nPlease start your development server:\n- Rails: `bin/dev` or `rails server`\n- Node/Next.js: `npm run dev`\n\nThen run `/test-browser` again.\n```\n\n</check_server>\n\n### 5. Test Each Affected Page\n\n<test_pages>\n\nFor each affected route, use agent-browser CLI commands (NOT Chrome MCP):\n\n**Step 1: Navigate and capture snapshot**\n```bash\nagent-browser open \"http://localhost:3000/[route]\"\nagent-browser snapshot -i\n```\n\n**Step 2: For headed mode (visual debugging)**\n```bash\nagent-browser --headed open \"http://localhost:3000/[route]\"\nagent-browser --headed snapshot -i\n```\n\n**Step 3: Verify key elements**\n- Use `agent-browser snapshot -i` to get interactive elements with refs\n- Page title/heading present\n- Primary content rendered\n- No error messages visible\n- Forms have expected fields\n\n**Step 4: Test critical interactions**\n```bash\nagent-browser click @e1  # Use ref from snapshot\nagent-browser snapshot -i\n```\n\n**Step 5: Take screenshots**\n```bash\nagent-browser screenshot page-name.png\nagent-browser screenshot --full page-name-full.png  # Full page\n```\n\n</test_pages>\n\n### 6. Human Verification (When Required)\n\n<human_verification>\n\nPause for human input when testing touches:\n\n| Flow Type | What to Ask |\n|-----------|-------------|\n| OAuth | \"Please sign in with [provider] and confirm it works\" |\n| Email | \"Check your inbox for the test email and confirm receipt\" |\n| Payments | \"Complete a test purchase in sandbox mode\" |\n| SMS | \"Verify you received the SMS code\" |\n| External APIs | \"Confirm the [service] integration is working\" |\n\nUse AskUserQuestion:\n```markdown\n**Human Verification Needed**\n\nThis test touches the [flow type]. Please:\n1. [Action to take]\n2. [What to verify]\n\nDid it work correctly?\n1. Yes - continue testing\n2. No - describe the issue\n```\n\n</human_verification>\n\n### 7. Handle Failures\n\n<failure_handling>\n\nWhen a test fails:\n\n1. **Document the failure:**\n   - Screenshot the error state: `agent-browser screenshot error.png`\n   - Note the exact reproduction steps\n\n2. **Ask user how to proceed:**\n   ```markdown\n   **Test Failed: [route]**\n\n   Issue: [description]\n   Console errors: [if any]\n\n   How to proceed?\n   1. Fix now - I'll help debug and fix\n   2. Create todo - Add to todos/ for later\n   3. Skip - Continue testing other pages\n   ```\n\n3. **If \"Fix now\":**\n   - Investigate the issue\n   - Propose a fix\n   - Apply fix\n   - Re-run the failing test\n\n4. **If \"Create todo\":**\n   - Create `{id}-pending-p1-browser-test-{description}.md`\n   - Continue testing\n\n5. **If \"Skip\":**\n   - Log as skipped\n   - Continue testing\n\n</failure_handling>\n\n### 8. Test Summary\n\n<test_summary>\n\nAfter all tests complete, present summary:\n\n```markdown\n## Browser Test Results\n\n**Test Scope:** PR #[number] / [branch name]\n**Server:** http://localhost:3000\n\n### Pages Tested: [count]\n\n| Route | Status | Notes |\n|-------|--------|-------|\n| `/users` | Pass | |\n| `/settings` | Pass | |\n| `/dashboard` | Fail | Console error: [msg] |\n| `/checkout` | Skip | Requires payment credentials |\n\n### Console Errors: [count]\n- [List any errors found]\n\n### Human Verifications: [count]\n- OAuth flow: Confirmed\n- Email delivery: Confirmed\n\n### Failures: [count]\n- `/dashboard` - [issue description]\n\n### Created Todos: [count]\n- `005-pending-p1-browser-test-dashboard-error.md`\n\n### Result: [PASS / FAIL / PARTIAL]\n```\n\n</test_summary>\n\n## Quick Usage Examples\n\n```bash\n# Test current branch changes\n/test-browser\n\n# Test specific PR\n/test-browser 847\n\n# Test specific branch\n/test-browser feature/new-dashboard\n```\n\n## agent-browser CLI Reference\n\n**ALWAYS use these Bash commands. NEVER use mcp__claude-in-chrome__* tools.**\n\n```bash\n# Navigation\nagent-browser open <url>           # Navigate to URL\nagent-browser back                 # Go back\nagent-browser close                # Close browser\n\n# Snapshots (get element refs)\nagent-browser snapshot -i          # Interactive elements with refs (@e1, @e2, etc.)\nagent-browser snapshot -i --json   # JSON output\n\n# Interactions (use refs from snapshot)\nagent-browser click @e1            # Click element\nagent-browser fill @e1 \"text\"      # Fill input\nagent-browser type @e1 \"text\"      # Type without clearing\nagent-browser press Enter          # Press key\n\n# Screenshots\nagent-browser screenshot out.png       # Viewport screenshot\nagent-browser screenshot --full out.png # Full page screenshot\n\n# Headed mode (visible browser)\nagent-browser --headed open <url>      # Open with visible browser\nagent-browser --headed click @e1       # Click in visible browser\n\n# Wait\nagent-browser wait @e1             # Wait for element\nagent-browser wait 2000            # Wait milliseconds\n```"

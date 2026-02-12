@@ -3589,7 +3589,11 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
     Returns the rendered prompt, the skill template used, the variables applied,
     and the user's original input — giving the frontend full transparency.
     """
-    result = build_prompt_for_frontend(req, prompt_skill_manager.get)
+    result = build_prompt_for_frontend(
+        req, prompt_skill_manager.get,
+        server_url=SERVER_CALLBACK_URL,
+        auth_token=USER_AUTH_TOKEN or "",
+    )
     return result
 
 
