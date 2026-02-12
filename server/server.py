@@ -110,6 +110,7 @@ CHAT_DATA_FILE = ""
 JOBS_DATA_FILE = ""
 ALERTS_DATA_FILE = ""
 SETTINGS_DATA_FILE = ""
+PLANS_DATA_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
@@ -123,6 +124,7 @@ AUTH_PROTECTED_PREFIXES = (
     "/sweeps",
     "/cluster",
     "/git",
+    "/plans",
 )
 
 
@@ -136,13 +138,14 @@ def requires_api_auth(path: str) -> bool:
 
 def init_paths(workdir: str):
     """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE
+    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE, PLANS_DATA_FILE
     WORKDIR = os.path.abspath(workdir)
     DATA_DIR = os.path.join(WORKDIR, ".agents")
     CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
     JOBS_DATA_FILE = os.path.join(DATA_DIR, "jobs.json")
     ALERTS_DATA_FILE = os.path.join(DATA_DIR, "alerts.json")
     SETTINGS_DATA_FILE = os.path.join(DATA_DIR, "settings.json")
+    PLANS_DATA_FILE = os.path.join(DATA_DIR, "plans.json")
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
     logger.info(f"Initialized with workdir: {WORKDIR}")
@@ -313,6 +316,25 @@ class RunRerunRequest(BaseModel):
 
 # WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest
 # → imported from wild_loop module
+
+
+# Plan Models
+PLAN_STATUSES = {"draft", "approved", "executing", "completed", "archived"}
+
+
+class PlanCreate(BaseModel):
+    title: str
+    goal: str
+    session_id: Optional[str] = None
+    sections: Optional[dict] = None  # structured sections parsed from LLM output
+    raw_markdown: str = ""  # full LLM response markdown
+
+
+class PlanUpdate(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None  # draft, approved, executing, completed, archived
+    sections: Optional[dict] = None
+    raw_markdown: Optional[str] = None
 
 
 class ClusterUpdateRequest(BaseModel):
@@ -679,6 +701,7 @@ chat_sessions: Dict[str, dict] = {}
 runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
+plans: Dict[str, dict] = {}
 # wild_mode_enabled, wild_loop_state → imported from wild_loop module
 # Access via wild_loop_mod.wild_mode_enabled / wild_loop_state (imported ref)
 session_stop_flags: Dict[str, bool] = {}
@@ -902,6 +925,32 @@ def load_alerts_state():
                 }
         except Exception as e:
             logger.error(f"Error loading alerts state: {e}")
+
+
+def save_plans_state():
+    """Persist plans to disk."""
+    try:
+        with open(PLANS_DATA_FILE, "w") as f:
+            json.dump({"plans": list(plans.values())}, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Error saving plans state: {e}")
+
+
+def load_plans_state():
+    """Load plans from disk."""
+    global plans
+    if os.path.exists(PLANS_DATA_FILE):
+        try:
+            with open(PLANS_DATA_FILE, "r") as f:
+                data = json.load(f)
+                loaded = data.get("plans", [])
+                plans = {
+                    plan["id"]: plan
+                    for plan in loaded
+                    if isinstance(plan, dict) and plan.get("id")
+                }
+        except Exception as e:
+            logger.error(f"Error loading plans state: {e}")
 
 
 def _cluster_type_label(cluster_type: str) -> str:
@@ -2843,9 +2892,19 @@ class ModeConfig:
 
 def _build_plan_state(message: str) -> dict:
     """Build template variables for plan mode."""
+    # Summarize existing plans for context
+    existing_plans_summary = "No existing plans."
+    if plans:
+        lines = []
+        for p in sorted(plans.values(), key=lambda x: x.get("created_at", 0), reverse=True)[:5]:
+            lines.append(f"- **{p.get('title', 'Untitled')}** ({p.get('status', 'draft')}): {p.get('goal', '')[:100]}")
+        existing_plans_summary = "\n".join(lines)
     return {
         "goal": message,
         "experiment_context": _build_experiment_context(),
+        "existing_plans": existing_plans_summary,
+        "server_url": SERVER_CALLBACK_URL,
+        "auth_token": USER_AUTH_TOKEN or "",
     }
 
 
@@ -2926,10 +2985,11 @@ def _log_background_chat_task(task: asyncio.Task) -> None:
         logger.error("Background chat worker failed: %s", exc, exc_info=(type(exc), exc, exc.__traceback__))
 
 
-async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime) -> None:
+
+async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime, *, mode: str = "agent") -> None:
     """Run the OpenCode stream for a chat session independent of HTTP clients."""
     session_stop_flags.pop(session_id, None)
-    logger.debug("Starting background chat worker for session %s run %s", session_id, runtime.run_id)
+    logger.debug("Starting background chat worker for session %s run %s (mode=%s)", session_id, runtime.run_id, mode)
 
     try:
         opencode_session_id = await get_opencode_session_for_chat(session_id)
@@ -2975,6 +3035,7 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
                 }
                 session.setdefault("messages", []).append(assistant_msg)
 
+
         # Auto-name: fetch title from OpenCode only once (after the first exchange)
         session = chat_sessions.get(session_id)
         if isinstance(session, dict) and not session.get("title"):
@@ -2998,7 +3059,7 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
         logger.debug("Background chat worker finished for session %s run %s", session_id, runtime.run_id)
 
 
-async def _start_chat_worker(session_id: str, content: str) -> ChatStreamRuntime:
+async def _start_chat_worker(session_id: str, content: str, mode: str = "agent") -> ChatStreamRuntime:
     existing = active_chat_streams.get(session_id)
     if existing and existing.status == "running":
         raise HTTPException(status_code=409, detail="Session already has an active response")
@@ -3009,7 +3070,7 @@ async def _start_chat_worker(session_id: str, content: str) -> ChatStreamRuntime
     active_chat_streams[session_id] = runtime
     _persist_active_stream_snapshot(session_id, runtime, force=True)
 
-    task = asyncio.create_task(_chat_worker(session_id, content, runtime))
+    task = asyncio.create_task(_chat_worker(session_id, content, runtime, mode=mode))
     active_chat_tasks[session_id] = task
     task.add_done_callback(_log_background_chat_task)
     return runtime
@@ -3058,7 +3119,7 @@ async def chat_endpoint(req: ChatRequest):
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
     content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
-    runtime = await _start_chat_worker(session_id, content)
+    runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it
     if provenance:
@@ -3589,7 +3650,11 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
     Returns the rendered prompt, the skill template used, the variables applied,
     and the user's original input — giving the frontend full transparency.
     """
-    result = build_prompt_for_frontend(req, prompt_skill_manager.get)
+    result = build_prompt_for_frontend(
+        req, prompt_skill_manager.get,
+        server_url=SERVER_CALLBACK_URL,
+        auth_token=USER_AUTH_TOKEN or "",
+    )
     return result
 
 
@@ -4416,6 +4481,124 @@ def start_opencode_server_subprocess(args):
     logger.info(f"Started OpenCode server (PID: {opencode_process.pid}) in {args.workdir}")
     return
 
+
+# =============================================================================
+# Plan Endpoints
+# =============================================================================
+
+@app.get("/plans")
+async def list_plans(status: Optional[str] = None, session_id: Optional[str] = None):
+    """List all plans, optionally filtered by status or session."""
+    result = list(plans.values())
+    if status:
+        result = [p for p in result if p.get("status") == status]
+    if session_id:
+        result = [p for p in result if p.get("session_id") == session_id]
+    # Sort by created_at descending (newest first)
+    result.sort(key=lambda p: p.get("created_at", 0), reverse=True)
+    return result
+
+
+@app.get("/plans/{plan_id}")
+async def get_plan(plan_id: str):
+    """Get a single plan by ID."""
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return plan
+
+
+@app.post("/plans")
+async def create_plan(req: PlanCreate):
+    """Create a new plan."""
+    now = time.time()
+    plan_id = str(uuid.uuid4())[:8]
+    plan = {
+        "id": plan_id,
+        "title": req.title,
+        "goal": req.goal,
+        "session_id": req.session_id,
+        "status": "draft",
+        "sections": req.sections or {},
+        "raw_markdown": req.raw_markdown,
+        "created_at": now,
+        "updated_at": now,
+    }
+    plans[plan_id] = plan
+    save_plans_state()
+    return plan
+
+
+@app.patch("/plans/{plan_id}")
+async def update_plan(plan_id: str, req: PlanUpdate):
+    """Update a plan's fields."""
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    if req.title is not None:
+        plan["title"] = req.title
+    if req.status is not None:
+        if req.status not in PLAN_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status '{req.status}'. Must be one of: {', '.join(sorted(PLAN_STATUSES))}"
+            )
+        plan["status"] = req.status
+    if req.sections is not None:
+        plan["sections"] = req.sections
+    if req.raw_markdown is not None:
+        plan["raw_markdown"] = req.raw_markdown
+
+    plan["updated_at"] = time.time()
+    save_plans_state()
+    return plan
+
+
+@app.post("/plans/{plan_id}/approve")
+async def approve_plan(plan_id: str):
+    """Approve a plan, setting its status to 'approved'."""
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if plan["status"] not in ("draft",):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot approve a plan with status '{plan['status']}'. Only draft plans can be approved."
+        )
+    plan["status"] = "approved"
+    plan["updated_at"] = time.time()
+    save_plans_state()
+    return plan
+
+
+@app.post("/plans/{plan_id}/execute")
+async def execute_plan(plan_id: str):
+    """Mark a plan as 'executing'. Frontend should transition to agent/wild mode."""
+    plan = plans.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if plan["status"] not in ("approved",):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot execute a plan with status '{plan['status']}'. Only approved plans can be executed."
+        )
+    plan["status"] = "executing"
+    plan["updated_at"] = time.time()
+    save_plans_state()
+    return plan
+
+
+@app.delete("/plans/{plan_id}")
+async def delete_plan(plan_id: str):
+    """Delete a plan."""
+    if plan_id not in plans:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    del plans[plan_id]
+    save_plans_state()
+    return {"deleted": True, "id": plan_id}
+
+
 def maybe_mount_frontend_static():
     """Serve packaged frontend static files if available."""
     if not FRONTEND_STATIC_DIR:
@@ -4474,6 +4657,7 @@ def main():
     load_chat_state()
     load_runs_state()
     load_alerts_state()
+    load_plans_state()
     load_settings_state()
     if cluster_state.get("source") == "unset":
         inferred = _infer_cluster_from_environment()
