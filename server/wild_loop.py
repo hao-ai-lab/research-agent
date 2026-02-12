@@ -40,10 +40,10 @@ class WildLoopConfigRequest(BaseModel):
 
 class WildEvent(BaseModel):
     id: str
-    priority: int          # 10=user, 20=critical, 30=warning, 50=run_event, 70=analysis, 90=exploring
+    priority: int          # 10=user, 20=critical, 30=warning, 50=run_event, 60=evolution, 70=analysis, 90=exploring
     title: str
     prompt: str
-    type: str              # "steer"|"alert"|"run_event"|"analysis"|"exploring"
+    type: str              # "steer"|"alert"|"run_event"|"evolution"|"analysis"|"exploring"
     created_at: float
 
 
@@ -167,6 +167,7 @@ wild_loop_state: dict = {
     "started_at": None,
     "is_paused": False,
     "sweep_id": None,
+    "evolution_session_id": None,  # OpenEvolve session ID when in evolving stage
     "termination": {
         "max_iterations": None,
         "max_time_seconds": None,

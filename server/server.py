@@ -41,6 +41,7 @@ from wild_loop import (
     load_from_saved as load_wild_from_saved,
 )
 import wild_loop as wild_loop_mod
+import openevolve_bridge
 
 import httpx
 import uvicorn
@@ -120,6 +121,7 @@ AUTH_PROTECTED_PREFIXES = (
     "/sweeps",
     "/cluster",
     "/git",
+    "/evolve",
 )
 
 
@@ -3372,6 +3374,169 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
     """
     result = build_prompt_for_frontend(req, prompt_skill_manager.get)
     return result
+
+
+# =============================================================================
+# OpenEvolve Evolution Endpoints
+# =============================================================================
+
+@app.post("/evolve/start")
+async def start_evolution_endpoint(req: openevolve_bridge.StartEvolutionRequest):
+    """Start an OpenEvolve evolution session.
+
+    Creates a sweep for tracking, then runs the evolutionary loop
+    in the background. Each candidate evaluation becomes a run.
+    """
+    config = req.config
+
+    # Bridge callbacks that connect OpenEvolve to the run/sweep system
+    async def _create_run(name, command, workdir, sweep_id, auto_start):
+        run_id = uuid.uuid4().hex[:12]
+        initial_status = "queued" if auto_start else "ready"
+        run_data = {
+            "name": name,
+            "command": command,
+            "workdir": workdir or WORKDIR,
+            "status": initial_status,
+            "created_at": time.time(),
+            "is_archived": False,
+            "sweep_id": sweep_id,
+            "parent_run_id": None,
+            "origin_alert_id": None,
+            "tmux_window": None,
+            "run_dir": None,
+            "exit_code": None,
+            "error": None,
+            "wandb_dir": None,
+        }
+        runs[run_id] = run_data
+        if sweep_id and sweep_id in sweeps:
+            _sync_run_membership_with_sweep(run_id, sweep_id)
+        save_runs_state()
+        # If auto_start, trigger the run launcher
+        if auto_start:
+            launch_run_in_tmux(run_id, run_data)
+            if sweep_id and sweep_id in sweeps:
+                recompute_sweep_state(sweep_id)
+        return {"id": run_id, **run_data}
+
+    async def _start_run(run_id):
+        run = runs.get(run_id)
+        if run:
+            launch_run_in_tmux(run_id, run)
+            if run.get("sweep_id") and run["sweep_id"] in sweeps:
+                recompute_sweep_state(run["sweep_id"])
+
+    def _get_run(run_id):
+        return runs.get(run_id)
+
+    async def _get_run_logs(run_id):
+        run = runs.get(run_id)
+        if not run or not run.get("run_dir"):
+            return ""
+        log_file = os.path.join(run["run_dir"], "output.log")
+        if not os.path.exists(log_file):
+            return ""
+        try:
+            with open(log_file, "r", errors="replace") as f:
+                return f.read()[-5000:]  # Last 5KB
+        except Exception:
+            return ""
+
+    async def _create_sweep(name, base_command, workdir, parameters, goal, status):
+        sweep_id = uuid.uuid4().hex[:12]
+        sweep_data = {
+            "name": name,
+            "base_command": base_command,
+            "workdir": workdir or WORKDIR,
+            "parameters": parameters or {},
+            "run_ids": [],
+            "status": status or "draft",
+            "created_at": time.time(),
+            "goal": goal,
+            "max_runs": None,
+            "ui_config": {"type": "evolution"},
+            "creation_context": {
+                "name": name,
+                "goal": goal,
+                "description": f"OpenEvolve evolution session",
+            },
+            "progress": {
+                "total": 0, "completed": 0, "failed": 0,
+                "running": 0, "launching": 0, "ready": 0,
+                "queued": 0, "canceled": 0,
+            },
+        }
+        sweeps[sweep_id] = sweep_data
+        save_runs_state()
+        return {"id": sweep_id, **sweep_data}
+
+    def _on_evolution_event(event: openevolve_bridge.EvolutionEvent):
+        """Push evolution events into the wild loop event queue."""
+        if wild_loop_mod.wild_mode_enabled:
+            wild_event_queue.enqueue({
+                "id": f"evo-{event.type}-{event.generation}-{time.time():.0f}",
+                "priority": 60,
+                "title": f"🧬 {event.message}",
+                "prompt": (
+                    f"# Evolution Update — Generation {event.generation}\n\n"
+                    f"{event.message}\n\n"
+                    f"Best score so far: {event.best_score}\n\n"
+                    f"Respond with your analysis and `<promise>CONTINUE</promise>` to keep going."
+                ),
+                "type": "evolution",
+                "created_at": time.time(),
+            })
+
+    try:
+        status = await openevolve_bridge.start_evolution(
+            config=config,
+            create_run_fn=_create_run,
+            start_run_fn=_start_run,
+            get_run_fn=_get_run,
+            get_run_logs_fn=_get_run_logs,
+            create_sweep_fn=_create_sweep,
+            event_callback=_on_evolution_event,
+        )
+        # Track evolution session in wild loop state
+        wild_loop_state["evolution_session_id"] = status.session_id
+        save_settings_state()
+        return status.model_dump()
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to start evolution: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/evolve/status")
+async def get_evolution_status():
+    """Get the current evolution session status."""
+    return openevolve_bridge.get_status().model_dump()
+
+
+@app.post("/evolve/stop")
+async def stop_evolution_endpoint():
+    """Stop the active evolution session."""
+    status = await openevolve_bridge.stop_evolution()
+    wild_loop_state["evolution_session_id"] = None
+    save_settings_state()
+    return status.model_dump()
+
+
+@app.get("/evolve/candidates")
+async def get_evolution_candidates(generation: Optional[int] = None):
+    """Get evolution candidates, optionally filtered by generation."""
+    return openevolve_bridge.get_candidates(generation)
+
+
+@app.get("/evolve/best")
+async def get_best_evolved_program():
+    """Get the best-scoring evolved program."""
+    best = openevolve_bridge.get_best_program()
+    if best is None:
+        return {"candidate": None, "message": "No candidates scored yet"}
+    return {"candidate": best}
 
 
 @app.get("/cluster")

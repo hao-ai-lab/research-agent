@@ -1374,3 +1374,79 @@ export async function updateCluster(request: ClusterUpdateRequest): Promise<Clus
     }
     return response.json()
 }
+
+// =============================================================================
+// OpenEvolve Evolution Functions
+// =============================================================================
+
+import type { EvolutionConfig, EvolutionStatus, EvolutionCandidate } from '@/lib/types'
+
+/**
+ * Start an evolution session
+ */
+export async function startEvolution(config: EvolutionConfig): Promise<EvolutionStatus> {
+    const response = await fetch(`${API_URL()}/evolve/start`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ config }),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to start evolution: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get evolution session status
+ */
+export async function getEvolutionStatus(): Promise<EvolutionStatus> {
+    const response = await fetch(`${API_URL()}/evolve/status`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get evolution status: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stop the active evolution session
+ */
+export async function stopEvolution(): Promise<EvolutionStatus> {
+    const response = await fetch(`${API_URL()}/evolve/stop`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to stop evolution: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get evolution candidates, optionally filtered by generation
+ */
+export async function getEvolutionCandidates(generation?: number): Promise<EvolutionCandidate[]> {
+    const params = generation !== undefined ? `?generation=${generation}` : ''
+    const response = await fetch(`${API_URL()}/evolve/candidates${params}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get evolution candidates: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get the best evolved program
+ */
+export async function getBestEvolvedProgram(): Promise<{ candidate: EvolutionCandidate | null; message?: string }> {
+    const response = await fetch(`${API_URL()}/evolve/best`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get best evolved program: ${response.statusText}`)
+    }
+    return response.json()
+}

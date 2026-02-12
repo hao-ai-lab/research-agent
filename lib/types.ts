@@ -174,6 +174,7 @@ export type WildLoopPhase =
   | "designing"
   | "monitoring"
   | "analyzing"
+  | "evolving"
   | "fixing"
   | "complete"
   | "paused"
@@ -386,4 +387,58 @@ export interface SweepArtifact {
   sweepId: string;
   config: SweepConfig;
   timestamp: Date;
+}
+
+// OpenEvolve Evolution types
+export interface EvolutionConfig {
+  initial_program: string;
+  evaluator_command: string;
+  goal: string;
+  iterations?: number;
+  population_size?: number;
+  num_islands?: number;
+  llm_model?: string;
+  llm_api_base?: string;
+  temperature?: number;
+  workdir?: string;
+  sweep_name?: string;
+  timeout_seconds?: number;
+  score_parse_mode?: "last_float" | "json" | "exit_code";
+}
+
+export interface EvolutionCandidate {
+  id: string;
+  generation: number;
+  code: string;
+  parent_id: string | null;
+  score: number | null;
+  run_id: string | null;
+  status: "pending" | "evaluating" | "scored" | "failed";
+  metadata: Record<string, unknown>;
+}
+
+export type EvolutionPhase =
+  | "idle"
+  | "initializing"
+  | "generating"
+  | "evaluating"
+  | "selecting"
+  | "complete"
+  | "failed"
+  | "paused";
+
+export interface EvolutionStatus {
+  session_id: string;
+  status: EvolutionPhase;
+  generation: number;
+  total_generations: number;
+  population_size: number;
+  best_score: number | null;
+  best_candidate_id: string | null;
+  candidates_evaluated: number;
+  candidates_total: number;
+  sweep_id: string | null;
+  started_at: number | null;
+  elapsed_seconds: number;
+  config: EvolutionConfig | null;
 }
