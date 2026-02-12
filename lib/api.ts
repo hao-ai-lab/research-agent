@@ -430,6 +430,7 @@ export interface WildLoopStatus {
     active_alerts: Alert[]
     has_pending_prompt: boolean
     pending_event_id: string | null
+    plan_autonomy: string
 }
 
 export interface LogResponse {
@@ -752,6 +753,7 @@ export async function configureWildLoop(config: {
     custom_condition?: string
     autonomy_level?: string
     queue_modify_enabled?: boolean
+    plan_autonomy?: string
 }): Promise<WildLoopStatus> {
     const response = await fetch(`${API_URL()}/wild/configure`, {
         method: 'POST',

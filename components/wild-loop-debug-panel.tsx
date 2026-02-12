@@ -4,7 +4,7 @@ import React, { useState, useCallback, useEffect } from 'react'
 import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { getWildLoopStatus, getWildEventQueue } from '@/lib/api'
+import { getWildLoopStatus, getWildEventQueue, configureWildLoop } from '@/lib/api'
 import type { WildLoopStatus, WildEventQueueItem } from '@/lib/api'
 
 interface WildLoopDebugPanelProps {
@@ -154,6 +154,22 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
 
                                     <span className="text-muted-foreground">Queue:</span>
                                     <span>{status.queue_size} events</span>
+
+                                    <span className="text-muted-foreground">Plan:</span>
+                                    <button
+                                        className={`text-left font-medium cursor-pointer hover:underline ${status.plan_autonomy === 'agent' ? 'text-green-400' : 'text-blue-400'
+                                            }`}
+                                        onClick={async () => {
+                                            const next = status.plan_autonomy === 'agent' ? 'collaborative' : 'agent'
+                                            try {
+                                                await configureWildLoop({ plan_autonomy: next })
+                                                refresh()
+                                            } catch { }
+                                        }}
+                                        title={`Click to switch to ${status.plan_autonomy === 'agent' ? 'collaborative' : 'agent'} mode`}
+                                    >
+                                        {status.plan_autonomy === 'agent' ? '🤖 Agent decides' : '🤝 Collaborative'}
+                                    </button>
                                 </div>
 
                                 {/* Run stats */}

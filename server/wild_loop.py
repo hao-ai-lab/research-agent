@@ -43,6 +43,7 @@ class WildLoopConfigRequest(BaseModel):
     custom_condition: Optional[str] = None
     autonomy_level: Optional[str] = None       # "cautious" | "balanced" | "full"
     queue_modify_enabled: Optional[bool] = None
+    plan_autonomy: Optional[str] = None         # "agent" | "collaborative"
 
 
 class WildEvent(BaseModel):
@@ -66,6 +67,7 @@ class BuildPromptRequest(BaseModel):
     prompt_type: str                              # "exploring" | "run_event" | "alert" | "analysis"
     # Common
     goal: Optional[str] = None
+    step_goal: Optional[str] = None
     iteration: Optional[int] = None
     max_iterations: Optional[int] = None
     # run_event fields
@@ -172,12 +174,14 @@ wild_loop_state: dict = {
     "is_active": False,
     "iteration": 0,
     "goal": None,
+    "step_goal": None,
     "session_id": None,
     "started_at": None,
     "is_paused": False,
     "sweep_id": None,
     "autonomy_level": "balanced",
     "queue_modify_enabled": True,
+    "plan_autonomy": "agent",
     "termination": {
         "max_iterations": None,
         "max_time_seconds": None,
@@ -261,6 +265,8 @@ def configure_loop(req: WildLoopConfigRequest) -> dict:
         wild_loop_state["autonomy_level"] = req.autonomy_level
     if req.queue_modify_enabled is not None:
         wild_loop_state["queue_modify_enabled"] = req.queue_modify_enabled
+    if req.plan_autonomy is not None:
+        wild_loop_state["plan_autonomy"] = req.plan_autonomy
     return wild_loop_state
 
 
@@ -406,103 +412,6 @@ _PROMPT_TYPE_SKILL_MAP = {
     "analysis": "wild_analyzing",
 }
 
-# Hardcoded fallback builders (kept for backward compat when skill is missing)
-_FALLBACK_EXPLORING = """# Wild Loop — Iteration {{iteration}} (Exploring)
-
-## Your Goal
-{{goal}}
-
-## Status
-No sweep has been created yet. You need to define one.
-
-## What You Should Do
-1. Explore the codebase and understand what experiments are needed
-2. When ready, send a sweep specification to the sweep creation endpoint
-3. The sweep spec should be a JSON object with the following fields:
-   - `name`: Human-readable name for the sweep
-   - `base_command`: Shell command template (parameters are appended as `--key=value`)
-   - `parameters`: Grid definition — the system expands it into individual runs
-   - `max_runs`: Maximum number of runs to create
-
-## Rules
-- Send the sweep spec directly to the endpoint — do NOT embed it in your response as XML tags
-- If you need more info before creating a sweep, just explain what you need and output `<promise>CONTINUE</promise>`
-- After sending the sweep spec, output `<promise>CONTINUE</promise>` to monitor results"""
-
-_FALLBACK_RUN_EVENT = """# Wild Loop — Run Event (Monitoring)
-
-## Your Goal
-{{goal}}
-
-## Event: Run "{{run_name}}" just {{run_status}}  {{status_emoji}}
-- **ID**: {{run_id}}
-- **Status**: {{run_status}}
-- **Command**: `{{run_command}}`
-
-### Log Tail (last 1000 chars)
-```
-{{log_tail}}
-```
-
-## Current Sweep Status
-{{sweep_summary}}
-
-## Instructions
-{{run_instructions}}
-- End with `<promise>CONTINUE</promise>`"""
-
-_FALLBACK_ALERT = """# Wild Loop — Alert
-
-## Your Goal
-{{goal}}
-
-## ⚠️ Alert from Run "{{run_name}}"
-- **Alert ID**: {{alert_id}}
-- **Severity**: {{alert_severity}}
-- **Message**: {{alert_message}}
-- **Available Choices**: {{alert_choices}}
-
-## How to Resolve This Alert
-You MUST resolve this alert by outputting a `<resolve_alert>` tag with your chosen action:
-
-```
-<resolve_alert>
-{{alert_resolve_example}}
-</resolve_alert>
-```
-
-## Instructions
-1. Analyze the alert and decide the best course of action
-2. Output the `<resolve_alert>` tag with your chosen response
-3. If the issue needs a code fix, explain what you'd change
-4. End with `<promise>CONTINUE</promise>`"""
-
-_FALLBACK_ANALYSIS = """# Wild Loop — Analysis (All Runs Complete)
-
-## Your Goal
-{{goal}}
-
-## Sweep "{{sweep_name}}" Results
-**{{total_runs}} total** — {{passed_runs}} passed, {{failed_runs}} failed
-
-{{run_summaries}}
-
-## Instructions
-- Review all run results above
-- Determine if the original goal has been fully achieved
-- Provide a clear summary report
-
-## Response
-- If goal is FULLY achieved with evidence: `<promise>COMPLETE</promise>`
-- If more experiments are needed: `<promise>CONTINUE</promise>` (will start a new exploration cycle)
-- If you need human input: `<promise>NEEDS_HUMAN</promise>`"""
-
-_FALLBACK_TEMPLATES = {
-    "exploring": _FALLBACK_EXPLORING,
-    "run_event": _FALLBACK_RUN_EVENT,
-    "alert": _FALLBACK_ALERT,
-    "analysis": _FALLBACK_ANALYSIS,
-}
 
 
 def _format_duration(seconds: Optional[int]) -> str:
@@ -529,6 +438,8 @@ def _render_simple(template: str, variables: Dict[str, str]) -> str:
 def build_prompt_for_frontend(
     req: BuildPromptRequest,
     skill_get_fn: Callable,
+    server_url: str = "",
+    auth_token: str = "",
 ) -> dict:
     """Build a wild loop prompt and return full provenance metadata.
 
@@ -537,6 +448,7 @@ def build_prompt_for_frontend(
     """
     prompt_type = req.prompt_type
     goal = req.goal or wild_loop_state.get("goal") or "No specific goal set"
+    step_goal = req.step_goal or wild_loop_state.get("step_goal") or "Work towards the user goal — assess the situation and take the most productive next action."
     iteration = req.iteration if req.iteration is not None else (wild_loop_state.get("iteration", 0) + 1)
 
     # Build variables dict based on prompt type
@@ -545,10 +457,20 @@ def build_prompt_for_frontend(
     autonomy = wild_loop_state.get("autonomy_level", "balanced")
     queue_edit = "Yes" if wild_loop_state.get("queue_modify_enabled", True) else "No"
     max_time = wild_loop_state.get("termination", {}).get("max_time_seconds")
+    plan_autonomy = wild_loop_state.get("plan_autonomy", "agent")
+    plan_autonomy_instruction = (
+        "You have full autonomy over planning. Decide the best approach based on the goal and available context. Do NOT ask clarifying questions \u2014 make reasonable assumptions and proceed."
+        if plan_autonomy == "agent"
+        else "Before executing, ask **up to 3 clarifying questions** if the goal is ambiguous. Wait for answers before committing to an approach. Prefer collaborative planning over independent assumptions."
+    )
     variables: Dict[str, str] = {
-        "goal": goal, "iteration": str(iteration), "max_iteration": max_iter_display,
+        "goal": goal, "step_goal": step_goal,
+        "iteration": str(iteration), "max_iteration": max_iter_display,
         "autonomy_level": autonomy, "queue_modify_enabled": queue_edit,
         "away_duration": _format_duration(max_time),
+        "server_url": server_url, "auth_token": auth_token,
+        "plan_autonomy": plan_autonomy,
+        "plan_autonomy_instruction": plan_autonomy_instruction,
     }
 
     if prompt_type == "run_event":
@@ -608,21 +530,25 @@ def build_prompt_for_frontend(
             "prompt_type": prompt_type,
         }
 
-    # Fallback to hardcoded templates
-    fallback = _FALLBACK_TEMPLATES.get(prompt_type, "")
-    rendered = _render_simple(fallback, variables)
+    # No skill found — return empty
+    logger.warning("[wild-engine] No skill template found for prompt_type=%s", prompt_type)
     return {
-        "rendered": rendered,
+        "rendered": "",
         "user_input": goal,
         "skill_id": None,
         "skill_name": None,
-        "template": fallback,
+        "template": None,
         "variables": variables,
         "prompt_type": prompt_type,
     }
 
 
-def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str) -> str:
+def build_wild_prompt(
+    prompt_skill_render_fn: Callable,
+    experiment_context: str,
+    server_url: str = "",
+    auth_token: str = "",
+) -> str:
     """Build the wild-mode preamble for _build_chat_prompt.
 
     Returns the rendered wild mode note string, or empty string if rendering fails.
@@ -630,6 +556,7 @@ def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str)
     """
     iteration = wild_loop_state.get("iteration", 0) + 1
     goal = wild_loop_state.get("goal") or "No specific goal set"
+    step_goal = wild_loop_state.get("step_goal") or "Work towards the user goal — assess the situation and take the most productive next action."
     max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
     custom_cond = wild_loop_state.get("termination", {}).get("custom_condition")
 
@@ -656,16 +583,28 @@ def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str)
     queue_edit = "Yes" if wild_loop_state.get("queue_modify_enabled", True) else "No"
     max_time = wild_loop_state.get("termination", {}).get("max_time_seconds")
 
+    plan_autonomy = wild_loop_state.get("plan_autonomy", "agent")
+    plan_autonomy_instruction = (
+        "You have full autonomy over planning. Decide the best approach based on the goal and available context. Do NOT ask clarifying questions \u2014 make reasonable assumptions and proceed."
+        if plan_autonomy == "agent"
+        else "Before executing, ask **up to 3 clarifying questions** if the goal is ambiguous. Wait for answers before committing to an approach. Prefer collaborative planning over independent assumptions."
+    )
+
     rendered = prompt_skill_render_fn("wild_system", {
         "iteration": iter_display,
         "max_iterations": str(max_iter) if max_iter else "unlimited",
         "goal": goal,
+        "step_goal": step_goal,
         "experiment_context": experiment_context,
         "sweep_note": sweep_note,
         "custom_condition": custom_condition_text,
         "autonomy_level": autonomy,
         "queue_modify_enabled": queue_edit,
         "away_duration": _format_duration(max_time),
+        "server_url": server_url,
+        "auth_token": auth_token,
+        "plan_autonomy": plan_autonomy,
+        "plan_autonomy_instruction": plan_autonomy_instruction,
     })
     if rendered:
         return rendered + "\n\n"
@@ -795,6 +734,35 @@ def parse_alert_resolution(text: str) -> Optional[dict]:
         return None
 
 
+def parse_next_step(text: str) -> Optional[str]:
+    """Parse a <next_step>...</next_step> tag from the agent's response.
+
+    Returns the next step goal string, or None if no tag found.
+    """
+    m = re.search(r"<next_step>([\s\S]*?)</next_step>", text)
+    if m:
+        step = m.group(1).strip()
+        return step if step else None
+    return None
+
+
+_VALID_ROLES = {"exploring", "monitoring", "analyzing", "alert"}
+
+def parse_next_role(text: str) -> Optional[str]:
+    """Parse a <next_role>...</next_role> tag from the agent's response.
+
+    Valid roles: exploring, monitoring, analyzing, alert.
+    Returns the role string if valid, or None.
+    """
+    m = re.search(r"<next_role>([\s\S]*?)</next_role>", text)
+    if m:
+        role = m.group(1).strip().lower()
+        if role in _VALID_ROLES:
+            return role
+        logger.warning("[wild-engine] Invalid next_role '%s', ignoring", role)
+    return None
+
+
 # =============================================================================
 # WildLoopEngine — Backend-Driven Orchestrator
 # =============================================================================
@@ -824,6 +792,10 @@ class WildLoopEngine:
         self._save_settings: Optional[Callable[[], None]] = None
         self._record_step: Optional[Callable[[dict], None]] = None
 
+        # ---- Server access info (set by set_callbacks) ----
+        self._server_url: str = ""
+        self._auth_token: str = ""
+
         # ---- Internal state ----
         self._poll_task: Optional[asyncio.Task] = None
         self._paused_at: Optional[float] = None
@@ -848,6 +820,8 @@ class WildLoopEngine:
         skill_get_fn: Callable,
         save_settings: Callable,
         record_step: Optional[Callable] = None,
+        server_url: str = "",
+        auth_token: str = "",
     ):
         """Inject server.py callbacks to avoid circular imports."""
         self._get_runs = get_runs
@@ -861,6 +835,8 @@ class WildLoopEngine:
         self._skill_get_fn = skill_get_fn
         self._save_settings = save_settings
         self._record_step = record_step
+        self._server_url = server_url
+        self._auth_token = auth_token
 
     # -----------------------------------------------------------------
     # Lifecycle
@@ -879,6 +855,7 @@ class WildLoopEngine:
             "is_paused": False,
             "iteration": 0,
             "goal": req.goal,
+            "step_goal": None,
             "session_id": req.session_id,
             "started_at": now,
             "sweep_id": None,
@@ -1014,6 +991,18 @@ class WildLoopEngine:
 
         # Parse signals from agent response
         signal = parse_signal(response_text)
+
+        # Parse next step goal from agent response
+        next_step = parse_next_step(response_text)
+        if next_step:
+            wild_loop_state["step_goal"] = next_step
+            logger.info("[wild-engine] Next step goal: %s", next_step[:100])
+
+        # Parse next role from agent response
+        next_role = parse_next_role(response_text)
+        if next_role:
+            wild_loop_state["next_step_role"] = next_role
+            logger.info("[wild-engine] Next step role: %s", next_role)
 
         if signal == "COMPLETE":
             logger.info("[wild-engine] COMPLETE signal at iteration %d", iteration)
@@ -1244,14 +1233,18 @@ class WildLoopEngine:
         if self._skill_get_fn:
             try:
                 max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+                step_goal = wild_loop_state.get("step_goal")
                 result = build_prompt_for_frontend(
                     BuildPromptRequest(
                         prompt_type=prompt_type,
                         goal=goal,
+                        step_goal=step_goal,
                         iteration=iteration,
                         max_iterations=max_iter,
                     ),
                     self._skill_get_fn,
+                    server_url=self._server_url,
+                    auth_token=self._auth_token,
                 )
                 prompt_text = result.get("rendered", "")
                 provenance = result
@@ -1259,10 +1252,8 @@ class WildLoopEngine:
                 logger.debug("[wild-engine] Skill template failed for exploring: %s", err)
 
         if not prompt_text:
-            prompt_text = _render_simple(_FALLBACK_EXPLORING, {
-                "goal": goal,
-                "iteration": str(iteration),
-            })
+            logger.warning("[wild-engine] No prompt rendered for exploring iteration %d", iteration)
+            prompt_text = f"Wild Loop iteration {iteration} — Goal: {goal}"
 
         event = {
             "id": f"explore-{iteration}-{uuid.uuid4().hex[:6]}",
@@ -1291,10 +1282,12 @@ class WildLoopEngine:
         prompt_text = None
         if self._skill_get_fn:
             try:
+                step_goal = wild_loop_state.get("step_goal")
                 result = build_prompt_for_frontend(
                     BuildPromptRequest(
                         prompt_type="run_event",
                         goal=goal,
+                        step_goal=step_goal,
                         run_id=run_id,
                         run_name=run_name,
                         run_status=run_status,
@@ -1303,6 +1296,8 @@ class WildLoopEngine:
                         sweep_summary=sweep_summary,
                     ),
                     self._skill_get_fn,
+                    server_url=self._server_url,
+                    auth_token=self._auth_token,
                 )
                 prompt_text = result.get("rendered", "")
                 provenance = result
@@ -1310,24 +1305,8 @@ class WildLoopEngine:
                 pass
 
         if not prompt_text:
-            status_emoji = "❌" if run_status == "failed" else "✅"
-            prompt_text = _render_simple(_FALLBACK_RUN_EVENT, {
-                "goal": goal,
-                "run_name": run_name,
-                "run_id": run_id,
-                "run_status": run_status,
-                "run_command": run_command,
-                "log_tail": (log_tail or "")[-1000:],
-                "sweep_summary": sweep_summary,
-                "status_emoji": status_emoji,
-                "run_instructions": (
-                    "- This run FAILED. Diagnose the issue from the logs above.\n"
-                    "- Take corrective action: fix code, adjust parameters, or create a new run."
-                ) if run_status == "failed" else (
-                    "- This run SUCCEEDED. Check if the results look correct.\n"
-                    "- If results are suspicious, investigate further."
-                ),
-            })
+            logger.warning("[wild-engine] No prompt rendered for run_event %s", run_id)
+            prompt_text = f"Run '{run_name}' {run_status} — Goal: {goal}"
 
         display_msg = f"@run:{run_name} {run_status}"
         event = {
@@ -1352,10 +1331,12 @@ class WildLoopEngine:
         prompt_text = None
         if self._skill_get_fn:
             try:
+                step_goal = wild_loop_state.get("step_goal")
                 result = build_prompt_for_frontend(
                     BuildPromptRequest(
                         prompt_type="alert",
                         goal=goal,
+                        step_goal=step_goal,
                         alert_id=alert_id,
                         alert_severity=alert.get("severity", ""),
                         alert_message=alert.get("message", ""),
@@ -1363,6 +1344,8 @@ class WildLoopEngine:
                         run_name=run_name,
                     ),
                     self._skill_get_fn,
+                    server_url=self._server_url,
+                    auth_token=self._auth_token,
                 )
                 prompt_text = result.get("rendered", "")
                 provenance = result
@@ -1370,17 +1353,8 @@ class WildLoopEngine:
                 pass
 
         if not prompt_text:
-            alert_choices = ", ".join(f"`{c}`" for c in alert.get("choices", []))
-            resolve_example = json.dumps({"alert_id": alert_id, "choice": "ONE_OF_THE_CHOICES_ABOVE"})
-            prompt_text = _render_simple(_FALLBACK_ALERT, {
-                "goal": goal,
-                "run_name": run_name,
-                "alert_id": alert_id,
-                "alert_severity": alert.get("severity", ""),
-                "alert_message": alert.get("message", ""),
-                "alert_choices": alert_choices,
-                "alert_resolve_example": resolve_example,
-            })
+            logger.warning("[wild-engine] No prompt rendered for alert %s", alert_id)
+            prompt_text = f"Alert from '{run_name}': {alert.get('message', '')} — Goal: {goal}"
 
         display_msg = f"@alert:{run_name} [{alert.get('severity', '')}] {alert.get('message', '')}"
         event = {
@@ -1411,10 +1385,12 @@ class WildLoopEngine:
         prompt_text = None
         if self._skill_get_fn:
             try:
+                step_goal = wild_loop_state.get("step_goal")
                 result = build_prompt_for_frontend(
                     BuildPromptRequest(
                         prompt_type="analysis",
                         goal=goal,
+                        step_goal=step_goal,
                         sweep_name=sweep_name,
                         total_runs=len(sweep_runs),
                         passed_runs=passed,
@@ -1422,6 +1398,8 @@ class WildLoopEngine:
                         run_summaries=run_summaries,
                     ),
                     self._skill_get_fn,
+                    server_url=self._server_url,
+                    auth_token=self._auth_token,
                 )
                 prompt_text = result.get("rendered", "")
                 provenance = result
@@ -1429,14 +1407,8 @@ class WildLoopEngine:
                 pass
 
         if not prompt_text:
-            prompt_text = _render_simple(_FALLBACK_ANALYSIS, {
-                "goal": goal,
-                "sweep_name": sweep_name,
-                "total_runs": str(len(sweep_runs)),
-                "passed_runs": str(passed),
-                "failed_runs": str(failed),
-                "run_summaries": run_summaries,
-            })
+            logger.warning("[wild-engine] No prompt rendered for analysis of sweep %s", sweep_name)
+            prompt_text = f"Analysis: {sweep_name} — {len(sweep_runs)} runs ({passed} passed, {failed} failed) — Goal: {goal}"
 
         sweep_id = wild_loop_state.get("sweep_id", "")
         event = {

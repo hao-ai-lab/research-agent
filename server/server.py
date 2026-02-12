@@ -784,6 +784,8 @@ wild_engine.set_callbacks(
     recompute_sweep_state=lambda sid: recompute_sweep_state(sid) if 'recompute_sweep_state' in dir() else None,
     skill_get_fn=lambda skill_id: prompt_skill_manager.get(skill_id),
     save_settings=lambda: save_settings_state(),
+    server_url=SERVER_CALLBACK_URL,
+    auth_token=USER_AUTH_TOKEN or "",
 )
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
@@ -2933,7 +2935,7 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tupl
         if config.skill_id == _WILD_SENTINEL:
             # Delegate to wild_loop module
             experiment_context = _build_experiment_context()
-            mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context)
+            mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context, server_url=SERVER_CALLBACK_URL, auth_token=USER_AUTH_TOKEN or "")
             # Wild mode provenance is handled by the frontend's wild loop
         else:
             variables = config.build_state(message)
