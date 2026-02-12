@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Bell,
+  ClipboardList,
   FileText,
   FolderTree,
   FlaskConical,
@@ -37,6 +38,11 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     icon: Bell,
   },
   {
+    tab: 'plans',
+    label: 'Plans',
+    icon: ClipboardList,
+  },
+  {
     tab: 'charts',
     label: 'Charts',
     icon: BarChart3,
@@ -67,3 +73,4 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     icon: Orbit,
   },
 ]
+

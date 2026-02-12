@@ -1607,3 +1607,138 @@ export async function updateCluster(request: ClusterUpdateRequest): Promise<Clus
     }
     return response.json()
 }
+
+// =============================================================================
+// Plan Management Types & Functions
+// =============================================================================
+
+export type PlanStatus = 'draft' | 'approved' | 'executing' | 'completed' | 'archived'
+
+export interface Plan {
+    id: string
+    title: string
+    goal: string
+    session_id: string | null
+    status: PlanStatus
+    sections: Record<string, unknown>
+    raw_markdown: string
+    created_at: number
+    updated_at: number
+}
+
+export interface CreatePlanRequest {
+    title: string
+    goal: string
+    session_id?: string
+    sections?: Record<string, unknown>
+    raw_markdown?: string
+}
+
+export interface UpdatePlanRequest {
+    title?: string
+    status?: PlanStatus
+    sections?: Record<string, unknown>
+    raw_markdown?: string
+}
+
+/**
+ * List all plans, optionally filtered by status or session
+ */
+export async function listPlans(status?: PlanStatus, sessionId?: string): Promise<Plan[]> {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (sessionId) params.set('session_id', sessionId)
+    const qs = params.toString()
+    const response = await fetch(`${API_URL()}/plans${qs ? `?${qs}` : ''}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list plans: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get a single plan by ID
+ */
+export async function getPlan(planId: string): Promise<Plan> {
+    const response = await fetch(`${API_URL()}/plans/${planId}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get plan: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Create a new plan
+ */
+export async function createPlan(request: CreatePlanRequest): Promise<Plan> {
+    const response = await fetch(`${API_URL()}/plans`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create plan: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update a plan's fields
+ */
+export async function updatePlan(planId: string, request: UpdatePlanRequest): Promise<Plan> {
+    const response = await fetch(`${API_URL()}/plans/${planId}`, {
+        method: 'PATCH',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to update plan: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Approve a draft plan
+ */
+export async function approvePlan(planId: string): Promise<Plan> {
+    const response = await fetch(`${API_URL()}/plans/${planId}/approve`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to approve plan: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Mark an approved plan as executing
+ */
+export async function executePlan(planId: string): Promise<Plan> {
+    const response = await fetch(`${API_URL()}/plans/${planId}/execute`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to execute plan: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Delete a plan
+ */
+export async function deletePlan(planId: string): Promise<{ deleted: boolean; id: string }> {
+    const response = await fetch(`${API_URL()}/plans/${planId}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to delete plan: ${response.statusText}`)
+    }
+    return response.json()
+}
