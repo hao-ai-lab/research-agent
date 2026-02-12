@@ -9,16 +9,16 @@ const API_URL = () => getApiUrl()
 // Get headers with optional auth token
 function getHeaders(includeContentType: boolean = false): HeadersInit {
     const headers: HeadersInit = {}
-    
+
     if (includeContentType) {
         headers['Content-Type'] = 'application/json'
     }
-    
+
     const authToken = getAuthToken()
     if (authToken) {
         headers['X-Auth-Token'] = authToken
     }
-    
+
     return headers
 }
 
@@ -408,12 +408,28 @@ export interface WildLoopStatus {
     session_id: string | null
     started_at: number | null
     is_paused: boolean
+    is_active: boolean
+    stage: string
+    sweep_id: string | null
     termination: {
         max_iterations: number | null
         max_time_seconds: number | null
         max_tokens: number | null
         custom_condition: string | null
     }
+    // Enriched fields from engine
+    queue_size: number
+    queue_events: WildEventQueueItem[]
+    run_stats: {
+        total: number
+        running: number
+        completed: number
+        failed: number
+        queued: number
+    }
+    active_alerts: Alert[]
+    has_pending_prompt: boolean
+    pending_event_id: string | null
 }
 
 export interface LogResponse {
@@ -702,6 +718,8 @@ export async function updateWildLoopStatus(update: {
     goal?: string
     session_id?: string
     is_paused?: boolean
+    is_active?: boolean
+    stage?: string
 }): Promise<WildLoopStatus> {
     const params = new URLSearchParams()
     if (update.phase !== undefined) params.set('phase', update.phase)
@@ -709,7 +727,9 @@ export async function updateWildLoopStatus(update: {
     if (update.goal !== undefined) params.set('goal', update.goal)
     if (update.session_id !== undefined) params.set('session_id', update.session_id)
     if (update.is_paused !== undefined) params.set('is_paused', String(update.is_paused))
-    
+    if (update.is_active !== undefined) params.set('is_active', String(update.is_active))
+    if (update.stage !== undefined) params.set('stage', update.stage)
+
     const response = await fetch(`${API_URL()}/wild/status?${params}`, {
         method: 'POST',
         headers: getHeaders()
@@ -850,6 +870,142 @@ export async function buildWildPrompt(req: BuildWildPromptRequest): Promise<Prom
 }
 
 // =============================================================================
+// Backend-Driven Wild Loop Engine (v5) API Functions
+// =============================================================================
+
+export interface WildNextPrompt {
+    has_prompt: boolean
+    event_id?: string | null
+    prompt?: string | null
+    display_message?: string | null
+    title?: string | null
+    event_type?: string | null
+    priority?: number | null
+    provenance?: PromptProvenance | null
+}
+
+/**
+ * Start the wild loop with a goal and session.
+ */
+export async function startWildLoop(params: {
+    goal: string
+    session_id: string
+    max_iterations?: number
+    max_time_seconds?: number
+    max_tokens?: number
+    custom_condition?: string
+}): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/start`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(params),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to start wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stop the wild loop.
+ */
+export async function stopWildLoop(): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/stop`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to stop wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Pause the wild loop.
+ */
+export async function pauseWildLoop(): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/pause`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to pause wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Resume the wild loop.
+ */
+export async function resumeWildLoop(): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/resume`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to resume wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Notify the backend that the agent finished responding.
+ */
+export async function wildResponseComplete(responseText: string): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/response-complete`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ response_text: responseText }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to submit wild response: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get the next prompt the frontend should send to the agent.
+ */
+export async function getWildNextPrompt(): Promise<WildNextPrompt> {
+    const response = await fetch(`${API_URL()}/wild/next-prompt`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get wild next prompt: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Mark the current pending prompt as consumed/sent.
+ */
+export async function consumeWildPrompt(): Promise<{ consumed: boolean; queue_size: number }> {
+    const response = await fetch(`${API_URL()}/wild/next-prompt/consume`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to consume wild prompt: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Insert a user steer message into the wild loop queue.
+ */
+export async function steerWildLoop(message: string, priority: number = 10): Promise<{ added: boolean; queue_size: number }> {
+    const response = await fetch(`${API_URL()}/wild/steer`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ message, priority }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to steer wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+// =============================================================================
 // Prompt Skill Functions  
 // =============================================================================
 
@@ -861,6 +1017,22 @@ export interface PromptSkill {
     variables: string[]
     category: 'prompt' | 'skill'  // "prompt" = template only, "skill" = has logic/tools
     built_in: boolean
+    internal: boolean  // true for wild_* and ra_mode_plan — cannot be deleted
+    _score?: number    // present in search results
+}
+
+export interface CreateSkillRequest {
+    name: string
+    description?: string
+    template?: string
+    category?: string
+    variables?: string[]
+}
+
+export interface InstallSkillRequest {
+    source: 'git'
+    url: string
+    name?: string
 }
 
 export interface SkillFileEntry {
@@ -921,6 +1093,67 @@ export async function reloadPromptSkills(): Promise<{ message: string; count: nu
     })
     if (!response.ok) {
         throw new Error(`Failed to reload prompt skills: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Create a new prompt skill
+ */
+export async function createSkill(req: CreateSkillRequest): Promise<PromptSkill> {
+    const response = await fetch(`${API_URL()}/prompt-skills`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(req),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to create skill: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Delete a user-created skill (internal skills return 403)
+ */
+export async function deleteSkill(id: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_URL()}/prompt-skills/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to delete skill: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Install a skill from an external source (git clone)
+ */
+export async function installSkill(req: InstallSkillRequest): Promise<PromptSkill> {
+    const response = await fetch(`${API_URL()}/prompt-skills/install`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(req),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to install skill: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Search skills by name, description, or template content
+ */
+export async function searchSkills(query: string, limit: number = 20): Promise<PromptSkill[]> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) })
+    const response = await fetch(`${API_URL()}/prompt-skills/search?${params}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to search skills: ${response.statusText}`)
     }
     return response.json()
 }

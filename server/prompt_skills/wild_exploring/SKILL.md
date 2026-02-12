@@ -1,6 +1,6 @@
 ---
 name: "Wild Loop — Exploring"
-description: "Exploring stage prompt. Guides the agent to analyze the codebase and output a sweep specification for automated experiment creation."
+description: "Exploring stage prompt. Guides the agent to analyze the codebase and send a sweep specification to the sweep creation endpoint."
 variables: ["goal", "iteration", "max_iteration"]
 ---
 
@@ -17,32 +17,15 @@ No sweep has been created yet. You need to define one.
 ## What You Should Do
 
 1. Explore the codebase and understand what experiments are needed
-2. When ready, output a sweep specification as a JSON block inside `<sweep>` tags
-3. The system will automatically create and start the sweep for you
-
-## How to Create a Sweep
-
-Output exactly this format (the system will parse it and call the API for you):
-
-```
-<sweep>
-{
-  "name": "My Experiment Sweep",
-  "base_command": "python train.py",
-  "parameters": {
-    "lr": [0.0001, 0.001, 0.01],
-    "batch_size": [32, 64]
-  },
-  "max_runs": 10
-}
-</sweep>
-```
-
-The `parameters` field defines a grid — the system will expand it into individual runs.
-The `base_command` is the shell command template. Parameters are appended as `--key=value`.
+2. When ready, send a sweep specification to the sweep creation endpoint
+3. The sweep spec should be a JSON object with the following fields:
+   - `name`: Human-readable name for the sweep
+   - `base_command`: Shell command template (parameters are appended as `--key=value`)
+   - `parameters`: Grid definition — the system expands it into individual runs
+   - `max_runs`: Maximum number of runs to create
 
 ## Rules
 
-- Do NOT run commands yourself. Output the `<sweep>` spec and the system handles execution.
+- Send the sweep spec directly to the endpoint — do NOT embed it in your response as XML tags
 - If you need more info before creating a sweep, just explain what you need and output `<promise>CONTINUE</promise>`
-- Once you output a `<sweep>` tag, the system will create & start it automatically.
+- After sending the sweep spec, output `<promise>CONTINUE</promise>` to monitor results
