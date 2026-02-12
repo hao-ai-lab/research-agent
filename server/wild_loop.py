@@ -41,6 +41,8 @@ class WildLoopConfigRequest(BaseModel):
     max_time_seconds: Optional[int] = None
     max_tokens: Optional[int] = None
     custom_condition: Optional[str] = None
+    autonomy_level: Optional[str] = None       # "cautious" | "balanced" | "full"
+    queue_modify_enabled: Optional[bool] = None
 
 
 class WildEvent(BaseModel):
@@ -193,6 +195,8 @@ wild_loop_state: dict = {
     "sweep_id": None,
     "plan": None,             # WildPlan dict or None
     "step_goal": None,        # Current step goal string (for display)
+    "autonomy_level": "balanced",
+    "queue_modify_enabled": True,
     "termination": {
         "max_iterations": None,
         "max_time_seconds": None,
@@ -272,6 +276,10 @@ def configure_loop(req: WildLoopConfigRequest) -> dict:
         termination["max_tokens"] = req.max_tokens
     if req.custom_condition is not None:
         termination["custom_condition"] = req.custom_condition
+    if req.autonomy_level is not None:
+        wild_loop_state["autonomy_level"] = req.autonomy_level
+    if req.queue_modify_enabled is not None:
+        wild_loop_state["queue_modify_enabled"] = req.queue_modify_enabled
     return wild_loop_state
 
 
@@ -555,6 +563,17 @@ _FALLBACK_TEMPLATES = {
 }
 
 
+def _format_duration(seconds: Optional[int]) -> str:
+    """Format a duration in seconds to a human-readable string."""
+    if seconds is None:
+        return "unlimited"
+    hours = seconds / 3600
+    if hours == int(hours):
+        h = int(hours)
+        return f"{h} hour{'s' if h != 1 else ''}"
+    return f"{hours:.1f} hours"
+
+
 def _render_simple(template: str, variables: Dict[str, str]) -> str:
     """Render a template by replacing {{key}} placeholders."""
     import re as _re
@@ -591,6 +610,14 @@ def build_prompt_for_frontend(
 
     if prompt_type == "planning":
         variables["experiment_context"] = req.experiment_context or "No experiment state yet."
+    autonomy = wild_loop_state.get("autonomy_level", "balanced")
+    queue_edit = "Yes" if wild_loop_state.get("queue_modify_enabled", True) else "No"
+    max_time = wild_loop_state.get("termination", {}).get("max_time_seconds")
+    variables: Dict[str, str] = {
+        "goal": goal, "iteration": str(iteration), "max_iteration": max_iter_display,
+        "autonomy_level": autonomy, "queue_modify_enabled": queue_edit,
+        "away_duration": _format_duration(max_time),
+    }
 
     if prompt_type == "run_event":
         status_emoji = "❌" if req.run_status == "failed" else "✅"
@@ -694,6 +721,9 @@ def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str)
         custom_condition_text = f"- Custom stop condition: {custom_cond}"
 
     step_goal = wild_loop_state.get("step_goal") or goal
+    autonomy = wild_loop_state.get("autonomy_level", "balanced")
+    queue_edit = "Yes" if wild_loop_state.get("queue_modify_enabled", True) else "No"
+    max_time = wild_loop_state.get("termination", {}).get("max_time_seconds")
 
     rendered = prompt_skill_render_fn("wild_system", {
         "iteration": iter_display,
@@ -703,6 +733,9 @@ def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str)
         "experiment_context": experiment_context,
         "sweep_note": sweep_note,
         "custom_condition": custom_condition_text,
+        "autonomy_level": autonomy,
+        "queue_modify_enabled": queue_edit,
+        "away_duration": _format_duration(max_time),
     })
     if rendered:
         return rendered + "\n\n"

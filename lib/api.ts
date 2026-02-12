@@ -750,6 +750,8 @@ export async function configureWildLoop(config: {
     max_time_seconds?: number
     max_tokens?: number
     custom_condition?: string
+    autonomy_level?: string
+    queue_modify_enabled?: boolean
 }): Promise<WildLoopStatus> {
     const response = await fetch(`${API_URL()}/wild/configure`, {
         method: 'POST',

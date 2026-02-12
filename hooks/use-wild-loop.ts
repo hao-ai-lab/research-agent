@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { WildLoopPhase, TerminationConditions } from '@/lib/types'
-import type { PromptProvenance } from '@/lib/types'
+import type { PromptProvenance, WildModeSetup } from '@/lib/types'
 import {
   getWildLoopStatus,
   startWildLoop, stopWildLoop, pauseWildLoop, resumeWildLoop,
@@ -47,6 +47,7 @@ export interface UseWildLoopResult {
   resume: () => void
   stop: () => void
   setTerminationConditions: (conditions: TerminationConditions) => void
+  applySetup: (setup: WildModeSetup) => void
   onResponseComplete: (responseText: string) => void
   pendingPrompt: string | null
   pendingProvenance: PromptProvenance | null
@@ -268,6 +269,20 @@ export function useWildLoop(): UseWildLoopResult {
       createdAt: e.created_at,
     }))
 
+  // ---- Apply setup from WildModeSetupPanel ----
+
+  const applySetup = useCallback(async (setup: WildModeSetup) => {
+    try {
+      await configureWildLoop({
+        max_time_seconds: setup.awayDurationMinutes * 60,
+        autonomy_level: setup.autonomyLevel,
+        queue_modify_enabled: setup.queueModifyEnabled,
+      })
+    } catch (err) {
+      console.error('[wild-loop] Apply setup failed:', err)
+    }
+  }, [])
+
   // Derive pending prompt from the next-prompt poll
   const pendingPrompt = nextPrompt?.has_prompt ? (nextPrompt.prompt ?? null) : null
   const pendingDisplayMessage = nextPrompt?.has_prompt ? (nextPrompt.display_message ?? null) : null
@@ -290,6 +305,7 @@ export function useWildLoop(): UseWildLoopResult {
     resume,
     stop,
     setTerminationConditions,
+    applySetup,
     onResponseComplete,
     pendingPrompt,
     pendingProvenance,

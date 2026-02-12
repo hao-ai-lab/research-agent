@@ -1,0 +1,196 @@
+.root {
+    width: 100%;
+    background: rgba(20, 16, 36, 0.65);
+    border: 1px solid rgba(139, 92, 246, 0.18);
+    border-radius: 14px;
+    padding: 14px 18px;
+    backdrop-filter: blur(12px);
+}
+
+.grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 20px;
+    align-items: center;
+}
+
+/* Sections — inline: label then controls */
+.sectionDuration,
+.sectionAutonomy,
+.sectionQueue {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Duration preset chips */
+.chips {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+}
+
+.chip {
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    background: rgba(30, 30, 50, 0.5);
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    line-height: 1;
+}
+
+.chip:hover {
+    border-color: rgba(168, 85, 247, 0.3);
+    color: #c4b5fd;
+}
+
+.chipActive {
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    border: 1px solid #a855f7;
+    background: rgba(168, 85, 247, 0.2);
+    color: #c4b5fd;
+}
+
+.customInput {
+    width: 42px;
+    padding: 4px 6px;
+    background: rgba(15, 15, 30, 0.6);
+    border: 1px solid rgba(139, 92, 246, 0.15);
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 12px;
+    outline: none;
+    margin-left: 2px;
+}
+
+.customInput::placeholder {
+    color: #475569;
+}
+
+.customInput:focus {
+    border-color: #a855f7;
+}
+
+.customSuffix {
+    font-size: 11px;
+    color: #475569;
+}
+
+/* Autonomy selector */
+.autonomyBtns {
+    display: flex;
+    gap: 3px;
+}
+
+.autoBtn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    background: rgba(30, 30, 50, 0.5);
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.autoBtn:hover {
+    border-color: rgba(168, 85, 247, 0.3);
+    color: #c4b5fd;
+}
+
+.autoBtnActive {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    border: 1px solid #a855f7;
+    background: rgba(168, 85, 247, 0.2);
+    color: #c4b5fd;
+}
+
+.autoIcon {
+    font-size: 12px;
+}
+
+/* Queue toggle */
+.queueToggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+.toggleTrackOn,
+.toggleTrackOff {
+    width: 30px;
+    height: 16px;
+    border-radius: 8px;
+    position: relative;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+}
+
+.toggleTrackOn {
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+}
+
+.toggleTrackOff {
+    background: rgba(148, 163, 184, 0.2);
+}
+
+.toggleThumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #fff;
+    position: absolute;
+    top: 2px;
+    transition: left 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.toggleLabel {
+    font-size: 11px;
+    color: #94a3b8;
+    white-space: nowrap;
+}
