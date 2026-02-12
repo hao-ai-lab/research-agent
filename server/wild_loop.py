@@ -399,10 +399,14 @@ def _render_simple(template: str, variables: Dict[str, str]) -> str:
 def build_prompt_for_frontend(
     req: BuildPromptRequest,
     skill_get_fn: Callable,
+    server_url: str = "http://127.0.0.1:10000",
+    auth_token: str = "",
 ) -> dict:
     """Build a wild loop prompt and return full provenance metadata.
 
     skill_get_fn: function(skill_id) -> {"id", "name", "template", "variables", ...} or None
+    server_url: base URL of the research-agent server (injected into templates)
+    auth_token: X-Auth-Token value for authenticating API calls (injected into templates)
     Returns a dict matching BuildPromptResponse shape.
     """
     prompt_type = req.prompt_type
@@ -412,7 +416,13 @@ def build_prompt_for_frontend(
     # Build variables dict based on prompt type
     max_iter = req.max_iterations or wild_loop_state.get("termination", {}).get("max_iterations")
     max_iter_display = str(max_iter) if max_iter else "∞"
-    variables: Dict[str, str] = {"goal": goal, "iteration": str(iteration), "max_iteration": max_iter_display}
+    variables: Dict[str, str] = {
+        "goal": goal,
+        "iteration": str(iteration),
+        "max_iteration": max_iter_display,
+        "server_url": server_url,
+        "auth_token": auth_token,
+    }
 
     if prompt_type == "run_event":
         status_emoji = "❌" if req.run_status == "failed" else "✅"
