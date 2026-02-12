@@ -249,10 +249,17 @@ export function EventQueuePanel({
       <div className="absolute bottom-0 left-0 right-0 z-30">
         <div className="overflow-hidden rounded-t-lg border border-b-0 border-border/40 bg-secondary/95 shadow-lg backdrop-blur-sm">
           {/* Header */}
-          <button
-            type="button"
+          <div
+            role="button"
+            tabIndex={0}
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary/30"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setIsExpanded(!isExpanded);
+              }
+            }}
+            className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-secondary/30"
           >
             {isExpanded ? (
               <ChevronDown className="h-3 w-3" />
@@ -278,7 +285,7 @@ export function EventQueuePanel({
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
-          </button>
+          </div>
 
           {/* Expanded content */}
           {isExpanded && (
