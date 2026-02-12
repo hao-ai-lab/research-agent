@@ -1,24 +1,31 @@
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
-import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle } from 'lucide-react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
+import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { getWildLoopStatus, getWildEventQueue, configureWildLoop } from '@/lib/api'
 import type { WildLoopStatus, WildEventQueueItem } from '@/lib/api'
+import { useAppSettings } from '@/lib/app-settings'
 
 interface WildLoopDebugPanelProps {
     onClose: () => void
 }
 
 export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
+    const { settings, setSettings } = useAppSettings()
     const [status, setStatus] = useState<WildLoopStatus | null>(null)
     const [queue, setQueue] = useState<{ queue_size: number; events: WildEventQueueItem[] } | null>(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [statusOpen, setStatusOpen] = useState(true)
     const [queueOpen, setQueueOpen] = useState(true)
+    const [entitiesOpen, setEntitiesOpen] = useState(true)
+    const [settingsOpen, setSettingsOpen] = useState(false)
     const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+    const prevIterationRef = useRef<number | null>(null)
+
+    const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 2
 
     const refresh = useCallback(async () => {
         setLoading(true)
@@ -31,6 +38,12 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
             setStatus(statusData)
             setQueue(queueData)
             setLastRefreshed(new Date())
+
+            // Detect iteration changes for extra refresh (already handled by interval)
+            if (prevIterationRef.current !== null && statusData.iteration !== prevIterationRef.current) {
+                // Iteration changed — data is already fresh from this call
+            }
+            prevIterationRef.current = statusData.iteration
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch')
         } finally {
@@ -38,10 +51,24 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         }
     }, [])
 
-    // Auto-refresh on mount
+    // Auto-refresh on mount + interval
     useEffect(() => {
         refresh()
-    }, [refresh])
+        if (refreshInterval > 0) {
+            const id = setInterval(refresh, refreshInterval * 1000)
+            return () => clearInterval(id)
+        }
+    }, [refresh, refreshInterval])
+
+    const setRefreshInterval = (seconds: number) => {
+        setSettings({
+            ...settings,
+            developer: {
+                ...settings.developer,
+                debugRefreshIntervalSeconds: seconds,
+            },
+        })
+    }
 
     const phaseColor = (phase: string) => {
         switch (phase) {
@@ -63,6 +90,19 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         if (p <= 70) return { label: 'Analysis', color: 'text-cyan-400' }
         return { label: 'Explore', color: 'text-muted-foreground' }
     }
+
+    const statusColor = (s: string) => {
+        switch (s) {
+            case 'running': return 'text-blue-400'
+            case 'finished': case 'completed': return 'text-green-400'
+            case 'failed': return 'text-red-400'
+            case 'queued': case 'ready': return 'text-muted-foreground'
+            case 'pending': return 'text-yellow-400'
+            default: return 'text-foreground'
+        }
+    }
+
+    const totalEntities = (status?.created_sweeps?.length ?? 0) + (status?.created_runs?.length ?? 0)
 
     return (
         <div className="flex h-full w-[350px] flex-col border-l border-border bg-background/95 backdrop-blur-sm">
@@ -95,10 +135,13 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                 </div>
             </div>
 
-            {/* Last refreshed */}
+            {/* Last refreshed + interval indicator */}
             {lastRefreshed && (
-                <div className="px-3 py-1 text-[10px] text-muted-foreground/60 border-b border-border/50">
-                    Last refreshed: {lastRefreshed.toLocaleTimeString()}
+                <div className="px-3 py-1 text-[10px] text-muted-foreground/60 border-b border-border/50 flex items-center justify-between">
+                    <span>Last refreshed: {lastRefreshed.toLocaleTimeString()}</span>
+                    {refreshInterval > 0 && (
+                        <span className="text-muted-foreground/40">⟳ {refreshInterval}s</span>
+                    )}
                 </div>
             )}
 
@@ -111,6 +154,38 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {/* Settings Section */}
+                <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {settingsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <Settings className="h-3 w-3 text-muted-foreground" />
+                        <span>Settings</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-3 text-xs">
+                            <div>
+                                <label className="text-muted-foreground text-[10px] font-medium block mb-1">
+                                    Auto-refresh interval (seconds)
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    {[0, 1, 2, 5, 10].map((s) => (
+                                        <button
+                                            key={s}
+                                            className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${refreshInterval === s
+                                                    ? 'bg-primary text-primary-foreground border-primary'
+                                                    : 'border-border/50 hover:bg-secondary text-muted-foreground'
+                                                }`}
+                                            onClick={() => setRefreshInterval(s)}
+                                        >
+                                            {s === 0 ? 'Off' : `${s}s`}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </CollapsibleContent>
+                </Collapsible>
+
                 {/* Status Section */}
                 <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
                     <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
@@ -225,6 +300,80 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                         ) : (
                             <div className="text-xs text-muted-foreground p-3">
                                 {loading ? 'Loading...' : 'No data'}
+                            </div>
+                        )}
+                    </CollapsibleContent>
+                </Collapsible>
+
+                {/* Created Entities Section */}
+                <Collapsible open={entitiesOpen} onOpenChange={setEntitiesOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {entitiesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <span>Created Entities</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                            {totalEntities} items
+                        </span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        {totalEntities === 0 ? (
+                            <div className="text-xs text-muted-foreground p-3 text-center">
+                                No sweeps or runs created yet
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-3 text-xs">
+                                {/* Created Sweeps */}
+                                {status?.created_sweeps && status.created_sweeps.length > 0 && (
+                                    <div>
+                                        <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
+                                            Sweeps ({status.created_sweeps.length})
+                                        </div>
+                                        <div className="space-y-1">
+                                            {status.created_sweeps.map((sweep) => (
+                                                <div
+                                                    key={sweep.id}
+                                                    className="flex items-center gap-2 rounded border border-border/30 bg-secondary/10 px-2 py-1.5"
+                                                >
+                                                    <span className={`text-[10px] font-medium ${statusColor(sweep.status)}`}>
+                                                        {sweep.status}
+                                                    </span>
+                                                    <span className="truncate flex-1 text-[10px]" title={sweep.name}>
+                                                        {sweep.name}
+                                                    </span>
+                                                    <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                                                        {sweep.run_count} runs
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Created Runs */}
+                                {status?.created_runs && status.created_runs.length > 0 && (
+                                    <div>
+                                        <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
+                                            Runs ({status.created_runs.length})
+                                        </div>
+                                        <div className="space-y-1">
+                                            {status.created_runs.map((run) => (
+                                                <div
+                                                    key={run.id}
+                                                    className="flex items-center gap-2 rounded border border-border/30 bg-secondary/10 px-2 py-1.5"
+                                                >
+                                                    <span className={`text-[10px] font-medium ${statusColor(run.status)}`}>
+                                                        {run.status}
+                                                    </span>
+                                                    <span className="truncate flex-1 text-[10px]" title={run.name}>
+                                                        {run.name}
+                                                    </span>
+                                                    <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">
+                                                        {run.id}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </CollapsibleContent>

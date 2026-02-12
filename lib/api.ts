@@ -431,6 +431,8 @@ export interface WildLoopStatus {
     has_pending_prompt: boolean
     pending_event_id: string | null
     plan_autonomy: string
+    created_sweeps: { id: string; name: string; status: string; run_count: number }[]
+    created_runs: { id: string; name: string; status: string }[]
 }
 
 export interface LogResponse {

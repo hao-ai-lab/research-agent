@@ -66,16 +66,20 @@ variables:
 
 At the end of your response, output these structured tags:
 
-1. **Signal** — exactly ONE:
+1. **Summary** — a brief summary of what you did this iteration:
+   ```
+   <summary>Compared metrics across 4 runs. Best run: lr=0.01, batch_size=64 with 92.3% accuracy. Goal not yet met — need to test larger models.</summary>
+   ```
+2. **Signal** — exactly ONE:
    - `<promise>COMPLETE</promise>` — goal fully achieved with evidence
    - `<promise>CONTINUE</promise>` — more experiments needed
    - `<promise>NEEDS_HUMAN</promise>` — need human input
-2. **Next step** (if continuing) — what the next iteration should do:
+3. **Next step** (if continuing) — what the next iteration should do:
    ```
    <next_step>Design a follow-up sweep with refined hyperparameters based on the analysis</next_step>
    ```
-3. **Next role** (if continuing) — which wild loop role should handle the next step:
+4. **Next role** (if continuing) — which wild loop role should handle the next step:
    ```
    <next_role>exploring</next_role>
    ```
-   Valid roles: `exploring`, `monitoring`, `analyzing`, `alert`
+   Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`

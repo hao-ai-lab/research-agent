@@ -1,6 +1,6 @@
 ---
 name: "Wild Loop — Alert"
-description: "Alert handling prompt. Guides the agent to analyze and resolve experiment alerts using the resolve_alert tag protocol and the server API."
+description: "Alert handling prompt. Guides the agent to analyze and resolve experiment alerts using the server API, with awareness of queue and batch processing."
 variables:
   [
     "goal",
@@ -12,7 +12,6 @@ variables:
     "alert_severity",
     "alert_message",
     "alert_choices",
-    "alert_resolve_example",
     "server_url",
     "auth_token",
   ]
@@ -41,33 +40,49 @@ variables:
 - **Auth Header**: `X-Auth-Token: {{auth_token}}`
 - **API Docs**: `{{server_url}}/docs`
 
-### Useful Endpoints for This Stage
+### Alert & Run Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/alerts/{id}/respond` | POST | Resolve this alert with a choice |
+| `/runs` | GET | **List all runs** — check for other failed/stopped runs |
+| `/alerts` | GET | List all alerts (check for other pending alerts to batch-process) |
+| `/alerts/{id}/respond` | POST | Resolve an alert with a choice (`{"choice": "..."}`) |
 | `/runs/{id}/logs` | GET | Get logs for the alerting run |
 | `/runs/{id}/rerun` | POST | Rerun the alerting run with fixes |
 | `/runs/{id}/stop` | POST | Stop the alerting run |
 
-### Standard Operating Procedure
+### Wild Event Queue Endpoints
 
-1. **Diagnose**: Read the alert message and fetch run logs if needed
-2. **Decide**: Choose the best course of action from the available choices
-3. **Resolve**: Either use the `<resolve_alert>` tag OR call `POST /alerts/{{alert_id}}/respond` directly
-4. **Fix**: If the issue needs a code fix, explain what you'd change and optionally rerun
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/wild/events/queue` | GET | View all pending events in the queue |
+| `/wild/events/{id}` | GET | Peek at a specific event by ID (see its full prompt/details) |
+| `/wild/events/{id}/resolve` | POST | Resolve (consume) a specific event by ID |
+| `/wild/events/all` | GET | View all events including resolved (history) |
+| `/wild/events/enqueue` | POST | Enqueue a new event (`{priority, title, prompt, type}`) |
 
-## How to Resolve This Alert
+## Standard Operating Procedure
 
-You MUST resolve this alert by outputting a `<resolve_alert>` tag with your chosen action:
+### Phase 1 — Diagnose This Alert
+1. Read the alert message above. Fetch run logs via `GET /runs/{id}/logs` if needed.
+2. Understand what went wrong with this specific run.
 
-```
-<resolve_alert>
-{{alert_resolve_example}}
-</resolve_alert>
-```
+### Phase 2 — Get the Global View
+3. **Check all runs**: Call `GET /runs` and look for other runs that are `failed` or `stopped`.
+4. **Scan the event queue**: Call `GET /wild/events/queue` and look for pending events of type `alert` or `run_event`.
+5. **Peek at sibling events**: For each relevant event, call `GET /wild/events/{event_id}` to read the full details.
+6. **List all alerts**: Call `GET /alerts` to see if other runs have triggered alerts.
 
-Or resolve via the API:
+### Phase 3 — Batch-Solve
+7. **Identify root cause**: If multiple alerts/failures share the same error (e.g. same config bug, same missing dependency, same OOM), treat them as one issue.
+8. **Decide on action**:
+   - If one fix resolves all → apply the fix once, then batch-resolve all related alerts & events
+   - If the sweep is fundamentally broken → stop all remaining runs via `POST /runs/{id}/stop` to save resources, then fix the code
+   - If only this alert is isolated → handle just this one
+9. **Resolve alerts**: Call `POST /alerts/{alert_id}/respond` for each alert with the appropriate choice
+10. **Mark events resolved**: Call `POST /wild/events/{event_id}/resolve` for each handled event so the loop doesn't re-process them
+
+### How to Resolve This Alert
 
 ```bash
 curl -s -X POST "{{server_url}}/alerts/{{alert_id}}/respond" \
@@ -80,7 +95,10 @@ curl -s -X POST "{{server_url}}/alerts/{{alert_id}}/respond" \
 
 At the end of your response, output these structured tags:
 
-1. **Resolve** — output the `<resolve_alert>` tag with your chosen action
+1. **Summary** — a brief summary of what you did this iteration:
+   ```
+   <summary>Resolved OOM alert on run "lr-0.01" and 2 sibling alerts with same root cause. Stopped affected runs and marked events resolved.</summary>
+   ```
 2. **Signal** — exactly ONE:
    - `<promise>CONTINUE</promise>` — resolved, continue monitoring
    - `<promise>NEEDS_HUMAN</promise>` — need human input
@@ -92,4 +110,4 @@ At the end of your response, output these structured tags:
    ```
    <next_role>monitoring</next_role>
    ```
-   Valid roles: `exploring`, `monitoring`, `analyzing`, `alert`
+   Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`

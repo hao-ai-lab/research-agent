@@ -110,55 +110,82 @@ class WildEventQueue:
 
     Sorted by (priority ASC, created_at ASC).  Lower priority = higher urgency.
     Deduplicates by event id.
+
+    Events are persisted with a status field:
+      - "pending" (default) — waiting to be processed
+      - "resolved" — consumed/completed (kept for history)
     """
 
     def __init__(self):
         self._heap: list = []       # list of (priority, created_at, counter, event_dict)
-        self._id_set: set = set()
+        self._events: dict = {}     # id -> event_dict (all events, for lookup)
         self._counter: int = 0      # tie-breaker for heapq stability
 
     @property
     def size(self) -> int:
-        return len(self._heap)
+        """Count of pending (unresolved) events."""
+        return sum(1 for e in self._events.values() if e.get("status") == "pending")
 
     def enqueue(self, event: dict) -> bool:
         """Add an event. Returns False if the id is already present (dedup)."""
         eid = event.get("id", "")
-        if eid in self._id_set:
+        if eid in self._events:
             return False
-        self._id_set.add(eid)
+        event.setdefault("status", "pending")
+        self._events[eid] = event
         self._counter += 1
         heapq.heappush(self._heap, (event["priority"], event["created_at"], self._counter, event))
         return True
 
     def dequeue(self) -> Optional[dict]:
-        """Pop and return the highest-priority (lowest number) event, or None."""
+        """Pop and return the highest-priority pending event, or None."""
         while self._heap:
             _, _, _, event = heapq.heappop(self._heap)
             eid = event.get("id", "")
-            if eid in self._id_set:
-                self._id_set.discard(eid)
+            if eid in self._events and self._events[eid].get("status") == "pending":
+                self._events[eid]["status"] = "resolved"
                 return event
         return None
 
     def peek(self) -> Optional[dict]:
-        """Look at the next event without removing it."""
+        """Look at the next pending event without removing it."""
         for entry in self._heap:
-            if entry[3].get("id", "") in self._id_set:
-                return entry[3]
+            ev = entry[3]
+            if ev.get("id", "") in self._events and self._events[ev["id"]].get("status") == "pending":
+                return ev
         return None
 
-    def items(self) -> list:
-        """Return a sorted snapshot of all live events."""
+    def resolve(self, event_id: str) -> bool:
+        """Mark an event as resolved by ID (out-of-order consumption).
+
+        Returns True if the event was found and resolved, False otherwise.
+        """
+        if event_id in self._events and self._events[event_id].get("status") == "pending":
+            self._events[event_id]["status"] = "resolved"
+            return True
+        return False
+
+    def get_event(self, event_id: str) -> Optional[dict]:
+        """Return a specific event by ID, or None."""
+        return self._events.get(event_id)
+
+    def items(self, include_resolved: bool = False) -> list:
+        """Return a sorted snapshot of events.
+
+        By default only pending events. Set include_resolved=True for all.
+        """
         result = []
         for _, _, _, event in sorted(self._heap):
-            if event.get("id", "") in self._id_set:
+            eid = event.get("id", "")
+            if eid not in self._events:
+                continue
+            if include_resolved or self._events[eid].get("status") == "pending":
                 result.append(event)
         return result
 
     def clear(self):
         self._heap.clear()
-        self._id_set.clear()
+        self._events.clear()
         self._counter = 0
 
 
@@ -182,6 +209,8 @@ wild_loop_state: dict = {
     "autonomy_level": "balanced",
     "queue_modify_enabled": True,
     "plan_autonomy": "agent",
+    "created_sweep_ids": [],
+    "created_run_ids": [],
     "termination": {
         "max_iterations": None,
         "max_time_seconds": None,
@@ -301,6 +330,42 @@ def get_queue_state() -> dict:
     }
 
 
+def resolve_event(event_id: str) -> dict:
+    """Resolve a specific event by ID (out-of-order consumption)."""
+    event = wild_event_queue.get_event(event_id)
+    if event is None:
+        return {"resolved": False, "error": "Event not found", "event": None}
+    if event.get("status") == "resolved":
+        return {"resolved": False, "error": "Already resolved", "event": event}
+    wild_event_queue.resolve(event_id)
+    return {"resolved": True, "event": event, "queue_size": wild_event_queue.size}
+
+
+def get_all_events() -> dict:
+    """Return all events including resolved ones."""
+    return {
+        "queue_size": wild_event_queue.size,
+        "events": wild_event_queue.items(include_resolved=True),
+    }
+
+
+# =============================================================================
+# Entity Creation Tracking (called from server.py endpoints)
+# =============================================================================
+
+def record_created_entity(entity_type: str, entity_id: str):
+    """Track a sweep or run created during the current wild session.
+
+    entity_type: 'sweep' or 'run'
+    """
+    if not wild_loop_state.get("is_active"):
+        return
+    key = "created_sweep_ids" if entity_type == "sweep" else "created_run_ids"
+    if entity_id not in wild_loop_state.get(key, []):
+        wild_loop_state.setdefault(key, []).append(entity_id)
+        logger.debug("[wild-engine] Tracked %s creation: %s", entity_type, entity_id)
+
+
 # =============================================================================
 # Auto-Enqueue Helpers (called from server.py create_alert / update_run_status)
 # =============================================================================
@@ -406,6 +471,7 @@ def build_experiment_context(
 
 # Skill ID mapping per prompt_type
 _PROMPT_TYPE_SKILL_MAP = {
+    "planning": "wild_planning",
     "exploring": "wild_exploring",
     "run_event": "wild_monitoring",
     "alert": "wild_alert",
@@ -746,7 +812,7 @@ def parse_next_step(text: str) -> Optional[str]:
     return None
 
 
-_VALID_ROLES = {"exploring", "monitoring", "analyzing", "alert"}
+_VALID_ROLES = {"planning", "exploring", "monitoring", "analyzing", "alert"}
 
 def parse_next_role(text: str) -> Optional[str]:
     """Parse a <next_role>...</next_role> tag from the agent's response.
@@ -760,6 +826,18 @@ def parse_next_role(text: str) -> Optional[str]:
         if role in _VALID_ROLES:
             return role
         logger.warning("[wild-engine] Invalid next_role '%s', ignoring", role)
+    return None
+
+
+def parse_summary(text: str) -> Optional[str]:
+    """Parse a <summary>...</summary> tag from the agent's response.
+
+    Returns the summary string, or None if no tag found.
+    """
+    m = re.search(r"<summary>([\s\S]*?)</summary>", text)
+    if m:
+        s = m.group(1).strip()
+        return s if s else None
     return None
 
 
@@ -849,8 +927,8 @@ class WildLoopEngine:
 
         now = time.time()
         wild_loop_state.update({
-            "phase": "exploring",
-            "stage": "exploring",
+            "phase": "planning",
+            "stage": "planning",
             "is_active": True,
             "is_paused": False,
             "iteration": 0,
@@ -859,6 +937,8 @@ class WildLoopEngine:
             "session_id": req.session_id,
             "started_at": now,
             "sweep_id": None,
+            "created_sweep_ids": [],
+            "created_run_ids": [],
             "termination": {
                 "max_iterations": req.max_iterations,
                 "max_time_seconds": req.max_time_seconds,
@@ -876,8 +956,8 @@ class WildLoopEngine:
         self._paused_duration = 0.0
         self._pending_prompt = None
 
-        # Enqueue the first exploring prompt
-        self._enqueue_exploring_prompt(iteration=1)
+        # Enqueue the first planning prompt
+        self._enqueue_planning_prompt(iteration=1)
 
         # Start the background polling task
         self._start_poll_task()
@@ -1004,6 +1084,12 @@ class WildLoopEngine:
             wild_loop_state["next_step_role"] = next_role
             logger.info("[wild-engine] Next step role: %s", next_role)
 
+        # Parse summary from agent response
+        summary = parse_summary(response_text)
+        if summary:
+            wild_loop_state["last_summary"] = summary
+            logger.info("[wild-engine] Step summary: %s", summary[:200])
+
         if signal == "COMPLETE":
             logger.info("[wild-engine] COMPLETE signal at iteration %d", iteration)
             self.stop()
@@ -1016,7 +1102,9 @@ class WildLoopEngine:
 
         stage = wild_loop_state.get("stage", "exploring")
 
-        if stage == "exploring":
+        if stage == "planning":
+            self._handle_planning_response(response_text, iteration)
+        elif stage == "exploring":
             self._handle_exploring_response(response_text, iteration)
         elif stage == "running":
             self._handle_running_response(response_text)
@@ -1144,6 +1232,28 @@ class WildLoopEngine:
                     if a.get("run_id") in sweep_run_ids and a.get("status") == "pending"
                 ]
 
+        # Enrich created entity summaries for the debug panel
+        created_sweeps_detail = []
+        for sid in wild_loop_state.get("created_sweep_ids", []):
+            if sid in sweeps_dict:
+                s = sweeps_dict[sid]
+                created_sweeps_detail.append({
+                    "id": sid,
+                    "name": s.get("name", sid),
+                    "status": s.get("status", "unknown"),
+                    "run_count": len(s.get("run_ids", [])),
+                })
+
+        created_runs_detail = []
+        for rid in wild_loop_state.get("created_run_ids", []):
+            if rid in runs_dict:
+                r = runs_dict[rid]
+                created_runs_detail.append({
+                    "id": rid,
+                    "name": r.get("name", rid),
+                    "status": r.get("status", "unknown"),
+                })
+
         return {
             **wild_loop_state,
             "queue_size": wild_event_queue.size,
@@ -1152,11 +1262,70 @@ class WildLoopEngine:
             "active_alerts": active_alerts_list,
             "has_pending_prompt": self._pending_prompt is not None,
             "pending_event_id": self._pending_prompt.get("event_id") if self._pending_prompt else None,
+            "created_sweeps": created_sweeps_detail,
+            "created_runs": created_runs_detail,
         }
 
     # -----------------------------------------------------------------
     # Internal: Stage-specific response handlers
     # -----------------------------------------------------------------
+
+    def _enqueue_planning_prompt(self, iteration: int):
+        """Build and enqueue a planning prompt."""
+        goal = wild_loop_state.get("goal", "Continue working")
+        prompt_type = "planning"
+
+        provenance = None
+        prompt_text = None
+        if self._skill_get_fn:
+            try:
+                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+                result = build_prompt_for_frontend(
+                    BuildPromptRequest(
+                        prompt_type=prompt_type,
+                        goal=goal,
+                        step_goal=None,
+                        iteration=iteration,
+                        max_iterations=max_iter,
+                    ),
+                    self._skill_get_fn,
+                    server_url=self._server_url,
+                    auth_token=self._auth_token,
+                )
+                prompt_text = result.get("rendered", "")
+                provenance = result
+            except Exception as err:
+                logger.debug("[wild-engine] Skill template failed for planning: %s", err)
+
+        if not prompt_text:
+            logger.warning("[wild-engine] No prompt rendered for planning iteration %d", iteration)
+            prompt_text = f"Wild Loop planning — Goal: {goal}. Create a step-by-step plan."
+
+        event = {
+            "id": f"plan-{iteration}-{uuid.uuid4().hex[:6]}",
+            "priority": 85,
+            "title": f"Planning (iteration {iteration})",
+            "prompt": prompt_text,
+            "display_message": None,
+            "type": "planning",
+            "created_at": time.time(),
+            "provenance": provenance,
+        }
+        wild_event_queue.enqueue(event)
+        self._pending_prompt = None
+        logger.debug("[wild-engine] Enqueued planning prompt iter=%d", iteration)
+
+    def _handle_planning_response(self, response_text: str, iteration: int):
+        """Handle response while in planning stage.
+
+        After planning, transition to exploring stage automatically
+        and enqueue the first exploring prompt.
+        """
+        # The plan's next_step and summary are already parsed in on_response_complete
+        wild_loop_state["stage"] = "exploring"
+        wild_loop_state["phase"] = "exploring"
+        logger.info("[wild-engine] Planning complete, transitioning to exploring")
+        self._enqueue_exploring_prompt(iteration + 1)
 
     def _handle_exploring_response(self, response_text: str, iteration: int):
         """Handle response while in exploring stage."""

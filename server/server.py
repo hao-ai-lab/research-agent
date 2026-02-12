@@ -34,8 +34,8 @@ from wild_loop import (
     wild_loop_state,
     get_wild_mode_state, set_wild_mode_state,
     get_loop_status, update_loop_status, configure_loop,
-    enqueue_event, dequeue_event, get_queue_state,
-    auto_enqueue_alert, auto_enqueue_run_terminal,
+    enqueue_event, dequeue_event, get_queue_state, resolve_event, get_all_events,
+    auto_enqueue_alert, auto_enqueue_run_terminal, record_created_entity,
     build_experiment_context, build_wild_prompt, build_prompt_for_frontend,
     get_serializable_state as get_wild_serializable_state,
     load_from_saved as load_wild_from_saved,
@@ -3219,6 +3219,7 @@ async def create_run(req: RunCreate):
     _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
     
+    record_created_entity("run", run_id)
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
     return {"id": run_id, **run_data}
 
@@ -3616,6 +3617,27 @@ async def dequeue_wild_event():
 async def get_wild_event_queue_endpoint():
     """Inspect the current queue state (for debugging/UI)."""
     return get_queue_state()
+
+
+@app.post("/wild/events/{event_id}/resolve")
+async def resolve_wild_event(event_id: str):
+    """Resolve (consume) a specific event by ID, out of normal queue order."""
+    return resolve_event(event_id)
+
+
+@app.get("/wild/events/all")
+async def get_all_wild_events():
+    """Return all events including resolved (history view)."""
+    return get_all_events()
+
+
+@app.get("/wild/events/{event_id}")
+async def peek_wild_event(event_id: str):
+    """Peek at a specific event by ID without consuming it."""
+    event = wild_event_queue.get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
 
 
 @app.get("/wild/status")
@@ -4113,6 +4135,7 @@ async def create_sweep(req: SweepCreate):
         }
         sweeps[sweep_id] = sweep_data
         save_runs_state()
+        record_created_entity("sweep", sweep_id)
         logger.info(f"Created draft sweep {sweep_id}: {req.name}")
         return {"id": sweep_id, **sweep_data}
     
@@ -4173,6 +4196,9 @@ async def create_sweep(req: SweepCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
     
+    record_created_entity("sweep", sweep_id)
+    for rid in run_ids:
+        record_created_entity("run", rid)
     logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
 
@@ -4283,6 +4309,50 @@ async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max p
     save_runs_state()
     
     return {"message": f"Started {started}/{attempted} runs", "sweep_id": sweep_id}
+
+
+@app.post("/sweeps/{sweep_id}/runs")
+async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
+    """Create a new run and attach it to a sweep in one call.
+
+    This allows adding runs to a sweep even if they are outside the original
+    parameter/hyperparameter grid (e.g. a one-off baseline, a manual rerun
+    with custom flags, etc.).
+    """
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+
+    # Force sweep_id on the run regardless of what was provided
+    req.sweep_id = sweep_id
+
+    run_id = uuid.uuid4().hex[:12]
+    initial_status = "queued" if req.auto_start else "ready"
+
+    run_data = {
+        "name": req.name,
+        "command": req.command,
+        "workdir": req.workdir or WORKDIR,
+        "status": initial_status,
+        "created_at": time.time(),
+        "is_archived": False,
+        "sweep_id": sweep_id,
+        "parent_run_id": req.parent_run_id,
+        "origin_alert_id": req.origin_alert_id,
+        "tmux_window": None,
+        "run_dir": None,
+        "exit_code": None,
+        "error": None,
+        "wandb_dir": None,
+    }
+
+    runs[run_id] = run_data
+    sweeps[sweep_id].setdefault("run_ids", []).append(run_id)
+    recompute_sweep_state(sweep_id)
+    save_runs_state()
+
+    record_created_entity("run", run_id)
+    logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
+    return {"id": run_id, **run_data}
 
 
 @app.post("/runs/{run_id}/add-to-sweep")
