@@ -61,6 +61,9 @@ export const createSession = (...args: Parameters<typeof realApi.createSession>)
 export const getSession = (...args: Parameters<typeof realApi.getSession>) =>
     getApi().getSession(...args)
 
+export const renameSession = (...args: Parameters<typeof realApi.renameSession>) =>
+    getApi().renameSession(...args)
+
 export const deleteSession = (...args: Parameters<typeof realApi.deleteSession>) =>
     getApi().deleteSession(...args)
 

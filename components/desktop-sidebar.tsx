@@ -12,6 +12,7 @@ import {
   Ellipsis,
   FlaskConical,
   PanelLeftClose,
+  Pencil,
   Play,
   Plus,
   Settings,
@@ -58,6 +59,7 @@ interface DesktopSidebarProps {
   onSaveSession?: (sessionId: string) => Promise<void> | void
   onUnsaveSession?: (sessionId: string) => Promise<void> | void
   onArchiveSession?: (sessionId: string) => Promise<void> | void
+  onRenameSession?: (sessionId: string, title: string) => Promise<void> | void
   onNavigateToRun: (runId: string) => void
   onInsertReference: (text: string) => void
   onSettingsClick: () => void
@@ -117,6 +119,7 @@ export function DesktopSidebar({
   onSaveSession,
   onUnsaveSession,
   onArchiveSession,
+  onRenameSession,
   onNavigateToRun,
   onInsertReference,
   onSettingsClick,
@@ -171,6 +174,27 @@ export function DesktopSidebar({
   const [isResizing, setIsResizing] = useState(false)
   const resizeStartXRef = useRef(0)
   const resizeStartWidthRef = useRef(width)
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const editInputRef = useRef<HTMLInputElement>(null)
+
+  const startEditing = useCallback((sessionId: string, currentTitle: string) => {
+    setEditingSessionId(sessionId)
+    setEditingTitle(currentTitle || 'Untitled chat')
+  }, [])
+
+  const commitRename = useCallback(() => {
+    if (editingSessionId && editingTitle.trim()) {
+      void onRenameSession?.(editingSessionId, editingTitle.trim())
+    }
+    setEditingSessionId(null)
+    setEditingTitle('')
+  }, [editingSessionId, editingTitle, onRenameSession])
+
+  const cancelEditing = useCallback(() => {
+    setEditingSessionId(null)
+    setEditingTitle('')
+  }, [])
   const savedSessionIdSet = useMemo(() => new Set(savedSessionIds), [savedSessionIds])
   const savedSessions = useMemo(
     () => sessions.filter((session) => savedSessionIdSet.has(session.id)).slice(0, 10),
@@ -304,22 +328,41 @@ export function DesktopSidebar({
                     key={session.id}
                     className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTabChange('chat')
-                        void onSelectSession(session.id)
-                      }}
-                      className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
-                    >
-                      <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
+                    {editingSessionId === session.id ? (
+                      <div className="inline-flex min-w-0 flex-1 items-center gap-1">
                         <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
-                        <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
-                      </span>
-                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                        {formatRelativeTime(new Date(session.created_at * 1000))}
-                      </span>
-                    </button>
+                        <input
+                          ref={editInputRef}
+                          type="text"
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                            if (e.key === 'Escape') cancelEditing()
+                          }}
+                          onBlur={commitRename}
+                          className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+                          autoFocus
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onTabChange('chat')
+                          void onSelectSession(session.id)
+                        }}
+                        className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                      >
+                        <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
+                          <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                          <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                        </span>
+                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                          {formatRelativeTime(new Date(session.created_at * 1000))}
+                        </span>
+                      </button>
+                    )}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -333,6 +376,10 @@ export function DesktopSidebar({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onSelect={() => startEditing(session.id, session.title)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Rename
+                        </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => void onUnsaveSession?.(session.id)}>
                           <Star className="mr-2 h-3.5 w-3.5" />
                           Unsave
@@ -374,19 +421,35 @@ export function DesktopSidebar({
                     key={session.id}
                     className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTabChange('chat')
-                        void onSelectSession(session.id)
-                      }}
-                      className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
-                    >
-                      <span className="min-w-0 truncate text-foreground">{session.title || 'Untitled chat'}</span>
-                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                        {formatRelativeTime(new Date(session.created_at * 1000))}
-                      </span>
-                    </button>
+                    {editingSessionId === session.id ? (
+                      <input
+                        ref={editInputRef}
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                          if (e.key === 'Escape') cancelEditing()
+                        }}
+                        onBlur={commitRename}
+                        className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+                        autoFocus
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onTabChange('chat')
+                          void onSelectSession(session.id)
+                        }}
+                        className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                      >
+                        <span className="min-w-0 truncate text-foreground">{session.title || 'Untitled chat'}</span>
+                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                          {formatRelativeTime(new Date(session.created_at * 1000))}
+                        </span>
+                      </button>
+                    )}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                       <Button
@@ -400,6 +463,10 @@ export function DesktopSidebar({
                       </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onSelect={() => startEditing(session.id, session.title)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Rename
+                        </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => void onSaveSession?.(session.id)}>
                           <Star className="mr-2 h-3.5 w-3.5" />
                           Save

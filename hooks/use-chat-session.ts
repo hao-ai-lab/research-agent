@@ -6,6 +6,7 @@ import {
     createSession,
     getSession,
     deleteSession,
+    renameSession as renameSessionApi,
     streamChat,
     streamSession,
     checkApiHealth,
@@ -73,6 +74,7 @@ export interface UseChatSessionResult {
     selectSession: (sessionId: string) => Promise<void>
     saveSession: (sessionId: string) => Promise<void>
     unsaveSession: (sessionId: string) => Promise<void>
+    renameSession: (sessionId: string, title: string) => Promise<void>
     archiveSession: (sessionId: string) => Promise<void>
     removeSession: (sessionId: string) => Promise<void>
     refreshSessions: () => Promise<void>
@@ -745,6 +747,18 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [currentSessionId])
 
+    // Rename a session
+    const renameSession = useCallback(async (sessionId: string, title: string) => {
+        try {
+            setError(null)
+            await renameSessionApi(sessionId, title)
+            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title } : s))
+        } catch (err) {
+            console.error('Failed to rename session:', err)
+            setError(err instanceof Error ? err.message : 'Failed to rename session')
+        }
+    }, [])
+
     // Archive a session client-side (keeps backend data intact)
     const archiveSession = useCallback(async (sessionId: string) => {
         setError(null)
@@ -982,6 +996,7 @@ export function useChatSession(): UseChatSessionResult {
         selectSession,
         saveSession,
         unsaveSession,
+        renameSession,
         archiveSession,
         removeSession,
         refreshSessions,

@@ -482,6 +482,14 @@ export async function getSession(sessionId: string): Promise<SessionWithMessages
     return session
 }
 
+export async function renameSession(sessionId: string, title: string): Promise<ChatSession> {
+    await delay(100)
+    const session = mockSessions.get(sessionId)
+    if (!session) throw new Error('Session not found')
+    session.title = title
+    return { id: sessionId, title: session.title, created_at: session.created_at, message_count: session.messages.length }
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
     await delay(100)
     mockSessions.delete(sessionId)
