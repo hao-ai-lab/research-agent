@@ -516,7 +516,7 @@ export function ConnectedChatView({
     )
 
     // Find the closing of the chat view to add debug panel
-    const showDebugPanel = settings.developer?.showWildLoopState === true && mode === 'wild'
+    const showDebugPanel = settings.developer?.showWildLoopState === true
     const debugPanelElement = showDebugPanel ? (
         <WildLoopDebugPanel onClose={() => {
             setSettings({
