@@ -227,6 +227,7 @@ export default function ResearchChat() {
     selectSession,
     saveSession,
     unsaveSession,
+    renameSession,
     archiveSession,
     currentSessionId,
     currentSession,
@@ -649,6 +650,9 @@ export default function ResearchChat() {
           }}
           onArchiveSession={async (sessionId) => {
             await archiveSession(sessionId)
+          }}
+          onRenameSession={async (sessionId, title) => {
+            await renameSession(sessionId, title)
           }}
           onNavigateToRun={handleNavigateToRun}
           onInsertReference={handleInsertChatReference}

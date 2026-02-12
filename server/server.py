@@ -221,6 +221,10 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
 
 
+class UpdateSessionRequest(BaseModel):
+    title: str
+
+
 class SystemPromptUpdate(BaseModel):
     system_prompt: str = ""
 
@@ -2562,6 +2566,22 @@ async def get_session(session_id: str):
         "messages": session.get("messages", []),
         "system_prompt": session.get("system_prompt", ""),
         "active_stream": active_stream,
+    }
+
+
+@app.patch("/sessions/{session_id}")
+async def update_session(session_id: str, req: UpdateSessionRequest):
+    """Update a chat session (e.g. rename)."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    chat_sessions[session_id]["title"] = req.title
+    save_chat_state()
+    session = chat_sessions[session_id]
+    return {
+        "id": session_id,
+        "title": session.get("title", "New Chat"),
+        "created_at": session.get("created_at"),
+        "message_count": len(session.get("messages", [])),
     }
 
 

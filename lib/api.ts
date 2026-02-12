@@ -142,6 +142,21 @@ export async function getSession(sessionId: string): Promise<SessionWithMessages
 }
 
 /**
+ * Rename a chat session
+ */
+export async function renameSession(sessionId: string, title: string): Promise<ChatSession> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: getHeaders(true),
+        body: JSON.stringify({ title }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to rename session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
  * Delete a chat session
  */
 export async function deleteSession(sessionId: string): Promise<void> {
