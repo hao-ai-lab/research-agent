@@ -384,119 +384,6 @@ _PROMPT_TYPE_SKILL_MAP = {
     "analysis": "wild_analyzing",
 }
 
-# Hardcoded fallback builders (kept for backward compat when skill is missing)
-_FALLBACK_EXPLORING = """# Wild Loop — Iteration {{iteration}} (Exploring)
-
-## Your Goal
-{{goal}}
-
-## Status
-No sweep has been created yet. You need to define one.
-
-## What You Should Do
-1. Explore the codebase and understand what experiments are needed
-2. When ready, output a sweep specification as a JSON block inside `<sweep>` tags
-3. The system will automatically create and start the sweep for you
-
-## How to Create a Sweep
-Output exactly this format (the system will parse it and call the API for you):
-
-```
-<sweep>
-{
-  "name": "My Experiment Sweep",
-  "base_command": "python train.py",
-  "parameters": {
-    "lr": [0.0001, 0.001, 0.01],
-    "batch_size": [32, 64]
-  },
-  "max_runs": 10
-}
-</sweep>
-```
-
-The `parameters` field defines a grid — the system will expand it into individual runs.
-The `base_command` is the shell command template. Parameters are appended as `--key=value`.
-
-## Rules
-- Do NOT run commands yourself. Output the `<sweep>` spec and the system handles execution.
-- If you need more info before creating a sweep, just explain what you need and output `<promise>CONTINUE</promise>`
-- Once you output a `<sweep>` tag, the system will create & start it automatically."""
-
-_FALLBACK_RUN_EVENT = """# Wild Loop — Run Event (Monitoring)
-
-## Your Goal
-{{goal}}
-
-## Event: Run "{{run_name}}" just {{run_status}}  {{status_emoji}}
-- **ID**: {{run_id}}
-- **Status**: {{run_status}}
-- **Command**: `{{run_command}}`
-
-### Log Tail (last 1000 chars)
-```
-{{log_tail}}
-```
-
-## Current Sweep Status
-{{sweep_summary}}
-
-## Instructions
-{{run_instructions}}
-- End with `<promise>CONTINUE</promise>`"""
-
-_FALLBACK_ALERT = """# Wild Loop — Alert
-
-## Your Goal
-{{goal}}
-
-## ⚠️ Alert from Run "{{run_name}}"
-- **Alert ID**: {{alert_id}}
-- **Severity**: {{alert_severity}}
-- **Message**: {{alert_message}}
-- **Available Choices**: {{alert_choices}}
-
-## How to Resolve This Alert
-You MUST resolve this alert by outputting a `<resolve_alert>` tag with your chosen action:
-
-```
-<resolve_alert>
-{{alert_resolve_example}}
-</resolve_alert>
-```
-
-## Instructions
-1. Analyze the alert and decide the best course of action
-2. Output the `<resolve_alert>` tag with your chosen response
-3. If the issue needs a code fix, explain what you'd change
-4. End with `<promise>CONTINUE</promise>`"""
-
-_FALLBACK_ANALYSIS = """# Wild Loop — Analysis (All Runs Complete)
-
-## Your Goal
-{{goal}}
-
-## Sweep "{{sweep_name}}" Results
-**{{total_runs}} total** — {{passed_runs}} passed, {{failed_runs}} failed
-
-{{run_summaries}}
-
-## Instructions
-- Review all run results above
-- Determine if the original goal has been fully achieved
-- Provide a clear summary report
-
-## Response
-- If goal is FULLY achieved with evidence: `<promise>COMPLETE</promise>`
-- If more experiments are needed: `<promise>CONTINUE</promise>` (will start a new exploration cycle)
-- If you need human input: `<promise>NEEDS_HUMAN</promise>`"""
-
-_FALLBACK_TEMPLATES = {
-    "exploring": _FALLBACK_EXPLORING,
-    "run_event": _FALLBACK_RUN_EVENT,
-    "alert": _FALLBACK_ALERT,
-    "analysis": _FALLBACK_ANALYSIS,
-}
 
 
 def _render_simple(template: str, variables: Dict[str, str]) -> str:
@@ -567,32 +454,26 @@ def build_prompt_for_frontend(
             "run_summaries": req.run_summaries or "",
         })
 
-    # Try to use the prompt skill template
+    # Use the prompt skill template (required)
     skill_id = _PROMPT_TYPE_SKILL_MAP.get(prompt_type)
-    skill = skill_get_fn(skill_id) if skill_id else None
+    if not skill_id:
+        raise ValueError(f"Unknown wild loop prompt_type: {prompt_type!r}")
 
-    if skill:
-        template_raw = skill["template"]
-        rendered = _render_simple(template_raw, variables)
-        return {
-            "rendered": rendered,
-            "user_input": goal,
-            "skill_id": skill["id"],
-            "skill_name": skill.get("name", skill["id"]),
-            "template": template_raw,
-            "variables": variables,
-            "prompt_type": prompt_type,
-        }
+    skill = skill_get_fn(skill_id)
+    if not skill:
+        raise ValueError(
+            f"Required prompt skill '{skill_id}' not found for prompt_type '{prompt_type}'. "
+            f"Ensure the skill is registered in prompt_skill_manager."
+        )
 
-    # Fallback to hardcoded templates
-    fallback = _FALLBACK_TEMPLATES.get(prompt_type, "")
-    rendered = _render_simple(fallback, variables)
+    template_raw = skill["template"]
+    rendered = _render_simple(template_raw, variables)
     return {
         "rendered": rendered,
         "user_input": goal,
-        "skill_id": None,
-        "skill_name": None,
-        "template": fallback,
+        "skill_id": skill["id"],
+        "skill_name": skill.get("name", skill["id"]),
+        "template": template_raw,
         "variables": variables,
         "prompt_type": prompt_type,
     }
@@ -639,8 +520,10 @@ def build_wild_prompt(prompt_skill_render_fn: Callable, experiment_context: str)
     if rendered:
         return rendered + "\n\n"
 
-    logger.warning("wild_system prompt skill not found — sending raw message")
-    return ""
+    raise ValueError(
+        "Required prompt skill 'wild_system' not found. "
+        "Ensure the skill is registered in prompt_skill_manager."
+    )
 
 
 # =============================================================================
