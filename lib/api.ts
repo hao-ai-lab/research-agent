@@ -9,16 +9,16 @@ const API_URL = () => getApiUrl()
 // Get headers with optional auth token
 function getHeaders(includeContentType: boolean = false): HeadersInit {
     const headers: HeadersInit = {}
-    
+
     if (includeContentType) {
         headers['Content-Type'] = 'application/json'
     }
-    
+
     const authToken = getAuthToken()
     if (authToken) {
         headers['X-Auth-Token'] = authToken
     }
-    
+
     return headers
 }
 
@@ -702,6 +702,8 @@ export async function updateWildLoopStatus(update: {
     goal?: string
     session_id?: string
     is_paused?: boolean
+    is_active?: boolean
+    stage?: string
 }): Promise<WildLoopStatus> {
     const params = new URLSearchParams()
     if (update.phase !== undefined) params.set('phase', update.phase)
@@ -709,7 +711,9 @@ export async function updateWildLoopStatus(update: {
     if (update.goal !== undefined) params.set('goal', update.goal)
     if (update.session_id !== undefined) params.set('session_id', update.session_id)
     if (update.is_paused !== undefined) params.set('is_paused', String(update.is_paused))
-    
+    if (update.is_active !== undefined) params.set('is_active', String(update.is_active))
+    if (update.stage !== undefined) params.set('stage', update.stage)
+
     const response = await fetch(`${API_URL()}/wild/status?${params}`, {
         method: 'POST',
         headers: getHeaders()
@@ -861,6 +865,22 @@ export interface PromptSkill {
     variables: string[]
     category: 'prompt' | 'skill'  // "prompt" = template only, "skill" = has logic/tools
     built_in: boolean
+    internal: boolean  // true for wild_* and ra_mode_plan — cannot be deleted
+    _score?: number    // present in search results
+}
+
+export interface CreateSkillRequest {
+    name: string
+    description?: string
+    template?: string
+    category?: string
+    variables?: string[]
+}
+
+export interface InstallSkillRequest {
+    source: 'git'
+    url: string
+    name?: string
 }
 
 export interface SkillFileEntry {
@@ -921,6 +941,67 @@ export async function reloadPromptSkills(): Promise<{ message: string; count: nu
     })
     if (!response.ok) {
         throw new Error(`Failed to reload prompt skills: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Create a new prompt skill
+ */
+export async function createSkill(req: CreateSkillRequest): Promise<PromptSkill> {
+    const response = await fetch(`${API_URL()}/prompt-skills`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(req),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to create skill: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Delete a user-created skill (internal skills return 403)
+ */
+export async function deleteSkill(id: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_URL()}/prompt-skills/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to delete skill: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Install a skill from an external source (git clone)
+ */
+export async function installSkill(req: InstallSkillRequest): Promise<PromptSkill> {
+    const response = await fetch(`${API_URL()}/prompt-skills/install`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(req),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to install skill: ${error}`)
+    }
+    return response.json()
+}
+
+/**
+ * Search skills by name, description, or template content
+ */
+export async function searchSkills(query: string, limit: number = 20): Promise<PromptSkill[]> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) })
+    const response = await fetch(`${API_URL()}/prompt-skills/search?${params}`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to search skills: ${response.statusText}`)
     }
     return response.json()
 }
