@@ -24,6 +24,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   FileText,
+  Bug,
 } from 'lucide-react'
 import {
   Dialog,
@@ -258,6 +259,22 @@ export function SettingsDialog({
           description: 'Reorder and toggle navigation items',
           icon: LayoutDashboard,
           type: 'custom' as const,
+        },
+        {
+          id: 'showWildLoopState',
+          label: 'Wild Loop Debug Panel',
+          description: 'Show backend state panel when in wild mode',
+          icon: Bug,
+          type: 'toggle' as const,
+          value: settings.developer?.showWildLoopState === true,
+        },
+        {
+          id: 'showPlanPanel',
+          label: 'Plan Panel',
+          description: 'Show the Plans tab for managing experiment plans',
+          icon: FileText,
+          type: 'toggle' as const,
+          value: settings.developer?.showPlanPanel === true,
         },
       ],
     },
@@ -565,6 +582,18 @@ export function SettingsDialog({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showWildLoopState') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showWildLoopState: checked },
+                  })
+                }
+                if (item.id === 'showPlanPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
               }}
             />
           </div>
@@ -850,11 +879,10 @@ export function SettingsDialog({
                     key={section.id}
                     type="button"
                     onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
-                    className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${
-                      activeSection.id === section.id
-                        ? 'bg-accent text-accent-foreground'
-                        : 'bg-secondary text-muted-foreground hover:text-foreground'
-                    }`}
+                    className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${activeSection.id === section.id
+                      ? 'bg-accent text-accent-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      }`}
                   >
                     {section.title}
                   </button>
