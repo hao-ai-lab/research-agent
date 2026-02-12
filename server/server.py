@@ -2903,6 +2903,8 @@ def _build_plan_state(message: str) -> dict:
         "goal": message,
         "experiment_context": _build_experiment_context(),
         "existing_plans": existing_plans_summary,
+        "server_url": SERVER_CALLBACK_URL,
+        "auth_token": USER_AUTH_TOKEN or "",
     }
 
 
@@ -2983,10 +2985,11 @@ def _log_background_chat_task(task: asyncio.Task) -> None:
         logger.error("Background chat worker failed: %s", exc, exc_info=(type(exc), exc, exc.__traceback__))
 
 
-async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime) -> None:
+
+async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime, *, mode: str = "agent") -> None:
     """Run the OpenCode stream for a chat session independent of HTTP clients."""
     session_stop_flags.pop(session_id, None)
-    logger.debug("Starting background chat worker for session %s run %s", session_id, runtime.run_id)
+    logger.debug("Starting background chat worker for session %s run %s (mode=%s)", session_id, runtime.run_id, mode)
 
     try:
         opencode_session_id = await get_opencode_session_for_chat(session_id)
@@ -3032,6 +3035,7 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
                 }
                 session.setdefault("messages", []).append(assistant_msg)
 
+
         # Auto-name: fetch title from OpenCode only once (after the first exchange)
         session = chat_sessions.get(session_id)
         if isinstance(session, dict) and not session.get("title"):
@@ -3055,7 +3059,7 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
         logger.debug("Background chat worker finished for session %s run %s", session_id, runtime.run_id)
 
 
-async def _start_chat_worker(session_id: str, content: str) -> ChatStreamRuntime:
+async def _start_chat_worker(session_id: str, content: str, mode: str = "agent") -> ChatStreamRuntime:
     existing = active_chat_streams.get(session_id)
     if existing and existing.status == "running":
         raise HTTPException(status_code=409, detail="Session already has an active response")
@@ -3066,7 +3070,7 @@ async def _start_chat_worker(session_id: str, content: str) -> ChatStreamRuntime
     active_chat_streams[session_id] = runtime
     _persist_active_stream_snapshot(session_id, runtime, force=True)
 
-    task = asyncio.create_task(_chat_worker(session_id, content, runtime))
+    task = asyncio.create_task(_chat_worker(session_id, content, runtime, mode=mode))
     active_chat_tasks[session_id] = task
     task.add_done_callback(_log_background_chat_task)
     return runtime
@@ -3115,7 +3119,7 @@ async def chat_endpoint(req: ChatRequest):
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
     content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
-    runtime = await _start_chat_worker(session_id, content)
+    runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it
     if provenance:

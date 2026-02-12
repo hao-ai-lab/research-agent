@@ -782,7 +782,7 @@ export default function ResearchChat() {
             {activeTab === 'skills' && (
               <SkillsBrowserView />
             )}
-            {activeTab === 'plans' && (
+            {activeTab === 'plans' && settings.developer?.showPlanPanel && (
               <PlanPanel />
             )}
             {activeTab === 'report' && (

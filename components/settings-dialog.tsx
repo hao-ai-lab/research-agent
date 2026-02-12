@@ -268,6 +268,14 @@ export function SettingsDialog({
           type: 'toggle' as const,
           value: settings.developer?.showWildLoopState === true,
         },
+        {
+          id: 'showPlanPanel',
+          label: 'Plan Panel',
+          description: 'Show the Plans tab for managing experiment plans',
+          icon: FileText,
+          type: 'toggle' as const,
+          value: settings.developer?.showPlanPanel === true,
+        },
       ],
     },
     {
@@ -580,6 +588,12 @@ export function SettingsDialog({
                     developer: { ...settings.developer, showWildLoopState: checked },
                   })
                 }
+                if (item.id === 'showPlanPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
               }}
             />
           </div>
@@ -866,8 +880,8 @@ export function SettingsDialog({
                     type="button"
                     onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
                     className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${activeSection.id === section.id
-                        ? 'bg-accent text-accent-foreground'
-                        : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      ? 'bg-accent text-accent-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
                       }`}
                   >
                     {section.title}

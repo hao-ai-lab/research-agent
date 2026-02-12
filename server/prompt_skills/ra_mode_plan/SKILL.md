@@ -1,7 +1,7 @@
 ---
 name: "Plan Mode — Planning Assistant"
-description: "Generates a structured experiment plan with parseable sections. Agent proposes a detailed plan before taking any action."
-variables: ["goal", "experiment_context", "existing_plans"]
+description: "Generates a structured experiment plan and saves it via the plan API endpoint."
+variables: ["goal", "experiment_context", "existing_plans", "server_url", "auth_token"]
 ---
 # Plan Mode
 
@@ -61,9 +61,31 @@ Your plan MUST follow this exact structure with these exact headers:
 - **Resources**: <GPU/compute requirements>
 ```
 
+## Saving the Plan
+
+After generating the plan, you **MUST** save it by calling the plan creation endpoint. Use the `bash` tool to run a `curl` command:
+
+```bash
+curl -s -X POST "{{server_url}}/plans" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: {{auth_token}}" \
+  -d '{
+    "title": "<your plan title>",
+    "goal": "<the objective section text>",
+    "session_id": null,
+    "raw_markdown": "<the FULL plan markdown starting from ## 📋 Plan: ...>"
+  }'
+```
+
+The endpoint returns the created plan as JSON with an `id` field. After saving, report the plan ID to the user like:
+
+> ✅ Plan saved — ID: `<plan_id>`
+
 ### Guidelines
 - Be specific and actionable — every step should be executable
 - Reference existing runs/sweeps from the experiment state when relevant
 - Avoid duplicating work already covered by existing plans
 - Suggest concrete hyperparameter values, not just ranges
 - The user will review the plan and then approve it for execution
+- **Always save the plan** via the endpoint above — do NOT skip this step
+- In the `raw_markdown` field, include ONLY the structured plan (starting from `## 📋 Plan:`), not your exploration or reasoning

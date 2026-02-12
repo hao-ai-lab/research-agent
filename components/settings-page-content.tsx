@@ -25,6 +25,7 @@ import {
   WifiOff,
   X,
   Bug,
+  FileText,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -255,6 +256,14 @@ export function SettingsPageContent({
           icon: Bug,
           type: 'toggle' as const,
           value: settings.developer?.showWildLoopState === true,
+        },
+        {
+          id: 'showPlanPanel',
+          label: 'Plan Panel',
+          description: 'Show the Plans tab for managing experiment plans',
+          icon: FileText,
+          type: 'toggle' as const,
+          value: settings.developer?.showPlanPanel === true,
         },
       ],
     },
@@ -558,6 +567,12 @@ export function SettingsPageContent({
                     developer: { ...settings.developer, showWildLoopState: checked },
                   })
                 }
+                if (item.id === 'showPlanPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
               }}
             />
           </div>
@@ -825,8 +840,8 @@ export function SettingsPageContent({
                     type="button"
                     onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
                     className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${activeSection.id === section.id
-                        ? 'bg-accent text-accent-foreground'
-                        : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      ? 'bg-accent text-accent-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
                       }`}
                   >
                     {section.title}
@@ -844,8 +859,8 @@ export function SettingsPageContent({
                   type="button"
                   onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
                   className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${activeSection.id === section.id
-                      ? 'bg-secondary text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
                     }`}
                 >
                   {section.title}
