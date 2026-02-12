@@ -337,6 +337,8 @@ export function useWildLoop(): UseWildLoopResult {
   const [iteration, setIteration] = useState(0)
   const [goal, setGoal] = useState<string | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
+  const pausedAtRef = useRef<number | null>(null)
+  const pausedDurationRef = useRef<number>(0) // total seconds spent paused
   const [sessionId, setSessionId] = useState<string | null>(null)
   // Event queue replaces single-slot pendingPrompt
   const queueRef = useRef(new EventQueue())
@@ -612,6 +614,8 @@ export function useWildLoop(): UseWildLoopResult {
     setIteration(0)
     setGoal(newGoal)
     setStartedAt(now)
+    pausedAtRef.current = null
+    pausedDurationRef.current = 0
     setSessionId(newSessionId)
     queueRef.current.clear()
     setQueueSnapshot([])
@@ -645,6 +649,7 @@ export function useWildLoop(): UseWildLoopResult {
   const pause = useCallback(() => {
     setIsPaused(true)
     setPhase('paused')
+    pausedAtRef.current = Date.now() / 1000 // record when we paused
     // Don't clear queue on pause — events stay queued for resume
     isBusyRef.current = false
     updateWildLoopStatus({ phase: 'paused', is_paused: true }).catch(console.error)
@@ -652,6 +657,11 @@ export function useWildLoop(): UseWildLoopResult {
 
   const resume = useCallback(() => {
     setIsPaused(false)
+    // Accumulate time spent in this pause interval
+    if (pausedAtRef.current !== null) {
+      pausedDurationRef.current += (Date.now() / 1000) - pausedAtRef.current
+      pausedAtRef.current = null
+    }
     const currentStage = stageRef.current
     const p: WildLoopPhase = currentStage === 'running' ? 'monitoring' : 'exploring'
     setPhase(p)
@@ -715,7 +725,8 @@ export function useWildLoop(): UseWildLoopResult {
     if (conds.maxIterations && iter >= conds.maxIterations) return true
     const started = startedAtRef.current
     if (conds.maxTimeSeconds && started) {
-      if ((Date.now() / 1000) - started >= conds.maxTimeSeconds) return true
+      const elapsed = (Date.now() / 1000) - started - pausedDurationRef.current
+      if (elapsed >= conds.maxTimeSeconds) return true
     }
     return false
   }, [])
