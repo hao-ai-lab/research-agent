@@ -24,6 +24,7 @@ import {
   Wifi,
   WifiOff,
   X,
+  Bug,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -47,7 +48,7 @@ export function SettingsPageContent({
   onNavigateToJourney,
   focusAuthToken = false,
 }: SettingsPageContentProps) {
-  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'about'>('api')
+  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'developer' | 'about'>('api')
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
   const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
@@ -240,6 +241,20 @@ export function SettingsPageContent({
           icon: Bell,
           type: 'toggle' as const,
           value: settings.notifications.webNotificationsEnabled,
+        },
+      ],
+    },
+    {
+      id: 'developer',
+      title: 'Developer',
+      items: [
+        {
+          id: 'showWildLoopState',
+          label: 'Wild Loop Debug Panel',
+          description: 'Show backend state panel when in wild mode',
+          icon: Bug,
+          type: 'toggle' as const,
+          value: settings.developer?.showWildLoopState === true,
         },
       ],
     },
@@ -537,6 +552,12 @@ export function SettingsPageContent({
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showWildLoopState') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showWildLoopState: checked },
+                  })
+                }
               }}
             />
           </div>
@@ -803,11 +824,10 @@ export function SettingsPageContent({
                     key={section.id}
                     type="button"
                     onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
-                    className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${
-                      activeSection.id === section.id
+                    className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${activeSection.id === section.id
                         ? 'bg-accent text-accent-foreground'
                         : 'bg-secondary text-muted-foreground hover:text-foreground'
-                    }`}
+                      }`}
                   >
                     {section.title}
                   </button>
@@ -823,11 +843,10 @@ export function SettingsPageContent({
                   key={section.id}
                   type="button"
                   onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
-                  className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                    activeSection.id === section.id
+                  className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${activeSection.id === section.id
                       ? 'bg-secondary text-foreground'
                       : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-                  }`}
+                    }`}
                 >
                   {section.title}
                 </button>
