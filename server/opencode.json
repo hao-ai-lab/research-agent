@@ -1,5 +1,22 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "permission": "allow",
+  "tools": {
+    "read": true,
+    "write": true,
+    "edit": true,
+    "bash": true,
+    "grep": true,
+    "glob": true,
+    "list": true,
+    "webfetch": true,
+    "skill": true,
+    "patch": true,
+    "task": true,
+    "question": true,
+    "todowrite": true,
+    "todoread": true
+  },
   "provider": {
     "research-agent": {
       "npm": "@ai-sdk/anthropic",
@@ -193,37 +210,5 @@
       "url": "https://mcp.context7.com/mcp",
       "enabled": true
     }
-  },
-  "permission": {
-    "read": "allow",
-    "write": "allow",
-    "edit": "allow",
-    "bash": "allow",
-    "grep": "allow",
-    "glob": "allow",
-    "list": "allow",
-    "webfetch": "allow",
-    "skill": "allow",
-    "patch": "allow",
-    "task": "allow",
-    "question": "allow",
-    "todowrite": "allow",
-    "todoread": "allow"
-  },
-  "tools": {
-    "read": true,
-    "write": true,
-    "edit": true,
-    "bash": true,
-    "grep": true,
-    "glob": true,
-    "list": true,
-    "webfetch": true,
-    "skill": true,
-    "patch": true,
-    "task": true,
-    "question": true,
-    "todowrite": true,
-    "todoread": true
   }
 }
