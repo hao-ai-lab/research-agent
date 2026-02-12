@@ -255,15 +255,18 @@ export function useWildLoop(): UseWildLoopResult {
     customCondition: termination?.custom_condition ?? null,
   }
 
-  // Map backend queue events to frontend QueuedEvent type
-  const eventQueue: QueuedEvent[] = (status?.queue_events ?? []).map((e) => ({
-    id: e.id,
-    priority: e.priority,
-    title: e.title,
-    prompt: e.prompt,
-    type: e.type as QueuedEvent['type'],
-    createdAt: e.created_at,
-  }))
+  // Map backend queue events to frontend QueuedEvent type, excluding the active/pending item
+  const pendingEventId = status?.pending_event_id ?? null
+  const eventQueue: QueuedEvent[] = (status?.queue_events ?? [])
+    .filter((e) => e.id !== pendingEventId)
+    .map((e) => ({
+      id: e.id,
+      priority: e.priority,
+      title: e.title,
+      prompt: e.prompt,
+      type: e.type as QueuedEvent['type'],
+      createdAt: e.created_at,
+    }))
 
   // Derive pending prompt from the next-prompt poll
   const pendingPrompt = nextPrompt?.has_prompt ? (nextPrompt.prompt ?? null) : null

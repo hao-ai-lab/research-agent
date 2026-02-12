@@ -429,6 +429,7 @@ export interface WildLoopStatus {
     }
     active_alerts: Alert[]
     has_pending_prompt: boolean
+    pending_event_id: string | null
 }
 
 export interface LogResponse {

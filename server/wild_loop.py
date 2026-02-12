@@ -1129,6 +1129,7 @@ class WildLoopEngine:
             "run_stats": run_stats,
             "active_alerts": active_alerts_list,
             "has_pending_prompt": self._pending_prompt is not None,
+            "pending_event_id": self._pending_prompt.get("event_id") if self._pending_prompt else None,
         }
 
     # -----------------------------------------------------------------
