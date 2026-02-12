@@ -71,10 +71,11 @@ curl -s -X POST "{{server_url}}/sweeps/SWEEP_ID/runs" \
 ## Rules
 
 - **Always use sweeps** — never create standalone runs. Every run must belong to a sweep.
+- **Do NOT start runs or sweeps yourself** — set `auto_start: false` when creating sweeps. The **job scheduler** will handle starting runs based on available resources.
 - If you already created a sweep this session, attach new runs to it via `POST /sweeps/{id}/runs`
 - Use the server API endpoints directly — do NOT embed sweep specs as XML tags in your response
 - If you need more info before creating a sweep, explain what you need and output `<promise>CONTINUE</promise>`
-- After creating runs or a sweep, output `<promise>CONTINUE</promise>` to monitor results
+- After creating runs or a sweep, output `<promise>CONTINUE</promise>` and suggest `<next_role>job_scheduling</next_role>` so the scheduler can start them
 
 ## Output Requirements
 
@@ -96,4 +97,4 @@ At the end of your response, output these structured tags:
    ```
    <next_role>monitoring</next_role>
    ```
-   Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`
+   Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`, `job_scheduling`

@@ -389,6 +389,8 @@ def auto_enqueue_alert(alert_id: str, run_id: str, run_name: str, severity: str,
         "created_at": time.time(),
     })
     logger.info(f"Auto-enqueued wild event for alert {alert_id} (severity={severity}, priority={priority})")
+    # Also enqueue a job scheduling event (resource may need rebalancing)
+    auto_enqueue_job_scheduling(reason=f"alert {alert_id} on run {run_name}")
 
 
 def auto_enqueue_run_terminal(run_id: str, run_name: str, status: str, exit_code=None, error=None):
@@ -411,6 +413,33 @@ def auto_enqueue_run_terminal(run_id: str, run_name: str, status: str, exit_code
         "created_at": time.time(),
     })
     logger.info(f"Auto-enqueued wild event for run {run_id} ({status}, priority={priority})")
+    # A run finished/failed → resource freed → schedule pending runs
+    auto_enqueue_job_scheduling(reason=f"run {run_name} {status}")
+
+
+def auto_enqueue_job_scheduling(reason: str = ""):
+    """Enqueue a job scheduling event if wild mode is on.
+
+    Only one job_scheduling event is allowed in the queue at a time.
+    Priority 15 = just below user messages (10), above all other events.
+    """
+    if not wild_mode_enabled:
+        return
+    # Dedup: skip if a job_scheduling event already exists in the queue
+    for ev in wild_event_queue.items():
+        if ev.get("type") == "job_scheduling":
+            logger.debug("[wild-engine] job_scheduling event already in queue, skipping (reason: %s)", reason)
+            return
+    wild_event_queue.enqueue({
+        "id": f"sched-{uuid.uuid4().hex[:6]}",
+        "priority": 15,
+        "title": "📋 Job Scheduler",
+        "prompt": f"Resource event: {reason}. Check queued/ready runs and decide what to start.",
+        "display_message": None,
+        "type": "job_scheduling",
+        "created_at": time.time(),
+    })
+    logger.info("[wild-engine] Enqueued job_scheduling event (reason: %s)", reason)
 
 
 # =============================================================================
@@ -476,6 +505,7 @@ _PROMPT_TYPE_SKILL_MAP = {
     "run_event": "wild_monitoring",
     "alert": "wild_alert",
     "analysis": "wild_analyzing",
+    "job_scheduling": "wild_job_scheduling",
 }
 
 
@@ -812,7 +842,7 @@ def parse_next_step(text: str) -> Optional[str]:
     return None
 
 
-_VALID_ROLES = {"planning", "exploring", "monitoring", "analyzing", "alert"}
+_VALID_ROLES = {"planning", "exploring", "monitoring", "analyzing", "alert", "job_scheduling"}
 
 def parse_next_role(text: str) -> Optional[str]:
     """Parse a <next_role>...</next_role> tag from the agent's response.
@@ -1111,6 +1141,8 @@ class WildLoopEngine:
             # running stage: don't auto-queue; polling handles next events
         elif stage == "analyzing":
             self._handle_analyzing_response(response_text, iteration)
+        elif stage == "job_scheduling":
+            self._handle_job_scheduling_response(response_text, iteration)
 
         if self._save_settings:
             self._save_settings()
@@ -1327,6 +1359,80 @@ class WildLoopEngine:
         logger.info("[wild-engine] Planning complete, transitioning to exploring")
         self._enqueue_exploring_prompt(iteration + 1)
 
+    def _enqueue_job_scheduling_prompt(self, iteration: int):
+        """Build and enqueue a job scheduling prompt.
+
+        Only one job_scheduling event is allowed in the queue.  If one already
+        exists this call is a no-op (dedup).
+        """
+        # Dedup check
+        for ev in wild_event_queue.items():
+            if ev.get("type") == "job_scheduling":
+                logger.debug("[wild-engine] job_scheduling already queued, skipping enqueue")
+                return
+
+        goal = wild_loop_state.get("goal", "Continue working")
+        prompt_type = "job_scheduling"
+
+        provenance = None
+        prompt_text = None
+        if self._skill_get_fn:
+            try:
+                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+                step_goal = wild_loop_state.get("step_goal")
+                result = build_prompt_for_frontend(
+                    BuildPromptRequest(
+                        prompt_type=prompt_type,
+                        goal=goal,
+                        step_goal=step_goal,
+                        iteration=iteration,
+                        max_iterations=max_iter,
+                    ),
+                    self._skill_get_fn,
+                    server_url=self._server_url,
+                    auth_token=self._auth_token,
+                )
+                prompt_text = result.get("rendered", "")
+                provenance = result
+            except Exception as err:
+                logger.debug("[wild-engine] Skill template failed for job_scheduling: %s", err)
+
+        if not prompt_text:
+            prompt_text = f"Job Scheduler — check queued/ready runs and decide what to start. Goal: {goal}"
+
+        event = {
+            "id": f"sched-{iteration}-{uuid.uuid4().hex[:6]}",
+            "priority": 15,
+            "title": f"📋 Job Scheduler (iteration {iteration})",
+            "prompt": prompt_text,
+            "display_message": None,
+            "type": "job_scheduling",
+            "created_at": time.time(),
+            "provenance": provenance,
+        }
+        wild_event_queue.enqueue(event)
+        self._pending_prompt = None
+        logger.debug("[wild-engine] Enqueued job_scheduling prompt iter=%d", iteration)
+
+    def _handle_job_scheduling_response(self, response_text: str, iteration: int):
+        """Handle response from the job scheduling stage.
+
+        After scheduling, transition to monitoring (if runs were started)
+        or back to the role suggested by next_role.
+        """
+        next_role = wild_loop_state.get("next_step_role")
+        if next_role and next_role != "job_scheduling":
+            wild_loop_state["stage"] = next_role
+            wild_loop_state["phase"] = next_role
+            logger.info("[wild-engine] Job scheduling done, transitioning to %s", next_role)
+        else:
+            # Default: go to monitoring to watch the launched runs
+            wild_loop_state["stage"] = "running"
+            wild_loop_state["phase"] = "monitoring"
+            logger.info("[wild-engine] Job scheduling done, transitioning to monitoring")
+        # Don't enqueue next prompt — polling / events will drive the next stage
+
+
     def _handle_exploring_response(self, response_text: str, iteration: int):
         """Handle response while in exploring stage."""
         # Check if agent output a <sweep> spec
@@ -1341,13 +1447,8 @@ class WildLoopEngine:
                 wild_loop_state["phase"] = "monitoring"
                 logger.info("[wild-engine] Created sweep %s, transitioning to running", sweep_id)
 
-                # Auto-start the sweep
-                if self._start_sweep:
-                    try:
-                        self._start_sweep(sweep_id, 100)
-                        logger.info("[wild-engine] Auto-started sweep %s", sweep_id)
-                    except Exception as err:
-                        logger.warning("[wild-engine] Failed to auto-start sweep: %s", err)
+                # Do NOT auto-start — enqueue a job scheduling event instead
+                auto_enqueue_job_scheduling(reason=f"new sweep {sweep_id} created")
                 return
             except Exception as err:
                 logger.error("[wild-engine] Failed to create sweep: %s", err)

@@ -110,4 +110,4 @@ At the end of your response, output these structured tags:
    ```
    <next_role>monitoring</next_role>
    ```
-   Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`
+   Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`, `job_scheduling`

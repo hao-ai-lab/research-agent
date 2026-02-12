@@ -100,7 +100,7 @@ At the END of your response, output these structured tags:
    - If completing, you may omit this tag
 9. **Next role** — propose which role should handle the next step:
    - `<next_role>monitoring</next_role>`
-   - Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`
+   - Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`, `job_scheduling`
    - If completing, you may omit this tag
 
 ## Critical Rules
