@@ -111,6 +111,10 @@ export interface AppSettings {
   leftPanel?: {
     items: LeftPanelItemConfig[];
   };
+  developer?: {
+    showWildLoopState?: boolean;
+    showPlanPanel?: boolean;
+  };
 }
 
 export interface RunAlert {
