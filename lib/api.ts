@@ -9,16 +9,16 @@ const API_URL = () => getApiUrl()
 // Get headers with optional auth token
 function getHeaders(includeContentType: boolean = false): HeadersInit {
     const headers: HeadersInit = {}
-    
+
     if (includeContentType) {
         headers['Content-Type'] = 'application/json'
     }
-    
+
     const authToken = getAuthToken()
     if (authToken) {
         headers['X-Auth-Token'] = authToken
     }
-    
+
     return headers
 }
 
@@ -709,7 +709,7 @@ export async function updateWildLoopStatus(update: {
     if (update.goal !== undefined) params.set('goal', update.goal)
     if (update.session_id !== undefined) params.set('session_id', update.session_id)
     if (update.is_paused !== undefined) params.set('is_paused', String(update.is_paused))
-    
+
     const response = await fetch(`${API_URL()}/wild/status?${params}`, {
         method: 'POST',
         headers: getHeaders()
@@ -850,8 +850,53 @@ export async function buildWildPrompt(req: BuildWildPromptRequest): Promise<Prom
 }
 
 // =============================================================================
-// Prompt Skill Functions  
+// Wild Step History Functions
 // =============================================================================
+
+export interface WildStepRecord {
+    step_number: number
+    type: string         // "exploring" | "run_event" | "alert" | "analysis" | "sweep_created" | "signal" | "monitoring"
+    title: string
+    summary: string
+    timestamp: number
+    phase: string
+    iteration: number
+    metadata: Record<string, unknown>
+}
+
+/**
+ * Get the full step history for the current wild loop session
+ */
+export async function getWildSteps(): Promise<WildStepRecord[]> {
+    const response = await fetch(`${API_URL()}/wild/steps`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get wild steps: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Record a completed step in the wild loop history
+ */
+export async function recordWildStep(step: {
+    step_type: string
+    title: string
+    summary?: string
+    metadata?: Record<string, unknown>
+}): Promise<WildStepRecord> {
+    const response = await fetch(`${API_URL()}/wild/steps`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(step),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to record wild step: ${response.statusText}`)
+    }
+    return response.json()
+}
+
 
 export interface PromptSkill {
     id: string

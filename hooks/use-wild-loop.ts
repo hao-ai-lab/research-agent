@@ -7,9 +7,9 @@ import {
   updateWildLoopStatus, configureWildLoop, setWildMode,
   getSweep, listSweeps, listAlerts, listRuns, startSweep, getRunLogs,
   createSweep, respondToAlert, listPromptSkills, enqueueWildEvent,
-  buildWildPrompt,
+  buildWildPrompt, recordWildStep, getWildSteps,
 } from '@/lib/api'
-import type { PromptSkill, BuildWildPromptRequest } from '@/lib/api'
+import type { PromptSkill, BuildWildPromptRequest, WildStepRecord } from '@/lib/api'
 import type { Alert, Run, Sweep, CreateSweepRequest } from '@/lib/api'
 import { EventQueue } from '@/lib/event-queue'
 import type { QueuedEvent } from '@/lib/event-queue'
@@ -40,6 +40,7 @@ export interface UseWildLoopResult {
   sweepId: string | null
   runStats: RunStats
   activeAlerts: Alert[]
+  stepHistory: WildStepRecord[]
   start: (goal: string, sessionId: string) => void
   pause: () => void
   resume: () => void
@@ -368,6 +369,7 @@ export function useWildLoop(): UseWildLoopResult {
   const [trackedSweepId, setTrackedSweepId] = useState<string | null>(null)
   const [runStats, setRunStats] = useState<RunStats>(emptyRunStats)
   const [activeAlerts, setActiveAlerts] = useState<Alert[]>([])
+  const [stepHistory, setStepHistory] = useState<WildStepRecord[]>([])
 
   // @deprecated — Template cache kept only as fallback if backend buildWildPrompt fails
   const templateCacheRef = useRef<Record<string, string>>({})
@@ -618,6 +620,7 @@ export function useWildLoop(): UseWildLoopResult {
     setTrackedSweepId(null)
     setRunStats(emptyRunStats)
     setActiveAlerts([])
+    setStepHistory([])
 
     // Clear event tracking
     seenRunStatusesRef.current.clear()
@@ -686,6 +689,7 @@ export function useWildLoop(): UseWildLoopResult {
     setTrackedSweepId(null)
     setRunStats(emptyRunStats)
     setActiveAlerts([])
+    setStepHistory([])
     isBusyRef.current = false
     analysisQueuedRef.current = false
 
@@ -732,6 +736,24 @@ export function useWildLoop(): UseWildLoopResult {
     const currentStage = stageRef.current
 
     updateWildLoopStatus({ iteration: nextIteration }).catch(console.error)
+
+    // Record step history — fire-and-forget to backend, optimistic local update
+    const stepTitle = currentStage === 'exploring'
+      ? `Exploring — iteration ${nextIteration}`
+      : currentStage === 'analyzing'
+        ? `Analysis — iteration ${nextIteration}`
+        : `Monitoring — iteration ${nextIteration}`
+    const stepSummary = signal
+      ? `Signal: ${signal.type}`
+      : responseText.slice(0, 120).replace(/\n/g, ' ')
+    recordWildStep({
+      step_type: currentStage,
+      title: stepTitle,
+      summary: stepSummary,
+      metadata: signal ? { signal: signal.type } : undefined,
+    }).then(step => {
+      setStepHistory((prev: WildStepRecord[]) => [...prev, step])
+    }).catch(err => console.warn('[wild-loop] Failed to record step:', err))
 
     if (checkTermination()) { stop(); return }
 
@@ -868,6 +890,7 @@ export function useWildLoop(): UseWildLoopResult {
   return {
     isActive, isPaused, phase, stage, iteration, goal, startedAt,
     terminationConditions, sweepId: trackedSweepId, runStats, activeAlerts,
+    stepHistory,
     start, pause, resume, stop, setTerminationConditions,
     onResponseComplete, pendingPrompt, pendingProvenance, pendingDisplayMessage, consumePrompt,
     eventQueue: queueSnapshot, reorderQueue, removeFromQueue, insertIntoQueue,

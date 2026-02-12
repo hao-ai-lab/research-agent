@@ -240,7 +240,7 @@ export default function ResearchChat() {
   // Load prompt skills for slash commands
   const [promptSkills, setPromptSkills] = useState<PromptSkill[]>([])
   useEffect(() => {
-    listPromptSkills().then(setPromptSkills).catch(() => {})
+    listPromptSkills().then(setPromptSkills).catch(() => { })
   }, [])
 
   const events = useMemo<RunEvent[]>(() => {
@@ -256,15 +256,15 @@ export default function ResearchChat() {
 
       const severityType: RunEvent['type'] =
         alert.severity === 'critical' ? 'error' :
-        alert.severity === 'warning' ? 'warning' : 'info'
+          alert.severity === 'warning' ? 'warning' : 'info'
 
       const priority: RunEvent['priority'] =
         alert.severity === 'critical' ? 'critical' :
-        alert.severity === 'warning' ? 'high' : 'low'
+          alert.severity === 'warning' ? 'high' : 'low'
 
       const title =
         alert.severity === 'critical' ? 'Critical Alert' :
-        alert.severity === 'warning' ? 'Warning' : 'Info'
+          alert.severity === 'warning' ? 'Warning' : 'Info'
 
       return {
         id: eventId,
@@ -395,9 +395,9 @@ export default function ResearchChat() {
     const defaultChoice = event.choices.includes('Ignore')
       ? 'Ignore'
       : (event.choices.find(choice => {
-          const normalized = choice.toLowerCase()
-          return !normalized.includes('stop') && !normalized.includes('kill') && !normalized.includes('terminate')
-        }) || event.choices[0])
+        const normalized = choice.toLowerCase()
+        return !normalized.includes('stop') && !normalized.includes('kill') && !normalized.includes('terminate')
+      }) || event.choices[0])
     try {
       await respondAlert(event.alertId, defaultChoice)
     } catch (e) {
@@ -692,6 +692,7 @@ export default function ResearchChat() {
               startedAt: wildLoop.startedAt,
               runStats: wildLoop.runStats,
               activeAlerts: wildLoop.activeAlerts,
+              stepHistory: wildLoop.stepHistory,
               onPause: wildLoop.pause,
               onResume: wildLoop.resume,
               onStop: wildLoop.stop,

@@ -3374,6 +3374,33 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
     return result
 
 
+@app.get("/wild/steps")
+async def get_wild_steps():
+    """Return the step history for wild loop timeline visualization."""
+    from wild_loop import get_step_history
+    return get_step_history()
+
+
+class RecordStepRequest(BaseModel):
+    step_type: str
+    title: str
+    summary: str = ""
+    metadata: Optional[dict] = None
+
+
+@app.post("/wild/steps")
+async def record_wild_step(req: RecordStepRequest):
+    """Record a completed step in the wild loop history (called by frontend)."""
+    from wild_loop import record_step
+    step = record_step(
+        step_type=req.step_type,
+        title=req.title,
+        summary=req.summary,
+        metadata=req.metadata,
+    )
+    return step
+
+
 @app.get("/cluster")
 async def get_cluster_state():
     """Get the persisted cluster state and current run summary."""

@@ -26,7 +26,8 @@ import { Label } from '@/components/ui/label'
 import { useApiConfig } from '@/lib/api-config'
 import type { WildLoopPhase } from '@/lib/types'
 import type { RunStats } from '@/hooks/use-wild-loop'
-import type { Alert } from '@/lib/api'
+import type { Alert, WildStepRecord } from '@/lib/api'
+import { WildStepTimeline } from './wild-step-timeline'
 import type { ReportCellType } from './report-view'
 import type { HomeTab } from '@/lib/navigation'
 import type { ChatSession } from '@/lib/api'
@@ -54,6 +55,7 @@ interface WildLoopNavProps {
   startedAt: number | null
   runStats?: RunStats
   activeAlerts?: Alert[]
+  stepHistory?: WildStepRecord[]
   onPause: () => void
   onResume: () => void
   onStop: () => void
@@ -397,6 +399,7 @@ function WildLoopNavDropdown({
   startedAt,
   runStats,
   activeAlerts = [],
+  stepHistory = [],
   onPause,
   onResume,
   onStop,
@@ -500,6 +503,13 @@ function WildLoopNavDropdown({
             <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 border border-red-500/20 px-2 py-0.5 text-[11px] font-medium text-red-400 animate-pulse">
               ⚠️ {alertCount} pending alert{alertCount > 1 ? 's' : ''}
             </span>
+          </div>
+        )}
+
+        {/* Step History Timeline */}
+        {stepHistory.length > 0 && (
+          <div className="border-b border-border/40">
+            <WildStepTimeline steps={stepHistory} maxVisible={6} />
           </div>
         )}
 

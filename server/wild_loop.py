@@ -175,6 +175,9 @@ wild_loop_state: dict = {
     }
 }
 
+# Step history — records each completed iteration for visualization
+step_history: list = []
+
 wild_event_queue = WildEventQueue()
 
 
@@ -219,9 +222,59 @@ def update_loop_status(
         wild_loop_state["is_paused"] = is_paused
     if phase == "idle":
         wild_loop_state["started_at"] = None
+        step_history.clear()
     elif wild_loop_state["started_at"] is None and phase not in ["idle", "complete"]:
         wild_loop_state["started_at"] = time.time()
     return wild_loop_state
+
+
+# =============================================================================
+# Step History — record completed steps for timeline visualization
+# =============================================================================
+
+def record_step(
+    step_type: str,
+    title: str,
+    summary: str = "",
+    metadata: Optional[dict] = None,
+) -> dict:
+    """Record a completed step in the wild loop history.
+
+    Args:
+        step_type: Category ("exploring", "run_event", "alert", "analysis",
+                   "sweep_created", "signal", "monitoring").
+        title:     Short human-readable title (e.g. "Exploring — iteration 3").
+        summary:   Brief description of what happened.
+        metadata:  Arbitrary phase-specific data (run IDs, signal type, etc.).
+
+    Returns the newly created step record.
+    """
+    step = {
+        "step_number": len(step_history) + 1,
+        "type": step_type,
+        "title": title,
+        "summary": summary,
+        "timestamp": time.time(),
+        "phase": wild_loop_state.get("phase", "idle"),
+        "iteration": wild_loop_state.get("iteration", 0),
+        "metadata": metadata or {},
+    }
+    step_history.append(step)
+    logger.debug(
+        "Recorded step #%d: type=%s title=%s",
+        step["step_number"], step_type, title,
+    )
+    return step
+
+
+def get_step_history() -> list:
+    """Return the full step history list (oldest first)."""
+    return list(step_history)
+
+
+def clear_step_history():
+    """Explicitly clear step history."""
+    step_history.clear()
 
 
 def configure_loop(req: WildLoopConfigRequest) -> dict:
@@ -535,6 +588,7 @@ def get_serializable_state() -> dict:
     return {
         "wild_mode": wild_mode_enabled,
         "wild_loop": copy.deepcopy(wild_loop_state),
+        "step_history": copy.deepcopy(step_history),
     }
 
 
@@ -545,3 +599,7 @@ def load_from_saved(data: dict):
     saved_loop = data.get("wild_loop")
     if saved_loop and isinstance(saved_loop, dict):
         wild_loop_state.update(saved_loop)
+    saved_steps = data.get("step_history")
+    if saved_steps and isinstance(saved_steps, list):
+        step_history.clear()
+        step_history.extend(saved_steps)

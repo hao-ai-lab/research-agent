@@ -40,6 +40,9 @@ from wild_loop import (
     build_wild_prompt,
     get_serializable_state,
     load_from_saved,
+    record_step,
+    get_step_history,
+    clear_step_history,
 )
 
 
@@ -67,6 +70,7 @@ def reset_wild_state():
         }
     })
     wl.wild_event_queue.clear()
+    wl.step_history.clear()
     yield
 
 
@@ -760,3 +764,93 @@ class TestEdgeCases:
         result = build_wild_prompt(mock_render, "ctx")
         # Empty string is falsy, so build_wild_prompt logs warning and returns ""
         assert result == ""
+
+
+# ===========================================================================
+# 10. Step History Tests
+# ===========================================================================
+
+class TestStepHistory:
+    """Tests for the step history tracking feature."""
+
+    def test_initial_empty(self):
+        assert get_step_history() == []
+
+    def test_record_single_step(self):
+        step = record_step("exploring", "Exploring — iteration 1", "Analyzed codebase")
+        assert step["step_number"] == 1
+        assert step["type"] == "exploring"
+        assert step["title"] == "Exploring — iteration 1"
+        assert step["summary"] == "Analyzed codebase"
+        assert "timestamp" in step
+        assert step["metadata"] == {}
+        assert len(get_step_history()) == 1
+
+    def test_record_multiple_steps(self):
+        record_step("exploring", "Step 1")
+        record_step("run_event", "Step 2", "Run completed")
+        record_step("analysis", "Step 3", "Sweep analyzed")
+        history = get_step_history()
+        assert len(history) == 3
+        assert history[0]["step_number"] == 1
+        assert history[1]["step_number"] == 2
+        assert history[2]["step_number"] == 3
+
+    def test_step_includes_phase_and_iteration(self):
+        update_loop_status(phase="monitoring", iteration=5)
+        step = record_step("run_event", "Run finished")
+        assert step["phase"] == "monitoring"
+        assert step["iteration"] == 5
+
+    def test_step_with_metadata(self):
+        step = record_step(
+            "sweep_created", "Sweep created",
+            "Created lr-sweep with 10 runs",
+            metadata={"sweep_id": "s123", "run_count": 10},
+        )
+        assert step["metadata"]["sweep_id"] == "s123"
+        assert step["metadata"]["run_count"] == 10
+
+    def test_clear_on_idle_reset(self):
+        record_step("exploring", "Step 1")
+        record_step("run_event", "Step 2")
+        assert len(get_step_history()) == 2
+        update_loop_status(phase="idle")
+        assert len(get_step_history()) == 0
+
+    def test_explicit_clear(self):
+        record_step("exploring", "Step 1")
+        clear_step_history()
+        assert len(get_step_history()) == 0
+
+    def test_serialization_round_trip(self):
+        record_step("exploring", "Step 1", "Explored")
+        record_step("analysis", "Step 2", "Analyzed")
+        saved = get_serializable_state()
+        assert len(saved["step_history"]) == 2
+
+        # Reset
+        wl.step_history.clear()
+        assert len(get_step_history()) == 0
+
+        # Restore
+        load_from_saved(saved)
+        restored = get_step_history()
+        assert len(restored) == 2
+        assert restored[0]["title"] == "Step 1"
+        assert restored[1]["title"] == "Step 2"
+
+    def test_serialization_json_safe(self):
+        record_step("signal", "Signal", "Received @@NEXT_STEP", metadata={"signal": "NEXT_STEP"})
+        saved = get_serializable_state()
+        json_str = json.dumps(saved)
+        restored = json.loads(json_str)
+        assert len(restored["step_history"]) == 1
+        assert restored["step_history"][0]["metadata"]["signal"] == "NEXT_STEP"
+
+    def test_get_step_history_returns_copy(self):
+        record_step("exploring", "Step 1")
+        history = get_step_history()
+        history.clear()  # Mutate the copy
+        assert len(get_step_history()) == 1  # Original unaffected
+
