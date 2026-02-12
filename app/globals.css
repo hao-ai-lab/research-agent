@@ -357,6 +357,11 @@ html[data-button-size='default'] {
   width: var(--app-chat-toolbar-btn-size) !important;
 }
 
+.chat-toolbar-icon svg {
+  height: calc(var(--app-chat-toolbar-btn-size) * 0.44) !important;
+  width: calc(var(--app-chat-toolbar-btn-size) * 0.44) !important;
+}
+
 .chat-toolbar-pill {
   min-height: var(--app-chat-toolbar-btn-size) !important;
   padding-top: calc(var(--app-chat-toolbar-btn-size) * 0.14) !important;

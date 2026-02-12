@@ -721,6 +721,7 @@ export default function ResearchChat() {
                 onOpenSettings={() => handleTabChange('settings')}
                 insertDraft={chatDraftInsert}
                 skills={promptSkills}
+                contextTokenCount={contextTokenCount}
               />
             )}
             {activeTab === 'runs' && (

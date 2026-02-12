@@ -202,18 +202,7 @@ export function FloatingNav({
         <WildLoopNavDropdown {...wl} />
       )}
 
-      {/* Context Usage - only in chat */}
-      {isChat && (
-        <div className="hidden sm:flex flex-col items-end gap-0.5 min-w-[120px] shrink-0">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>Context:</span>
-            <span className="font-mono tabular-nums">
-              {formatTokenCount(contextTokenCount)} / 200k
-            </span>
-          </div>
-          <Progress value={Math.min((contextTokenCount / 200000) * 100, 100)} className="h-1 w-full" />
-        </div>
-      )}
+      {/* Context Usage moved to chat input */}
 
       {/* Spacer to push icons to the right */}
       <div className="flex-1" />
