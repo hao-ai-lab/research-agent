@@ -31,6 +31,15 @@ jobs:
       - name: Install Modal CLI
         run: pip install modal
 
+      - name: Generate CI frontend config
+        run: |
+          APP_SLUG="research-agent-preview-pr-${{ github.event.pull_request.number }}"
+          SERVER_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-server.modal.run"
+          echo "NEXT_PUBLIC_DEFAULT_SERVER_URL=${SERVER_URL}" > .env.local
+          echo "NEXT_PUBLIC_DEFAULT_AUTH_TOKEN=test" >> .env.local
+          echo "BACKEND_URL=${SERVER_URL}" >> .env.local
+          cat .env.local
+
       - name: Deploy preview to Modal
         run: |
           modal deploy modal_preview.py \
@@ -46,7 +55,7 @@ jobs:
             const prNumber = context.payload.pull_request.number;
             const sha = context.sha.slice(0, 7);
             const appSlug = `research-agent-preview-pr-${prNumber}`;
-            const previewUrl = `https://${context.repo.owner}--${appSlug}-preview-server.modal.run`;
+            const previewUrl = `https://${context.repo.owner}--${appSlug}-preview-app.modal.run`;
 
             // Look for an existing preview bot comment to update
             const { data: comments } = await github.rest.issues.listComments({

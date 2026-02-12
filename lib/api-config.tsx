@@ -7,8 +7,9 @@ const STORAGE_KEY_API_URL = 'research-agent-api-url'
 const STORAGE_KEY_USE_MOCK = 'research-agent-use-mock'
 const STORAGE_KEY_AUTH_TOKEN = 'research-agent-auth-token'
 
-// Default values
-const DEFAULT_API_URL = 'http://localhost:10000'
+// Default values (can be overridden via env vars for CI)
+const DEFAULT_API_URL = process.env.NEXT_PUBLIC_DEFAULT_SERVER_URL || 'http://localhost:10000'
+const DEFAULT_AUTH_TOKEN = process.env.NEXT_PUBLIC_DEFAULT_AUTH_TOKEN || ''
 const DEFAULT_USE_MOCK = false
 const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
@@ -79,7 +80,7 @@ export function getAuthToken(): string {
 export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
     const [apiUrl, setApiUrlState] = useState<string>(DEFAULT_API_URL)
     const [useMock, setUseMockState] = useState<boolean>(DEFAULT_USE_MOCK)
-    const [authToken, setAuthTokenState] = useState<string>('')
+    const [authToken, setAuthTokenState] = useState<string>(DEFAULT_AUTH_TOKEN)
     const [isHydrated, setIsHydrated] = useState(false)
 
     // Load from localStorage on mount
@@ -105,6 +106,9 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
 
         if (storedToken) {
             setAuthTokenState(storedToken)
+        } else if (DEFAULT_AUTH_TOKEN) {
+            setAuthTokenState(DEFAULT_AUTH_TOKEN)
+            localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, DEFAULT_AUTH_TOKEN)
         }
 
         setIsHydrated(true)
