@@ -9,6 +9,9 @@ variables:
     "experiment_context",
     "sweep_note",
     "custom_condition",
+    "autonomy_level",
+    "queue_modify_enabled",
+    "away_duration",
   ]
 ---
 
@@ -22,6 +25,12 @@ You are in an autonomous experiment loop. Work on the goal below until you can g
 
 {{experiment_context}}
 {{sweep_note}}
+
+## Configuration
+
+- **Autonomy Level**: {{autonomy_level}}
+- **Away Duration**: {{away_duration}}
+- **Queue Editing**: {{queue_modify_enabled}}
 
 ## Instructions
 
