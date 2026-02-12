@@ -91,6 +91,10 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
 
         if (storedUrl) {
             setApiUrlState(storedUrl)
+        } else if (process.env.NEXT_PUBLIC_DEFAULT_SERVER_URL) {
+            // CI: persist the explicit default so auto-resolve doesn't override it
+            setApiUrlState(DEFAULT_API_URL)
+            localStorage.setItem(STORAGE_KEY_API_URL, DEFAULT_API_URL)
         } else {
             const envApiUrl = resolveEnvApiUrl()
             if (envApiUrl) {
