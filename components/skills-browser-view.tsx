@@ -7,11 +7,15 @@ import {
   File,
   FileText,
   FolderOpen,
+  GitBranch,
+  Plus,
   RefreshCcw,
   RotateCcw,
   Save,
   ScrollText,
   Search,
+  Shield,
+  Trash2,
   Wand2,
   X,
 } from 'lucide-react'
@@ -23,6 +27,9 @@ import {
   writeSkillFile,
   updatePromptSkill,
   reloadPromptSkills,
+  createSkill,
+  deleteSkill,
+  installSkill,
   type PromptSkill,
   type SkillFileEntry,
 } from '@/lib/api'
@@ -68,6 +75,21 @@ export function SkillsBrowserView() {
   const [selectedSkill, setSelectedSkill] = useState<PromptSkill | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Create skill state
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [newSkillName, setNewSkillName] = useState('')
+  const [newSkillDesc, setNewSkillDesc] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  // Install skill state
+  const [showInstallForm, setShowInstallForm] = useState(false)
+  const [installUrl, setInstallUrl] = useState('')
+  const [installing, setInstalling] = useState(false)
+
+  // Delete confirmation state
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
   // --------------------------------------------------------------------------
   // Data loading
   // --------------------------------------------------------------------------
@@ -111,6 +133,63 @@ export function SkillsBrowserView() {
       setError(e instanceof Error ? e.message : 'Failed to reload')
     }
   }, [loadSkills])
+
+  // --------------------------------------------------------------------------
+  // CRUD handlers
+  // --------------------------------------------------------------------------
+
+  const handleCreate = useCallback(async () => {
+    if (!newSkillName.trim()) return
+    setCreating(true)
+    setError(null)
+    try {
+      await createSkill({ name: newSkillName.trim(), description: newSkillDesc.trim() })
+      setShowCreateForm(false)
+      setNewSkillName('')
+      setNewSkillDesc('')
+      await loadSkills()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create skill')
+    } finally {
+      setCreating(false)
+    }
+  }, [newSkillName, newSkillDesc, loadSkills])
+
+  const handleDelete = useCallback(async (skillId: string) => {
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteSkill(skillId)
+      setConfirmDeleteId(null)
+      if (selected?.skillId === skillId) {
+        setSelected(null)
+        setSelectedSkill(null)
+        setEditorContent('')
+        setOriginalContent('')
+      }
+      await loadSkills()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete skill')
+    } finally {
+      setDeleting(false)
+    }
+  }, [selected, loadSkills])
+
+  const handleInstall = useCallback(async () => {
+    if (!installUrl.trim()) return
+    setInstalling(true)
+    setError(null)
+    try {
+      await installSkill({ source: 'git', url: installUrl.trim() })
+      setShowInstallForm(false)
+      setInstallUrl('')
+      await loadSkills()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to install skill')
+    } finally {
+      setInstalling(false)
+    }
+  }, [installUrl, loadSkills])
 
   // --------------------------------------------------------------------------
   // Tree building
@@ -252,11 +331,10 @@ export function SkillsBrowserView() {
       <div key={node.id}>
         <button
           type="button"
-          className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-            isSelected
+          className={`group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${isSelected
               ? 'bg-accent/15 text-accent'
               : 'text-foreground/80 hover:bg-secondary/60'
-          }`}
+            }`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => {
             if (node.type === 'skill') {
@@ -294,6 +372,29 @@ export function SkillsBrowserView() {
           )}
 
           <span className="truncate">{node.label}</span>
+
+          {/* Internal badge */}
+          {node.type === 'skill' && node.skill?.internal && (
+            <span className="ml-1 flex items-center gap-0.5 text-[9px] rounded-full bg-amber-500/10 border border-amber-500/20 px-1.5 py-px text-amber-400 font-medium" title="System skill — cannot be deleted">
+              <Shield className="h-2.5 w-2.5" />
+              System
+            </span>
+          )}
+
+          {/* Delete button for non-internal skills */}
+          {node.type === 'skill' && node.skill && !node.skill.internal && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmDeleteId(node.skillId)
+              }}
+              className="ml-auto opacity-0 group-hover:opacity-100 text-destructive/60 hover:text-destructive transition-all p-0.5 rounded"
+              title={`Delete ${node.label}`}
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
 
           {node.type === 'file' && node.fileEntry?.size != null && (
             <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
@@ -333,11 +434,10 @@ export function SkillsBrowserView() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-semibold text-foreground truncate">{selectedSkill.name}</h2>
-                <span className={`text-[10px] rounded-full px-1.5 py-0.5 font-medium ${
-                  selectedSkill.category === 'skill'
+                <span className={`text-[10px] rounded-full px-1.5 py-0.5 font-medium ${selectedSkill.category === 'skill'
                     ? 'bg-violet-500/15 text-violet-400'
                     : 'bg-cyan-500/15 text-cyan-400'
-                }`}>
+                  }`}>
                   {selectedSkill.category === 'skill' ? 'Skill' : 'Prompt'}
                 </span>
               </div>
@@ -525,6 +625,97 @@ export function SkillsBrowserView() {
             <RefreshCcw className="h-3.5 w-3.5" />
           </Button>
         </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1.5 px-3 pb-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowCreateForm(true)}
+            className="flex-1 text-xs h-7 gap-1"
+          >
+            <Plus className="h-3 w-3" />
+            New
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowInstallForm(true)}
+            className="flex-1 text-xs h-7 gap-1"
+          >
+            <GitBranch className="h-3 w-3" />
+            Install
+          </Button>
+        </div>
+
+        {/* Create skill inline form */}
+        {showCreateForm && (
+          <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
+            <input
+              type="text"
+              value={newSkillName}
+              onChange={(e) => setNewSkillName(e.target.value)}
+              placeholder="Skill name"
+              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+              autoFocus
+            />
+            <input
+              type="text"
+              value={newSkillDesc}
+              onChange={(e) => setNewSkillDesc(e.target.value)}
+              placeholder="Description (optional)"
+              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+            />
+            <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => { setShowCreateForm(false); setNewSkillName(''); setNewSkillDesc('') }} className="flex-1 text-xs h-7">
+                Cancel
+              </Button>
+              <Button variant="default" size="sm" disabled={!newSkillName.trim() || creating} onClick={handleCreate} className="flex-1 text-xs h-7">
+                {creating ? 'Creating…' : 'Create'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Install from Git inline form */}
+        {showInstallForm && (
+          <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
+            <input
+              type="text"
+              value={installUrl}
+              onChange={(e) => setInstallUrl(e.target.value)}
+              placeholder="Git repository URL"
+              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+              autoFocus
+            />
+            <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => { setShowInstallForm(false); setInstallUrl('') }} className="flex-1 text-xs h-7">
+                Cancel
+              </Button>
+              <Button variant="default" size="sm" disabled={!installUrl.trim() || installing} onClick={handleInstall} className="flex-1 text-xs h-7">
+                {installing ? 'Cloning…' : 'Clone & Install'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Delete confirmation */}
+        {confirmDeleteId && (
+          <div className="border-b border-border/40 px-3 py-3 bg-destructive/5">
+            <p className="text-xs text-foreground mb-2">
+              Delete <span className="font-mono font-semibold">{confirmDeleteId}</span>? This cannot be undone.
+            </p>
+            <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)} className="flex-1 text-xs h-7">
+                Cancel
+              </Button>
+              <Button variant="destructive" size="sm" disabled={deleting} onClick={() => handleDelete(confirmDeleteId)} className="flex-1 text-xs h-7">
+                <Trash2 className="h-3 w-3 mr-1" />
+                {deleting ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Search */}
         <div className="px-3 py-2">

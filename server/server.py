@@ -39,6 +39,9 @@ from wild_loop import (
     build_experiment_context, build_wild_prompt, build_prompt_for_frontend,
     get_serializable_state as get_wild_serializable_state,
     load_from_saved as load_wild_from_saved,
+    # Backend-driven engine (v5)
+    WildStartRequest, WildResponseCompleteRequest, WildSteerRequest, WildNextPrompt,
+    engine as wild_engine,
 )
 import wild_loop as wild_loop_mod
 
@@ -354,6 +357,14 @@ class ClusterDetectRequest(BaseModel):
 # =============================================================================
 
 import yaml
+import shutil
+import subprocess
+
+# Skills that ship with the server and cannot be deleted.
+INTERNAL_SKILL_IDS = {
+    "wild_alert", "wild_analyzing", "wild_exploring",
+    "wild_monitoring", "wild_system", "ra_mode_plan",
+}
 
 class PromptSkillManager:
     """Manages prompt template files (markdown with YAML frontmatter).
@@ -413,6 +424,7 @@ class PromptSkillManager:
             "variables": frontmatter.get("variables", []),
             "category": frontmatter.get("category", "prompt"),  # "prompt" | "skill"
             "built_in": True,
+            "internal": skill_id in INTERNAL_SKILL_IDS,
             "filepath": filepath,
             "folder": os.path.dirname(filepath),
         }
@@ -424,6 +436,135 @@ class PromptSkillManager:
             {k: v for k, v in skill.items() if k not in exclude}
             for skill in self._skills.values()
         ]
+
+    def create(
+        self,
+        name: str,
+        description: str = "",
+        template: str = "",
+        category: str = "skill",
+        variables: Optional[list] = None,
+    ) -> dict:
+        """Create a new skill folder with SKILL.md.
+
+        Returns the new skill dict.  Raises ValueError if the ID already exists.
+        """
+        import re as _re
+        skill_id = _re.sub(r"[^a-zA-Z0-9_-]", "_", name.strip().lower().replace(" ", "_"))
+        if skill_id in self._skills:
+            raise ValueError(f"Skill '{skill_id}' already exists")
+
+        folder = os.path.join(self.skills_dir, skill_id)
+        os.makedirs(folder, exist_ok=True)
+
+        frontmatter = {
+            "name": name,
+            "description": description,
+            "category": category,
+        }
+        if variables:
+            frontmatter["variables"] = variables
+
+        fm_text = yaml.dump(frontmatter, default_flow_style=False).strip()
+        file_content = f"---\n{fm_text}\n---\n{template}\n"
+
+        filepath = os.path.join(folder, "SKILL.md")
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(file_content)
+
+        skill = self._parse_file(filepath, skill_id)
+        self._skills[skill_id] = skill
+        exclude = {"filepath", "folder"}
+        return {k: v for k, v in skill.items() if k not in exclude}
+
+    def delete(self, skill_id: str) -> bool:
+        """Delete a user-created skill.
+
+        Raises ValueError for internal skills.  Returns True on success.
+        """
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            raise KeyError(f"Skill '{skill_id}' not found")
+        if skill.get("internal"):
+            raise ValueError(f"Cannot delete internal skill '{skill_id}'")
+
+        folder = skill["folder"]
+        if os.path.isdir(folder):
+            shutil.rmtree(folder)
+        del self._skills[skill_id]
+        return True
+
+    def install_from_git(self, url: str, name: Optional[str] = None) -> dict:
+        """Clone a skill from a git URL.
+
+        If *name* is not provided, derive it from the repo name.
+        Returns the parsed skill dict.
+        """
+        if not name:
+            # Derive from URL: https://github.com/user/my-skill.git -> my-skill
+            name = url.rstrip("/").rstrip(".git").rsplit("/", 1)[-1]
+        import re as _re
+        skill_id = _re.sub(r"[^a-zA-Z0-9_-]", "_", name.strip().lower().replace(" ", "_"))
+        if skill_id in self._skills:
+            raise ValueError(f"Skill '{skill_id}' already exists")
+
+        dest = os.path.join(self.skills_dir, skill_id)
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", url, dest],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
+
+        skill_md = os.path.join(dest, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            shutil.rmtree(dest)
+            raise FileNotFoundError("Repository does not contain a SKILL.md file")
+
+        skill = self._parse_file(skill_md, skill_id)
+        self._skills[skill_id] = skill
+        exclude = {"filepath", "folder"}
+        return {k: v for k, v in skill.items() if k not in exclude}
+
+    def search(self, query: str, limit: int = 20) -> list:
+        """Search skills by name, description, and template content.
+
+        Returns a list of skill dicts sorted by relevance score.
+        """
+        if not query or not query.strip():
+            return self.list()[:limit]
+
+        q = query.strip().lower()
+        scored: list[tuple[float, dict]] = []
+        exclude = {"filepath", "folder"}
+
+        for skill in self._skills.values():
+            score = 0.0
+            name = skill.get("name", "").lower()
+            desc = skill.get("description", "").lower()
+            tmpl = skill.get("template", "").lower()
+
+            # Exact name match is strongest signal
+            if q == name:
+                score += 100
+            elif q in name:
+                score += 60
+
+            # Description match
+            if q in desc:
+                score += 30
+
+            # Template body match (weakest signal)
+            if q in tmpl:
+                score += 10
+
+            if score > 0:
+                clean = {k: v for k, v in skill.items() if k not in exclude}
+                clean["_score"] = score
+                scored.append((score, clean))
+
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [s[1] for s in scored[:limit]]
 
     def get(self, skill_id: str) -> Optional[dict]:
         """Get a single skill by ID."""
@@ -568,6 +709,82 @@ active_chat_tasks: Dict[str, asyncio.Task] = {}
 
 
 # WildEventQueue class + wild_event_queue instance → imported from wild_loop module
+
+
+def _get_run_log_content(run_id: str) -> str:
+    """Return log tail for a run as plain text (for engine callbacks)."""
+    run = runs.get(run_id)
+    if not run:
+        return "Run not found"
+    run_dir = run.get("run_dir")
+    if not run_dir:
+        return "No run directory"
+    log_file = os.path.join(run_dir, "run.log")
+    if not os.path.exists(log_file):
+        return "No log file"
+    try:
+        with open(log_file, "r") as f:
+            content = f.read()
+        return content[-5000:] if len(content) > 5000 else content
+    except Exception as e:
+        return f"Error reading log: {e}"
+
+
+def _create_sweep_sync(spec: dict) -> dict:
+    """Synchronous sweep creation wrapper for engine callbacks."""
+    sweep_id = uuid.uuid4().hex[:12]
+    created_at = time.time()
+    sweep_data = {
+        "name": spec.get("name", f"sweep-{sweep_id}"),
+        "base_command": spec.get("base_command", ""),
+        "workdir": spec.get("workdir"),
+        "parameters": spec.get("parameters", {}),
+        "max_runs": spec.get("max_runs"),
+        "status": "pending",
+        "run_ids": [],
+        "created_at": created_at,
+    }
+    sweeps[sweep_id] = sweep_data
+    return {"id": sweep_id, **sweep_data}
+
+
+def _start_sweep_sync(sweep_id: str, parallel: int = 1):
+    """Synchronous sweep start wrapper for engine callbacks."""
+    if sweep_id not in sweeps:
+        return
+    sweep = sweeps[sweep_id]
+    sweep["status"] = "running"
+    sweep["parallel"] = parallel
+
+
+def _respond_to_alert_sync(alert_id: str, choice: str):
+    """Synchronous alert response for engine callbacks."""
+    alert = active_alerts.get(alert_id)
+    if not alert:
+        return
+    alert["status"] = "responded"
+    alert["choice"] = choice
+    response_file = alert.get("response_file")
+    if response_file:
+        try:
+            with open(response_file, "w") as f:
+                f.write(choice)
+        except Exception as e:
+            logger.error(f"Engine: Failed writing alert response for {alert_id}: {e}")
+
+# Wire up the WildLoopEngine callbacks (dependency injection to avoid circular imports)
+wild_engine.set_callbacks(
+    get_runs=lambda: runs,
+    get_sweeps=lambda: sweeps,
+    get_alerts=lambda: active_alerts,
+    get_run_logs=_get_run_log_content,
+    create_sweep=_create_sweep_sync,
+    start_sweep=_start_sweep_sync,
+    respond_to_alert=_respond_to_alert_sync,
+    recompute_sweep_state=lambda sid: recompute_sweep_state(sid) if 'recompute_sweep_state' in dir() else None,
+    skill_get_fn=lambda skill_id: prompt_skill_manager.get(skill_id),
+    save_settings=lambda: save_settings_state(),
+)
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
 
@@ -3397,17 +3614,19 @@ async def get_wild_event_queue_endpoint():
 
 @app.get("/wild/status")
 async def get_wild_status():
-    """Get the current wild loop state."""
-    return get_loop_status()
+    """Get the current wild loop state (enriched with queue/run stats)."""
+    return wild_engine.get_full_status()
 
 
 @app.post("/wild/status")
 async def update_wild_status(phase: str = None, iteration: int = None,
                              goal: str = None, session_id: str = None,
-                             is_paused: bool = None):
+                             is_paused: bool = None, is_active: bool = None,
+                             stage: str = None):
     """Update wild loop state from frontend."""
     result = update_loop_status(phase=phase, iteration=iteration, goal=goal,
-                                session_id=session_id, is_paused=is_paused)
+                                session_id=session_id, is_paused=is_paused,
+                                is_active=is_active, stage=stage)
     save_settings_state()
     return result
 
@@ -3427,8 +3646,74 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
     Returns the rendered prompt, the skill template used, the variables applied,
     and the user's original input — giving the frontend full transparency.
     """
-    result = build_prompt_for_frontend(req, prompt_skill_manager.get)
+    result = build_prompt_for_frontend(
+        req, prompt_skill_manager.get,
+        server_url=SERVER_CALLBACK_URL,
+        auth_token=USER_AUTH_TOKEN or "",
+    )
     return result
+
+
+# =============================================================================
+# Backend-Driven Wild Loop Endpoints (v5 Engine)
+# =============================================================================
+
+@app.post("/wild/start")
+async def wild_start(req: WildStartRequest):
+    """Start the wild loop with a goal and session."""
+    result = wild_engine.start(req)
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/stop")
+async def wild_stop():
+    """Stop the wild loop."""
+    result = wild_engine.stop()
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/pause")
+async def wild_pause():
+    """Pause the wild loop."""
+    result = wild_engine.pause()
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/resume")
+async def wild_resume():
+    """Resume the wild loop."""
+    result = wild_engine.resume()
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/response-complete")
+async def wild_response_complete(req: WildResponseCompleteRequest):
+    """Frontend tells backend the agent finished responding."""
+    result = wild_engine.on_response_complete(req.response_text)
+    save_settings_state()
+    return result
+
+
+@app.get("/wild/next-prompt")
+async def wild_next_prompt():
+    """Get the next prompt the frontend should send to the agent."""
+    return wild_engine.get_next_prompt()
+
+
+@app.post("/wild/next-prompt/consume")
+async def wild_consume_prompt():
+    """Mark the current pending prompt as consumed/sent."""
+    return wild_engine.consume_prompt()
+
+
+@app.post("/wild/steer")
+async def wild_steer(req: WildSteerRequest):
+    """Insert a user steer message into the wild loop queue."""
+    return wild_engine.steer(req)
 
 
 @app.get("/cluster")
@@ -3525,10 +3810,79 @@ class PromptSkillUpdate(BaseModel):
     template: str
 
 
+class PromptSkillCreate(BaseModel):
+    name: str
+    description: str = ""
+    template: str = ""
+    category: str = "skill"
+    variables: Optional[List[str]] = None
+
+
+class PromptSkillInstall(BaseModel):
+    source: str = "git"  # "git" for now; "zip" later
+    url: str
+    name: Optional[str] = None
+
+
 @app.get("/prompt-skills")
 async def list_prompt_skills():
     """List all available prompt skills."""
     return prompt_skill_manager.list()
+
+
+@app.get("/prompt-skills/search")
+async def search_prompt_skills(q: str = "", limit: int = 20):
+    """Search prompt skills by name, description, or template content.
+
+    Agents can call this endpoint to discover available skills.
+    Results are sorted by relevance score (_score field).
+    """
+    return prompt_skill_manager.search(q, limit)
+
+
+@app.post("/prompt-skills")
+async def create_prompt_skill(req: PromptSkillCreate):
+    """Create a new prompt skill.
+
+    Creates a new skill directory with SKILL.md under prompt_skills/.
+    """
+    try:
+        skill = prompt_skill_manager.create(
+            name=req.name,
+            description=req.description,
+            template=req.template,
+            category=req.category,
+            variables=req.variables,
+        )
+        return skill
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/prompt-skills/reload")
+async def reload_prompt_skills():
+    """Reload all prompt skills from disk."""
+    prompt_skill_manager.load_all()
+    return {"message": "Prompt skills reloaded", "count": len(prompt_skill_manager.list())}
+
+
+@app.post("/prompt-skills/install")
+async def install_prompt_skill(req: PromptSkillInstall):
+    """Install a skill from an external source (git clone).
+
+    Clones the repository into prompt_skills/<name>/ and parses SKILL.md.
+    """
+    if req.source != "git":
+        raise HTTPException(status_code=400, detail=f"Unsupported install source: {req.source}")
+    try:
+        skill = prompt_skill_manager.install_from_git(req.url, req.name)
+        return skill
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/prompt-skills/{skill_id}")
@@ -3549,6 +3903,21 @@ async def update_prompt_skill(skill_id: str, req: PromptSkillUpdate):
     return updated
 
 
+@app.delete("/prompt-skills/{skill_id}")
+async def delete_prompt_skill(skill_id: str):
+    """Delete a user-created skill.
+
+    Internal skills (wild_*, ra_mode_plan) cannot be deleted (403).
+    """
+    try:
+        prompt_skill_manager.delete(skill_id)
+        return {"message": f"Skill '{skill_id}' deleted"}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
 @app.post("/prompt-skills/{skill_id}/render")
 async def render_prompt_skill(skill_id: str, variables: Dict[str, str]):
     """Render a prompt skill template with the given variables."""
@@ -3556,13 +3925,6 @@ async def render_prompt_skill(skill_id: str, variables: Dict[str, str]):
     if rendered is None:
         raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
     return {"rendered": rendered}
-
-
-@app.post("/prompt-skills/reload")
-async def reload_prompt_skills():
-    """Reload all prompt skills from disk."""
-    prompt_skill_manager.load_all()
-    return {"message": "Prompt skills reloaded", "count": len(prompt_skill_manager.list())}
 
 
 class SkillFileWrite(BaseModel):

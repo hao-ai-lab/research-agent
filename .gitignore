@@ -41,3 +41,4 @@ server/.build-venv
 server/.uv-cache
 server/dist
 server/build
+.ra-auth-token
