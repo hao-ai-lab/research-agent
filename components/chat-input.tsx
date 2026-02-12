@@ -31,6 +31,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { ExperimentRun, Artifact, InsightChart, ChatMessage, Sweep } from '@/lib/types'
 import type { Alert as ApiAlert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
@@ -95,6 +100,8 @@ interface ChatInputProps {
   isWildLoopActive?: boolean
   onSteer?: (message: string, priority: number) => void
   onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void
+  // Context token count
+  contextTokenCount?: number
 }
 
 export function ChatInput({
@@ -122,6 +129,7 @@ export function ChatInput({
   isWildLoopActive = false,
   onSteer,
   onOpenReplyExcerpt,
+  contextTokenCount = 0,
 }: ChatInputProps) {
   const referenceMentionRegex = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
   const genericMentionRegex = /(?<!\S)@[A-Za-z0-9:._-]*/g
@@ -1291,8 +1299,8 @@ export function ChatInput({
           {/* Add attachment */}
           <Popover open={isAttachOpen} onOpenChange={setIsAttachOpen}>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="chat-toolbar-icon h-7 w-7">
-                <Plus className="h-4 w-4" />
+              <Button variant="ghost" size="icon" className="chat-toolbar-icon">
+                <Plus />
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-40 p-1.5">
@@ -1354,17 +1362,17 @@ export function ChatInput({
           <Button 
             variant="ghost" 
             size="icon" 
-            className="chat-toolbar-icon h-7 w-7"
+            className="chat-toolbar-icon"
             onClick={() => openMentionFromToolbar('all')}
           >
-            <AtSign className="h-4 w-4" />
+            <AtSign />
           </Button>
 
           {/* Commands */}
           <Popover open={isCommandOpen} onOpenChange={setIsCommandOpen}>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="chat-toolbar-icon h-7 w-7">
-                <Command className="h-4 w-4" />
+              <Button variant="ghost" size="icon" className="chat-toolbar-icon">
+                <Command />
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-48 p-1.5">
@@ -1390,7 +1398,45 @@ export function ChatInput({
         </div>
 
         {/* Stop + Send/Queue buttons */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          {/* Context token count - circular indicator */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="relative flex items-center justify-center cursor-help">
+                <svg className="h-6 w-6 -rotate-90" viewBox="0 0 24 24">
+                  {/* Background circle */}
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    className="text-border"
+                  />
+                  {/* Progress circle */}
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeDasharray={`${Math.min((contextTokenCount / 200000) * 62.83, 62.83)} 62.83`}
+                    className={contextTokenCount / 200000 > 0.8 ? 'text-destructive' : contextTokenCount / 200000 > 0.6 ? 'text-warning' : 'text-primary'}
+                  />
+                </svg>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              <p className="font-medium">Context Usage</p>
+              <p className="text-muted-foreground">
+                {contextTokenCount >= 1000 ? `${(contextTokenCount / 1000).toFixed(1)}k` : contextTokenCount} / 200k tokens ({((contextTokenCount / 200000) * 100).toFixed(1)}%)
+              </p>
+            </TooltipContent>
+          </Tooltip>
+
           {isStreaming && onStop && (
             <Button
               onClick={onStop}
@@ -1408,10 +1454,10 @@ export function ChatInput({
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  className="flex h-9 items-center gap-0.5 rounded-lg border border-border/50 bg-secondary/60 px-2 text-[12px] font-medium text-foreground hover:bg-secondary/80 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="chat-toolbar-pill flex items-center gap-0.5 rounded-lg border border-border/50 bg-secondary/60 px-2 font-medium text-foreground hover:bg-secondary/80 focus:outline-none focus:ring-1 focus:ring-primary/40"
                   title="Message priority"
                 >
-                  <span className="text-muted-foreground/70 text-[10px]">P</span>
+                  <span className="text-muted-foreground/70" style={{ fontSize: '0.7em' }}>P</span>
                   <span>{steerPriority}</span>
                 </button>
               </PopoverTrigger>
@@ -1476,7 +1522,7 @@ export function ChatInput({
             onClick={handleSubmit}
             disabled={!message.trim() && attachments.length === 0 && !replyExcerpt}
             size="icon"
-            className={`h-9 w-9 rounded-lg disabled:opacity-30 relative ${
+            className={`chat-toolbar-icon rounded-lg disabled:opacity-30 relative ${
               isStreaming && onQueue
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
                 : isWildLoopActive && onSteer
@@ -1487,7 +1533,7 @@ export function ChatInput({
           >
             {isStreaming && onQueue ? (
               <>
-                <ListPlus className="h-3.5 w-3.5" />
+                <ListPlus />
                 {queueCount > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-foreground text-[9px] font-medium text-background">
                     {queueCount}
@@ -1495,9 +1541,9 @@ export function ChatInput({
                 )}
               </>
             ) : isWildLoopActive && onSteer ? (
-              <Send className="h-3.5 w-3.5" />
+              <Send />
             ) : (
-              <Send className="h-3.5 w-3.5" />
+              <Send />
             )}
             <span className="sr-only">
               {isStreaming && onQueue ? 'Queue message' : isWildLoopActive && onSteer ? 'Steer agent' : 'Send message'}

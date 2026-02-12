@@ -58,6 +58,7 @@ interface ConnectedChatViewProps {
     injectedMessages?: ChatMessageType[]
     onUserMessage?: (message: string) => void
     skills?: PromptSkill[]
+    contextTokenCount?: number
 }
 
 /**
@@ -85,6 +86,7 @@ export function ConnectedChatView({
     injectedMessages = [],
     onUserMessage,
     skills = [],
+    contextTokenCount = 0,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
@@ -507,6 +509,7 @@ export function ConnectedChatView({
                     }, 0) // Insert at front of queue
                 } : undefined}
                 onOpenReplyExcerpt={handleOpenReplyExcerpt}
+                contextTokenCount={contextTokenCount}
             />
         </>
     )
