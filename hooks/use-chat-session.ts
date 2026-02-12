@@ -97,6 +97,7 @@ export interface UseChatSessionResult {
     // Prompt provenance (content-keyed map for all modes)
     provenanceMap: Map<string, PromptProvenance>
     provenanceVersion: number
+    setProvenance: (content: string, provenance: PromptProvenance) => void
 }
 
 const initialStreamingState: StreamingState = {
@@ -109,6 +110,7 @@ const initialStreamingState: StreamingState = {
 
 const STORAGE_KEY_ARCHIVED_CHAT_SESSIONS = 'archivedChatSessionIds'
 const STORAGE_KEY_SAVED_CHAT_SESSIONS = 'savedChatSessionIds'
+const STORAGE_KEY_PROMPT_PROVENANCE = 'promptProvenanceByContent'
 
 function readArchivedSessionIds(): string[] {
     if (typeof window === 'undefined') return []
@@ -152,6 +154,38 @@ function parseDevelopCommand(content: string): string | null {
         return 'Usage: /develop <text>'
     }
     return payload
+}
+
+function isPromptProvenance(value: unknown): value is PromptProvenance {
+    if (!value || typeof value !== 'object') return false
+    const candidate = value as Partial<PromptProvenance>
+    return (
+        typeof candidate.rendered === 'string' &&
+        typeof candidate.user_input === 'string' &&
+        typeof candidate.prompt_type === 'string' &&
+        candidate.variables != null &&
+        typeof candidate.variables === 'object'
+    )
+}
+
+function readPromptProvenanceMap(): Map<string, PromptProvenance> {
+    if (typeof window === 'undefined') return new Map()
+
+    try {
+        const raw = window.localStorage.getItem(STORAGE_KEY_PROMPT_PROVENANCE)
+        if (!raw) return new Map()
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object') return new Map()
+
+        const next = new Map<string, PromptProvenance>()
+        for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof key !== 'string' || !isPromptProvenance(value)) continue
+            next.set(key, value)
+        }
+        return next
+    } catch {
+        return new Map()
+    }
 }
 
 type ToolStatus = 'pending' | 'running' | 'completed' | 'error'
@@ -416,6 +450,14 @@ function buildStreamingStateFromActiveStream(activeStream: ActiveSessionStream):
     }
 }
 
+interface StreamProcessUpdate {
+    textDelta: string
+    thinkingDelta: string
+    sawToolPart: boolean
+    done: boolean
+    provenance?: PromptProvenance
+}
+
 export function useChatSession(): UseChatSessionResult {
     // Connection state
     const [isConnected, setIsConnected] = useState(false)
@@ -440,13 +482,18 @@ export function useChatSession(): UseChatSessionResult {
     const abortControllerRef = useRef<AbortController | null>(null)
 
     // Prompt provenance: content-keyed map populated from SSE provenance events
-    const provenanceMapRef = useRef<Map<string, PromptProvenance>>(new Map())
+    const provenanceMapRef = useRef<Map<string, PromptProvenance>>(readPromptProvenanceMap())
     const [provenanceVersion, setProvenanceVersion] = useState(0)
+    const setProvenance = useCallback((content: string, provenance: PromptProvenance) => {
+        if (!content) return
+        provenanceMapRef.current.set(content, provenance)
+        setProvenanceVersion(v => v + 1)
+    }, [])
 
     // Get current session object
     const currentSession = sessions.find(s => s.id === currentSessionId) || null
 
-    const processStreamEvent = useCallback((event: StreamEvent) => {
+    const processStreamEvent = useCallback((event: StreamEvent): StreamProcessUpdate => {
         const partId = event.id
 
         if (event.type === 'part_delta') {
@@ -561,6 +608,25 @@ export function useChatSession(): UseChatSessionResult {
             return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true }
         }
 
+        if (event.type === 'provenance' && event.rendered) {
+            const provenance: PromptProvenance = {
+                rendered: event.rendered,
+                user_input: event.user_input || event.rendered,
+                skill_id: event.skill_id ?? null,
+                skill_name: event.skill_name ?? null,
+                template: event.template ?? null,
+                variables: event.variables ?? {},
+                prompt_type: event.prompt_type ?? 'unknown',
+            }
+            return {
+                textDelta: '',
+                thinkingDelta: '',
+                sawToolPart: false,
+                done: false,
+                provenance,
+            }
+        }
+
         return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false }
     }, [])
 
@@ -660,6 +726,12 @@ export function useChatSession(): UseChatSessionResult {
             JSON.stringify(savedSessionIds)
         )
     }, [savedSessionIds])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const serialized = JSON.stringify(Object.fromEntries(provenanceMapRef.current.entries()))
+        window.localStorage.setItem(STORAGE_KEY_PROMPT_PROVENANCE, serialized)
+    }, [provenanceVersion])
 
     // Create new session - returns the new session ID
     const createNewSession = useCallback(async (): Promise<string | null> => {
@@ -875,8 +947,7 @@ export function useChatSession(): UseChatSessionResult {
                 }
                 // Capture provenance event and store keyed by user_input
                 if (update.provenance) {
-                    provenanceMapRef.current.set(update.provenance.user_input || content, update.provenance)
-                    setProvenanceVersion(v => v + 1)
+                    setProvenance(update.provenance.user_input || content, update.provenance)
                 }
                 if (update.done) {
                     break
@@ -928,7 +999,7 @@ export function useChatSession(): UseChatSessionResult {
                 setStreamingState(initialStreamingState)
             }
         }
-    }, [currentSessionId, streamingState.isStreaming, refreshSessions, processStreamEvent])
+    }, [currentSessionId, streamingState.isStreaming, refreshSessions, processStreamEvent, setProvenance])
 
     const stopStreaming = useCallback(async () => {
         if (abortControllerRef.current) {
@@ -995,5 +1066,6 @@ export function useChatSession(): UseChatSessionResult {
         clearQueue,
         provenanceMap: provenanceMapRef.current,
         provenanceVersion,
+        setProvenance,
     }
 }

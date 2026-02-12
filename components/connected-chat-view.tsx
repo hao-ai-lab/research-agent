@@ -26,7 +26,6 @@ import type {
     Sweep,
     SweepConfig,
     InsightChart,
-    PromptProvenance,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
@@ -118,12 +117,6 @@ export function ConnectedChatView({
             },
         })
     }, [settings, setSettings])
-    // Content-keyed provenance map: rendered prompt text → provenance metadata
-    // If a message's content is in this map, it's a wild loop auto-generated message.
-    // Ref avoids unnecessary re-renders; read during useMemo render pass.
-    const provenanceMapRef = useRef<Map<string, PromptProvenance>>(new Map())
-    // Counter to force re-render when provenance is added (ref alone won't trigger)
-    const [provenanceVersion, setProvenanceVersion] = useState(0)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
 
@@ -146,6 +139,9 @@ export function ConnectedChatView({
         queueMessage,
         messageQueue,
         removeFromQueue,
+        provenanceMap,
+        provenanceVersion,
+        setProvenance,
     } = externalChatSession || internalChatSession
 
     // Always-current messages ref so streaming-end effect reads latest without re-triggering
@@ -227,11 +223,11 @@ export function ConnectedChatView({
                 toolDurationMs: part.tool_duration_ms,
             })),
             timestamp: new Date(msg.timestamp * 1000),
-            source: provenanceMapRef.current.has(msg.content) ? ('agent_wild' as const) : undefined,
-            provenance: provenanceMapRef.current.get(msg.content) ?? undefined,
+            source: provenanceMap.has(msg.content) ? ('agent_wild' as const) : undefined,
+            provenance: provenanceMap.get(msg.content) ?? undefined,
         }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [messages, currentSessionId, provenanceVersion])
+    }, [messages, currentSessionId, provenanceMap, provenanceVersion])
 
     const displayMessages: ChatMessageType[] = useMemo(() => {
         if (injectedMessages.length === 0) {
@@ -339,8 +335,7 @@ export function ConnectedChatView({
             // Store provenance keyed by visible content (stable, index-independent)
             const prov = wildLoop.pendingProvenance
             if (prov) {
-                provenanceMapRef.current.set(visibleContent, prov)
-                setProvenanceVersion(v => v + 1) // trigger re-render for useMemo
+                setProvenance(visibleContent, prov)
             }
 
             // Send as 'agent' mode — frontend now constructs the full prompt,
@@ -352,7 +347,7 @@ export function ConnectedChatView({
         // Small delay to prevent UI flash
         const timer = setTimeout(autoSend, 500)
         return () => clearTimeout(timer)
-    }, [wildLoop?.pendingPrompt, streamingState.isStreaming, currentSessionId, messages.length, sendMessage, mode, createNewSession, wildLoop])
+    }, [wildLoop?.pendingPrompt, streamingState.isStreaming, currentSessionId, messages.length, sendMessage, mode, createNewSession, wildLoop, setProvenance])
 
     // Handle send - create session if needed, start wild loop if in wild mode
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
@@ -381,8 +376,7 @@ export function ConnectedChatView({
                     goal: message,
                     iteration: 0,
                 })
-                provenanceMapRef.current.set(prov.rendered, prov)
-                setProvenanceVersion(v => v + 1)
+                setProvenance(prov.rendered, prov)
                 await sendMessage(prov.rendered, 'agent', sessionId)
                 return
             } catch (err) {
@@ -391,7 +385,7 @@ export function ConnectedChatView({
         }
 
         await sendMessage(message, effectiveMode, sessionId)
-    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage])
+    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage, setProvenance])
 
     const handleReplyToSelection = useCallback((selectedText: string) => {
         if (!currentSessionId) return
