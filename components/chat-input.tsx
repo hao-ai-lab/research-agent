@@ -1402,8 +1402,8 @@ export function ChatInput({
           {/* Context token count - circular indicator */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="relative flex items-center justify-center cursor-help">
-                <svg className="h-6 w-6 -rotate-90" viewBox="0 0 24 24">
+              <div className="chat-toolbar-icon relative flex items-center justify-center cursor-help">
+                <svg className="h-[65%] w-[65%] -rotate-90" viewBox="0 0 24 24">
                   {/* Background circle */}
                   <circle
                     cx="12"
