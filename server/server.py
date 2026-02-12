@@ -39,6 +39,9 @@ from wild_loop import (
     build_experiment_context, build_wild_prompt, build_prompt_for_frontend,
     get_serializable_state as get_wild_serializable_state,
     load_from_saved as load_wild_from_saved,
+    # Backend-driven engine (v5)
+    WildStartRequest, WildResponseCompleteRequest, WildSteerRequest, WildNextPrompt,
+    engine as wild_engine,
 )
 import wild_loop as wild_loop_mod
 
@@ -683,6 +686,82 @@ active_chat_tasks: Dict[str, asyncio.Task] = {}
 
 
 # WildEventQueue class + wild_event_queue instance → imported from wild_loop module
+
+
+def _get_run_log_content(run_id: str) -> str:
+    """Return log tail for a run as plain text (for engine callbacks)."""
+    run = runs.get(run_id)
+    if not run:
+        return "Run not found"
+    run_dir = run.get("run_dir")
+    if not run_dir:
+        return "No run directory"
+    log_file = os.path.join(run_dir, "run.log")
+    if not os.path.exists(log_file):
+        return "No log file"
+    try:
+        with open(log_file, "r") as f:
+            content = f.read()
+        return content[-5000:] if len(content) > 5000 else content
+    except Exception as e:
+        return f"Error reading log: {e}"
+
+
+def _create_sweep_sync(spec: dict) -> dict:
+    """Synchronous sweep creation wrapper for engine callbacks."""
+    sweep_id = uuid.uuid4().hex[:12]
+    created_at = time.time()
+    sweep_data = {
+        "name": spec.get("name", f"sweep-{sweep_id}"),
+        "base_command": spec.get("base_command", ""),
+        "workdir": spec.get("workdir"),
+        "parameters": spec.get("parameters", {}),
+        "max_runs": spec.get("max_runs"),
+        "status": "pending",
+        "run_ids": [],
+        "created_at": created_at,
+    }
+    sweeps[sweep_id] = sweep_data
+    return {"id": sweep_id, **sweep_data}
+
+
+def _start_sweep_sync(sweep_id: str, parallel: int = 1):
+    """Synchronous sweep start wrapper for engine callbacks."""
+    if sweep_id not in sweeps:
+        return
+    sweep = sweeps[sweep_id]
+    sweep["status"] = "running"
+    sweep["parallel"] = parallel
+
+
+def _respond_to_alert_sync(alert_id: str, choice: str):
+    """Synchronous alert response for engine callbacks."""
+    alert = active_alerts.get(alert_id)
+    if not alert:
+        return
+    alert["status"] = "responded"
+    alert["choice"] = choice
+    response_file = alert.get("response_file")
+    if response_file:
+        try:
+            with open(response_file, "w") as f:
+                f.write(choice)
+        except Exception as e:
+            logger.error(f"Engine: Failed writing alert response for {alert_id}: {e}")
+
+# Wire up the WildLoopEngine callbacks (dependency injection to avoid circular imports)
+wild_engine.set_callbacks(
+    get_runs=lambda: runs,
+    get_sweeps=lambda: sweeps,
+    get_alerts=lambda: active_alerts,
+    get_run_logs=_get_run_log_content,
+    create_sweep=_create_sweep_sync,
+    start_sweep=_start_sweep_sync,
+    respond_to_alert=_respond_to_alert_sync,
+    recompute_sweep_state=lambda sid: recompute_sweep_state(sid) if 'recompute_sweep_state' in dir() else None,
+    skill_get_fn=lambda skill_id: prompt_skill_manager.get(skill_id),
+    save_settings=lambda: save_settings_state(),
+)
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
 
@@ -3478,8 +3557,8 @@ async def get_wild_event_queue_endpoint():
 
 @app.get("/wild/status")
 async def get_wild_status():
-    """Get the current wild loop state."""
-    return get_loop_status()
+    """Get the current wild loop state (enriched with queue/run stats)."""
+    return wild_engine.get_full_status()
 
 
 @app.post("/wild/status")
@@ -3512,6 +3591,68 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
     """
     result = build_prompt_for_frontend(req, prompt_skill_manager.get)
     return result
+
+
+# =============================================================================
+# Backend-Driven Wild Loop Endpoints (v5 Engine)
+# =============================================================================
+
+@app.post("/wild/start")
+async def wild_start(req: WildStartRequest):
+    """Start the wild loop with a goal and session."""
+    result = wild_engine.start(req)
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/stop")
+async def wild_stop():
+    """Stop the wild loop."""
+    result = wild_engine.stop()
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/pause")
+async def wild_pause():
+    """Pause the wild loop."""
+    result = wild_engine.pause()
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/resume")
+async def wild_resume():
+    """Resume the wild loop."""
+    result = wild_engine.resume()
+    save_settings_state()
+    return result
+
+
+@app.post("/wild/response-complete")
+async def wild_response_complete(req: WildResponseCompleteRequest):
+    """Frontend tells backend the agent finished responding."""
+    result = wild_engine.on_response_complete(req.response_text)
+    save_settings_state()
+    return result
+
+
+@app.get("/wild/next-prompt")
+async def wild_next_prompt():
+    """Get the next prompt the frontend should send to the agent."""
+    return wild_engine.get_next_prompt()
+
+
+@app.post("/wild/next-prompt/consume")
+async def wild_consume_prompt():
+    """Mark the current pending prompt as consumed/sent."""
+    return wild_engine.consume_prompt()
+
+
+@app.post("/wild/steer")
+async def wild_steer(req: WildSteerRequest):
+    """Insert a user steer message into the wild loop queue."""
+    return wild_engine.steer(req)
 
 
 @app.get("/cluster")

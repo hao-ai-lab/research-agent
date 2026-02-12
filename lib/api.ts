@@ -408,12 +408,27 @@ export interface WildLoopStatus {
     session_id: string | null
     started_at: number | null
     is_paused: boolean
+    is_active: boolean
+    stage: string
+    sweep_id: string | null
     termination: {
         max_iterations: number | null
         max_time_seconds: number | null
         max_tokens: number | null
         custom_condition: string | null
     }
+    // Enriched fields from engine
+    queue_size: number
+    queue_events: WildEventQueueItem[]
+    run_stats: {
+        total: number
+        running: number
+        completed: number
+        failed: number
+        queued: number
+    }
+    active_alerts: Alert[]
+    has_pending_prompt: boolean
 }
 
 export interface LogResponse {
@@ -849,6 +864,142 @@ export async function buildWildPrompt(req: BuildWildPromptRequest): Promise<Prom
     })
     if (!response.ok) {
         throw new Error(`Failed to build wild prompt: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+// =============================================================================
+// Backend-Driven Wild Loop Engine (v5) API Functions
+// =============================================================================
+
+export interface WildNextPrompt {
+    has_prompt: boolean
+    event_id?: string | null
+    prompt?: string | null
+    display_message?: string | null
+    title?: string | null
+    event_type?: string | null
+    priority?: number | null
+    provenance?: PromptProvenance | null
+}
+
+/**
+ * Start the wild loop with a goal and session.
+ */
+export async function startWildLoop(params: {
+    goal: string
+    session_id: string
+    max_iterations?: number
+    max_time_seconds?: number
+    max_tokens?: number
+    custom_condition?: string
+}): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/start`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(params),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to start wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stop the wild loop.
+ */
+export async function stopWildLoop(): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/stop`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to stop wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Pause the wild loop.
+ */
+export async function pauseWildLoop(): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/pause`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to pause wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Resume the wild loop.
+ */
+export async function resumeWildLoop(): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/resume`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to resume wild loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Notify the backend that the agent finished responding.
+ */
+export async function wildResponseComplete(responseText: string): Promise<WildLoopStatus> {
+    const response = await fetch(`${API_URL()}/wild/response-complete`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ response_text: responseText }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to submit wild response: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get the next prompt the frontend should send to the agent.
+ */
+export async function getWildNextPrompt(): Promise<WildNextPrompt> {
+    const response = await fetch(`${API_URL()}/wild/next-prompt`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get wild next prompt: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Mark the current pending prompt as consumed/sent.
+ */
+export async function consumeWildPrompt(): Promise<{ consumed: boolean; queue_size: number }> {
+    const response = await fetch(`${API_URL()}/wild/next-prompt/consume`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to consume wild prompt: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Insert a user steer message into the wild loop queue.
+ */
+export async function steerWildLoop(message: string, priority: number = 10): Promise<{ added: boolean; queue_size: number }> {
+    const response = await fetch(`${API_URL()}/wild/steer`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ message, priority }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to steer wild loop: ${response.statusText}`)
     }
     return response.json()
 }
