@@ -36,6 +36,8 @@ class WildLoopConfigRequest(BaseModel):
     max_time_seconds: Optional[int] = None
     max_tokens: Optional[int] = None
     custom_condition: Optional[str] = None
+    autonomy_level: Optional[str] = None       # "cautious" | "balanced" | "full"
+    queue_modify_enabled: Optional[bool] = None
 
 
 class WildEvent(BaseModel):
@@ -167,6 +169,8 @@ wild_loop_state: dict = {
     "started_at": None,
     "is_paused": False,
     "sweep_id": None,
+    "autonomy_level": "balanced",
+    "queue_modify_enabled": True,
     "termination": {
         "max_iterations": None,
         "max_time_seconds": None,
@@ -239,6 +243,10 @@ def configure_loop(req: WildLoopConfigRequest) -> dict:
         termination["max_tokens"] = req.max_tokens
     if req.custom_condition is not None:
         termination["custom_condition"] = req.custom_condition
+    if req.autonomy_level is not None:
+        wild_loop_state["autonomy_level"] = req.autonomy_level
+    if req.queue_modify_enabled is not None:
+        wild_loop_state["queue_modify_enabled"] = req.queue_modify_enabled
     return wild_loop_state
 
 

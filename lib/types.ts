@@ -198,6 +198,14 @@ export interface TerminationConditions {
   customCondition?: string | null;
 }
 
+export type AutonomyLevel = 'cautious' | 'balanced' | 'full';
+
+export interface WildModeSetup {
+  awayDurationMinutes: number;
+  autonomyLevel: AutonomyLevel;
+  queueModifyEnabled: boolean;
+}
+
 export interface WildLoopState {
   phase: WildLoopPhase;
   iteration: number;

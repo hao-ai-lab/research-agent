@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { WildLoopPhase, TerminationConditions } from '@/lib/types'
-import type { PromptProvenance } from '@/lib/types'
+import type { PromptProvenance, WildModeSetup } from '@/lib/types'
 import {
   updateWildLoopStatus, configureWildLoop, setWildMode,
   getSweep, listSweeps, listAlerts, listRuns, startSweep, getRunLogs,
@@ -45,6 +45,7 @@ export interface UseWildLoopResult {
   resume: () => void
   stop: () => void
   setTerminationConditions: (conditions: TerminationConditions) => void
+  applySetup: (setup: WildModeSetup) => void
   onResponseComplete: (responseText: string) => void
   pendingPrompt: string | null
   pendingProvenance: PromptProvenance | null
@@ -703,6 +704,23 @@ export function useWildLoop(): UseWildLoopResult {
     }).catch(console.error)
   }, [])
 
+  const applySetup = useCallback((setup: WildModeSetup) => {
+    // Convert away duration to termination max_time_seconds
+    const conditions: TerminationConditions = {
+      ...terminationRef.current,
+      maxTimeSeconds: setup.awayDurationMinutes * 60,
+    }
+    setTerminationConditionsState(conditions)
+    configureWildLoop({
+      max_time_seconds: conditions.maxTimeSeconds ?? undefined,
+      max_iterations: conditions.maxIterations ?? undefined,
+      max_tokens: conditions.maxTokens ?? undefined,
+      custom_condition: conditions.customCondition ?? undefined,
+      autonomy_level: setup.autonomyLevel,
+      queue_modify_enabled: setup.queueModifyEnabled,
+    }).catch(console.error)
+  }, [])
+
   const consumePrompt = useCallback(() => {
     queueRef.current.dequeue()
     setQueueSnapshot([...queueRef.current.items])
@@ -868,7 +886,7 @@ export function useWildLoop(): UseWildLoopResult {
   return {
     isActive, isPaused, phase, stage, iteration, goal, startedAt,
     terminationConditions, sweepId: trackedSweepId, runStats, activeAlerts,
-    start, pause, resume, stop, setTerminationConditions,
+    start, pause, resume, stop, setTerminationConditions, applySetup,
     onResponseComplete, pendingPrompt, pendingProvenance, pendingDisplayMessage, consumePrompt,
     eventQueue: queueSnapshot, reorderQueue, removeFromQueue, insertIntoQueue,
   }

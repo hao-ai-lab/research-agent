@@ -9,6 +9,7 @@ import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
+import { WildModeSetupPanel } from '@/components/wild-mode-setup-panel'
 import {
     Sheet,
     SheetContent,
@@ -27,6 +28,7 @@ import type {
     SweepConfig,
     InsightChart,
     PromptProvenance,
+    WildModeSetup,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
@@ -232,7 +234,7 @@ export function ConnectedChatView({
             source: provenanceMapRef.current.has(msg.content) ? ('agent_wild' as const) : undefined,
             provenance: provenanceMapRef.current.get(msg.content) ?? undefined,
         }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [messages, currentSessionId, provenanceVersion])
 
     const displayMessages: ChatMessageType[] = useMemo(() => {
@@ -536,7 +538,7 @@ export function ConnectedChatView({
                         <div className="w-full max-w-3xl">
                             {renderChatInput('centered')}
                         </div>
-                        {showStarterCards && (
+                        {showStarterCards && mode !== 'wild' && (
                             <div className="mt-4 lg:mt-5 w-full max-w-6xl">
                                 <ChatStarterCards
                                     runs={runs}
@@ -549,6 +551,15 @@ export function ConnectedChatView({
                                             id: Date.now(),
                                             text: prompt,
                                         })
+                                    }}
+                                />
+                            </div>
+                        )}
+                        {mode === 'wild' && wildLoop && (
+                            <div className="mt-4 lg:mt-5 w-full max-w-3xl">
+                                <WildModeSetupPanel
+                                    onLaunch={(setup: WildModeSetup) => {
+                                        wildLoop.applySetup(setup)
                                     }}
                                 />
                             </div>

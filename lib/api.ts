@@ -9,16 +9,16 @@ const API_URL = () => getApiUrl()
 // Get headers with optional auth token
 function getHeaders(includeContentType: boolean = false): HeadersInit {
     const headers: HeadersInit = {}
-    
+
     if (includeContentType) {
         headers['Content-Type'] = 'application/json'
     }
-    
+
     const authToken = getAuthToken()
     if (authToken) {
         headers['X-Auth-Token'] = authToken
     }
-    
+
     return headers
 }
 
@@ -709,7 +709,7 @@ export async function updateWildLoopStatus(update: {
     if (update.goal !== undefined) params.set('goal', update.goal)
     if (update.session_id !== undefined) params.set('session_id', update.session_id)
     if (update.is_paused !== undefined) params.set('is_paused', String(update.is_paused))
-    
+
     const response = await fetch(`${API_URL()}/wild/status?${params}`, {
         method: 'POST',
         headers: getHeaders()
@@ -730,6 +730,8 @@ export async function configureWildLoop(config: {
     max_time_seconds?: number
     max_tokens?: number
     custom_condition?: string
+    autonomy_level?: string
+    queue_modify_enabled?: boolean
 }): Promise<WildLoopStatus> {
     const response = await fetch(`${API_URL()}/wild/configure`, {
         method: 'POST',
