@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -86,24 +86,7 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
  */
 function StreamingPartRenderer({ part }: { part: StreamingPart }) {
     if (part.type === 'thinking') {
-        return (
-            <>
-                <div className="flex items-start gap-2">
-                    <div className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
-                        <Brain className="h-3 w-3 animate-pulse" />
-                        <span>Thinking...</span>
-                    </div>
-                </div>
-                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[7.5rem] overflow-y-auto">
-                    {part.content.split('\n').map((line, i) => (
-                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
-                            {line}
-                        </p>
-                    ))}
-                    <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
-                </div>
-            </>
-        )
+        return <StreamingThinkingPart part={part} />
     }
 
     if (part.type === 'tool') {
@@ -122,10 +105,69 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
     return null
 }
 
+/**
+ * Streaming thinking part — expanded while actively streaming, auto-collapses when done.
+ * Detects "done" by checking if content has stopped changing.
+ */
+function StreamingThinkingPart({ part }: { part: StreamingPart }) {
+    const [isOpen, setIsOpen] = useState(true)
+    const [isDone, setIsDone] = useState(false)
+    const prevContentRef = useRef(part.content)
+    const length_to_show = 150
+
+    // Detect when thinking stops (content unchanged for 400ms)
+    useEffect(() => {
+        if (isDone) return
+        prevContentRef.current = part.content
+        const timer = setTimeout(() => {
+            if (prevContentRef.current === part.content && part.content.length > 0) {
+                setIsDone(true)
+                setIsOpen(false)
+            }
+        }, 400)
+        return () => clearTimeout(timer)
+    }, [part.content, isDone])
+
+    return (
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+            <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                <Brain className={`h-3 w-3 ${!isDone ? 'animate-pulse' : ''}`} />
+                <span>{isDone ? 'Thought' : 'Thinking...'}</span>
+                {!isOpen && isDone && part.content && (
+                    <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.content.split('\n')[0]}>
+                        — {part.content.split('\n')[0].slice(0, length_to_show)}{part.content.split('\n')[0].length > length_to_show ? '…' : ''}
+                    </span>
+                )}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[7.5rem] overflow-y-auto">
+                    {part.content.split('\n').map((line, i) => (
+                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                            {line}
+                        </p>
+                    ))}
+                    {!isDone && <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />}
+                </div>
+            </CollapsibleContent>
+        </Collapsible>
+    )
+}
+
 function StreamingToolPart({ part }: { part: StreamingPart }) {
     const [isOpen, setIsOpen] = useState(true)
     const state = part.toolState || 'pending'
     const durationLabel = formatDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
+    const length_to_show = 150
+
+    // Auto-collapse when tool finishes (completed or error)
+    useEffect(() => {
+        if (state === 'completed' || state === 'error') {
+            // Small delay so user can briefly see the final state
+            const timer = setTimeout(() => setIsOpen(false), 300)
+            return () => clearTimeout(timer)
+        }
+    }, [state])
 
     return (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -139,6 +181,11 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                     {getToolStateLabel(state)}
                 </span>
                 {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
+                {!isOpen && (part.toolDescription || part.toolInput) && (
+                    <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.toolDescription || part.toolInput}>
+                        — {(part.toolDescription || part.toolInput || '').slice(0, length_to_show)}{(part.toolDescription || part.toolInput || '').length > length_to_show ? '…' : ''}
+                    </span>
+                )}
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
                 <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2 max-h-[7.5rem] overflow-y-auto">
