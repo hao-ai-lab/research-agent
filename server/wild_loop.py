@@ -2062,6 +2062,15 @@ class WildLoopEngine:
                 wild_loop_state.update(result.state_updates)
 
             for new_event in result.enqueue_events:
+                # Singleton: skip if a job_scheduling event already exists in queue
+                if new_event.get("type") == "job_scheduling":
+                    already_queued = any(
+                        ev.get("type") == "job_scheduling"
+                        for ev in wild_event_queue.items()
+                    )
+                    if already_queued:
+                        logger.debug("[wild-engine] Cron '%s': job_scheduling already in queue, skipping", task.name)
+                        continue
                 if "created_at" not in new_event:
                     new_event["created_at"] = time.time()
                 if "id" not in new_event:

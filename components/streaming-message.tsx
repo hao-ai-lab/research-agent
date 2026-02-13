@@ -43,7 +43,7 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
                                         <span>Thinking...</span>
                                     </div>
                                 </div>
-                                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[7.5rem] overflow-y-auto">
+                                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
                                     {thinkingContent.split('\n').map((line, i) => (
                                         <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                                             {line}
@@ -141,7 +141,7 @@ function StreamingThinkingPart({ part }: { part: StreamingPart }) {
                 )}
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
-                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[7.5rem] overflow-y-auto">
+                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
                     {part.content.split('\n').map((line, i) => (
                         <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                             {line}
@@ -188,7 +188,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                 )}
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
-                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2 max-h-[7.5rem] overflow-y-auto">
+                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
                     {part.toolDescription && (
                         <div>
                             <span className="font-medium text-foreground/70">Description:</span>{' '}

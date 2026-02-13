@@ -250,6 +250,13 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
       root.style.removeProperty('--app-chat-toolbar-btn-size')
     }
 
+    const streamingToolBoxHeightRem = settings.appearance.streamingToolBoxHeightRem
+    if (typeof streamingToolBoxHeightRem === 'number' && Number.isFinite(streamingToolBoxHeightRem) && streamingToolBoxHeightRem > 0) {
+      root.style.setProperty('--app-streaming-tool-box-height', `${streamingToolBoxHeightRem}rem`)
+    } else {
+      root.style.removeProperty('--app-streaming-tool-box-height')
+    }
+
     const handleThemeChange = () => {
       if (settings.appearance.theme === 'system') {
         applyTheme()
