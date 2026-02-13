@@ -108,11 +108,19 @@ class TestWildV2Engine:
         session_dir = os.path.join(self.tmpdir, ".agents", "wild", sid)
         assert os.path.isdir(session_dir)
 
-        # Check plan file
-        plan_path = os.path.join(session_dir, "plan.md")
-        assert os.path.isfile(plan_path)
-        with open(plan_path) as f:
+        # Check tasks.md created (replaces old plan.md)
+        tasks_path = os.path.join(session_dir, "tasks.md")
+        assert os.path.isfile(tasks_path)
+        with open(tasks_path) as f:
             assert "Train a model" in f.read()
+
+        # Check iteration_log.md created
+        log_path = os.path.join(session_dir, "iteration_log.md")
+        assert os.path.isfile(log_path)
+        with open(log_path) as f:
+            content = f.read()
+            assert "Train a model" in content
+            assert "Iteration Log" in content
 
         self.engine.stop()
 
@@ -275,9 +283,27 @@ def test_loop_done_signal():
 
         assert engine.session.status == "done"
         assert engine.session.iteration == 1
-        assert "All done" in engine.session.plan
+        # tasks.md on disk should contain the goal
+        tasks_path = os.path.join(
+            tmpdir, ".agents", "wild", engine.session.session_id, "tasks.md"
+        )
+        assert os.path.isfile(tasks_path)
+        # History should be enriched
         assert len(engine.session.history) == 1
         assert engine.session.history[0]["promise"] == "DONE"
+        assert "duration_s" in engine.session.history[0]
+        assert "files_modified" in engine.session.history[0]
+        assert "error_count" in engine.session.history[0]
+
+        # Iteration log should have been written
+        log_path = os.path.join(
+            tmpdir, ".agents", "wild", engine.session.session_id, "iteration_log.md"
+        )
+        assert os.path.isfile(log_path)
+        with open(log_path) as f:
+            log_content = f.read()
+        assert "Iteration 1" in log_content
+        assert "DONE" in log_content
 
     asyncio.run(_run())
 

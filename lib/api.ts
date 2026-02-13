@@ -1020,8 +1020,12 @@ export interface WildV2IterationHistory {
     summary: string
     started_at: number
     finished_at: number
+    duration_s: number
     opencode_session_id: string
     promise: string | null
+    files_modified: string[]
+    error_count: number
+    errors: string[]
 }
 
 export interface WildV2Status {
@@ -1038,6 +1042,8 @@ export interface WildV2Status {
     pending_events_count?: number
     pending_events?: Array<{ id: string; type: string; title: string; detail: string }>
     steer_context?: string
+    no_progress_streak?: number
+    short_iteration_count?: number
     system_health?: {
         running: number
         queued: number

@@ -33,7 +33,6 @@ import type {
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
-import { buildWildPrompt } from '@/lib/api'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64
 
@@ -123,12 +122,7 @@ export function ConnectedChatView({
             },
         })
     }, [settings, setSettings])
-    // Content-keyed provenance map: rendered prompt text → provenance metadata
-    // If a message's content is in this map, it's a wild loop auto-generated message.
-    // Ref avoids unnecessary re-renders; read during useMemo render pass.
-    const provenanceMapRef = useRef<Map<string, PromptProvenance>>(new Map())
     // Counter to force re-render when provenance is added (ref alone won't trigger)
-    const [provenanceVersion, setProvenanceVersion] = useState(0)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
 
@@ -232,11 +226,11 @@ export function ConnectedChatView({
                 toolDurationMs: part.tool_duration_ms,
             })),
             timestamp: new Date(msg.timestamp * 1000),
-            source: provenanceMapRef.current.has(msg.content) ? ('agent_wild' as const) : undefined,
-            provenance: provenanceMapRef.current.get(msg.content) ?? undefined,
+            source: undefined,
+            provenance: undefined,
         }))
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [messages, currentSessionId, provenanceVersion])
+    }, [messages, currentSessionId])
 
     const displayMessages: ChatMessageType[] = useMemo(() => {
         if (injectedMessages.length === 0) {
@@ -285,116 +279,47 @@ export function ConnectedChatView({
 
     // ========== Wild Loop Integration ==========
 
-    // When streaming finishes, notify the wild loop to decide next action
+    // When streaming finishes, send a web notification
     useEffect(() => {
-        if (prevStreamingRef.current && !streamingState.isStreaming && wildLoop?.isActive) {
-            // Small delay to ensure messages state has settled (assistant message added)
-            const timer = setTimeout(() => {
-                const msgs = messagesRef.current
-                const lastMsg = msgs[msgs.length - 1]
-                if (lastMsg?.role === 'assistant') {
-                    console.log('[wild-loop] Stream finished, calling onResponseComplete, msg length:', lastMsg.content.length)
-                    wildLoop.onResponseComplete(lastMsg.content)
-
-                    // Send web notification for wild loop response
-                    const preview = lastMsg.content.slice(0, 120).replace(/\n/g, ' ')
-                    notify('🚀 Wild Mode Response', preview || 'Bot finished responding')
-                } else {
-                    // No assistant message — OpenCode timed out or never responded
-                    // Treat as CONTINUE (retry with same goal)
-                    console.warn('[wild-loop] Stream ended with no assistant response, retrying...')
-                    wildLoop.onResponseComplete('')
-                }
-            }, 200)
-            prevStreamingRef.current = streamingState.isStreaming
-            return () => clearTimeout(timer)
-        }
-
-        // Non-wild-loop: send notification when streaming ends with a response
-        if (prevStreamingRef.current && !streamingState.isStreaming && !wildLoop?.isActive) {
+        if (prevStreamingRef.current && !streamingState.isStreaming) {
             const msgs = messagesRef.current
             const lastMsg = msgs[msgs.length - 1]
             if (lastMsg?.role === 'assistant') {
                 const preview = lastMsg.content.slice(0, 120).replace(/\n/g, ' ')
-                notify('🔬 Bot Response', preview || 'Bot finished responding')
+                if (wildLoop?.isActive) {
+                    notify('🚀 Wild Mode Response', preview || 'Bot finished responding')
+                } else {
+                    notify('🔬 Bot Response', preview || 'Bot finished responding')
+                }
             }
         }
-
         prevStreamingRef.current = streamingState.isStreaming
     }, [streamingState.isStreaming, wildLoop, notify])
-
-    // When wild loop has a pending prompt, auto-send it
-    useEffect(() => {
-        if (!wildLoop?.pendingPrompt || streamingState.isStreaming) return
-
-        const autoSend = async () => {
-            let sessionId = currentSessionId
-            if (!sessionId) {
-                sessionId = await createNewSession()
-                if (!sessionId) return
-            }
-
-            const fullPrompt = wildLoop.pendingPrompt!
-            const displayMsg = wildLoop.pendingDisplayMessage
-            // The visible message is the short display message (if set), otherwise the full prompt
-            const visibleContent = displayMsg || fullPrompt
-            // When display message differs from prompt, pass full prompt as override for the LLM
-            const promptOverride = displayMsg ? fullPrompt : undefined
-
-            // Store provenance keyed by visible content (stable, index-independent)
-            const prov = wildLoop.pendingProvenance
-            if (prov) {
-                provenanceMapRef.current.set(visibleContent, prov)
-                setProvenanceVersion(v => v + 1) // trigger re-render for useMemo
-            }
-
-            // Send as 'agent' mode — frontend now constructs the full prompt,
-            // so we skip backend's wild_mode prompt injection
-            await sendMessage(visibleContent, 'agent', sessionId, promptOverride)
-            wildLoop.consumePrompt()
-        }
-
-        // Small delay to prevent UI flash
-        const timer = setTimeout(autoSend, 500)
-        return () => clearTimeout(timer)
-    }, [wildLoop?.pendingPrompt, streamingState.isStreaming, currentSessionId, messages.length, sendMessage, mode, createNewSession, wildLoop])
 
     // Handle send - create session if needed, start wild loop if in wild mode
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
         let sessionId = currentSessionId
         if (!sessionId) {
-            // Auto-create a session on first message
             sessionId = await createNewSession()
             if (!sessionId) {
-                return // Session creation failed
+                return
             }
         }
 
         const effectiveMode = msgMode || mode
         onUserMessage?.(message)
 
-        // If in wild mode and loop isn't active, start the loop on first message
+        // If in wild mode and loop isn't active, start the V2 loop.
+        // V2 handles ALL iterations (including the first) through its own chat callback,
+        // so we do NOT send the message via sendMessage — that would create a conflicting
+        // chat worker on the same session and cause a 409.
         if (effectiveMode === 'wild' && wildLoop && !wildLoop.isActive) {
             wildLoop.start(message, sessionId)
+            return  // V2 takes over from here
         }
 
-        // In wild mode, route through backend prompt builder for provenance
-        if (effectiveMode === 'wild') {
-            try {
-                const prov = await buildWildPrompt({
-                    prompt_type: 'exploring',
-                    goal: message,
-                    iteration: 0,
-                })
-                provenanceMapRef.current.set(prov.rendered, prov)
-                setProvenanceVersion(v => v + 1)
-                await sendMessage(prov.rendered, 'agent', sessionId)
-                return
-            } catch (err) {
-                console.warn('[chat] Backend buildWildPrompt failed for initial message, sending raw:', err)
-            }
-        }
-
+        // Send the message normally — in wild mode (already running), the V2 backend
+        // handles all subsequent iterations autonomously
         await sendMessage(message, effectiveMode, sessionId)
     }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage])
 

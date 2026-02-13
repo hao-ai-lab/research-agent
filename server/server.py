@@ -3107,6 +3107,78 @@ async def _start_chat_worker(session_id: str, content: str, mode: str = "agent")
     return runtime
 
 
+async def _send_chat_for_v2(chat_session_id: str, prompt: str, display_message: str) -> str:
+    """Route a V2 iteration through the frontend's chat session for live streaming.
+
+    1. Adds a user message to the chat session (so the frontend shows the iteration)
+    2. Starts the chat worker (which streams the response via SSE)
+    3. Waits for completion
+    4. Returns the full response text
+
+    This is the callback passed to WildV2Engine.send_chat_message.
+    """
+    logger.info("[wild-v2-chat] _send_chat_for_v2 called: session=%s, prompt_len=%d, display=%s",
+                chat_session_id, len(prompt), display_message)
+
+    if chat_session_id not in chat_sessions:
+        logger.error("[wild-v2-chat] Chat session %s not found!", chat_session_id)
+        raise ValueError(f"Chat session {chat_session_id} not found")
+
+    session = chat_sessions[chat_session_id]
+
+    # Check if there's already an active stream on this session
+    existing_runtime = active_chat_streams.get(chat_session_id)
+    if existing_runtime and existing_runtime.status == "running":
+        logger.warning("[wild-v2-chat] Session %s already has an active stream (run=%s), waiting for it to finish...",
+                       chat_session_id, existing_runtime.run_id)
+        # Wait for the existing task to complete before starting a new one
+        existing_task = active_chat_tasks.get(chat_session_id)
+        if existing_task:
+            try:
+                await existing_task
+                logger.info("[wild-v2-chat] Previous task finished, proceeding")
+            except Exception:
+                logger.warning("[wild-v2-chat] Previous task failed, proceeding anyway")
+
+    # Add user message showing the iteration context
+    user_msg = {
+        "role": "user",
+        "content": display_message,
+        "timestamp": time.time(),
+        "wild_v2": True,
+    }
+    session.setdefault("messages", []).append(user_msg)
+    save_chat_state()
+    logger.debug("[wild-v2-chat] Added user message to chat session")
+
+    # Start the chat worker — this sends the full prompt to OpenCode and streams
+    # the response via SSE, so the frontend picks it up live
+    logger.info("[wild-v2-chat] Starting chat worker for session %s", chat_session_id)
+    runtime = await _start_chat_worker(chat_session_id, prompt, mode="agent")
+    logger.info("[wild-v2-chat] Chat worker started: run_id=%s", runtime.run_id)
+
+    # Wait for the background task to finish
+    task = active_chat_tasks.get(chat_session_id)
+    if task:
+        logger.info("[wild-v2-chat] Waiting for chat worker task to complete...")
+        try:
+            await task
+            logger.info("[wild-v2-chat] Chat worker task completed successfully")
+        except Exception as err:
+            logger.error("[wild-v2-chat] Chat worker task failed: %s", err, exc_info=True)
+    else:
+        logger.warning("[wild-v2-chat] No task found in active_chat_tasks for session %s", chat_session_id)
+
+    full_text = runtime.full_text or ""
+    logger.info("[wild-v2-chat] Got %d chars from chat session %s (status=%s)",
+                len(full_text), chat_session_id, runtime.status)
+    return full_text
+
+
+# Wire the chat streaming callback into the V2 engine
+wild_v2_engine._send_chat_message = _send_chat_for_v2
+
+
 @app.get("/sessions/{session_id}/stream")
 async def stream_session(session_id: str, from_seq: int = Query(1, ge=1), run_id: Optional[str] = Query(None)):
     """Attach/re-attach to an in-flight chat stream with catch-up replay."""
@@ -3846,8 +3918,14 @@ async def wild_v2_system_health():
 
 @app.get("/wild/v2/plan/{session_id}")
 async def wild_v2_plan(session_id: str):
-    """Get the current plan markdown."""
+    """Get the current tasks/plan markdown (reads tasks.md from disk)."""
     return {"plan": wild_v2_engine.get_plan()}
+
+
+@app.get("/wild/v2/iteration-log/{session_id}")
+async def wild_v2_iteration_log(session_id: str):
+    """Get the iteration log markdown."""
+    return {"log": wild_v2_engine.get_iteration_log()}
 
 
 @app.post("/wild/v2/steer")
