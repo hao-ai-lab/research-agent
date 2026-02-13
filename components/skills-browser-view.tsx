@@ -621,162 +621,190 @@ export function SkillsBrowserView() {
         <ResizablePanel defaultSize={30} minSize={20} maxSize={48}>
           {/* Left panel — file tree */}
           <div className="flex h-full flex-col bg-background">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border/40 px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <Wand2 className="h-4 w-4 text-violet-400" />
-            <span className="text-sm font-semibold text-foreground">Prompt Skills Library</span>
-            <span className="text-[10px] text-muted-foreground tabular-nums">
-              {skills.length}
-            </span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleReload}
-            title="Reload skills from disk"
-            className="h-7 w-7 p-0"
-          >
-            <RefreshCcw className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-1.5 px-3 pb-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowCreateForm(true)}
-            className="flex-1 text-xs h-7 gap-1"
-          >
-            <Plus className="h-3 w-3" />
-            New
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowInstallForm(true)}
-            className="flex-1 text-xs h-7 gap-1"
-          >
-            <GitBranch className="h-3 w-3" />
-            Install
-          </Button>
-        </div>
-
-        {/* Create skill inline form */}
-        {showCreateForm && (
-          <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
-            <input
-              type="text"
-              value={newSkillName}
-              onChange={(e) => setNewSkillName(e.target.value)}
-              placeholder="Skill name"
-              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-              autoFocus
-            />
-            <input
-              type="text"
-              value={newSkillDesc}
-              onChange={(e) => setNewSkillDesc(e.target.value)}
-              placeholder="Description (optional)"
-              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-            />
-            <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => { setShowCreateForm(false); setNewSkillName(''); setNewSkillDesc('') }} className="flex-1 text-xs h-7">
-                Cancel
-              </Button>
-              <Button variant="default" size="sm" disabled={!newSkillName.trim() || creating} onClick={handleCreate} className="flex-1 text-xs h-7">
-                {creating ? 'Creating…' : 'Create'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Install from Git inline form */}
-        {showInstallForm && (
-          <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
-            <input
-              type="text"
-              value={installUrl}
-              onChange={(e) => setInstallUrl(e.target.value)}
-              placeholder="Git repository URL"
-              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-              autoFocus
-            />
-            <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => { setShowInstallForm(false); setInstallUrl('') }} className="flex-1 text-xs h-7">
-                Cancel
-              </Button>
-              <Button variant="default" size="sm" disabled={!installUrl.trim() || installing} onClick={handleInstall} className="flex-1 text-xs h-7">
-                {installing ? 'Cloning…' : 'Clone & Install'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Delete confirmation */}
-        {confirmDeleteId && (
-          <div className="border-b border-border/40 px-3 py-3 bg-destructive/5">
-            <p className="text-xs text-foreground mb-2">
-              Delete <span className="font-mono font-semibold">{confirmDeleteId}</span>? This cannot be undone.
-            </p>
-            <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)} className="flex-1 text-xs h-7">
-                Cancel
-              </Button>
-              <Button variant="destructive" size="sm" disabled={deleting} onClick={() => handleDelete(confirmDeleteId)} className="flex-1 text-xs h-7">
-                <Trash2 className="h-3 w-3 mr-1" />
-                {deleting ? 'Deleting…' : 'Delete'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Search */}
-        <div className="px-3 py-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search skills…"
-              className="h-8 w-full rounded-md border border-border/50 bg-secondary/30 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border/40 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <Wand2 className="h-4 w-4 text-violet-400" />
+                <span className="text-sm font-semibold text-foreground">Prompt Skills Library</span>
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  {skills.length}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleReload}
+                title="Reload skills from disk"
+                className="h-7 w-7 p-0"
               >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Tree */}
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
-            </div>
-          ) : error ? (
-            <div className="px-2 py-4 text-center">
-              <p className="text-xs text-destructive mb-2">{error}</p>
-              <Button variant="ghost" size="sm" onClick={loadSkills} className="text-xs">
-                Retry
+                <RefreshCcw className="h-3.5 w-3.5" />
               </Button>
             </div>
-          ) : treeNodes.length === 0 ? (
-            <div className="px-2 py-8 text-center text-xs text-muted-foreground">
-              {search ? 'No skills match your search.' : 'No skills found. Start the server to load templates.'}
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-1.5 px-3 pb-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCreateForm(true)}
+                className="flex-1 text-xs h-7 gap-1"
+              >
+                <Plus className="h-3 w-3" />
+                New
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowInstallForm(true)}
+                className="flex-1 text-xs h-7 gap-1"
+              >
+                <GitBranch className="h-3 w-3" />
+                Install
+              </Button>
             </div>
-          ) : (
-            treeNodes.map((node) => renderTreeNode(node))
-          )}
-        </div>
-      </div>
+
+            {/* Create skill inline form */}
+            {showCreateForm && (
+              <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
+                <input
+                  type="text"
+                  value={newSkillName}
+                  onChange={(e) => setNewSkillName(e.target.value)}
+                  placeholder="Skill name"
+                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                  autoFocus
+                />
+                <input
+                  type="text"
+                  value={newSkillDesc}
+                  onChange={(e) => setNewSkillDesc(e.target.value)}
+                  placeholder="Description (optional)"
+                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                />
+                <div className="flex gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setShowCreateForm(false); setNewSkillName(''); setNewSkillDesc('') }}
+                    className="flex-1 text-xs h-7"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={!newSkillName.trim() || creating}
+                    onClick={handleCreate}
+                    className="flex-1 text-xs h-7"
+                  >
+                    {creating ? 'Creating…' : 'Create'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Install from Git inline form */}
+            {showInstallForm && (
+              <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
+                <input
+                  type="text"
+                  value={installUrl}
+                  onChange={(e) => setInstallUrl(e.target.value)}
+                  placeholder="Git repository URL"
+                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                  autoFocus
+                />
+                <div className="flex gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setShowInstallForm(false); setInstallUrl('') }}
+                    className="flex-1 text-xs h-7"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={!installUrl.trim() || installing}
+                    onClick={handleInstall}
+                    className="flex-1 text-xs h-7"
+                  >
+                    {installing ? 'Cloning…' : 'Clone & Install'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Delete confirmation */}
+            {confirmDeleteId && (
+              <div className="border-b border-border/40 px-3 py-3 bg-destructive/5">
+                <p className="text-xs text-foreground mb-2">
+                  Delete <span className="font-mono font-semibold">{confirmDeleteId}</span>? This cannot be undone.
+                </p>
+                <div className="flex gap-1.5">
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)} className="flex-1 text-xs h-7">
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={deleting}
+                    onClick={() => handleDelete(confirmDeleteId)}
+                    className="flex-1 text-xs h-7"
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    {deleting ? 'Deleting…' : 'Delete'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Search */}
+            <div className="px-3 py-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search skills…"
+                  className="h-8 w-full rounded-md border border-border/50 bg-secondary/30 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Tree */}
+            <div className="flex-1 overflow-y-auto px-2 pb-4">
+              {loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+                </div>
+              ) : error ? (
+                <div className="px-2 py-4 text-center">
+                  <p className="text-xs text-destructive mb-2">{error}</p>
+                  <Button variant="ghost" size="sm" onClick={loadSkills} className="text-xs">
+                    Retry
+                  </Button>
+                </div>
+              ) : treeNodes.length === 0 ? (
+                <div className="px-2 py-8 text-center text-xs text-muted-foreground">
+                  {search ? 'No skills match your search.' : 'No skills found. Start the server to load templates.'}
+                </div>
+              ) : (
+                treeNodes.map((node) => renderTreeNode(node))
+              )}
+            </div>
+          </div>
         </ResizablePanel>
         <ResizableHandle withHandle className="bg-border/50 hover:bg-cyan-400/30 transition-colors" />
         <ResizablePanel defaultSize={70} minSize={52}>
