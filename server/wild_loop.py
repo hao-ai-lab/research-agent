@@ -150,68 +150,38 @@ def get_action_handler(name: str) -> Optional[Callable]:
 # ---------------------------------------------------------------------------
 
 async def resource_monitor_handler(event: dict, config: dict, context: dict) -> ActionResult:
-    """Check system utilization and trigger job_scheduling if underutilized.
+    """Check system utilization and directly start queued runs if capacity allows.
+
+    This is a **script-based** handler — no LLM prompt is needed.
+    It checks running vs max_concurrent slots, finds queued/ready runs,
+    and starts them directly via the start_sweep helper.
 
     Config keys:
         max_concurrent (int): max runs before system is "full" (default 5)
     """
     runs = context.get("runs", {})
-    running_count = sum(1 for r in runs.values() if r.get("status") == "running")
-    queued_count = sum(1 for r in runs.values() if r.get("status") in ("queued", "ready"))
-    max_concurrent = config.get("max_concurrent", 5)
-
-    if running_count < max_concurrent and queued_count > 0:
-        return ActionResult(
-            success=True,
-            summary=f"Underutilized: {running_count}/{max_concurrent} running, {queued_count} queued → trigger scheduling",
-            enqueue_events=[{
-                "id": f"sched-auto-{uuid.uuid4().hex[:6]}",
-                "type": "job_scheduling",
-                "priority": 15,
-                "title": "📋 Job Scheduler (auto)",
-                "prompt": f"System underutilized ({running_count} running, {queued_count} queued). Schedule more runs.",
-                "created_at": time.time(),
-            }],
-        )
-    return ActionResult(
-        success=True,
-        summary=f"System OK: {running_count}/{max_concurrent} running, {queued_count} queued",
-    )
-
-register_action_handler("resource_monitor", resource_monitor_handler)
-
-
-# ---------------------------------------------------------------------------
-# Built-in handler: job_scheduling_action
-# ---------------------------------------------------------------------------
-
-async def job_scheduling_action_handler(event: dict, config: dict, context: dict) -> ActionResult:
-    """Lightweight job scheduler — starts queued runs if resources allow.
-
-    Unlike the LLM-based job_scheduling skill, this handler runs inline
-    without an LLM call.  It simply checks running count vs max_concurrent
-    and starts the next queued runs.
-
-    Config keys:
-        max_concurrent (int): max simultaneous runs (default 5)
-    """
-    runs = context.get("runs", {})
     sweeps = context.get("sweeps", {})
-    state = context.get("wild_loop_state", {})
     start_sweep_fn = context.get("start_sweep")
 
     running_count = sum(1 for r in runs.values() if r.get("status") == "running")
+    queued_count = sum(1 for r in runs.values() if r.get("status") in ("queued", "ready"))
     max_concurrent = config.get("max_concurrent", 5)
     slots = max_concurrent - running_count
 
     if slots <= 0:
         return ActionResult(
             success=True,
-            summary=f"No free slots ({running_count}/{max_concurrent} running)",
+            summary=f"System full: {running_count}/{max_concurrent} running, {queued_count} queued — no action",
         )
 
-    # Find sweeps with queued/ready runs and start them
-    started = []
+    if queued_count == 0:
+        return ActionResult(
+            success=True,
+            summary=f"System OK: {running_count}/{max_concurrent} running, 0 queued — nothing to start",
+        )
+
+    # Directly start queued runs (no LLM needed)
+    started: list[str] = []
     for sweep_id, sweep in sweeps.items():
         if slots <= 0:
             break
@@ -227,19 +197,21 @@ async def job_scheduling_action_handler(event: dict, config: dict, context: dict
                 started.append(f"{sweep.get('name', sweep_id)}({batch})")
                 slots -= batch
             except Exception as err:
-                logger.warning("[job-sched-action] Failed to start sweep %s: %s", sweep_id, err)
+                logger.warning("[resource-monitor] Failed to start sweep %s: %s", sweep_id, err)
 
     if started:
         return ActionResult(
             success=True,
-            summary=f"Started runs: {', '.join(started)} ({running_count + len(started)}/{max_concurrent})",
+            summary=f"Started runs: {', '.join(started)} ({running_count + sum(int(s.split('(')[1].rstrip(')')) for s in started)}/{max_concurrent})",
         )
     return ActionResult(
         success=True,
-        summary=f"Nothing to start ({running_count}/{max_concurrent} running, no queued runs)",
+        summary=f"Underutilized ({running_count}/{max_concurrent} running, {queued_count} queued) but no startable sweeps",
     )
 
-register_action_handler("job_scheduling_action", job_scheduling_action_handler)
+register_action_handler("resource_monitor", resource_monitor_handler)
+
+
 
 
 # =============================================================================
@@ -530,8 +502,6 @@ def auto_enqueue_alert(alert_id: str, run_id: str, run_name: str, severity: str,
         "created_at": time.time(),
     })
     logger.info(f"Auto-enqueued wild event for alert {alert_id} (severity={severity}, priority={priority})")
-    # Also enqueue a job scheduling event (resource may need rebalancing)
-    auto_enqueue_job_scheduling(reason=f"alert {alert_id} on run {run_name}")
 
 
 def auto_enqueue_run_terminal(run_id: str, run_name: str, status: str, exit_code=None, error=None):
@@ -554,33 +524,9 @@ def auto_enqueue_run_terminal(run_id: str, run_name: str, status: str, exit_code
         "created_at": time.time(),
     })
     logger.info(f"Auto-enqueued wild event for run {run_id} ({status}, priority={priority})")
-    # A run finished/failed → resource freed → schedule pending runs
-    auto_enqueue_job_scheduling(reason=f"run {run_name} {status}")
 
 
-def auto_enqueue_job_scheduling(reason: str = ""):
-    """Enqueue a job scheduling event if wild mode is on.
 
-    Only one job_scheduling event is allowed in the queue at a time.
-    Priority 15 = just below user messages (10), above all other events.
-    """
-    if not wild_mode_enabled:
-        return
-    # Dedup: skip if a job_scheduling event already exists in the queue
-    for ev in wild_event_queue.items():
-        if ev.get("type") == "job_scheduling":
-            logger.debug("[wild-engine] job_scheduling event already in queue, skipping (reason: %s)", reason)
-            return
-    wild_event_queue.enqueue({
-        "id": f"sched-{uuid.uuid4().hex[:6]}",
-        "priority": 15,
-        "title": "📋 Job Scheduler",
-        "prompt": f"Resource event: {reason}. Check queued/ready runs and decide what to start.",
-        "display_message": None,
-        "type": "job_scheduling",
-        "created_at": time.time(),
-    })
-    logger.info("[wild-engine] Enqueued job_scheduling event (reason: %s)", reason)
 
 
 # =============================================================================
@@ -1133,8 +1079,7 @@ class WildLoopEngine:
         self._paused_duration = 0.0
         self._pending_prompt = None
 
-        # Enqueue the first planning prompt
-        self._enqueue_planning_prompt(iteration=1)
+        self._enqueue_planning_prompt(iteration=0)
 
         # Register default cron tasks
         self._cron_tasks = [
@@ -1300,8 +1245,10 @@ class WildLoopEngine:
             # running stage: don't auto-queue; polling handles next events
         elif stage == "analyzing":
             self._handle_analyzing_response(response_text, iteration)
+        # job_scheduling is now handled entirely by action handlers (no LLM).
+        # If somehow the stage is still "job_scheduling", treat it like exploring.
         elif stage == "job_scheduling":
-            self._handle_job_scheduling_response(response_text, iteration)
+            self._handle_exploring_response(response_text, iteration)
 
         if self._save_settings:
             self._save_settings()
@@ -1522,78 +1469,10 @@ class WildLoopEngine:
         logger.info("[wild-engine] Planning complete, transitioning to exploring")
         self._enqueue_exploring_prompt(iteration + 1)
 
-    def _enqueue_job_scheduling_prompt(self, iteration: int):
-        """Build and enqueue a job scheduling prompt.
-
-        Only one job_scheduling event is allowed in the queue.  If one already
-        exists this call is a no-op (dedup).
-        """
-        # Dedup check
-        for ev in wild_event_queue.items():
-            if ev.get("type") == "job_scheduling":
-                logger.debug("[wild-engine] job_scheduling already queued, skipping enqueue")
-                return
-
-        goal = wild_loop_state.get("goal", "Continue working")
-        prompt_type = "job_scheduling"
-
-        provenance = None
-        prompt_text = None
-        if self._skill_get_fn:
-            try:
-                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
-                step_goal = wild_loop_state.get("step_goal")
-                result = build_prompt_for_frontend(
-                    BuildPromptRequest(
-                        prompt_type=prompt_type,
-                        goal=goal,
-                        step_goal=step_goal,
-                        iteration=iteration,
-                        max_iterations=max_iter,
-                    ),
-                    self._skill_get_fn,
-                    server_url=self._server_url,
-                    auth_token=self._auth_token,
-                )
-                prompt_text = result.get("rendered", "")
-                provenance = result
-            except Exception as err:
-                logger.debug("[wild-engine] Skill template failed for job_scheduling: %s", err)
-
-        if not prompt_text:
-            prompt_text = f"Job Scheduler — check queued/ready runs and decide what to start. Goal: {goal}"
-
-        event = {
-            "id": f"sched-{iteration}-{uuid.uuid4().hex[:6]}",
-            "priority": 15,
-            "title": f"📋 Job Scheduler (iteration {iteration})",
-            "prompt": prompt_text,
-            "display_message": None,
-            "type": "job_scheduling",
-            "created_at": time.time(),
-            "provenance": provenance,
-        }
-        wild_event_queue.enqueue(event)
-        self._pending_prompt = None
-        logger.debug("[wild-engine] Enqueued job_scheduling prompt iter=%d", iteration)
-
-    def _handle_job_scheduling_response(self, response_text: str, iteration: int):
-        """Handle response from the job scheduling stage.
-
-        After scheduling, transition to monitoring (if runs were started)
-        or back to the role suggested by next_role.
-        """
-        next_role = wild_loop_state.get("next_step_role")
-        if next_role and next_role != "job_scheduling":
-            wild_loop_state["stage"] = next_role
-            wild_loop_state["phase"] = next_role
-            logger.info("[wild-engine] Job scheduling done, transitioning to %s", next_role)
-        else:
-            # Default: go to monitoring to watch the launched runs
-            wild_loop_state["stage"] = "running"
-            wild_loop_state["phase"] = "monitoring"
-            logger.info("[wild-engine] Job scheduling done, transitioning to monitoring")
-        # Don't enqueue next prompt — polling / events will drive the next stage
+    # NOTE: _enqueue_job_scheduling_prompt and _handle_job_scheduling_response
+    # have been removed.  Job scheduling is now handled entirely by the
+    # script-based `job_scheduling_action` action handler (no LLM call).
+    # See auto_enqueue_job_scheduling() and job_scheduling_action_handler().
 
 
     def _handle_exploring_response(self, response_text: str, iteration: int):
@@ -1609,9 +1488,7 @@ class WildLoopEngine:
                 wild_loop_state["stage"] = "running"
                 wild_loop_state["phase"] = "monitoring"
                 logger.info("[wild-engine] Created sweep %s, transitioning to running", sweep_id)
-
-                # Do NOT auto-start — enqueue a job scheduling event instead
-                auto_enqueue_job_scheduling(reason=f"new sweep {sweep_id} created")
+                # Cron-based resource_monitor will start queued runs
                 return
             except Exception as err:
                 logger.error("[wild-engine] Failed to create sweep: %s", err)
@@ -2037,6 +1914,9 @@ class WildLoopEngine:
         for task in self._cron_tasks:
             if now - task.last_fired < task.interval_seconds:
                 continue
+
+            # Cron tasks are script-only (no LLM), so they always run
+            # regardless of pending prompts or LLM state.
 
             task.last_fired = now
             handler = get_action_handler(task.handler)

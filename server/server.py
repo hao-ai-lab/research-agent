@@ -54,10 +54,22 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Configure logging
-# logging.basicConfig(level=logging.INFO)
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging — explicit handlers so uvicorn.run() can't override them
+_log_formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(_log_formatter)
+
+# App logger
 logger = logging.getLogger("research-agent-server")
+logger.setLevel(logging.DEBUG)
+logger.addHandler(_log_handler)
+logger.propagate = False  # Don't depend on root logger (uvicorn resets it)
+
+# Wild loop logger
+_wild_logger = logging.getLogger("wild_loop")
+_wild_logger.setLevel(logging.DEBUG)
+_wild_logger.addHandler(_log_handler)
+_wild_logger.propagate = False
 
 # =============================================================================
 # Configuration
@@ -4740,7 +4752,7 @@ def main():
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
     logger.info(f"Working directory: {WORKDIR}")
     
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, log_config=None)
 
 
 if __name__ == "__main__":
