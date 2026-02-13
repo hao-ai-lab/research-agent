@@ -74,6 +74,9 @@ export function SettingsPageContent({
   const [chatToolbarSizeInput, setChatToolbarSizeInput] = useState<string>(
     settings.appearance.chatToolbarButtonSizePx?.toString() ?? ''
   )
+  const [chatInputInitialHeightInput, setChatInputInitialHeightInput] = useState<string>(
+    settings.appearance.chatInputInitialHeightPx?.toString() ?? ''
+  )
   const [toolBoxHeightInput, setToolBoxHeightInput] = useState<string>(
     settings.appearance.streamingToolBoxHeightRem?.toString() ?? ''
   )
@@ -110,6 +113,10 @@ export function SettingsPageContent({
   React.useEffect(() => {
     setChatToolbarSizeInput(settings.appearance.chatToolbarButtonSizePx?.toString() ?? '')
   }, [settings.appearance.chatToolbarButtonSizePx])
+
+  React.useEffect(() => {
+    setChatInputInitialHeightInput(settings.appearance.chatInputInitialHeightPx?.toString() ?? '')
+  }, [settings.appearance.chatInputInitialHeightPx])
 
   React.useEffect(() => {
     setToolBoxHeightInput(settings.appearance.streamingToolBoxHeightRem?.toString() ?? '')
@@ -442,7 +449,39 @@ export function SettingsPageContent({
     setChatToolbarSizeInput(clamped.toString())
   }
 
-  const handleToolBoxHeightChange = (value: string) => {
+  const handleChatInputInitialHeightChange = (value: string, currentInput: string) => {
+    // If input was empty and spinner was clicked, browser uses min value - adjust to default (48)
+    if (!currentInput && value === '40') {
+      setChatInputInitialHeightInput('48')
+      updateAppearanceSettings({ chatInputInitialHeightPx: 48 })
+      return
+    }
+    setChatInputInitialHeightInput(value)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 40 && parsed <= 120) {
+      updateAppearanceSettings({ chatInputInitialHeightPx: parsed })
+    }
+  }
+
+  const handleChatInputInitialHeightBlur = (value: string) => {
+    if (!value.trim()) {
+      updateAppearanceSettings({ chatInputInitialHeightPx: null })
+      setChatInputInitialHeightInput('')
+      return
+    }
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(40, Math.min(120, parsed))
+    updateAppearanceSettings({ chatInputInitialHeightPx: clamped })
+    setChatInputInitialHeightInput(clamped.toString())
+  }
+
+  const handleToolBoxHeightChange = (value: string, currentInput: string) => {
+    if (!currentInput && value === '4') {
+      setToolBoxHeightInput('7.5')
+      updateAppearanceSettings({ streamingToolBoxHeightRem: 7.5 })
+      return
+    }
     setToolBoxHeightInput(value)
     const parsed = Number(value)
     if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 1000) {
@@ -811,6 +850,24 @@ export function SettingsPageContent({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
+                      <Label htmlFor="chat-input-initial-height" className="text-xs">Chat Input Initial Height (px) <span className="font-normal text-muted-foreground">40–120</span></Label>
+                      <p className="text-[11px] text-muted-foreground">Default one-line composer height before expansion</p>
+                    </div>
+                    <Input
+                      id="chat-input-initial-height"
+                      type="number"
+                      min={40}
+                      max={120}
+                      value={chatInputInitialHeightInput}
+                      onChange={(e) => handleChatInputInitialHeightChange(e.target.value, chatInputInitialHeightInput)}
+                      onBlur={(e) => handleChatInputInitialHeightBlur(e.target.value)}
+                      placeholder="48"
+                      className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
                       <Label htmlFor="tool-box-height" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
                     </div>
@@ -821,7 +878,7 @@ export function SettingsPageContent({
                       max={1000}
                       step={0.5}
                       value={toolBoxHeightInput}
-                      onChange={(e) => handleToolBoxHeightChange(e.target.value)}
+                      onChange={(e) => handleToolBoxHeightChange(e.target.value, toolBoxHeightInput)}
                       onBlur={(e) => handleToolBoxHeightBlur(e.target.value)}
                       placeholder="7.5"
                       className="h-8 w-24 text-xs"
@@ -903,6 +960,7 @@ export function SettingsPageContent({
                           customFontSizePx: null,
                           customButtonScalePercent: null,
                           chatToolbarButtonSizePx: null,
+                          chatInputInitialHeightPx: null,
                           streamingToolBoxHeightRem: null,
                           customPrimaryColor: null,
                           customAccentColor: null,

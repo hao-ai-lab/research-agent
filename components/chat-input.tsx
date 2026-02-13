@@ -24,6 +24,8 @@ import {
   Trash2,
   ChevronDown,
   ClipboardList,
+  Cpu,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -38,6 +40,7 @@ import {
 } from '@/components/ui/tooltip'
 import type { ExperimentRun, Artifact, InsightChart, ChatMessage, Sweep } from '@/lib/types'
 import type { Alert as ApiAlert } from '@/lib/api-client'
+import type { ChatModelOption, SessionModelSelection } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
 import {
   REFERENCE_TYPE_BACKGROUND_MAP,
@@ -102,6 +105,27 @@ interface ChatInputProps {
   onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void
   // Context token count
   contextTokenCount?: number
+  modelOptions?: ChatModelOption[]
+  selectedModel?: SessionModelSelection | null
+  isModelUpdating?: boolean
+  onModelChange?: (model: SessionModelSelection) => Promise<void> | void
+}
+
+const DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX = 48
+const MAX_CHAT_INPUT_HEIGHT_PX = 170
+
+function getTextareaMinHeight(textarea: HTMLTextAreaElement): number {
+  if (typeof window === 'undefined') return DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX
+  const parsed = Number.parseFloat(window.getComputedStyle(textarea).minHeight)
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX
+  return parsed
+}
+
+function resizeTextarea(textarea: HTMLTextAreaElement) {
+  textarea.style.height = 'auto'
+  const minHeight = getTextareaMinHeight(textarea)
+  const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), MAX_CHAT_INPUT_HEIGHT_PX)
+  textarea.style.height = `${nextHeight}px`
 }
 
 export function ChatInput({
@@ -130,6 +154,10 @@ export function ChatInput({
   onSteer,
   onOpenReplyExcerpt,
   contextTokenCount = 0,
+  modelOptions = [],
+  selectedModel = null,
+  isModelUpdating = false,
+  onModelChange,
 }: ChatInputProps) {
   const referenceMentionRegex = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
   const genericMentionRegex = /(?<!\S)@[A-Za-z0-9:._-]*/g
@@ -146,6 +174,7 @@ export function ChatInput({
   const [replyExcerpt, setReplyExcerpt] = useState<{ text: string; fileName: string } | null>(null)
   const [isAttachOpen, setIsAttachOpen] = useState(false)
   const [isModeOpen, setIsModeOpen] = useState(false)
+  const [isModelOpen, setIsModelOpen] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [isMentionOpen, setIsMentionOpen] = useState(false)
   const [isCommandOpen, setIsCommandOpen] = useState(false)
@@ -498,8 +527,7 @@ export function ChatInput({
 
   useEffect(() => {
     if (!textareaRef.current) return
-    textareaRef.current.style.height = 'auto'
-    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+    resizeTextarea(textareaRef.current)
   }, [message])
 
   useEffect(() => {
@@ -512,8 +540,7 @@ export function ChatInput({
     setTimeout(() => {
       textareaRef.current?.focus()
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+        resizeTextarea(textareaRef.current)
       }
     }, 0)
   }, [insertDraft?.id, insertDraft?.text])
@@ -567,7 +594,7 @@ export function ChatInput({
       setSlashStartIndex(null)
       setSlashQuery('')
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
+        resizeTextarea(textareaRef.current)
       }
     }
   }
@@ -698,8 +725,7 @@ export function ChatInput({
     const value = e.target.value
     const cursorPos = e.target.selectionStart
     setMessage(value)
-    e.target.style.height = 'auto'
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
+    resizeTextarea(e.target)
     if (highlightRef.current) {
       highlightRef.current.scrollTop = e.target.scrollTop
     }
@@ -867,12 +893,37 @@ export function ChatInput({
       const newCursorPos = cursorPos + 1
       input.focus()
       input.setSelectionRange(newCursorPos, newCursorPos)
-      input.style.height = 'auto'
-      input.style.height = `${Math.min(input.scrollHeight, 120)}px`
+      resizeTextarea(input)
     }, 0)
   }
 
   // Removed format/emoji popovers for compact design - using insertText for @ mentions and commands
+
+  const defaultModelOption = modelOptions.find((option) => option.is_default) || modelOptions[0] || null
+  const effectiveSelectedModel = selectedModel || (
+    defaultModelOption
+      ? { provider_id: defaultModelOption.provider_id, model_id: defaultModelOption.model_id }
+      : null
+  )
+  const selectedModelLabel = effectiveSelectedModel
+    ? `${effectiveSelectedModel.provider_id} > ${effectiveSelectedModel.model_id}`
+    : 'Model'
+
+  const modelOptionsByProvider = useMemo(() => {
+    const groups = new Map<string, ChatModelOption[]>()
+    modelOptions.forEach((option) => {
+      const key = option.provider_id
+      const existing = groups.get(key) || []
+      existing.push(option)
+      groups.set(key, existing)
+    })
+    return Array.from(groups.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([providerId, options]) => ({
+        providerId,
+        options: options.slice().sort((a, b) => a.model_id.localeCompare(b.model_id)),
+      }))
+  }, [modelOptions])
 
   return (
     <div
@@ -1171,8 +1222,8 @@ export function ChatInput({
             rows={1}
             className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
-              minHeight: '58px',
-              maxHeight: '170px',
+              minHeight: `var(--app-chat-input-initial-height, ${DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX}px)`,
+              maxHeight: `${MAX_CHAT_INPUT_HEIGHT_PX}px`,
               caretColor: 'var(--foreground)',
               color: 'transparent',
             }}
@@ -1295,6 +1346,76 @@ export function ChatInput({
               </div>
             </PopoverContent>
           </Popover>
+
+          {/* Model selector */}
+          {onModelChange && modelOptions.length > 0 && (
+            <Popover open={isModelOpen} onOpenChange={setIsModelOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  disabled={isModelUpdating}
+                  className="chat-toolbar-pill flex max-w-[190px] items-center gap-1 rounded-lg border border-border/60 bg-secondary px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  title="Select model"
+                >
+                  <Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{selectedModelLabel}</span>
+                  <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="start" className="w-72 p-1.5">
+                <p className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Provider &gt; Model ID</p>
+                <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                  {modelOptionsByProvider.map((providerGroup) => (
+                    <div key={providerGroup.providerId} className="rounded-md border border-border/50 bg-background/60 p-1">
+                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {providerGroup.providerId}
+                      </p>
+                      <div className="flex flex-col gap-0.5">
+                        {providerGroup.options.map((option) => {
+                          const isSelected = Boolean(
+                            effectiveSelectedModel &&
+                            option.provider_id === effectiveSelectedModel.provider_id &&
+                            option.model_id === effectiveSelectedModel.model_id
+                          )
+                          return (
+                            <button
+                              key={`${option.provider_id}:${option.model_id}`}
+                              type="button"
+                              disabled={isModelUpdating}
+                              onClick={() => {
+                                void (async () => {
+                                  try {
+                                    await onModelChange({
+                                      provider_id: option.provider_id,
+                                      model_id: option.model_id,
+                                    })
+                                  } finally {
+                                    setIsModelOpen(false)
+                                  }
+                                })()
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                                isSelected
+                                  ? 'border border-border/70 bg-secondary'
+                                  : 'border border-transparent hover:bg-secondary/70'
+                              }`}
+                            >
+                              <div className="h-4 w-4 shrink-0 text-primary">
+                                {isSelected ? <Check className="h-4 w-4" /> : null}
+                              </div>
+                              <p className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                                {option.model_id}
+                              </p>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
 
           {/* Add attachment */}
           <Popover open={isAttachOpen} onOpenChange={setIsAttachOpen}>

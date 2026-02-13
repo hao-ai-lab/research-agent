@@ -15,6 +15,8 @@ import * as mockApi from './api-mock'
 // Export types from real API
 export type {
     ChatSession,
+    ChatModelOption,
+    SessionModelSelection,
     ChatMessageData,
     ActiveSessionStream,
     SessionWithMessages,
@@ -66,6 +68,15 @@ export const renameSession = (...args: Parameters<typeof realApi.renameSession>)
 
 export const deleteSession = (...args: Parameters<typeof realApi.deleteSession>) =>
     getApi().deleteSession(...args)
+
+export const listModels = (...args: Parameters<typeof realApi.listModels>) =>
+    getApi().listModels(...args)
+
+export const getSessionModel = (...args: Parameters<typeof realApi.getSessionModel>) =>
+    getApi().getSessionModel(...args)
+
+export const setSessionModel = (...args: Parameters<typeof realApi.setSessionModel>) =>
+    getApi().setSessionModel(...args)
 
 export const streamChat = (...args: Parameters<typeof realApi.streamChat>) =>
     getApi().streamChat(...args)
