@@ -19,8 +19,9 @@ const DEBUG_PANEL_DEFAULT_WIDTH = 360
 type TaskItemStatus = 'done' | 'doing' | 'todo'
 
 type ParsedPlanLine =
-    | { id: string; kind: 'heading'; order: number; text: string; indentLevel: number }
+    | { id: string; kind: 'heading'; level: number; text: string; indentLevel: number }
     | { id: string; kind: 'task'; status: TaskItemStatus; text: string; indentLevel: number }
+    | { id: string; kind: 'list'; ordered: boolean; order?: number; text: string; indentLevel: number }
     | { id: string; kind: 'text'; text: string; indentLevel: number }
     | { id: string; kind: 'spacer' }
 
@@ -32,6 +33,17 @@ function parseTasksMarkdown(plan: string): ParsedPlanLine[] {
     return plan.split('\n').map((rawLine, index) => {
         if (rawLine.trim().length === 0) {
             return { id: `spacer-${index}`, kind: 'spacer' } as ParsedPlanLine
+        }
+
+        const headingMatch = rawLine.match(/^(\s*)(#{1,6})\s+(.*)$/)
+        if (headingMatch) {
+            return {
+                id: `heading-${index}`,
+                kind: 'heading',
+                level: headingMatch[2].length,
+                text: headingMatch[3],
+                indentLevel: Math.floor(headingMatch[1].length / 2),
+            } satisfies ParsedPlanLine
         }
 
         const taskMatch = rawLine.match(/^(\s*)(?:[-*+]|\d+[.)])\s+\[( |x|X|\/)\]\s+(.*)$/)
@@ -47,14 +59,26 @@ function parseTasksMarkdown(plan: string): ParsedPlanLine[] {
             } satisfies ParsedPlanLine
         }
 
-        const headingMatch = rawLine.match(/^(\s*)(\d+)[.)]\s+(.*)$/)
-        if (headingMatch) {
+        const orderedListMatch = rawLine.match(/^(\s*)(\d+)[.)]\s+(.*)$/)
+        if (orderedListMatch) {
             return {
-                id: `heading-${index}`,
-                kind: 'heading',
-                order: Number(headingMatch[2]),
-                text: headingMatch[3],
-                indentLevel: Math.floor(headingMatch[1].length / 2),
+                id: `ordered-${index}`,
+                kind: 'list',
+                ordered: true,
+                order: Number(orderedListMatch[2]),
+                text: orderedListMatch[3],
+                indentLevel: Math.floor(orderedListMatch[1].length / 2),
+            } satisfies ParsedPlanLine
+        }
+
+        const unorderedListMatch = rawLine.match(/^(\s*)[-*+]\s+(.*)$/)
+        if (unorderedListMatch) {
+            return {
+                id: `unordered-${index}`,
+                kind: 'list',
+                ordered: false,
+                text: unorderedListMatch[2],
+                indentLevel: Math.floor(unorderedListMatch[1].length / 2),
             } satisfies ParsedPlanLine
         }
 
@@ -66,6 +90,89 @@ function parseTasksMarkdown(plan: string): ParsedPlanLine[] {
             indentLevel: Math.floor(textIndent / 2),
         } satisfies ParsedPlanLine
     })
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[] {
+    const nodes: React.ReactNode[] = []
+    const tokenRegex = /(`[^`]+`)|(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\))|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)/g
+    let cursor = 0
+    let match: RegExpExecArray | null
+    let partIndex = 0
+
+    while ((match = tokenRegex.exec(text)) !== null) {
+        if (match.index > cursor) {
+            nodes.push(
+                <React.Fragment key={`${keyPrefix}-plain-${partIndex++}`}>
+                    {text.slice(cursor, match.index)}
+                </React.Fragment>
+            )
+        }
+
+        if (match[1]) {
+            nodes.push(
+                <code
+                    key={`${keyPrefix}-code-${partIndex++}`}
+                    className="rounded border border-border/60 bg-secondary/60 px-1.5 py-0.5 font-mono text-[0.9em] text-foreground"
+                >
+                    {match[1].slice(1, -1)}
+                </code>
+            )
+        } else if (match[2]) {
+            nodes.push(
+                <a
+                    key={`${keyPrefix}-link-${partIndex++}`}
+                    href={match[4]}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+                >
+                    {match[3]}
+                </a>
+            )
+        } else if (match[5]) {
+            nodes.push(
+                <strong key={`${keyPrefix}-bold-${partIndex++}`} className="font-semibold text-foreground">
+                    {match[6]}
+                </strong>
+            )
+        } else if (match[7]) {
+            nodes.push(
+                <em key={`${keyPrefix}-italic-${partIndex++}`} className="italic text-foreground/90">
+                    {match[8]}
+                </em>
+            )
+        }
+
+        cursor = match.index + match[0].length
+    }
+
+    if (cursor < text.length) {
+        nodes.push(
+            <React.Fragment key={`${keyPrefix}-tail-${partIndex++}`}>
+                {text.slice(cursor)}
+            </React.Fragment>
+        )
+    }
+
+    if (nodes.length === 0) {
+        nodes.push(<React.Fragment key={`${keyPrefix}-empty`}>{text}</React.Fragment>)
+    }
+
+    return nodes
+}
+
+function stripMarkdownSyntax(text: string): string {
+    return text
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/^(\s*)#{1,6}\s+/gm, '$1')
+        .replace(/^\s*(?:[-*+]|\d+[.)])\s+\[(?: |x|X|\/)\]\s+/gm, '')
+        .replace(/^\s*[-*+]\s+/gm, '')
+        .replace(/^\s*\d+[.)]\s+/gm, '')
+        .replace(/\s+/g, ' ')
+        .trim()
 }
 
 export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
@@ -94,6 +201,8 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
     const prevIterationRef = useRef<number | null>(null)
 
     const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 2
+    const tasksFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopTasksFontSizePx ?? 16))
+    const historyFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopHistoryFontSizePx ?? 15))
     const parsedPlan = useMemo(
         () => parseTasksMarkdown(v2Status?.plan ?? ''),
         [v2Status?.plan]
@@ -413,39 +522,43 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                         {planCounts.todo} todo
                                                     </span>
                                                 </div>
-                                                <div className="max-h-[280px] overflow-y-auto px-2 py-1.5">
-                                                    <div className="space-y-0.5 text-[11px] leading-relaxed">
+                                                <div className="max-h-[320px] overflow-y-auto px-2 py-1.5">
+                                                    <div className="space-y-0.5" style={{ fontSize: `${tasksFontSizePx}px`, lineHeight: 1.55 }}>
                                                         {parsedPlan.map((line) => {
                                                             if (line.kind === 'spacer') {
                                                                 return <div key={line.id} className="h-1" />
                                                             }
                                                             if (line.kind === 'heading') {
+                                                                const headingScale = line.level <= 1 ? 1.2 : line.level === 2 ? 1.12 : 1.05
                                                                 return (
                                                                     <div
                                                                         key={line.id}
-                                                                        className="mt-1.5 flex items-baseline gap-2 text-foreground"
-                                                                        style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                        className="mt-1.5 break-words font-semibold text-foreground"
+                                                                        style={{
+                                                                            marginLeft: `${line.indentLevel * 14}px`,
+                                                                            fontSize: `${Math.round(tasksFontSizePx * headingScale)}px`,
+                                                                        }}
                                                                     >
-                                                                        <span className="text-muted-foreground">{line.order}.</span>
-                                                                        <span className="font-semibold">{line.text}</span>
+                                                                        {renderInlineMarkdown(line.text, `${line.id}-heading`)}
                                                                     </div>
                                                                 )
                                                             }
                                                             if (line.kind === 'task') {
+                                                                const iconSize = Math.max(14, Math.round(tasksFontSizePx * 0.9))
                                                                 return (
                                                                     <div
                                                                         key={line.id}
                                                                         className="flex items-start gap-2 py-0.5"
-                                                                        style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                        style={{ marginLeft: `${line.indentLevel * 14}px` }}
                                                                     >
                                                                         {line.status === 'done' && (
-                                                                            <CheckCircle2 className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-400" />
+                                                                            <CheckCircle2 className="mt-[1px] shrink-0 text-green-400" style={{ width: iconSize, height: iconSize }} />
                                                                         )}
                                                                         {line.status === 'doing' && (
-                                                                            <Loader2 className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" />
+                                                                            <Loader2 className="mt-[1px] shrink-0 animate-spin text-blue-400" style={{ width: iconSize, height: iconSize }} />
                                                                         )}
                                                                         {line.status === 'todo' && (
-                                                                            <Circle className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                                                                            <Circle className="mt-[1px] shrink-0 text-muted-foreground/60" style={{ width: iconSize, height: iconSize }} />
                                                                         )}
                                                                         <span
                                                                             className={`${line.status === 'done'
@@ -455,7 +568,23 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                                                     : 'text-muted-foreground/85'
                                                                                 } break-words`}
                                                                         >
-                                                                            {line.text}
+                                                                            {renderInlineMarkdown(line.text, `${line.id}-task`)}
+                                                                        </span>
+                                                                    </div>
+                                                                )
+                                                            }
+                                                            if (line.kind === 'list') {
+                                                                return (
+                                                                    <div
+                                                                        key={line.id}
+                                                                        className="flex items-start gap-2 py-0.5 text-foreground/90"
+                                                                        style={{ marginLeft: `${line.indentLevel * 14}px` }}
+                                                                    >
+                                                                        <span className="shrink-0 text-muted-foreground">
+                                                                            {line.ordered ? `${line.order}.` : '•'}
+                                                                        </span>
+                                                                        <span className="break-words">
+                                                                            {renderInlineMarkdown(line.text, `${line.id}-list`)}
                                                                         </span>
                                                                     </div>
                                                                 )
@@ -463,10 +592,10 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                             return (
                                                                 <div
                                                                     key={line.id}
-                                                                    className="whitespace-pre-wrap break-words text-[10px] text-muted-foreground/70"
-                                                                    style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                    className="whitespace-pre-wrap break-words text-muted-foreground/85"
+                                                                    style={{ marginLeft: `${line.indentLevel * 14}px` }}
                                                                 >
-                                                                    {line.text}
+                                                                    {renderInlineMarkdown(line.text, `${line.id}-text`)}
                                                                 </div>
                                                             )
                                                         })}
@@ -566,8 +695,10 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                         <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
                                             {reversedHistory.map((h) => {
                                                 const isExpanded = expandedHistoryRows[h.iteration] === true
+                                                const summaryPreview = stripMarkdownSyntax(h.summary || '')
+                                                const summaryLines = parseTasksMarkdown(h.summary || '')
                                                 return (
-                                                    <div key={h.iteration} className="rounded bg-secondary/30 px-2 py-1.5 text-[10px]">
+                                                    <div key={h.iteration} className="rounded bg-secondary/30 px-2 py-1.5" style={{ fontSize: `${historyFontSizePx}px`, lineHeight: 1.55 }}>
                                                         <button
                                                             type="button"
                                                             className="flex w-full items-start gap-1.5 text-left"
@@ -581,7 +712,7 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                             <ChevronRight className={`mt-[1px] h-2.5 w-2.5 shrink-0 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                                                             <span className="shrink-0 text-muted-foreground">#{h.iteration}</span>
                                                             <span className={`${isExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'} flex-1`}>
-                                                                {h.summary}
+                                                                {summaryPreview}
                                                             </span>
                                                             {h.promise && (
                                                                 <span className={`shrink-0 font-medium ${h.promise === 'DONE'
@@ -597,6 +728,59 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                         </button>
                                                         {isExpanded && (
                                                             <div className="mt-1.5 space-y-1 border-t border-border/30 pt-1.5 text-muted-foreground">
+                                                                {summaryLines.length > 0 && (
+                                                                    <div className="space-y-0.5 text-foreground/90">
+                                                                        {summaryLines.map((line) => {
+                                                                            if (line.kind === 'spacer') return <div key={`${h.iteration}-${line.id}`} className="h-1" />
+                                                                            if (line.kind === 'heading') {
+                                                                                return (
+                                                                                    <div
+                                                                                        key={`${h.iteration}-${line.id}`}
+                                                                                        className="break-words font-semibold text-foreground"
+                                                                                        style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                                    >
+                                                                                        {renderInlineMarkdown(line.text, `hist-${h.iteration}-${line.id}-heading`)}
+                                                                                    </div>
+                                                                                )
+                                                                            }
+                                                                            if (line.kind === 'task') {
+                                                                                return (
+                                                                                    <div
+                                                                                        key={`${h.iteration}-${line.id}`}
+                                                                                        className="flex items-start gap-2 py-0.5"
+                                                                                        style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                                    >
+                                                                                        {line.status === 'done' && <CheckCircle2 className="mt-[1px] h-4 w-4 shrink-0 text-green-400" />}
+                                                                                        {line.status === 'doing' && <Loader2 className="mt-[1px] h-4 w-4 shrink-0 animate-spin text-blue-400" />}
+                                                                                        {line.status === 'todo' && <Circle className="mt-[1px] h-4 w-4 shrink-0 text-muted-foreground/60" />}
+                                                                                        <span className="break-words">{renderInlineMarkdown(line.text, `hist-${h.iteration}-${line.id}-task`)}</span>
+                                                                                    </div>
+                                                                                )
+                                                                            }
+                                                                            if (line.kind === 'list') {
+                                                                                return (
+                                                                                    <div
+                                                                                        key={`${h.iteration}-${line.id}`}
+                                                                                        className="flex items-start gap-2 py-0.5"
+                                                                                        style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                                    >
+                                                                                        <span className="shrink-0 text-muted-foreground">{line.ordered ? `${line.order}.` : '•'}</span>
+                                                                                        <span className="break-words">{renderInlineMarkdown(line.text, `hist-${h.iteration}-${line.id}-list`)}</span>
+                                                                                    </div>
+                                                                                )
+                                                                            }
+                                                                            return (
+                                                                                <div
+                                                                                    key={`${h.iteration}-${line.id}`}
+                                                                                    className="whitespace-pre-wrap break-words"
+                                                                                    style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                                >
+                                                                                    {renderInlineMarkdown(line.text, `hist-${h.iteration}-${line.id}-text`)}
+                                                                                </div>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                )}
                                                                 <div>
                                                                     Duration: {Number.isFinite(h.duration_s) ? `${h.duration_s.toFixed(1)}s` : '—'}
                                                                 </div>
