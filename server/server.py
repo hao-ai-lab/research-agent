@@ -374,10 +374,16 @@ import shutil
 import subprocess
 
 # Skills that ship with the server and cannot be deleted.
+# Keep explicit IDs for one-offs and reserve prefixes for families of
+# system-managed skills.
 INTERNAL_SKILL_IDS = {
-    "wild_alert", "wild_analyzing", "wild_exploring",
-    "wild_monitoring", "wild_system", "ra_mode_plan",
+    "ra_mode_plan",
 }
+INTERNAL_SKILL_PREFIXES = ("wild_", "ra_mode_")
+
+
+def _is_internal_skill(skill_id: str) -> bool:
+    return skill_id in INTERNAL_SKILL_IDS or skill_id.startswith(INTERNAL_SKILL_PREFIXES)
 
 class PromptSkillManager:
     """Manages prompt template files (markdown with YAML frontmatter).
@@ -437,7 +443,7 @@ class PromptSkillManager:
             "variables": frontmatter.get("variables", []),
             "category": frontmatter.get("category", "prompt"),  # "prompt" | "skill"
             "built_in": True,
-            "internal": skill_id in INTERNAL_SKILL_IDS,
+            "internal": _is_internal_skill(skill_id),
             "filepath": filepath,
             "folder": os.path.dirname(filepath),
         }
