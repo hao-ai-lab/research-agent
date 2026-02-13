@@ -116,6 +116,7 @@ export interface AppSettings {
     showWildLoopState?: boolean;
     showPlanPanel?: boolean;
     debugRefreshIntervalSeconds?: number;
+    wildLoopDebugPanelWidthPx?: number;
   };
 }
 

@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle, Settings } from 'lucide-react'
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle, Settings, CheckCircle2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { getWildLoopStatus, getWildEventQueue, configureWildLoop, getWildV2Status } from '@/lib/api'
@@ -10,6 +10,62 @@ import { useAppSettings } from '@/lib/app-settings'
 
 interface WildLoopDebugPanelProps {
     onClose: () => void
+}
+
+const DEBUG_PANEL_MIN_WIDTH = 320
+const DEBUG_PANEL_MAX_WIDTH = 760
+const DEBUG_PANEL_DEFAULT_WIDTH = 360
+
+type TaskItemStatus = 'done' | 'doing' | 'todo'
+
+type ParsedPlanLine =
+    | { id: string; kind: 'heading'; order: number; text: string; indentLevel: number }
+    | { id: string; kind: 'task'; status: TaskItemStatus; text: string; indentLevel: number }
+    | { id: string; kind: 'text'; text: string; indentLevel: number }
+    | { id: string; kind: 'spacer' }
+
+function clampDebugPanelWidth(width: number): number {
+    return Math.min(DEBUG_PANEL_MAX_WIDTH, Math.max(DEBUG_PANEL_MIN_WIDTH, width))
+}
+
+function parseTasksMarkdown(plan: string): ParsedPlanLine[] {
+    return plan.split('\n').map((rawLine, index) => {
+        if (rawLine.trim().length === 0) {
+            return { id: `spacer-${index}`, kind: 'spacer' } as ParsedPlanLine
+        }
+
+        const taskMatch = rawLine.match(/^(\s*)(?:[-*+]|\d+[.)])\s+\[( |x|X|\/)\]\s+(.*)$/)
+        if (taskMatch) {
+            const marker = taskMatch[2]
+            const status: TaskItemStatus = marker === '/' ? 'doing' : (marker.toLowerCase() === 'x' ? 'done' : 'todo')
+            return {
+                id: `task-${index}`,
+                kind: 'task',
+                status,
+                text: taskMatch[3],
+                indentLevel: Math.floor(taskMatch[1].length / 2),
+            } satisfies ParsedPlanLine
+        }
+
+        const headingMatch = rawLine.match(/^(\s*)(\d+)[.)]\s+(.*)$/)
+        if (headingMatch) {
+            return {
+                id: `heading-${index}`,
+                kind: 'heading',
+                order: Number(headingMatch[2]),
+                text: headingMatch[3],
+                indentLevel: Math.floor(headingMatch[1].length / 2),
+            } satisfies ParsedPlanLine
+        }
+
+        const textIndent = (rawLine.match(/^(\s*)/)?.[1].length ?? 0)
+        return {
+            id: `text-${index}`,
+            kind: 'text',
+            text: rawLine.trim(),
+            indentLevel: Math.floor(textIndent / 2),
+        } satisfies ParsedPlanLine
+    })
 }
 
 export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
@@ -26,10 +82,39 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
     const [v2TasksOpen, setV2TasksOpen] = useState(true)
     const [v2LogOpen, setV2LogOpen] = useState(false)
     const [v2Status, setV2Status] = useState<WildV2Status | null>(null)
+    const [expandedHistoryRows, setExpandedHistoryRows] = useState<Record<number, boolean>>({})
     const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+    const [panelWidth, setPanelWidth] = useState(() =>
+        clampDebugPanelWidth(settings.developer?.wildLoopDebugPanelWidthPx ?? DEBUG_PANEL_DEFAULT_WIDTH)
+    )
+    const [isResizingPanel, setIsResizingPanel] = useState(false)
+    const panelWidthRef = useRef(panelWidth)
+    const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null)
+    const settingsRef = useRef(settings)
     const prevIterationRef = useRef<number | null>(null)
 
     const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 2
+    const parsedPlan = useMemo(
+        () => parseTasksMarkdown(v2Status?.plan ?? ''),
+        [v2Status?.plan]
+    )
+    const planCounts = useMemo(() => {
+        return parsedPlan.reduce(
+            (acc, line) => {
+                if (line.kind !== 'task') return acc
+                if (line.status === 'done') acc.done += 1
+                if (line.status === 'doing') acc.doing += 1
+                if (line.status === 'todo') acc.todo += 1
+                return acc
+            },
+            { done: 0, doing: 0, todo: 0 }
+        )
+    }, [parsedPlan])
+    const reversedHistory = useMemo(
+        () => (v2Status?.history ? v2Status.history.slice().reverse() : []),
+        [v2Status?.history]
+    )
+    const allHistoryExpanded = reversedHistory.length > 0 && reversedHistory.every((h) => expandedHistoryRows[h.iteration] === true)
 
     const refresh = useCallback(async () => {
         setLoading(true)
@@ -76,6 +161,80 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         })
     }
 
+    useEffect(() => {
+        settingsRef.current = settings
+    }, [settings])
+
+    useEffect(() => {
+        panelWidthRef.current = panelWidth
+    }, [panelWidth])
+
+    useEffect(() => {
+        if (isResizingPanel) return
+        const savedWidth = settings.developer?.wildLoopDebugPanelWidthPx
+        if (typeof savedWidth === 'number' && Number.isFinite(savedWidth)) {
+            setPanelWidth(clampDebugPanelWidth(savedWidth))
+        }
+    }, [settings.developer?.wildLoopDebugPanelWidthPx, isResizingPanel])
+
+    useEffect(() => {
+        if (!isResizingPanel) return
+
+        const handleMouseMove = (event: MouseEvent) => {
+            const dragState = resizeStartRef.current
+            if (!dragState) return
+            const nextWidth = clampDebugPanelWidth(dragState.startWidth + (dragState.startX - event.clientX))
+            setPanelWidth(nextWidth)
+        }
+
+        const handleMouseUp = () => {
+            const nextWidth = panelWidthRef.current
+            const currentSettings = settingsRef.current
+            setIsResizingPanel(false)
+            resizeStartRef.current = null
+            setSettings({
+                ...currentSettings,
+                developer: {
+                    ...currentSettings.developer,
+                    wildLoopDebugPanelWidthPx: nextWidth,
+                },
+            })
+        }
+
+        window.addEventListener('mousemove', handleMouseMove)
+        window.addEventListener('mouseup', handleMouseUp)
+        document.body.style.cursor = 'col-resize'
+        document.body.style.userSelect = 'none'
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove)
+            window.removeEventListener('mouseup', handleMouseUp)
+            document.body.style.cursor = ''
+            document.body.style.userSelect = ''
+        }
+    }, [isResizingPanel, setSettings])
+
+    const startPanelResize = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+        event.preventDefault()
+        resizeStartRef.current = {
+            startX: event.clientX,
+            startWidth: panelWidthRef.current,
+        }
+        setIsResizingPanel(true)
+    }, [])
+
+    const resetPanelWidth = useCallback(() => {
+        const nextWidth = DEBUG_PANEL_DEFAULT_WIDTH
+        setPanelWidth(nextWidth)
+        setSettings({
+            ...settings,
+            developer: {
+                ...settings.developer,
+                wildLoopDebugPanelWidthPx: nextWidth,
+            },
+        })
+    }, [settings, setSettings])
+
     const phaseColor = (phase: string) => {
         switch (phase) {
             case 'idle': return 'text-muted-foreground'
@@ -111,7 +270,20 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
     const totalEntities = (status?.created_sweeps?.length ?? 0) + (status?.created_runs?.length ?? 0)
 
     return (
-        <div className="flex h-full w-[350px] flex-col border-l border-border bg-background/95 backdrop-blur-sm">
+        <div
+            className={`relative flex h-full flex-col border-l border-border bg-background/95 backdrop-blur-sm ${isResizingPanel ? 'select-none' : ''}`}
+            style={{ width: `${panelWidth}px` }}
+        >
+            <button
+                type="button"
+                className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize"
+                onMouseDown={startPanelResize}
+                onDoubleClick={resetPanelWidth}
+                title="Drag to resize panel. Double click to reset."
+                aria-label="Resize debug panel"
+            >
+                <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/70 transition-colors group-hover:bg-foreground/60" />
+            </button>
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
                 <div className="flex items-center gap-2">
@@ -229,9 +401,78 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                             </span>
                                         </CollapsibleTrigger>
                                         <CollapsibleContent>
-                                            <pre className="mt-1 text-[10px] bg-secondary/30 rounded p-2 overflow-x-auto max-h-[250px] overflow-y-auto whitespace-pre-wrap border border-border/30">
-                                                {v2Status.plan}
-                                            </pre>
+                                            <div className="mt-1 rounded border border-border/40 bg-secondary/20">
+                                                <div className="flex flex-wrap items-center gap-1 border-b border-border/30 px-2 py-1 text-[9px]">
+                                                    <span className="rounded bg-green-500/15 px-1.5 py-0.5 text-green-400">
+                                                        {planCounts.done} complete
+                                                    </span>
+                                                    <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-blue-400">
+                                                        {planCounts.doing} in progress
+                                                    </span>
+                                                    <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                                                        {planCounts.todo} todo
+                                                    </span>
+                                                </div>
+                                                <div className="max-h-[280px] overflow-y-auto px-2 py-1.5">
+                                                    <div className="space-y-0.5 text-[11px] leading-relaxed">
+                                                        {parsedPlan.map((line) => {
+                                                            if (line.kind === 'spacer') {
+                                                                return <div key={line.id} className="h-1" />
+                                                            }
+                                                            if (line.kind === 'heading') {
+                                                                return (
+                                                                    <div
+                                                                        key={line.id}
+                                                                        className="mt-1.5 flex items-baseline gap-2 text-foreground"
+                                                                        style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                    >
+                                                                        <span className="text-muted-foreground">{line.order}.</span>
+                                                                        <span className="font-semibold">{line.text}</span>
+                                                                    </div>
+                                                                )
+                                                            }
+                                                            if (line.kind === 'task') {
+                                                                return (
+                                                                    <div
+                                                                        key={line.id}
+                                                                        className="flex items-start gap-2 py-0.5"
+                                                                        style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                    >
+                                                                        {line.status === 'done' && (
+                                                                            <CheckCircle2 className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-400" />
+                                                                        )}
+                                                                        {line.status === 'doing' && (
+                                                                            <Loader2 className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" />
+                                                                        )}
+                                                                        {line.status === 'todo' && (
+                                                                            <Circle className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                                                                        )}
+                                                                        <span
+                                                                            className={`${line.status === 'done'
+                                                                                ? 'text-muted-foreground'
+                                                                                : line.status === 'doing'
+                                                                                    ? 'text-foreground'
+                                                                                    : 'text-muted-foreground/85'
+                                                                                } break-words`}
+                                                                        >
+                                                                            {line.text}
+                                                                        </span>
+                                                                    </div>
+                                                                )
+                                                            }
+                                                            return (
+                                                                <div
+                                                                    key={line.id}
+                                                                    className="whitespace-pre-wrap break-words text-[10px] text-muted-foreground/70"
+                                                                    style={{ marginLeft: `${line.indentLevel * 12}px` }}
+                                                                >
+                                                                    {line.text}
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </CollapsibleContent>
                                     </Collapsible>
                                 )}
@@ -302,21 +543,78 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                 {/* Iteration History */}
                                 {v2Status.history && v2Status.history.length > 0 && (
                                     <div className="border-t border-border/30 pt-2">
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">
-                                            Iteration History ({v2Status.history.length})
+                                        <div className="mb-1 flex items-center gap-2 text-[10px] text-muted-foreground font-medium">
+                                            <span>Iteration History ({v2Status.history.length})</span>
+                                            <button
+                                                type="button"
+                                                className="ml-auto rounded px-1.5 py-0.5 text-[9px] text-blue-400 hover:bg-blue-500/10"
+                                                onClick={() => {
+                                                    if (allHistoryExpanded) {
+                                                        setExpandedHistoryRows({})
+                                                        return
+                                                    }
+                                                    const next: Record<number, boolean> = {}
+                                                    for (const item of reversedHistory) {
+                                                        next[item.iteration] = true
+                                                    }
+                                                    setExpandedHistoryRows(next)
+                                                }}
+                                            >
+                                                {allHistoryExpanded ? 'Collapse all' : 'Expand all'}
+                                            </button>
                                         </div>
-                                        <div className="space-y-1 max-h-[150px] overflow-y-auto">
-                                            {v2Status.history.slice().reverse().map((h) => (
-                                                <div key={h.iteration} className="text-[10px] flex items-start gap-1.5 rounded bg-secondary/30 px-2 py-1">
-                                                    <span className="text-muted-foreground shrink-0">#{h.iteration}</span>
-                                                    <span className="truncate flex-1" title={h.summary}>{h.summary}</span>
-                                                    {h.promise && (
-                                                        <span className={`shrink-0 font-medium ${h.promise === 'DONE' ? 'text-green-400' :
-                                                            h.promise === 'WAITING' ? 'text-yellow-400' : 'text-muted-foreground'
-                                                            }`}>{h.promise}</span>
-                                                    )}
-                                                </div>
-                                            ))}
+                                        <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+                                            {reversedHistory.map((h) => {
+                                                const isExpanded = expandedHistoryRows[h.iteration] === true
+                                                return (
+                                                    <div key={h.iteration} className="rounded bg-secondary/30 px-2 py-1.5 text-[10px]">
+                                                        <button
+                                                            type="button"
+                                                            className="flex w-full items-start gap-1.5 text-left"
+                                                            onClick={() =>
+                                                                setExpandedHistoryRows((prev) => ({
+                                                                    ...prev,
+                                                                    [h.iteration]: !prev[h.iteration],
+                                                                }))
+                                                            }
+                                                        >
+                                                            <ChevronRight className={`mt-[1px] h-2.5 w-2.5 shrink-0 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                                            <span className="shrink-0 text-muted-foreground">#{h.iteration}</span>
+                                                            <span className={`${isExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'} flex-1`}>
+                                                                {h.summary}
+                                                            </span>
+                                                            {h.promise && (
+                                                                <span className={`shrink-0 font-medium ${h.promise === 'DONE'
+                                                                    ? 'text-green-400'
+                                                                    : h.promise === 'WAITING'
+                                                                        ? 'text-yellow-400'
+                                                                        : 'text-muted-foreground'
+                                                                    }`}
+                                                                >
+                                                                    {h.promise}
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                        {isExpanded && (
+                                                            <div className="mt-1.5 space-y-1 border-t border-border/30 pt-1.5 text-muted-foreground">
+                                                                <div>
+                                                                    Duration: {Number.isFinite(h.duration_s) ? `${h.duration_s.toFixed(1)}s` : '—'}
+                                                                </div>
+                                                                {h.files_modified.length > 0 && (
+                                                                    <div className="whitespace-pre-wrap break-words">
+                                                                        Files: {h.files_modified.join(', ')}
+                                                                    </div>
+                                                                )}
+                                                                {h.errors.length > 0 && (
+                                                                    <div className="whitespace-pre-wrap break-words text-red-400/90">
+                                                                        Errors: {h.errors.join(' | ')}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                     </div>
                                 )}
