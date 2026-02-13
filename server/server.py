@@ -394,6 +394,7 @@ class TerminalResizeRequest(BaseModel):
 TERMINAL_STREAM_EOF = "__RA_TERMINAL_STREAM_EOF__"
 TERMINAL_OUTPUT_QUEUE_MAX = 512
 TERMINAL_MAX_OUTPUT_CHUNK_BYTES = 64 * 1024
+TERMINAL_HISTORY_MAX_CHUNKS = 256
 
 
 class TerminalShellSession:
@@ -412,6 +413,7 @@ class TerminalShellSession:
         self.shell_command: str = ""
         self.cols = 120
         self.rows = 30
+        self._history: list[str] = []
 
     @staticmethod
     def _clamp_cols(cols: int) -> int:
@@ -467,6 +469,10 @@ class TerminalShellSession:
     def _broadcast(self, data: str) -> None:
         if not data:
             return
+        if data != TERMINAL_STREAM_EOF:
+            self._history.append(data)
+            if len(self._history) > TERMINAL_HISTORY_MAX_CHUNKS:
+                self._history = self._history[-TERMINAL_HISTORY_MAX_CHUNKS:]
 
         dead: list[asyncio.Queue] = []
         for subscriber in self._subscribers:
@@ -555,6 +561,19 @@ class TerminalShellSession:
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=TERMINAL_OUTPUT_QUEUE_MAX)
         self._subscribers.add(queue)
+        # Replay recent output so late subscribers still see prompt/history.
+        for chunk in self._history:
+            try:
+                queue.put_nowait(chunk)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    queue.put_nowait(chunk)
+                except asyncio.QueueFull:
+                    break
         return queue
 
     def unsubscribe(self, queue: asyncio.Queue) -> None:

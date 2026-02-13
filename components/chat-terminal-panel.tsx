@@ -1,9 +1,8 @@
 'use client'
 
-import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { type ClipboardEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
-  CornerDownLeft,
   Eraser,
   Loader2,
   RefreshCw,
@@ -19,22 +18,35 @@ import {
   streamTerminalSession,
 } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 
 const MAX_OUTPUT_CHARS = 250_000
+const ANSI_CSI_REGEX = /\u001b\[[0-?]*[ -/]*[@-~]/g
+const ANSI_OSC_REGEX = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g
+const ANSI_FE_REGEX = /\u001b[@-_]/g
+
+function sanitizeTerminalChunk(chunk: string): string {
+  if (!chunk) return ''
+  return chunk
+    .replace(ANSI_OSC_REGEX, '')
+    .replace(ANSI_CSI_REGEX, '')
+    .replace(ANSI_FE_REGEX, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '')
+}
 
 export function ChatTerminalPanel() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [workdir, setWorkdir] = useState('')
   const [shell, setShell] = useState('')
   const [output, setOutput] = useState('')
-  const [command, setCommand] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isConnecting, setIsConnecting] = useState(true)
   const [isConnected, setIsConnected] = useState(false)
 
   const mountedRef = useRef(false)
   const sessionIdRef = useRef<string | null>(null)
+  const isConnectedRef = useRef(false)
+  const inputChainRef = useRef<Promise<void>>(Promise.resolve())
   const streamAbortRef = useRef<AbortController | null>(null)
   const terminalViewportRef = useRef<HTMLDivElement>(null)
   const terminalSurfaceRef = useRef<HTMLDivElement>(null)
@@ -48,6 +60,10 @@ export function ChatTerminalPanel() {
       return next.slice(next.length - MAX_OUTPUT_CHARS)
     })
   }, [])
+
+  useEffect(() => {
+    isConnectedRef.current = isConnected
+  }, [isConnected])
 
   const stopStreaming = useCallback(() => {
     const controller = streamAbortRef.current
@@ -64,6 +80,22 @@ export function ChatTerminalPanel() {
     } catch {
       // No-op: backend may already have closed the session.
     }
+  }, [])
+
+  const enqueueInput = useCallback((data: string) => {
+    if (!data) return
+    const currentSessionId = sessionIdRef.current
+    if (!currentSessionId || !isConnectedRef.current) return
+
+    inputChainRef.current = inputChainRef.current
+      .then(async () => {
+        await sendTerminalInput(currentSessionId, data)
+      })
+      .catch((inputErr) => {
+        if (!mountedRef.current) return
+        const message = inputErr instanceof Error ? inputErr.message : 'Failed to send terminal input'
+        setError(message)
+      })
   }, [])
 
   const startSession = useCallback(async () => {
@@ -99,7 +131,7 @@ export function ChatTerminalPanel() {
               continue
             }
             if (event.type === 'output') {
-              appendOutput(event.data || '')
+              appendOutput(sanitizeTerminalChunk(event.data || ''))
               continue
             }
             if (event.type === 'closed') {
@@ -155,6 +187,11 @@ export function ChatTerminalPanel() {
   }, [output])
 
   useEffect(() => {
+    if (!isConnected) return
+    terminalViewportRef.current?.focus()
+  }, [isConnected])
+
+  useEffect(() => {
     if (!sessionId || !terminalSurfaceRef.current) return
 
     const surface = terminalSurfaceRef.current
@@ -194,31 +231,62 @@ export function ChatTerminalPanel() {
     }
   }, [sessionId])
 
-  const handleSubmit = useCallback(async (event: FormEvent) => {
+  const handleCtrlC = useCallback(() => {
+    enqueueInput('\u0003')
+  }, [enqueueInput])
+
+  const handleTerminalKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (!isConnectedRef.current || !sessionIdRef.current) return
+
+    const key = event.key
+    let payload: string | null = null
+
+    const arrowMap: Record<string, string> = {
+      ArrowUp: '\u001b[A',
+      ArrowDown: '\u001b[B',
+      ArrowRight: '\u001b[C',
+      ArrowLeft: '\u001b[D',
+    }
+
+    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'c') {
+      const selectedText = typeof window !== 'undefined' ? window.getSelection()?.toString() : ''
+      if (selectedText) {
+        return
+      }
+      payload = '\u0003'
+    } else if (event.ctrlKey && key.length === 1) {
+      const lower = key.toLowerCase()
+      const code = lower.charCodeAt(0)
+      if (code >= 97 && code <= 122) {
+        payload = String.fromCharCode(code - 96)
+      }
+    } else if (key in arrowMap) {
+      payload = arrowMap[key]
+    } else if (key === 'Enter') {
+      payload = '\n'
+    } else if (key === 'Backspace') {
+      payload = '\u007f'
+    } else if (key === 'Tab') {
+      payload = '\t'
+    } else if (key === 'Escape') {
+      payload = '\u001b'
+    } else if (!event.altKey && !event.metaKey && !event.ctrlKey && key.length === 1) {
+      payload = key
+    }
+
+    if (!payload) return
+
     event.preventDefault()
+    enqueueInput(payload)
+  }, [enqueueInput])
 
-    const trimmed = command.trim()
-    if (!trimmed || !sessionId) return
-
-    setCommand('')
-
-    try {
-      await sendTerminalInput(sessionId, `${command}\n`)
-    } catch (inputErr) {
-      const message = inputErr instanceof Error ? inputErr.message : 'Failed to send terminal input'
-      setError(message)
-    }
-  }, [command, sessionId])
-
-  const handleCtrlC = useCallback(async () => {
-    if (!sessionId) return
-    try {
-      await sendTerminalInput(sessionId, '\u0003')
-    } catch (inputErr) {
-      const message = inputErr instanceof Error ? inputErr.message : 'Failed to send interrupt'
-      setError(message)
-    }
-  }, [sessionId])
+  const handleTerminalPaste = useCallback((event: ClipboardEvent<HTMLDivElement>) => {
+    if (!isConnectedRef.current || !sessionIdRef.current) return
+    const pasted = event.clipboardData.getData('text')
+    if (!pasted) return
+    event.preventDefault()
+    enqueueInput(pasted)
+  }, [enqueueInput])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden border-t border-border/70 bg-card/30">
@@ -249,7 +317,7 @@ export function ChatTerminalPanel() {
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            onClick={() => { void handleCtrlC() }}
+            onClick={handleCtrlC}
             title="Send Ctrl+C"
             disabled={!isConnected || !sessionId}
           >
@@ -278,7 +346,16 @@ export function ChatTerminalPanel() {
       )}
 
       <div ref={terminalSurfaceRef} className="min-h-0 flex-1 overflow-hidden bg-black/95">
-        <div ref={terminalViewportRef} className="h-full overflow-auto px-3 py-2">
+        <div
+          ref={terminalViewportRef}
+          className="h-full overflow-auto px-3 py-2 outline-none"
+          tabIndex={0}
+          role="textbox"
+          aria-label="Terminal output and input"
+          onKeyDown={handleTerminalKeyDown}
+          onPaste={handleTerminalPaste}
+          onClick={() => terminalViewportRef.current?.focus()}
+        >
           <pre className="min-h-full whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-green-200">
             {output || (isConnecting ? '' : '$ ')}
           </pre>
@@ -291,22 +368,10 @@ export function ChatTerminalPanel() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border/70 bg-background px-3 py-2">
-        <span className="font-mono text-xs text-muted-foreground">$</span>
-        <Input
-          value={command}
-          onChange={(event) => setCommand(event.target.value)}
-          placeholder={shell ? `Command (${shell})` : 'Run a command'}
-          className="h-8 font-mono text-xs"
-          autoComplete="off"
-          spellCheck={false}
-          disabled={!sessionId || !isConnected}
-        />
-        <Button type="submit" size="sm" className="h-8 gap-1.5" disabled={!sessionId || !isConnected || command.trim().length === 0}>
-          <CornerDownLeft className="h-3.5 w-3.5" />
-          Run
-        </Button>
-      </form>
+      <div className="border-t border-border/70 bg-background px-3 py-1.5 text-[11px] text-muted-foreground">
+        Click terminal and type directly. Press <kbd className="rounded border border-border/70 px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to run.
+        {shell ? ` Shell: ${shell}` : ''}
+      </div>
     </div>
   )
 }
