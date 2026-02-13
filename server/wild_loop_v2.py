@@ -270,6 +270,29 @@ class WildV2Engine:
         # Add system health
         d["system_health"] = self._get_system_health()
 
+        # Add file contents from disk
+        sid = self._session.session_id
+        session_dir = self._session_dir(sid)
+        d["session_dir"] = session_dir
+
+        # Read iteration_log.md
+        log_path = os.path.join(session_dir, "iteration_log.md")
+        if os.path.exists(log_path):
+            try:
+                with open(log_path) as f:
+                    d["iteration_log"] = f.read()
+            except Exception:
+                d["iteration_log"] = ""
+
+        # Re-read tasks.md (freshest version)
+        tasks_path = os.path.join(session_dir, "tasks.md")
+        if os.path.exists(tasks_path):
+            try:
+                with open(tasks_path) as f:
+                    d["plan"] = f.read()
+            except Exception:
+                pass
+
         return d
 
     def get_events(self) -> list:

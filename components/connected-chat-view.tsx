@@ -315,13 +315,28 @@ export function ConnectedChatView({
         // chat worker on the same session and cause a 409.
         if (effectiveMode === 'wild' && wildLoop && !wildLoop.isActive) {
             wildLoop.start(message, sessionId)
+
+            // V2 starts asynchronously — poll selectSession to attach to the stream
+            // once the backend starts the first iteration's chat worker
+            const pollForStream = async () => {
+                for (let i = 0; i < 15; i++) {
+                    await new Promise(r => setTimeout(r, 1000))
+                    try {
+                        await selectSession(sessionId)
+                        break  // attached to stream
+                    } catch {
+                        // stream not ready yet, retry
+                    }
+                }
+            }
+            pollForStream()
             return  // V2 takes over from here
         }
 
         // Send the message normally — in wild mode (already running), the V2 backend
         // handles all subsequent iterations autonomously
         await sendMessage(message, effectiveMode, sessionId)
-    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage])
+    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage, selectSession])
 
     const handleReplyToSelection = useCallback((selectedText: string) => {
         if (!currentSessionId) return

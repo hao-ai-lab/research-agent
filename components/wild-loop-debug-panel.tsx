@@ -23,6 +23,8 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
     const [entitiesOpen, setEntitiesOpen] = useState(true)
     const [settingsOpen, setSettingsOpen] = useState(false)
     const [v2PlanOpen, setV2PlanOpen] = useState(true)
+    const [v2TasksOpen, setV2TasksOpen] = useState(true)
+    const [v2LogOpen, setV2LogOpen] = useState(false)
     const [v2Status, setV2Status] = useState<WildV2Status | null>(null)
     const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
     const prevIterationRef = useRef<number | null>(null)
@@ -208,14 +210,48 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                     <div className="text-foreground">{v2Status.goal || '—'}</div>
                                 </div>
 
-                                {/* Plan */}
-                                {v2Status.plan && (
+                                {/* Session Dir */}
+                                {v2Status.session_dir && (
                                     <div>
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Current Plan</div>
-                                        <pre className="text-[10px] bg-secondary/30 rounded p-2 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap">
-                                            {v2Status.plan}
-                                        </pre>
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Session Dir</div>
+                                        <code className="text-[10px] text-blue-400 break-all">{v2Status.session_dir}</code>
                                     </div>
+                                )}
+
+                                {/* 📄 tasks.md */}
+                                {v2Status.plan && (
+                                    <Collapsible open={v2TasksOpen} onOpenChange={setV2TasksOpen}>
+                                        <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors">
+                                            {v2TasksOpen ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                            📄 tasks.md
+                                            <span className="ml-auto text-[9px] text-muted-foreground/60">
+                                                {v2Status.plan.length} chars
+                                            </span>
+                                        </CollapsibleTrigger>
+                                        <CollapsibleContent>
+                                            <pre className="mt-1 text-[10px] bg-secondary/30 rounded p-2 overflow-x-auto max-h-[250px] overflow-y-auto whitespace-pre-wrap border border-border/30">
+                                                {v2Status.plan}
+                                            </pre>
+                                        </CollapsibleContent>
+                                    </Collapsible>
+                                )}
+
+                                {/* 📄 iteration_log.md */}
+                                {v2Status.iteration_log && (
+                                    <Collapsible open={v2LogOpen} onOpenChange={setV2LogOpen}>
+                                        <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors">
+                                            {v2LogOpen ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                            📄 iteration_log.md
+                                            <span className="ml-auto text-[9px] text-muted-foreground/60">
+                                                {v2Status.iteration_log.length} chars
+                                            </span>
+                                        </CollapsibleTrigger>
+                                        <CollapsibleContent>
+                                            <pre className="mt-1 text-[10px] bg-secondary/30 rounded p-2 overflow-x-auto max-h-[250px] overflow-y-auto whitespace-pre-wrap border border-border/30">
+                                                {v2Status.iteration_log}
+                                            </pre>
+                                        </CollapsibleContent>
+                                    </Collapsible>
                                 )}
 
                                 {/* System Health */}
@@ -227,6 +263,21 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                             <span className="text-muted-foreground">⏳ {v2Status.system_health.queued}</span>
                                             <span className="text-green-400">✓ {v2Status.system_health.completed}</span>
                                             <span className="text-red-400">✗ {v2Status.system_health.failed}</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Struggle Signals */}
+                                {((v2Status.no_progress_streak ?? 0) > 0 || (v2Status.short_iteration_count ?? 0) > 0) && (
+                                    <div className="border-t border-border/30 pt-2">
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">⚠ Struggle Signals</div>
+                                        <div className="flex flex-wrap gap-3 text-[10px]">
+                                            {(v2Status.no_progress_streak ?? 0) > 0 && (
+                                                <span className="text-orange-400">No-progress streak: {v2Status.no_progress_streak}</span>
+                                            )}
+                                            {(v2Status.short_iteration_count ?? 0) > 0 && (
+                                                <span className="text-yellow-400">Short iterations: {v2Status.short_iteration_count}</span>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -261,7 +312,7 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                     <span className="truncate flex-1" title={h.summary}>{h.summary}</span>
                                                     {h.promise && (
                                                         <span className={`shrink-0 font-medium ${h.promise === 'DONE' ? 'text-green-400' :
-                                                                h.promise === 'WAITING' ? 'text-yellow-400' : 'text-muted-foreground'
+                                                            h.promise === 'WAITING' ? 'text-yellow-400' : 'text-muted-foreground'
                                                             }`}>{h.promise}</span>
                                                     )}
                                                 </div>

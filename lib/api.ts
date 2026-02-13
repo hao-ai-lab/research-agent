@@ -1036,6 +1036,8 @@ export interface WildV2Status {
     iteration?: number
     max_iterations?: number
     plan?: string
+    iteration_log?: string
+    session_dir?: string
     history?: WildV2IterationHistory[]
     started_at?: number
     finished_at?: number | null
