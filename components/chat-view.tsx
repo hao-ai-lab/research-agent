@@ -112,6 +112,17 @@ export function ChatView({
     return pairs
   }, [messages])
 
+  const pendingUserMessage = useMemo(() => {
+    if (collapseChats || messages.length === 0) return null
+    const lastMessage = messages[messages.length - 1]
+    return lastMessage.role === 'user' ? lastMessage : null
+  }, [messages, collapseChats])
+
+  const visibleMessages = useMemo(() => {
+    if (!pendingUserMessage) return messages
+    return messages.filter((message) => message.id !== pendingUserMessage.id)
+  }, [messages, pendingUserMessage])
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Main Chat Area */}
@@ -126,6 +137,19 @@ export function ChatView({
           <ScrollArea className="h-full" ref={scrollRef}>
             <div className="pb-4">
               <div className="mt-4 space-y-1 px-2.5">
+                {pendingUserMessage && (
+                  <div className="sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+                    <ChatMessage
+                      message={pendingUserMessage}
+                      collapseArtifacts={collapseArtifactsInChat}
+                      sweeps={sweeps}
+                      runs={runs}
+                      onEditSweep={onEditSweep}
+                      onLaunchSweep={onLaunchSweep}
+                      onRunClick={onRunClick}
+                    />
+                  </div>
+                )}
                 {collapseChats ? (
                   // Collapsed view - show pairs
                   messagePairs.map((pair, index) => (
@@ -142,7 +166,7 @@ export function ChatView({
                   ))
                 ) : (
                   // Normal view
-                  messages.map((message) => (
+                  visibleMessages.map((message) => (
                     <ChatMessage 
                       key={message.id} 
                       message={message} 

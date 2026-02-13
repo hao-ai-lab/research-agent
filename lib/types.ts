@@ -92,6 +92,7 @@ export interface AppSettings {
     customFontSizePx?: number | null;
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
+    chatInputInitialHeightPx?: number | null;
     streamingToolBoxHeightRem?: number | null;
     showStarterCards?: boolean;
     showSidebarNewChatButton?: boolean;

@@ -271,6 +271,21 @@ export function ConnectedChatView({
         return pairs
     }, [displayMessages])
 
+    const streamingRoundUserMessage = useMemo(() => {
+        if (collapseChats || !streamingState.isStreaming) return null
+        for (let i = displayMessages.length - 1; i >= 0; i -= 1) {
+            if (displayMessages[i].role !== 'user') continue
+            const hasAssistantAfter = displayMessages.slice(i + 1).some((candidate) => candidate.role === 'assistant')
+            return hasAssistantAfter ? null : displayMessages[i]
+        }
+        return null
+    }, [displayMessages, streamingState.isStreaming, collapseChats])
+
+    const visibleMessages = useMemo(() => {
+        if (!streamingRoundUserMessage) return displayMessages
+        return displayMessages.filter((message) => message.id !== streamingRoundUserMessage.id)
+    }, [displayMessages, streamingRoundUserMessage])
+
     const effectiveInsertDraft = useMemo(() => {
         if (!starterDraftInsert) return insertDraft
         if (!insertDraft) return starterDraftInsert
@@ -579,6 +594,21 @@ export function ConnectedChatView({
                             <ScrollArea className="h-full" ref={scrollRef}>
                                 <div className="pb-4">
                                     <div className="mt-4 space-y-1 px-2.5 min-w-0">
+                                        {streamingRoundUserMessage && (
+                                            <div className="sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+                                                <ChatMessage
+                                                    message={streamingRoundUserMessage}
+                                                    collapseArtifacts={collapseArtifactsInChat}
+                                                    sweeps={sweeps}
+                                                    runs={runs}
+                                                    alerts={alerts}
+                                                    onEditSweep={onEditSweep}
+                                                    onLaunchSweep={onLaunchSweep}
+                                                    onRunClick={onRunClick}
+                                                    onReplyToSelection={handleReplyToSelection}
+                                                />
+                                            </div>
+                                        )}
                                         {collapseChats
                                             ? messagePairs.map((pair, index) => (
                                                 <CollapsedChatPair
@@ -594,11 +624,12 @@ export function ConnectedChatView({
                                                     onReplyToSelection={handleReplyToSelection}
                                                 />
                                             ))
-                                            : displayMessages.map((message, index) => {
+                                            : visibleMessages.map((message) => {
                                                 // Find the previous user message for context extraction
                                                 let prevUserContent: string | undefined
                                                 if (message.role === 'assistant') {
-                                                    for (let i = index - 1; i >= 0; i--) {
+                                                    const sourceIndex = displayMessages.findIndex((candidate) => candidate.id === message.id)
+                                                    for (let i = sourceIndex - 1; i >= 0; i--) {
                                                         if (displayMessages[i].role === 'user') {
                                                             prevUserContent = displayMessages[i].content
                                                             break

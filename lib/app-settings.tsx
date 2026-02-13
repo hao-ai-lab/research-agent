@@ -11,6 +11,7 @@ const STORAGE_KEY_APPEARANCE_RUN_ITEM_INTERACTION = 'research-agent-appearance-r
 const STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX = 'research-agent-appearance-custom-font-size-px'
 const STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT = 'research-agent-appearance-custom-button-scale-percent'
 const STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX = 'research-agent-appearance-chat-toolbar-button-size-px'
+const STORAGE_KEY_APPEARANCE_CHAT_INPUT_INITIAL_HEIGHT_PX = 'research-agent-appearance-chat-input-initial-height-px'
 
 export const defaultAppSettings: AppSettings = {
   appearance: {
@@ -22,6 +23,7 @@ export const defaultAppSettings: AppSettings = {
     customFontSizePx: null,
     customButtonScalePercent: null,
     chatToolbarButtonSizePx: null,
+    chatInputInitialHeightPx: null,
     showStarterCards: false,
     showSidebarNewChatButton: false,
   },
@@ -108,6 +110,13 @@ function writeSettingsToStorage(nextSettings: AppSettings) {
   } else {
     localStorage.setItem(STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX, String(chatToolbarButtonSizePx))
   }
+
+  const chatInputInitialHeightPx = sanitizePositiveNumber(nextSettings.appearance.chatInputInitialHeightPx)
+  if (chatInputInitialHeightPx === null) {
+    localStorage.removeItem(STORAGE_KEY_APPEARANCE_CHAT_INPUT_INITIAL_HEIGHT_PX)
+  } else {
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_CHAT_INPUT_INITIAL_HEIGHT_PX, String(chatInputInitialHeightPx))
+  }
 }
 
 function readStoredSettings(): AppSettings {
@@ -133,6 +142,7 @@ function readStoredSettings(): AppSettings {
     const customFontSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.customFontSizePx)
     const customButtonScalePercentFromBlob = sanitizePositiveNumber(parsed?.appearance?.customButtonScalePercent)
     const chatToolbarButtonSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.chatToolbarButtonSizePx)
+    const chatInputInitialHeightPxFromBlob = sanitizePositiveNumber(parsed?.appearance?.chatInputInitialHeightPx)
 
     const storedTheme = localStorage.getItem(STORAGE_KEY_APPEARANCE_THEME)
     const storedFontSize = localStorage.getItem(STORAGE_KEY_APPEARANCE_FONT_SIZE)
@@ -141,6 +151,7 @@ function readStoredSettings(): AppSettings {
     const storedCustomFontSizePx = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_FONT_SIZE_PX))
     const storedCustomButtonScalePercent = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_BUTTON_SCALE_PERCENT))
     const storedChatToolbarButtonSizePx = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX))
+    const storedChatInputInitialHeightPx = parseStoredNumber(localStorage.getItem(STORAGE_KEY_APPEARANCE_CHAT_INPUT_INITIAL_HEIGHT_PX))
 
     const resolvedTheme = isValidTheme(storedTheme)
       ? storedTheme
@@ -170,6 +181,7 @@ function readStoredSettings(): AppSettings {
         customFontSizePx: sanitizePositiveNumber(storedCustomFontSizePx) ?? customFontSizePxFromBlob ?? defaultAppSettings.appearance.customFontSizePx,
         customButtonScalePercent: sanitizePositiveNumber(storedCustomButtonScalePercent) ?? customButtonScalePercentFromBlob ?? defaultAppSettings.appearance.customButtonScalePercent,
         chatToolbarButtonSizePx: sanitizePositiveNumber(storedChatToolbarButtonSizePx) ?? chatToolbarButtonSizePxFromBlob ?? defaultAppSettings.appearance.chatToolbarButtonSizePx,
+        chatInputInitialHeightPx: sanitizePositiveNumber(storedChatInputInitialHeightPx) ?? chatInputInitialHeightPxFromBlob ?? defaultAppSettings.appearance.chatInputInitialHeightPx,
         showStarterCards: parsed?.appearance?.showStarterCards ?? defaultAppSettings.appearance.showStarterCards,
         showSidebarNewChatButton: parsed?.appearance?.showSidebarNewChatButton ?? defaultAppSettings.appearance.showSidebarNewChatButton,
         starterCardTemplates: parsed?.appearance?.starterCardTemplates ?? {},
@@ -248,6 +260,13 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
       root.style.setProperty('--app-chat-toolbar-btn-size', `${chatToolbarButtonSizePx}px`)
     } else {
       root.style.removeProperty('--app-chat-toolbar-btn-size')
+    }
+
+    const chatInputInitialHeightPx = settings.appearance.chatInputInitialHeightPx
+    if (typeof chatInputInitialHeightPx === 'number' && Number.isFinite(chatInputInitialHeightPx) && chatInputInitialHeightPx > 0) {
+      root.style.setProperty('--app-chat-input-initial-height', `${chatInputInitialHeightPx}px`)
+    } else {
+      root.style.removeProperty('--app-chat-input-initial-height')
     }
 
     const streamingToolBoxHeightRem = settings.appearance.streamingToolBoxHeightRem

@@ -104,6 +104,23 @@ interface ChatInputProps {
   contextTokenCount?: number
 }
 
+const DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX = 48
+const MAX_CHAT_INPUT_HEIGHT_PX = 170
+
+function getTextareaMinHeight(textarea: HTMLTextAreaElement): number {
+  if (typeof window === 'undefined') return DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX
+  const parsed = Number.parseFloat(window.getComputedStyle(textarea).minHeight)
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX
+  return parsed
+}
+
+function resizeTextarea(textarea: HTMLTextAreaElement) {
+  textarea.style.height = 'auto'
+  const minHeight = getTextareaMinHeight(textarea)
+  const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), MAX_CHAT_INPUT_HEIGHT_PX)
+  textarea.style.height = `${nextHeight}px`
+}
+
 export function ChatInput({
   onSend,
   onStop,
@@ -498,8 +515,7 @@ export function ChatInput({
 
   useEffect(() => {
     if (!textareaRef.current) return
-    textareaRef.current.style.height = 'auto'
-    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+    resizeTextarea(textareaRef.current)
   }, [message])
 
   useEffect(() => {
@@ -512,8 +528,7 @@ export function ChatInput({
     setTimeout(() => {
       textareaRef.current?.focus()
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
+        resizeTextarea(textareaRef.current)
       }
     }, 0)
   }, [insertDraft?.id, insertDraft?.text])
@@ -567,7 +582,7 @@ export function ChatInput({
       setSlashStartIndex(null)
       setSlashQuery('')
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
+        resizeTextarea(textareaRef.current)
       }
     }
   }
@@ -698,8 +713,7 @@ export function ChatInput({
     const value = e.target.value
     const cursorPos = e.target.selectionStart
     setMessage(value)
-    e.target.style.height = 'auto'
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
+    resizeTextarea(e.target)
     if (highlightRef.current) {
       highlightRef.current.scrollTop = e.target.scrollTop
     }
@@ -867,8 +881,7 @@ export function ChatInput({
       const newCursorPos = cursorPos + 1
       input.focus()
       input.setSelectionRange(newCursorPos, newCursorPos)
-      input.style.height = 'auto'
-      input.style.height = `${Math.min(input.scrollHeight, 120)}px`
+      resizeTextarea(input)
     }, 0)
   }
 
@@ -1171,8 +1184,8 @@ export function ChatInput({
             rows={1}
             className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
-              minHeight: '58px',
-              maxHeight: '170px',
+              minHeight: `var(--app-chat-input-initial-height, ${DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX}px)`,
+              maxHeight: `${MAX_CHAT_INPUT_HEIGHT_PX}px`,
               caretColor: 'var(--foreground)',
               color: 'transparent',
             }}

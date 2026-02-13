@@ -307,18 +307,39 @@ export function ChatMessage({
       return [<CodeOutputBox key="detected-code" language={standaloneCode.language} code={standaloneCode.code} />]
     }
 
-    // Simple markdown rendering
     const lines = content.split('\n')
     const elements: React.ReactNode[] = []
     let inCodeBlock = false
     let codeContent = ''
     let codeLanguage = ''
     let codeKey = 0
+    let listType: 'ul' | 'ol' | null = null
+    let listItems: string[] = []
+
+    const flushList = (listKey: string) => {
+      if (!listType || listItems.length === 0) return
+      const ListTag = listType
+      elements.push(
+        <ListTag
+          key={listKey}
+          className={listType === 'ul' ? 'list-disc pl-6 space-y-1 text-foreground/90' : 'list-decimal pl-6 space-y-1 text-foreground/90'}
+        >
+          {listItems.map((item, itemIndex) => (
+            <li key={`${listKey}-item-${itemIndex}`}>
+              {renderInlineMarkdown(item, `${listKey}-item-${itemIndex}`)}
+            </li>
+          ))}
+        </ListTag>
+      )
+      listType = null
+      listItems = []
+    }
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
 
       if (line.startsWith('```')) {
+        flushList(`list-before-code-${i}`)
         if (inCodeBlock) {
           elements.push(
             <CodeOutputBox
@@ -342,34 +363,72 @@ export function ChatMessage({
         continue
       }
 
-      if (line.startsWith('**') && line.endsWith('**')) {
+      const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
+      const orderedItemMatch = line.match(/^\d+\.\s+(.+)$/)
+      const unorderedItemMatch = line.match(/^[-*+]\s+(.+)$/)
+      const blockquoteMatch = line.match(/^>\s?(.*)$/)
+
+      if (unorderedItemMatch) {
+        if (listType !== 'ul') {
+          flushList(`list-switch-${i}`)
+          listType = 'ul'
+        }
+        listItems.push(unorderedItemMatch[1])
+        continue
+      }
+
+      if (orderedItemMatch) {
+        if (listType !== 'ol') {
+          flushList(`list-switch-${i}`)
+          listType = 'ol'
+        }
+        listItems.push(orderedItemMatch[1])
+        continue
+      }
+
+      flushList(`list-${i}`)
+
+      if (headingMatch) {
+        const level = headingMatch[1].length
+        const HeadingTag = `h${Math.min(level, 6)}` as keyof React.JSX.IntrinsicElements
+        elements.push(
+          <HeadingTag key={`heading-${i}`} className="mt-3 mb-1 font-semibold text-foreground">
+            {renderInlineMarkdown(headingMatch[2], `heading-${i}`)}
+          </HeadingTag>
+        )
+      } else if (blockquoteMatch) {
+        const quoteLines = [blockquoteMatch[1]]
+        while (i + 1 < lines.length && /^>\s?/.test(lines[i + 1])) {
+          i += 1
+          quoteLines.push(lines[i].replace(/^>\s?/, ''))
+        }
+        elements.push(
+          <blockquote key={`quote-${i}`} className="border-l-2 border-border/70 pl-3 text-foreground/80">
+            {quoteLines.map((quoteLine, quoteIndex) => (
+              <p key={`quote-${i}-${quoteIndex}`}>
+                {renderInlineMarkdown(quoteLine, `quote-${i}-${quoteIndex}`)}
+              </p>
+            ))}
+          </blockquote>
+        )
+      } else if (line.startsWith('**') && line.endsWith('**')) {
         elements.push(
           <p key={i} className="mt-3 mb-1 font-semibold text-foreground">
-            {line.slice(2, -2)}
+            {renderInlineMarkdown(line.slice(2, -2), `strong-line-${i}`)}
           </p>
         )
-      } else if (line.startsWith('- ') || line.startsWith('* ')) {
-        elements.push(
-          <li key={i} className="ml-4 text-foreground/90">
-            {renderInlineMarkdown(line.slice(2))}
-          </li>
-        )
-      } else if (line.match(/^\d+\. /)) {
-        elements.push(
-          <li key={i} className="ml-4 list-decimal text-foreground/90">
-            {renderInlineMarkdown(line.replace(/^\d+\. /, ''))}
-          </li>
-        )
       } else if (line.trim() === '') {
-        elements.push(<br key={i} />)
+        elements.push(<div key={`spacer-${i}`} className="h-2" />)
       } else {
         elements.push(
           <p key={i} className="text-foreground/90">
-            {renderInlineMarkdown(line)}
+            {renderInlineMarkdown(line, `line-${i}`)}
           </p>
         )
       }
     }
+
+    flushList('list-end')
 
     if (inCodeBlock && codeContent) {
       elements.push(
@@ -384,37 +443,103 @@ export function ChatMessage({
     return elements
   }
 
-  const renderInlineMarkdown = (text: string) => {
-    // Handle inline code
-    const parts = text.split(/(`[^`]+`)/)
-    return parts.map((part, i) => {
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return (
-          <code
-            key={i}
-            className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
-          >
-            {part.slice(1, -1)}
-          </code>
-        )
-      }
-      // Handle bold
-      const boldParts = part.split(/(\*\*[^*]+\*\*)/)
-      return boldParts.map((bp, j) => {
-        if (bp.startsWith('**') && bp.endsWith('**')) {
-          return (
-            <strong key={`${i}-${j}`} className="font-semibold">
-              {renderReferences(bp.slice(2, -2), `bold-${i}-${j}`)}
-            </strong>
-          )
-        }
-        return (
-          <React.Fragment key={`${i}-${j}`}>
-            {renderReferences(bp, `text-${i}-${j}`)}
+  const renderInlineMarkdown = (text: string, keyPrefix: string) => {
+    const elements: React.ReactNode[] = []
+    const tokenRegex = /(`[^`]+`|\*\*[^*]+\*\*|~~[^~]+~~|\[[^\]]+\]\((?:[^()\s]+)\)|\*[^*\n]+\*|_[^_\n]+_)/g
+    let cursor = 0
+    let tokenIndex = 0
+    let match: RegExpExecArray | null
+
+    while ((match = tokenRegex.exec(text)) !== null) {
+      if (match.index > cursor) {
+        elements.push(
+          <React.Fragment key={`${keyPrefix}-plain-${tokenIndex++}`}>
+            {renderReferences(text.slice(cursor, match.index), `${keyPrefix}-plain-${tokenIndex}`)}
           </React.Fragment>
         )
-      })
-    })
+      }
+
+      const token = match[0]
+      const tokenKey = `${keyPrefix}-token-${tokenIndex++}`
+
+      if (token.startsWith('`') && token.endsWith('`')) {
+        elements.push(
+          <code
+            key={tokenKey}
+            className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
+          >
+            {token.slice(1, -1)}
+          </code>
+        )
+      } else if (token.startsWith('**') && token.endsWith('**')) {
+        elements.push(
+          <strong key={tokenKey} className="font-semibold">
+            {renderReferences(token.slice(2, -2), `${tokenKey}-bold`)}
+          </strong>
+        )
+      } else if ((token.startsWith('*') && token.endsWith('*')) || (token.startsWith('_') && token.endsWith('_'))) {
+        elements.push(
+          <em key={tokenKey} className="italic">
+            {renderReferences(token.slice(1, -1), `${tokenKey}-italic`)}
+          </em>
+        )
+      } else if (token.startsWith('~~') && token.endsWith('~~')) {
+        elements.push(
+          <span key={tokenKey} className="line-through">
+            {renderReferences(token.slice(2, -2), `${tokenKey}-strike`)}
+          </span>
+        )
+      } else if (token.startsWith('[') && token.includes('](') && token.endsWith(')')) {
+        const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+        if (linkMatch) {
+          const href = linkMatch[2]
+          const isExternal = /^https?:\/\//i.test(href)
+          elements.push(
+            <a
+              key={tokenKey}
+              href={href}
+              target={isExternal ? '_blank' : undefined}
+              rel={isExternal ? 'noreferrer noopener' : undefined}
+              className="underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground"
+            >
+              {renderReferences(linkMatch[1], `${tokenKey}-link`)}
+            </a>
+          )
+        } else {
+          elements.push(
+            <React.Fragment key={tokenKey}>
+              {renderReferences(token, `${tokenKey}-fallback`)}
+            </React.Fragment>
+          )
+        }
+      } else {
+        elements.push(
+          <React.Fragment key={tokenKey}>
+            {renderReferences(token, `${tokenKey}-text`)}
+          </React.Fragment>
+        )
+      }
+
+      cursor = tokenRegex.lastIndex
+    }
+
+    if (cursor < text.length) {
+      elements.push(
+        <React.Fragment key={`${keyPrefix}-tail`}>
+          {renderReferences(text.slice(cursor), `${keyPrefix}-tail-text`)}
+        </React.Fragment>
+      )
+    }
+
+    if (elements.length === 0) {
+      elements.push(
+        <React.Fragment key={`${keyPrefix}-empty`}>
+          {renderReferences(text, `${keyPrefix}-empty-text`)}
+        </React.Fragment>
+      )
+    }
+
+    return elements
   }
 
   if (isUser) {
@@ -450,7 +575,9 @@ export function ChatMessage({
           </div>
         )}
         <div className="border-l-4 border-primary px-3 py-1">
-          <p className="text-base leading-relaxed text-foreground break-words">{renderInlineMarkdown(userBody)}</p>
+          <div className="space-y-1 text-base leading-relaxed text-foreground break-words">
+            {renderMarkdown(userBody)}
+          </div>
         </div>
       </div>
     )

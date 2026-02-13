@@ -332,7 +332,7 @@ function detectStandaloneCode(content: string): { language: string; code: string
 }
 
 /**
- * Simple streaming text renderer - handles basic markdown
+ * Streaming text renderer for markdown-like assistant output.
  */
 function renderStreamingText(text: string): React.ReactNode {
     const taggedCode = parseTaggedCodeBlock(text)
@@ -351,11 +351,33 @@ function renderStreamingText(text: string): React.ReactNode {
     let codeContent = ''
     let codeLanguage = ''
     let codeKey = 0
+    let listType: 'ul' | 'ol' | null = null
+    let listItems: string[] = []
+
+    const flushList = (listKey: string) => {
+        if (!listType || listItems.length === 0) return
+        const ListTag = listType
+        elements.push(
+            <ListTag
+                key={listKey}
+                className={listType === 'ul' ? 'list-disc pl-6 space-y-1 text-foreground/90' : 'list-decimal pl-6 space-y-1 text-foreground/90'}
+            >
+                {listItems.map((item, itemIndex) => (
+                    <li key={`${listKey}-item-${itemIndex}`}>
+                        {renderStreamingInlineMarkdown(item, `${listKey}-item-${itemIndex}`)}
+                    </li>
+                ))}
+            </ListTag>
+        )
+        listType = null
+        listItems = []
+    }
 
     for (let i = 0; i < lines.length; i += 1) {
         const line = lines[i]
 
         if (line.startsWith('```')) {
+            flushList(`list-before-code-${i}`)
             if (inCodeBlock) {
                 const key = `code-${codeKey++}`
                 elements.push(
@@ -380,33 +402,78 @@ function renderStreamingText(text: string): React.ReactNode {
             continue
         }
 
+        const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
+        const orderedItemMatch = line.match(/^\d+\.\s+(.+)$/)
+        const unorderedItemMatch = line.match(/^[-*+]\s+(.+)$/)
+        const blockquoteMatch = line.match(/^>\s?(.*)$/)
+
+        if (unorderedItemMatch) {
+            if (listType !== 'ul') {
+                flushList(`list-switch-${i}`)
+                listType = 'ul'
+            }
+            listItems.push(unorderedItemMatch[1])
+            continue
+        }
+
+        if (orderedItemMatch) {
+            if (listType !== 'ol') {
+                flushList(`list-switch-${i}`)
+                listType = 'ol'
+            }
+            listItems.push(orderedItemMatch[1])
+            continue
+        }
+
+        flushList(`list-${i}`)
+
+        if (headingMatch) {
+            const level = headingMatch[1].length
+            const HeadingTag = `h${Math.min(level, 6)}` as keyof React.JSX.IntrinsicElements
+            elements.push(
+                <HeadingTag key={`heading-${i}`} className="mt-3 mb-1 font-semibold text-foreground">
+                    {renderStreamingInlineMarkdown(headingMatch[2], `heading-${i}`)}
+                </HeadingTag>
+            )
+            continue
+        }
+        if (blockquoteMatch) {
+            const quoteLines = [blockquoteMatch[1]]
+            while (i + 1 < lines.length && /^>\s?/.test(lines[i + 1])) {
+                i += 1
+                quoteLines.push(lines[i].replace(/^>\s?/, ''))
+            }
+            elements.push(
+                <blockquote key={`quote-${i}`} className="border-l-2 border-border/70 pl-3 text-foreground/80">
+                    {quoteLines.map((quoteLine, quoteIndex) => (
+                        <p key={`quote-${i}-${quoteIndex}`}>
+                            {renderStreamingInlineMarkdown(quoteLine, `quote-${i}-${quoteIndex}`)}
+                        </p>
+                    ))}
+                </blockquote>
+            )
+            continue
+        }
         if (line.startsWith('**') && line.endsWith('**')) {
             elements.push(
                 <p key={i} className="mt-3 mb-1 font-semibold text-foreground">
-                    {line.slice(2, -2)}
+                    {renderStreamingInlineMarkdown(line.slice(2, -2), `strong-line-${i}`)}
                 </p>
             )
             continue
         }
-        if (line.startsWith('- ') || line.startsWith('* ')) {
-            elements.push(
-                <li key={i} className="ml-4 text-foreground/90">
-                    {line.slice(2)}
-                </li>
-            )
-            continue
-        }
         if (line.trim() === '') {
-            elements.push(<br key={i} />)
+            elements.push(<div key={`spacer-${i}`} className="h-2" />)
             continue
         }
         elements.push(
-            <span key={i}>
-                {line}
-                {i < lines.length - 1 && <br />}
-            </span>
+            <p key={i} className="text-foreground/90">
+                {renderStreamingInlineMarkdown(line, `line-${i}`)}
+            </p>
         )
     }
+
+    flushList('list-end')
 
     if (inCodeBlock && codeContent) {
         const key = `code-${codeKey++}`
@@ -417,6 +484,93 @@ function renderStreamingText(text: string): React.ReactNode {
                 code={codeContent.replace(/\n$/, '')}
             />
         )
+    }
+
+    return elements
+}
+
+function renderStreamingInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[] {
+    const elements: React.ReactNode[] = []
+    const tokenRegex = /(`[^`]+`|\*\*[^*]+\*\*|~~[^~]+~~|\[[^\]]+\]\((?:[^()\s]+)\)|\*[^*\n]+\*|_[^_\n]+_)/g
+    let cursor = 0
+    let tokenIndex = 0
+    let match: RegExpExecArray | null
+
+    while ((match = tokenRegex.exec(text)) !== null) {
+        if (match.index > cursor) {
+            elements.push(
+                <React.Fragment key={`${keyPrefix}-plain-${tokenIndex++}`}>
+                    {text.slice(cursor, match.index)}
+                </React.Fragment>
+            )
+        }
+
+        const token = match[0]
+        const tokenKey = `${keyPrefix}-token-${tokenIndex++}`
+
+        if (token.startsWith('`') && token.endsWith('`')) {
+            elements.push(
+                <code
+                    key={tokenKey}
+                    className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
+                >
+                    {token.slice(1, -1)}
+                </code>
+            )
+        } else if (token.startsWith('**') && token.endsWith('**')) {
+            elements.push(
+                <strong key={tokenKey} className="font-semibold">
+                    {token.slice(2, -2)}
+                </strong>
+            )
+        } else if ((token.startsWith('*') && token.endsWith('*')) || (token.startsWith('_') && token.endsWith('_'))) {
+            elements.push(
+                <em key={tokenKey} className="italic">
+                    {token.slice(1, -1)}
+                </em>
+            )
+        } else if (token.startsWith('~~') && token.endsWith('~~')) {
+            elements.push(
+                <span key={tokenKey} className="line-through">
+                    {token.slice(2, -2)}
+                </span>
+            )
+        } else if (token.startsWith('[') && token.includes('](') && token.endsWith(')')) {
+            const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+            if (linkMatch) {
+                const href = linkMatch[2]
+                const isExternal = /^https?:\/\//i.test(href)
+                elements.push(
+                    <a
+                        key={tokenKey}
+                        href={href}
+                        target={isExternal ? '_blank' : undefined}
+                        rel={isExternal ? 'noreferrer noopener' : undefined}
+                        className="underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground"
+                    >
+                        {linkMatch[1]}
+                    </a>
+                )
+            } else {
+                elements.push(<React.Fragment key={tokenKey}>{token}</React.Fragment>)
+            }
+        } else {
+            elements.push(<React.Fragment key={tokenKey}>{token}</React.Fragment>)
+        }
+
+        cursor = tokenRegex.lastIndex
+    }
+
+    if (cursor < text.length) {
+        elements.push(
+            <React.Fragment key={`${keyPrefix}-tail`}>
+                {text.slice(cursor)}
+            </React.Fragment>
+        )
+    }
+
+    if (elements.length === 0) {
+        elements.push(<React.Fragment key={`${keyPrefix}-empty`}>{text}</React.Fragment>)
     }
 
     return elements
