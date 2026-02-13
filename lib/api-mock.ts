@@ -489,6 +489,12 @@ function buildClusterResponse(): ClusterStatusResponse {
 
 export async function listSessions(): Promise<ChatSession[]> {
     await delay(200)
+    const hasPendingAlertBySessionId = new Set(
+        Array.from(mockAlerts.values())
+            .filter((alert) => alert.status === 'pending' && typeof alert.session_id === 'string')
+            .map((alert) => alert.session_id as string)
+    )
+
     return Array.from(mockSessions.values()).map(s => ({
         id: s.id,
         title: s.title,
@@ -496,6 +502,7 @@ export async function listSessions(): Promise<ChatSession[]> {
         message_count: s.message_count,
         model_provider: s.model_provider,
         model_id: s.model_id,
+        status: hasPendingAlertBySessionId.has(s.id) ? 'awaiting_human' : (s.message_count > 0 ? 'completed' : 'idle'),
     }))
 }
 
@@ -520,6 +527,7 @@ export async function createSession(title?: string, model?: SessionModelSelectio
         message_count: 0,
         model_provider: session.model_provider,
         model_id: session.model_id,
+        status: 'idle',
     }
 }
 
@@ -544,6 +552,7 @@ export async function renameSession(sessionId: string, title: string): Promise<C
         message_count: session.messages.length,
         model_provider: session.model_provider,
         model_id: session.model_id,
+        status: session.messages.length > 0 ? 'completed' : 'idle',
     }
 }
 

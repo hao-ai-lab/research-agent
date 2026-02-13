@@ -23,6 +23,14 @@ function getHeaders(includeContentType: boolean = false): HeadersInit {
 }
 
 // Types
+export type ChatSessionStatus =
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'questionable'
+    | 'awaiting_human'
+    | 'idle'
+
 export interface ChatSession {
     id: string
     title: string
@@ -30,6 +38,7 @@ export interface ChatSession {
     message_count: number
     model_provider?: string
     model_id?: string
+    status?: ChatSessionStatus
 }
 
 export interface SessionModelSelection {

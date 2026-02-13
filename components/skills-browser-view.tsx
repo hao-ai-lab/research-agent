@@ -20,6 +20,8 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import {
   listPromptSkills,
   listSkillFiles,
@@ -332,8 +334,8 @@ export function SkillsBrowserView() {
         <button
           type="button"
           className={`group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${isSelected
-              ? 'bg-accent/15 text-accent'
-              : 'text-foreground/80 hover:bg-secondary/60'
+              ? 'bg-cyan-500/14 text-cyan-100 ring-1 ring-cyan-400/35'
+              : 'text-foreground/80 hover:bg-secondary/60 hover:text-foreground'
             }`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => {
@@ -371,7 +373,16 @@ export function SkillsBrowserView() {
             <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
 
-          <span className="truncate">{node.label}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="min-w-0 flex-1 truncate" title={node.label}>
+                {node.label}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6} className="max-w-xs break-words px-2 py-1 text-[11px]">
+              {node.label}
+            </TooltipContent>
+          </Tooltip>
 
           {/* Internal badge */}
           {node.type === 'skill' && node.skill?.internal && (
@@ -433,7 +444,9 @@ export function SkillsBrowserView() {
             )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-semibold text-foreground truncate">{selectedSkill.name}</h2>
+                <h2 className="text-base font-semibold text-foreground truncate" title={selectedSkill.name}>
+                  {selectedSkill.name}
+                </h2>
                 <span className={`text-[10px] rounded-full px-1.5 py-0.5 font-medium ${selectedSkill.category === 'skill'
                     ? 'bg-violet-500/15 text-violet-400'
                     : 'bg-cyan-500/15 text-cyan-400'
@@ -471,7 +484,7 @@ export function SkillsBrowserView() {
                       setEditorContent((prev) => prev + insertion)
                     }
                   }}
-                  className="rounded-full bg-accent/8 border border-accent/20 px-2.5 py-0.5 text-[11px] font-mono text-accent hover:bg-accent/15 transition-colors cursor-pointer"
+                  className="rounded-full border border-cyan-400/35 bg-cyan-500/12 px-2.5 py-0.5 text-[11px] font-mono text-cyan-200 hover:border-cyan-300/55 hover:bg-cyan-500/22 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45 transition-colors cursor-pointer"
                   title={`Insert {{${v}}}`}
                 >
                   {`{{${v}}}`}
@@ -603,184 +616,218 @@ export function SkillsBrowserView() {
   // --------------------------------------------------------------------------
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left panel — file tree */}
-      <div className="flex w-64 shrink-0 flex-col border-r border-border/40 bg-background">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border/40 px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <Wand2 className="h-4 w-4 text-violet-400" />
-            <span className="text-sm font-semibold text-foreground">Skills</span>
-            <span className="text-[10px] text-muted-foreground tabular-nums">
-              {skills.length}
-            </span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleReload}
-            title="Reload skills from disk"
-            className="h-7 w-7 p-0"
-          >
-            <RefreshCcw className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-1.5 px-3 pb-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowCreateForm(true)}
-            className="flex-1 text-xs h-7 gap-1"
-          >
-            <Plus className="h-3 w-3" />
-            New
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowInstallForm(true)}
-            className="flex-1 text-xs h-7 gap-1"
-          >
-            <GitBranch className="h-3 w-3" />
-            Install
-          </Button>
-        </div>
-
-        {/* Create skill inline form */}
-        {showCreateForm && (
-          <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
-            <input
-              type="text"
-              value={newSkillName}
-              onChange={(e) => setNewSkillName(e.target.value)}
-              placeholder="Skill name"
-              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-              autoFocus
-            />
-            <input
-              type="text"
-              value={newSkillDesc}
-              onChange={(e) => setNewSkillDesc(e.target.value)}
-              placeholder="Description (optional)"
-              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-            />
-            <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => { setShowCreateForm(false); setNewSkillName(''); setNewSkillDesc('') }} className="flex-1 text-xs h-7">
-                Cancel
-              </Button>
-              <Button variant="default" size="sm" disabled={!newSkillName.trim() || creating} onClick={handleCreate} className="flex-1 text-xs h-7">
-                {creating ? 'Creating…' : 'Create'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Install from Git inline form */}
-        {showInstallForm && (
-          <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
-            <input
-              type="text"
-              value={installUrl}
-              onChange={(e) => setInstallUrl(e.target.value)}
-              placeholder="Git repository URL"
-              className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-              autoFocus
-            />
-            <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => { setShowInstallForm(false); setInstallUrl('') }} className="flex-1 text-xs h-7">
-                Cancel
-              </Button>
-              <Button variant="default" size="sm" disabled={!installUrl.trim() || installing} onClick={handleInstall} className="flex-1 text-xs h-7">
-                {installing ? 'Cloning…' : 'Clone & Install'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Delete confirmation */}
-        {confirmDeleteId && (
-          <div className="border-b border-border/40 px-3 py-3 bg-destructive/5">
-            <p className="text-xs text-foreground mb-2">
-              Delete <span className="font-mono font-semibold">{confirmDeleteId}</span>? This cannot be undone.
-            </p>
-            <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)} className="flex-1 text-xs h-7">
-                Cancel
-              </Button>
-              <Button variant="destructive" size="sm" disabled={deleting} onClick={() => handleDelete(confirmDeleteId)} className="flex-1 text-xs h-7">
-                <Trash2 className="h-3 w-3 mr-1" />
-                {deleting ? 'Deleting…' : 'Delete'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Search */}
-        <div className="px-3 py-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search skills…"
-              className="h-8 w-full rounded-md border border-border/50 bg-secondary/30 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+    <div className="h-full overflow-hidden">
+      <ResizablePanelGroup direction="horizontal" autoSaveId="skills-browser-layout">
+        <ResizablePanel defaultSize={30} minSize={20} maxSize={48}>
+          {/* Left panel — file tree */}
+          <div className="flex h-full flex-col bg-background">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border/40 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <Wand2 className="h-4 w-4 text-violet-400" />
+                <span className="text-sm font-semibold text-foreground">Prompt Skills Library</span>
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  {skills.length}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleReload}
+                title="Reload skills from disk"
+                className="h-7 w-7 p-0"
               >
-                <X className="h-3 w-3" />
-              </button>
+                <RefreshCcw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-1.5 px-3 pb-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCreateForm(true)}
+                className="flex-1 text-xs h-7 gap-1"
+              >
+                <Plus className="h-3 w-3" />
+                New
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowInstallForm(true)}
+                className="flex-1 text-xs h-7 gap-1"
+              >
+                <GitBranch className="h-3 w-3" />
+                Install
+              </Button>
+            </div>
+
+            {/* Create skill inline form */}
+            {showCreateForm && (
+              <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
+                <input
+                  type="text"
+                  value={newSkillName}
+                  onChange={(e) => setNewSkillName(e.target.value)}
+                  placeholder="Skill name"
+                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                  autoFocus
+                />
+                <input
+                  type="text"
+                  value={newSkillDesc}
+                  onChange={(e) => setNewSkillDesc(e.target.value)}
+                  placeholder="Description (optional)"
+                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                />
+                <div className="flex gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setShowCreateForm(false); setNewSkillName(''); setNewSkillDesc('') }}
+                    className="flex-1 text-xs h-7"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={!newSkillName.trim() || creating}
+                    onClick={handleCreate}
+                    className="flex-1 text-xs h-7"
+                  >
+                    {creating ? 'Creating…' : 'Create'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Install from Git inline form */}
+            {showInstallForm && (
+              <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
+                <input
+                  type="text"
+                  value={installUrl}
+                  onChange={(e) => setInstallUrl(e.target.value)}
+                  placeholder="Git repository URL"
+                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                  autoFocus
+                />
+                <div className="flex gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setShowInstallForm(false); setInstallUrl('') }}
+                    className="flex-1 text-xs h-7"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={!installUrl.trim() || installing}
+                    onClick={handleInstall}
+                    className="flex-1 text-xs h-7"
+                  >
+                    {installing ? 'Cloning…' : 'Clone & Install'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Delete confirmation */}
+            {confirmDeleteId && (
+              <div className="border-b border-border/40 px-3 py-3 bg-destructive/5">
+                <p className="text-xs text-foreground mb-2">
+                  Delete <span className="font-mono font-semibold">{confirmDeleteId}</span>? This cannot be undone.
+                </p>
+                <div className="flex gap-1.5">
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)} className="flex-1 text-xs h-7">
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={deleting}
+                    onClick={() => handleDelete(confirmDeleteId)}
+                    className="flex-1 text-xs h-7"
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    {deleting ? 'Deleting…' : 'Delete'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Search */}
+            <div className="px-3 py-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search skills…"
+                  className="h-8 w-full rounded-md border border-border/50 bg-secondary/30 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Tree */}
+            <div className="flex-1 overflow-y-auto px-2 pb-4">
+              {loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+                </div>
+              ) : error ? (
+                <div className="px-2 py-4 text-center">
+                  <p className="text-xs text-destructive mb-2">{error}</p>
+                  <Button variant="ghost" size="sm" onClick={loadSkills} className="text-xs">
+                    Retry
+                  </Button>
+                </div>
+              ) : treeNodes.length === 0 ? (
+                <div className="px-2 py-8 text-center text-xs text-muted-foreground">
+                  {search ? 'No skills match your search.' : 'No skills found. Start the server to load templates.'}
+                </div>
+              ) : (
+                treeNodes.map((node) => renderTreeNode(node))
+              )}
+            </div>
+          </div>
+        </ResizablePanel>
+        <ResizableHandle withHandle className="bg-border/50 hover:bg-cyan-400/30 transition-colors" />
+        <ResizablePanel defaultSize={70} minSize={52}>
+          {/* Right panel — editor / detail */}
+          <div className="h-full min-w-0 bg-background/50 overflow-hidden">
+            {!selected ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                <Wand2 className="h-10 w-10 opacity-20" />
+                <div className="text-center">
+                  <p className="text-sm font-medium">Select a skill</p>
+                  <p className="text-xs mt-1 max-w-xs">
+                    Choose a skill from the tree to view and edit its template, variables, and files.
+                  </p>
+                </div>
+              </div>
+            ) : selected.type === 'skill' ? (
+              renderSkillCard()
+            ) : (
+              renderFileEditor()
             )}
           </div>
-        </div>
-
-        {/* Tree */}
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
-            </div>
-          ) : error ? (
-            <div className="px-2 py-4 text-center">
-              <p className="text-xs text-destructive mb-2">{error}</p>
-              <Button variant="ghost" size="sm" onClick={loadSkills} className="text-xs">
-                Retry
-              </Button>
-            </div>
-          ) : treeNodes.length === 0 ? (
-            <div className="px-2 py-8 text-center text-xs text-muted-foreground">
-              {search ? 'No skills match your search.' : 'No skills found. Start the server to load templates.'}
-            </div>
-          ) : (
-            treeNodes.map((node) => renderTreeNode(node))
-          )}
-        </div>
-      </div>
-
-      {/* Right panel — editor / detail */}
-      <div className="flex-1 min-w-0 bg-background/50 overflow-hidden">
-        {!selected ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-            <Wand2 className="h-10 w-10 opacity-20" />
-            <div className="text-center">
-              <p className="text-sm font-medium">Select a skill</p>
-              <p className="text-xs mt-1 max-w-xs">
-                Choose a skill from the tree to view and edit its template, variables, and files.
-              </p>
-            </div>
-          </div>
-        ) : selected.type === 'skill' ? (
-          renderSkillCard()
-        ) : (
-          renderFileEditor()
-        )}
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   )
 }

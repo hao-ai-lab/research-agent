@@ -464,10 +464,16 @@ import shutil
 import subprocess
 
 # Skills that ship with the server and cannot be deleted.
+# Keep explicit IDs for one-offs and reserve prefixes for families of
+# system-managed skills.
 INTERNAL_SKILL_IDS = {
-    "wild_alert", "wild_analyzing", "wild_exploring",
-    "wild_monitoring", "wild_system", "ra_mode_plan",
+    "ra_mode_plan",
 }
+INTERNAL_SKILL_PREFIXES = ("wild_", "ra_mode_")
+
+
+def _is_internal_skill(skill_id: str) -> bool:
+    return skill_id in INTERNAL_SKILL_IDS or skill_id.startswith(INTERNAL_SKILL_PREFIXES)
 
 class PromptSkillManager:
     """Manages prompt template files (markdown with YAML frontmatter).
@@ -527,7 +533,7 @@ class PromptSkillManager:
             "variables": frontmatter.get("variables", []),
             "category": frontmatter.get("category", "prompt"),  # "prompt" | "skill"
             "built_in": True,
-            "internal": skill_id in INTERNAL_SKILL_IDS,
+            "internal": _is_internal_skill(skill_id),
             "filepath": filepath,
             "folder": os.path.dirname(filepath),
         }
@@ -2925,6 +2931,27 @@ async def get_repo_file(
 @app.get("/sessions")
 async def list_sessions():
     """List all chat sessions."""
+    def resolve_session_status(session_id: str, session: dict[str, Any]) -> str:
+        has_pending_human_input = any(
+            alert.get("status") == "pending" and alert.get("session_id") == session_id
+            for alert in active_alerts.values()
+        )
+        if has_pending_human_input:
+            return "awaiting_human"
+
+        runtime = active_chat_streams.get(session_id)
+        if runtime and runtime.status == "running":
+            return "running"
+
+        raw_status = (runtime.status if runtime else None) or session.get("last_status")
+        if raw_status in {"failed", "error"}:
+            return "failed"
+        if raw_status in {"stopped", "interrupted"}:
+            return "questionable"
+        if session.get("messages"):
+            return "completed"
+        return "idle"
+
     sessions = []
     for sid, session in chat_sessions.items():
         if not isinstance(session, dict):
@@ -2937,6 +2964,7 @@ async def list_sessions():
             "message_count": len(session.get("messages", [])),
             "model_provider": session_model_provider,
             "model_id": session_model_id,
+            "status": resolve_session_status(sid, session),
         })
     sessions.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return sessions
@@ -2965,6 +2993,7 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "system_prompt": "",
         "model_provider": session_model_provider,
         "model_id": session_model_id,
+        "last_status": "idle",
     }
     save_chat_state()
     return {
@@ -2974,6 +3003,7 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "message_count": 0,
         "model_provider": session_model_provider,
         "model_id": session_model_id,
+        "status": "idle",
     }
 
 
@@ -3257,6 +3287,8 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
 
         session = chat_sessions.get(session_id)
         if isinstance(session, dict):
+            session["last_status"] = runtime.status
+            session["last_error"] = runtime.error
             session.pop("active_stream", None)
         save_chat_state()
 

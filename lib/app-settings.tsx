@@ -22,6 +22,8 @@ export const defaultAppSettings: AppSettings = {
     customFontSizePx: null,
     customButtonScalePercent: null,
     chatToolbarButtonSizePx: null,
+    wildLoopTasksFontSizePx: null,
+    wildLoopHistoryFontSizePx: null,
     showStarterCards: false,
     showSidebarNewChatButton: false,
   },
@@ -133,6 +135,8 @@ function readStoredSettings(): AppSettings {
     const customFontSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.customFontSizePx)
     const customButtonScalePercentFromBlob = sanitizePositiveNumber(parsed?.appearance?.customButtonScalePercent)
     const chatToolbarButtonSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.chatToolbarButtonSizePx)
+    const wildLoopTasksFontSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.wildLoopTasksFontSizePx)
+    const wildLoopHistoryFontSizePxFromBlob = sanitizePositiveNumber(parsed?.appearance?.wildLoopHistoryFontSizePx)
 
     const storedTheme = localStorage.getItem(STORAGE_KEY_APPEARANCE_THEME)
     const storedFontSize = localStorage.getItem(STORAGE_KEY_APPEARANCE_FONT_SIZE)
@@ -170,6 +174,8 @@ function readStoredSettings(): AppSettings {
         customFontSizePx: sanitizePositiveNumber(storedCustomFontSizePx) ?? customFontSizePxFromBlob ?? defaultAppSettings.appearance.customFontSizePx,
         customButtonScalePercent: sanitizePositiveNumber(storedCustomButtonScalePercent) ?? customButtonScalePercentFromBlob ?? defaultAppSettings.appearance.customButtonScalePercent,
         chatToolbarButtonSizePx: sanitizePositiveNumber(storedChatToolbarButtonSizePx) ?? chatToolbarButtonSizePxFromBlob ?? defaultAppSettings.appearance.chatToolbarButtonSizePx,
+        wildLoopTasksFontSizePx: wildLoopTasksFontSizePxFromBlob ?? defaultAppSettings.appearance.wildLoopTasksFontSizePx,
+        wildLoopHistoryFontSizePx: wildLoopHistoryFontSizePxFromBlob ?? defaultAppSettings.appearance.wildLoopHistoryFontSizePx,
         showStarterCards: parsed?.appearance?.showStarterCards ?? defaultAppSettings.appearance.showStarterCards,
         showSidebarNewChatButton: parsed?.appearance?.showSidebarNewChatButton ?? defaultAppSettings.appearance.showSidebarNewChatButton,
         starterCardTemplates: parsed?.appearance?.starterCardTemplates ?? {},
