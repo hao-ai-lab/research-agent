@@ -130,6 +130,7 @@ FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
 
 AUTH_PROTECTED_PREFIXES = (
     "/sessions",
+    "/models",
     "/chat",
     "/runs",
     "/alerts",
@@ -169,6 +170,88 @@ def init_paths(workdir: str):
 def get_auth() -> Optional[httpx.BasicAuth]:
     """Get HTTP basic auth if password is configured."""
     return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else None
+
+
+def _parse_optional_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return int(text)
+    return None
+
+
+def load_available_opencode_models() -> list[dict[str, Any]]:
+    """Load model options from opencode.json providers and include current fallback."""
+    entries: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add_entry(provider_id: str, model_id: str, data: Any = None) -> None:
+        provider = str(provider_id or "").strip()
+        model = str(model_id or "").strip()
+        if not provider or not model:
+            return
+        key = (provider, model)
+        if key in seen:
+            return
+        seen.add(key)
+
+        model_data = data if isinstance(data, dict) else {}
+        limit = model_data.get("limit") if isinstance(model_data.get("limit"), dict) else {}
+        context_limit = _parse_optional_int(limit.get("context"))
+        output_limit = _parse_optional_int(limit.get("output"))
+        display_name = model_data.get("name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            display_name = model
+
+        entries.append({
+            "provider_id": provider,
+            "model_id": model,
+            "name": display_name.strip(),
+            "context_limit": context_limit,
+            "output_limit": output_limit,
+            "is_default": provider == MODEL_PROVIDER and model == MODEL_ID,
+        })
+
+    try:
+        with open(OPENCODE_CONFIG, "r", encoding="utf-8") as fh:
+            config = json.load(fh)
+    except Exception as e:
+        logger.warning("Failed to load OpenCode config %s: %s", OPENCODE_CONFIG, e)
+        config = {}
+
+    providers: dict[str, Any] = {}
+    for key in ("provider", "providers"):
+        section = config.get(key) if isinstance(config, dict) else None
+        if isinstance(section, dict):
+            providers.update(section)
+
+    for provider_id, provider_cfg in providers.items():
+        if not isinstance(provider_cfg, dict):
+            continue
+        models = provider_cfg.get("models")
+        if not isinstance(models, dict):
+            continue
+        for model_id, model_cfg in models.items():
+            add_entry(str(provider_id), str(model_id), model_cfg)
+
+    # Ensure currently configured model is always selectable.
+    add_entry(MODEL_PROVIDER, MODEL_ID)
+
+    entries.sort(key=lambda item: (str(item.get("provider_id", "")), str(item.get("model_id", ""))))
+    return entries
+
+
+def get_session_model(session: dict[str, Any]) -> tuple[str, str]:
+    """Resolve provider/model from session, falling back to global defaults."""
+    provider = str(session.get("model_provider") or MODEL_PROVIDER).strip() or MODEL_PROVIDER
+    model = str(session.get("model_id") or MODEL_ID).strip() or MODEL_ID
+    return provider, model
 
 
 # =============================================================================
@@ -238,6 +321,8 @@ class ChatRequest(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
+    model_provider: Optional[str] = None
+    model_id: Optional[str] = None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -246,6 +331,11 @@ class UpdateSessionRequest(BaseModel):
 
 class SystemPromptUpdate(BaseModel):
     system_prompt: str = ""
+
+
+class SessionModelUpdate(BaseModel):
+    provider_id: str
+    model_id: str
 
 
 # Run Models
@@ -1959,10 +2049,16 @@ async def fetch_opencode_session_title(opencode_session_id: str) -> Optional[str
     return None
 
 
-async def send_prompt_to_opencode(client: httpx.AsyncClient, session_id: str, content: str):
-    """Send a prompt to an OpenCode session."""
+async def send_prompt_to_opencode(
+    client: httpx.AsyncClient,
+    session_id: str,
+    content: str,
+    model_provider: str,
+    model_id: str,
+):
+    """Send a prompt to an OpenCode session using an explicit model."""
     prompt_payload = {
-        "model": {"providerID": MODEL_PROVIDER, "modelID": MODEL_ID},
+        "model": {"providerID": model_provider, "modelID": model_id},
         "parts": [{"type": "text", "text": content}]
     }
     resp = await client.post(
@@ -2350,11 +2446,23 @@ async def _stream_runtime_events(
 
 async def run_opencode_session(chat_session_id: str, opencode_session_id: str, content: str) -> tuple[str, str, list]:
     """Run a prompt and return full text, thinking, and ordered parts."""
+    session = chat_sessions.get(chat_session_id)
+    session_model_provider = MODEL_PROVIDER
+    session_model_id = MODEL_ID
+    if isinstance(session, dict):
+        session_model_provider, session_model_id = get_session_model(session)
+
     full_text = ""
     full_thinking = ""
     parts_accumulator = StreamPartsAccumulator()
     async with httpx.AsyncClient(timeout=None) as client:
-        await send_prompt_to_opencode(client, opencode_session_id, content)
+        await send_prompt_to_opencode(
+            client,
+            opencode_session_id,
+            content,
+            session_model_provider,
+            session_model_id,
+        )
         async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
             if should_stop_session(chat_session_id):
                 break
@@ -2844,23 +2952,37 @@ async def list_sessions():
             return "completed"
         return "idle"
 
-    sessions = [
-        {
+    sessions = []
+    for sid, session in chat_sessions.items():
+        if not isinstance(session, dict):
+            continue
+        session_model_provider, session_model_id = get_session_model(session)
+        sessions.append({
             "id": sid,
             "title": session.get("title", "New Chat"),
             "created_at": session.get("created_at"),
             "message_count": len(session.get("messages", [])),
+            "model_provider": session_model_provider,
+            "model_id": session_model_id,
             "status": resolve_session_status(sid, session),
-        }
-        for sid, session in chat_sessions.items()
-    ]
+        })
     sessions.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return sessions
+
+
+@app.get("/models")
+async def list_models():
+    """List available model options from opencode config."""
+    return load_available_opencode_models()
 
 
 @app.post("/sessions")
 async def create_session(req: Optional[CreateSessionRequest] = None):
     """Create a new chat session."""
+    requested_provider = req.model_provider if req else None
+    requested_model_id = req.model_id if req else None
+    session_model_provider = str(requested_provider or MODEL_PROVIDER).strip() or MODEL_PROVIDER
+    session_model_id = str(requested_model_id or MODEL_ID).strip() or MODEL_ID
     session_id = uuid.uuid4().hex[:12]
     title = req.title if req and req.title else "New Chat"
     chat_sessions[session_id] = {
@@ -2869,6 +2991,8 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "messages": [],
         "opencode_session_id": None,
         "system_prompt": "",
+        "model_provider": session_model_provider,
+        "model_id": session_model_id,
         "last_status": "idle",
     }
     save_chat_state()
@@ -2877,6 +3001,8 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "title": title,
         "created_at": chat_sessions[session_id]["created_at"],
         "message_count": 0,
+        "model_provider": session_model_provider,
+        "model_id": session_model_id,
         "status": "idle",
     }
 
@@ -2887,6 +3013,7 @@ async def get_session(session_id: str):
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     session = chat_sessions[session_id]
+    session_model_provider, session_model_id = get_session_model(session)
     runtime = active_chat_streams.get(session_id)
     active_stream = runtime.snapshot() if runtime and runtime.status == "running" else session.get("active_stream")
     return {
@@ -2895,6 +3022,8 @@ async def get_session(session_id: str):
         "created_at": session.get("created_at"),
         "messages": session.get("messages", []),
         "system_prompt": session.get("system_prompt", ""),
+        "model_provider": session_model_provider,
+        "model_id": session_model_id,
         "active_stream": active_stream,
     }
 
@@ -2907,11 +3036,14 @@ async def update_session(session_id: str, req: UpdateSessionRequest):
     chat_sessions[session_id]["title"] = req.title
     save_chat_state()
     session = chat_sessions[session_id]
+    session_model_provider, session_model_id = get_session_model(session)
     return {
         "id": session_id,
         "title": session.get("title", "New Chat"),
         "created_at": session.get("created_at"),
         "message_count": len(session.get("messages", [])),
+        "model_provider": session_model_provider,
+        "model_id": session_model_id,
     }
 
 
@@ -2931,6 +3063,38 @@ async def get_system_prompt(session_id: str):
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"system_prompt": chat_sessions[session_id].get("system_prompt", "")}
+
+
+@app.get("/sessions/{session_id}/model")
+async def get_session_model_endpoint(session_id: str):
+    """Get the provider/model configured for this session."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = chat_sessions[session_id]
+    if not isinstance(session, dict):
+        raise HTTPException(status_code=500, detail="Session data is invalid")
+    provider_id, model_id = get_session_model(session)
+    return {"provider_id": provider_id, "model_id": model_id}
+
+
+@app.put("/sessions/{session_id}/model")
+async def update_session_model(session_id: str, req: SessionModelUpdate):
+    """Update provider/model for subsequent prompts in a chat session."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    provider_id = str(req.provider_id or "").strip()
+    model_id = str(req.model_id or "").strip()
+    if not provider_id or not model_id:
+        raise HTTPException(status_code=400, detail="provider_id and model_id are required")
+
+    session = chat_sessions[session_id]
+    if not isinstance(session, dict):
+        raise HTTPException(status_code=500, detail="Session data is invalid")
+    session["model_provider"] = provider_id
+    session["model_id"] = model_id
+    save_chat_state()
+    return {"provider_id": provider_id, "model_id": model_id}
 
 
 @app.put("/sessions/{session_id}/system-prompt")
@@ -3056,11 +3220,23 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
     logger.debug("Starting background chat worker for session %s run %s (mode=%s)", session_id, runtime.run_id, mode)
 
     try:
+        session = chat_sessions.get(session_id)
+        session_model_provider = MODEL_PROVIDER
+        session_model_id = MODEL_ID
+        if isinstance(session, dict):
+            session_model_provider, session_model_id = get_session_model(session)
+
         opencode_session_id = await get_opencode_session_for_chat(session_id)
         async with httpx.AsyncClient(timeout=None) as client:
             logger.debug("Sending prompt to OpenCode session %s", opencode_session_id)
             logger.debug("Content: %s", content)
-            await send_prompt_to_opencode(client, opencode_session_id, content)
+            await send_prompt_to_opencode(
+                client,
+                opencode_session_id,
+                content,
+                session_model_provider,
+                session_model_id,
+            )
             logger.debug("Sent prompt to OpenCode session %s", opencode_session_id)
 
             async for event, _text_delta, _thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
@@ -3604,7 +3780,10 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
             "title": f"Alert: {runs[run_id].get('name', run_id)}",
             "created_at": time.time(),
             "messages": [],
-            "opencode_session_id": None
+            "opencode_session_id": None,
+            "system_prompt": "",
+            "model_provider": MODEL_PROVIDER,
+            "model_id": MODEL_ID,
         }
         alert_payload["session_id"] = session_id
         alert_payload["auto_session"] = True

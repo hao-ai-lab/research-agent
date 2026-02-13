@@ -36,7 +36,21 @@ export interface ChatSession {
     title: string
     created_at: number
     message_count: number
+    model_provider?: string
+    model_id?: string
     status?: ChatSessionStatus
+}
+
+export interface SessionModelSelection {
+    provider_id: string
+    model_id: string
+}
+
+export interface ChatModelOption extends SessionModelSelection {
+    name: string
+    context_limit?: number | null
+    output_limit?: number | null
+    is_default?: boolean
 }
 
 export interface ChatMessageData {
@@ -125,11 +139,19 @@ export async function listSessions(): Promise<ChatSession[]> {
 /**
  * Create a new chat session
  */
-export async function createSession(title?: string): Promise<ChatSession> {
+export async function createSession(title?: string, model?: SessionModelSelection): Promise<ChatSession> {
+    const body: Record<string, unknown> = {}
+    if (title) {
+        body.title = title
+    }
+    if (model) {
+        body.model_provider = model.provider_id
+        body.model_id = model.model_id
+    }
     const response = await fetch(`${API_URL()}/sessions`, {
         method: 'POST',
         headers: getHeaders(true),
-        body: JSON.stringify(title ? { title } : {}),
+        body: JSON.stringify(body),
     })
     if (!response.ok) {
         throw new Error(`Failed to create session: ${response.statusText}`)
@@ -176,6 +198,47 @@ export async function deleteSession(sessionId: string): Promise<void> {
     if (!response.ok) {
         throw new Error(`Failed to delete session: ${response.statusText}`)
     }
+}
+
+/**
+ * List available chat models.
+ */
+export async function listModels(): Promise<ChatModelOption[]> {
+    const response = await fetch(`${API_URL()}/models`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list models: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get currently configured session model.
+ */
+export async function getSessionModel(sessionId: string): Promise<SessionModelSelection> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/model`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get session model: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update provider/model for a chat session.
+ */
+export async function setSessionModel(sessionId: string, model: SessionModelSelection): Promise<SessionModelSelection> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/model`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify(model),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to set session model: ${response.statusText}`)
+    }
+    return response.json()
 }
 
 /**
