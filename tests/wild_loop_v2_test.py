@@ -19,6 +19,7 @@ from wild_loop_v2 import (
     parse_promise,
     parse_summary,
 )
+from v2_prompts import PromptContext, build_planning_prompt, build_iteration_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +185,8 @@ class TestWildV2Engine:
     def test_build_prompt_contains_goal(self):
         self.engine.start(goal="Train ResNet on CIFAR-10")
         session = self.engine.session
-        prompt = self.engine._build_prompt(session)
+        ctx = self.engine._build_context(session)
+        prompt = build_iteration_prompt(ctx)
         assert "Train ResNet on CIFAR-10" in prompt
         assert "iteration" in prompt.lower()
         self.engine.stop()
@@ -192,7 +194,8 @@ class TestWildV2Engine:
     def test_build_prompt_includes_steer(self):
         self.engine.start(goal="Test")
         self.engine.steer("Use learning rate 0.001")
-        prompt = self.engine._build_prompt(self.engine.session)
+        ctx = self.engine._build_context(self.engine.session)
+        prompt = build_iteration_prompt(ctx)
         assert "Use learning rate 0.001" in prompt
         self.engine.stop()
 
@@ -260,13 +263,28 @@ def test_loop_done_signal():
         tmpdir = tempfile.mkdtemp()
         engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
 
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Planning response
+                return (
+                    "Explored codebase.\n\n"
+                    "<plan>\n# Tasks\n- [ ] Do the thing\n</plan>\n"
+                    "<summary>Planning done.</summary>"
+                )
+            # Execution response — DONE
+            return (
+                "I completed the task.\n\n"
+                "<summary>Finished everything.</summary>\n"
+                "<plan>\n# Done\n- [x] All done\n</plan>\n"
+                "<promise>DONE</promise>"
+            )
+
         engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
-        engine._run_opencode = AsyncMock(return_value=(
-            "I completed the task.\n\n"
-            "<summary>Finished everything.</summary>\n"
-            "<plan>\n# Done\n- [x] All done\n</plan>\n"
-            "<promise>DONE</promise>"
-        ))
+        engine._run_opencode = mock_run
         engine._git_commit = AsyncMock()
 
         engine.start(goal="Quick test", max_iterations=5)
@@ -282,18 +300,19 @@ def test_loop_done_signal():
         await engine._run_loop()
 
         assert engine.session.status == "done"
-        assert engine.session.iteration == 1
-        # tasks.md on disk should contain the goal
+        assert engine.session.iteration == 1  # 1 execution iteration
+        # tasks.md on disk should exist
         tasks_path = os.path.join(
             tmpdir, ".agents", "wild", engine.session.session_id, "tasks.md"
         )
         assert os.path.isfile(tasks_path)
-        # History should be enriched
-        assert len(engine.session.history) == 1
-        assert engine.session.history[0]["promise"] == "DONE"
-        assert "duration_s" in engine.session.history[0]
-        assert "files_modified" in engine.session.history[0]
-        assert "error_count" in engine.session.history[0]
+        # History should be: planning (iter 0) + execution (iter 1)
+        assert len(engine.session.history) == 2
+        assert engine.session.history[0]["iteration"] == 0  # planning
+        assert engine.session.history[1]["promise"] == "DONE"
+        assert "duration_s" in engine.session.history[1]
+        assert "files_modified" in engine.session.history[1]
+        assert "error_count" in engine.session.history[1]
 
         # Iteration log should have been written
         log_path = os.path.join(
@@ -315,10 +334,18 @@ def test_loop_max_iterations():
         tmpdir = tempfile.mkdtemp()
         engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
 
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Planning response
+                return "Explored.\n<plan># Tasks\n- [ ] Continue</plan>\n<summary>Planned.</summary>"
+            return "Working on it.\n<summary>More work.</summary>\n<plan># Plan\n- [ ] Continue</plan>"
+
         engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
-        engine._run_opencode = AsyncMock(return_value=(
-            "Working on it.\n<summary>More work.</summary>\n<plan># Plan\n- [ ] Continue</plan>"
-        ))
+        engine._run_opencode = mock_run
         engine._git_commit = AsyncMock()
 
         engine.start(goal="Test", max_iterations=3)
@@ -333,7 +360,8 @@ def test_loop_max_iterations():
 
         assert engine.session.status == "done"
         assert engine.session.iteration == 3
-        assert len(engine.session.history) == 3
+        # History: planning (0) + 3 execution iterations
+        assert len(engine.session.history) == 4
 
     asyncio.run(_run())
 
@@ -351,6 +379,9 @@ def test_loop_waiting_signal():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
+                # Planning response
+                return "Explored.\n<plan># Tasks\n- [ ] Wait then do</plan>\n<summary>Planned.</summary>"
+            if call_count == 2:
                 return "Waiting.\n<summary>Waiting for runs.</summary>\n<promise>WAITING</promise>"
             return "Done.\n<summary>Finished.</summary>\n<promise>DONE</promise>"
 
@@ -370,7 +401,10 @@ def test_loop_waiting_signal():
 
         assert engine.session.status == "done"
         assert engine.session.iteration == 2
-        assert engine.session.history[0]["promise"] == "WAITING"
-        assert engine.session.history[1]["promise"] == "DONE"
+        # History: planning (0) + WAITING (1) + DONE (2)
+        assert len(engine.session.history) == 3
+        assert engine.session.history[0]["iteration"] == 0  # planning
+        assert engine.session.history[1]["promise"] == "WAITING"
+        assert engine.session.history[2]["promise"] == "DONE"
 
     asyncio.run(_run())
