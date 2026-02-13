@@ -74,6 +74,9 @@ import { useAppSettings } from '@/lib/app-settings'
 type DetailsView = 'time' | 'priority'
 type GroupByMode = 'none' | 'sweep'
 const STORAGE_KEY_RUNS_VIEW_PREFERENCES = 'runsViewPreferences'
+const CHARTS_PAGE_SIZE = 12
+const SWEEPS_PAGE_SIZE = 8
+const RUNS_PAGE_SIZE = 24
 
 const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
   'ready',
@@ -179,6 +182,9 @@ export function RunsView({
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
   const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
+  const [chartsPage, setChartsPage] = useState(1)
+  const [sweepsPage, setSweepsPage] = useState(1)
+  const [runsPage, setRunsPage] = useState(1)
   const scrollPositionRef = useRef<number>(0)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
@@ -271,6 +277,7 @@ export function RunsView({
     window.localStorage.setItem(STORAGE_KEY_RUNS_VIEW_PREFERENCES, JSON.stringify(preferences))
   }, [detailsView, groupByMode, sweepFilter, statusFilter])
 
+
   const filteredRuns = useMemo(() => {
     return runs.filter((run) => {
       if (!statusFilter.has(run.status)) return false
@@ -290,6 +297,44 @@ export function RunsView({
     [filteredRuns]
   )
 
+  const totalRunsPages = Math.max(1, Math.ceil(filteredActiveRuns.length / RUNS_PAGE_SIZE))
+  const pagedFilteredActiveRuns = useMemo(() => {
+    const start = (runsPage - 1) * RUNS_PAGE_SIZE
+    return filteredActiveRuns.slice(start, start + RUNS_PAGE_SIZE)
+  }, [filteredActiveRuns, runsPage])
+
+  const chartRunsWithHistory = useMemo(
+    () => allActiveRuns.filter((run) => run.lossHistory && run.lossHistory.length > 0),
+    [allActiveRuns]
+  )
+  const totalChartsPages = Math.max(1, Math.ceil(chartRunsWithHistory.length / CHARTS_PAGE_SIZE))
+  const pagedChartRuns = useMemo(() => {
+    const start = (chartsPage - 1) * CHARTS_PAGE_SIZE
+    return chartRunsWithHistory.slice(start, start + CHARTS_PAGE_SIZE)
+  }, [chartRunsWithHistory, chartsPage])
+
+  const totalSweepsPages = Math.max(1, Math.ceil(sortedSweeps.length / SWEEPS_PAGE_SIZE))
+  const pagedSweeps = useMemo(() => {
+    const start = (sweepsPage - 1) * SWEEPS_PAGE_SIZE
+    return sortedSweeps.slice(start, start + SWEEPS_PAGE_SIZE)
+  }, [sortedSweeps, sweepsPage])
+
+  useEffect(() => {
+    setRunsPage(1)
+  }, [detailsView, groupByMode, sweepFilter, statusFilter])
+
+  useEffect(() => {
+    setRunsPage((prev) => Math.min(prev, totalRunsPages))
+  }, [totalRunsPages])
+
+  useEffect(() => {
+    setChartsPage((prev) => Math.min(prev, totalChartsPages))
+  }, [totalChartsPages])
+
+  useEffect(() => {
+    setSweepsPage((prev) => Math.min(prev, totalSweepsPages))
+  }, [totalSweepsPages])
+
   const selectedManageRuns = useMemo(
     () => filteredRuns.filter((run) => selectedManageRunIds.has(run.id)),
     [filteredRuns, selectedManageRunIds]
@@ -298,11 +343,11 @@ export function RunsView({
   // Sort runs for details view
   const sortedRuns = useMemo(() => {
     if (detailsView === 'time') {
-      return [...filteredActiveRuns].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+      return [...pagedFilteredActiveRuns].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
     }
     // Priority view - group by category
-    return filteredActiveRuns
-  }, [filteredActiveRuns, detailsView])
+    return pagedFilteredActiveRuns
+  }, [pagedFilteredActiveRuns, detailsView])
 
   const groupedRunsBySweep = useMemo(() => {
     const groups = new Map<string, ExperimentRun[]>()
@@ -1351,14 +1396,14 @@ export function RunsView({
     )
   }
 
-  const favoriteRuns = filteredActiveRuns.filter(r => r.isFavorite)
-  const alertRuns = filteredActiveRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
-  const runningRuns = filteredActiveRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const readyRuns = filteredActiveRuns.filter(r => r.status === 'ready' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const queuedRuns = filteredActiveRuns.filter(r => r.status === 'queued' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const failedRuns = filteredActiveRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const completedRuns = filteredActiveRuns.filter(r => r.status === 'completed' && !r.isFavorite)
-  const canceledRuns = filteredActiveRuns.filter(r => r.status === 'canceled' && !r.isFavorite)
+  const favoriteRuns = pagedFilteredActiveRuns.filter(r => r.isFavorite)
+  const alertRuns = pagedFilteredActiveRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
+  const runningRuns = pagedFilteredActiveRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const readyRuns = pagedFilteredActiveRuns.filter(r => r.status === 'ready' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const queuedRuns = pagedFilteredActiveRuns.filter(r => r.status === 'queued' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const failedRuns = pagedFilteredActiveRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const completedRuns = pagedFilteredActiveRuns.filter(r => r.status === 'completed' && !r.isFavorite)
+  const canceledRuns = pagedFilteredActiveRuns.filter(r => r.status === 'canceled' && !r.isFavorite)
   const isAllStatusSelected = statusFilter.size === RUN_STATUS_OPTIONS.length
   const canArchiveSelection = selectedManageRuns.some((run) => !run.isArchived)
   const canUnarchiveSelection = selectedManageRuns.some((run) => run.isArchived)
@@ -1377,17 +1422,17 @@ export function RunsView({
     <>
     <div className="flex flex-col h-full overflow-hidden">
       {/* Top Nav Bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/80 backdrop-blur-sm shrink-0">
-        <h2 className="text-sm font-medium text-foreground">Runs</h2>
+      <div className="flex items-center justify-between border-b border-border bg-card/80 px-3 py-1.5 backdrop-blur-sm shrink-0">
+        <h2 className="text-xs font-medium text-foreground">Runs</h2>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2.5 text-xs gap-1.5"
+              className="h-6 px-2 text-[11px] gap-1"
               onClick={() => setSweepDialogOpen(true)}
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-3 w-3" />
               Create Sweep
             </Button>
           </TooltipTrigger>
@@ -1397,7 +1442,8 @@ export function RunsView({
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full" ref={scrollAreaRef} onScrollCapture={handleScroll}>
-          <div className="p-4 space-y-5">
+          <div className="p-3 space-y-4">
+            <div className="grid gap-3 lg:grid-cols-2">
             {/* Overview Stats */}
             <div className="rounded-xl border border-border bg-card">
               <button
@@ -1567,37 +1613,54 @@ export function RunsView({
                 </div>
               )}
             </div>
+            </div>
 
             {/* Charts Section */}
-            <div className="rounded-xl border border-border bg-card">
-              <div className="flex items-center justify-between p-3">
-                <button
-                  type="button"
-                  onClick={() => toggleTopSection('charts')}
-                  className="flex min-w-0 flex-1 items-center justify-between text-left"
-                >
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Charts
-                  </h3>
-                  {isTopSectionExpanded('charts') ? (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => onNavigateToCharts?.()}
-                >
-                  &gt;
-                </Button>
-              </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => toggleTopSection('charts')}
+                className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+              >
+                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Charts</h3>
+                {isTopSectionExpanded('charts') ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
               {isTopSectionExpanded('charts') && (
-                <div className="border-t border-border p-3">
+                <div className="rounded-xl border border-border bg-card p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[11px]"
+                        onClick={() => setChartsPage((p) => Math.max(1, p - 1))}
+                        disabled={chartsPage === 1}
+                      >
+                        Prev
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground">
+                        Page {chartsPage} / {totalChartsPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[11px]"
+                        onClick={() => setChartsPage((p) => Math.min(totalChartsPages, p + 1))}
+                        disabled={chartsPage >= totalChartsPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => onNavigateToCharts?.()}>
+                      &gt;
+                    </Button>
+                  </div>
                   <AllRunsChart
-                    runs={allActiveRuns}
+                    runs={pagedChartRuns}
                     visibleRunIds={visibleRunIds}
                     onToggleVisibility={toggleRunVisibility}
                     visibilityGroups={visibilityGroups}
@@ -1609,19 +1672,16 @@ export function RunsView({
               )}
             </div>
 
-            <div className="rounded-xl border border-border bg-card">
+            {/* Sweeps Section */}
+            <div>
               <button
                 type="button"
                 onClick={() => toggleTopSection('sweeps')}
-                className="flex w-full items-center justify-between p-3 text-left"
+                className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
               >
-                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Sweeps
-                </h3>
+                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Sweeps</h3>
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="text-[10px]">
-                    {sortedSweeps.length}
-                  </Badge>
+                  <Badge variant="secondary" className="text-[10px]">{sortedSweeps.length}</Badge>
                   {isTopSectionExpanded('sweeps') ? (
                     <ChevronDown className="h-4 w-4 text-muted-foreground" />
                   ) : (
@@ -1630,10 +1690,33 @@ export function RunsView({
                 </div>
               </button>
               {isTopSectionExpanded('sweeps') && (
-                <div className="border-t border-border p-3">
+                <div className="rounded-xl border border-border bg-card p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setSweepsPage((p) => Math.max(1, p - 1))}
+                      disabled={sweepsPage === 1}
+                    >
+                      Prev
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">
+                      Page {sweepsPage} / {totalSweepsPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setSweepsPage((p) => Math.min(totalSweepsPages, p + 1))}
+                      disabled={sweepsPage >= totalSweepsPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
                   {sortedSweeps.length > 0 ? (
                     <div className="space-y-2">
-                      {sortedSweeps.map((sweep) => (
+                      {pagedSweeps.map((sweep) => (
                         <SweepItem key={sweep.id} sweep={sweep} />
                       ))}
                     </div>
@@ -1646,23 +1729,21 @@ export function RunsView({
               )}
             </div>
 
-            {/* All Runs */}
+            {/* Runs Section */}
             <div>
               <button
                 type="button"
                 onClick={() => toggleTopSection('runs')}
-                className="mb-3 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+                className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
               >
-                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Runs
-                </h3>
+                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Runs</h3>
                 {isTopSectionExpanded('runs') ? (
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 ) : (
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 )}
               </button>
-              {isTopSectionExpanded('runs') && (
+            {isTopSectionExpanded('runs') && (
               <div className="rounded-xl border border-border bg-card">
                 <div className="border-b border-border px-4 py-3 space-y-2">
                   <div className="flex items-center gap-2">
@@ -1765,21 +1846,6 @@ export function RunsView({
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            aria-label="Create Sweep"
-                            onClick={() => setSweepDialogOpen(true)}
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Create Sweep</TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
                             variant={manageMode ? 'default' : 'outline'}
                             size="icon"
                             onClick={() => {
@@ -1800,6 +1866,30 @@ export function RunsView({
                         <TooltipContent>{manageMode ? 'Exit Manage' : 'Manage Runs'}</TooltipContent>
                       </Tooltip>
                     </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setRunsPage((p) => Math.max(1, p - 1))}
+                      disabled={runsPage === 1}
+                    >
+                      Prev
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">
+                      Page {runsPage} / {totalRunsPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setRunsPage((p) => Math.min(totalRunsPages, p + 1))}
+                      disabled={runsPage >= totalRunsPages}
+                    >
+                      Next
+                    </Button>
                   </div>
 
                   {manageMode && (
@@ -1924,7 +2014,7 @@ export function RunsView({
                   )}
                 </div>
               </div>
-              )}
+            )}
             </div>
           </div>
         </ScrollArea>

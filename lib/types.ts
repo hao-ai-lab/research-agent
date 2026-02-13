@@ -93,6 +93,8 @@ export interface AppSettings {
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
     streamingToolBoxHeightRem?: number | null;
+    customPrimaryColor?: string | null;
+    customAccentColor?: string | null;
     showStarterCards?: boolean;
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
