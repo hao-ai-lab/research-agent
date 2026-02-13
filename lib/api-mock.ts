@@ -66,6 +66,36 @@ const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
         is_default: true,
     },
     {
+        provider_id: 'opencode',
+        model_id: 'glm-4.7-free',
+        name: 'glm-4.7-free',
+        is_default: false,
+    },
+    {
+        provider_id: 'opencode',
+        model_id: 'trinity-large-preview-free',
+        name: 'trinity-large-preview-free',
+        is_default: false,
+    },
+    {
+        provider_id: 'opencode',
+        model_id: 'minimax-m2.1-free',
+        name: 'minimax-m2.1-free',
+        is_default: false,
+    },
+    {
+        provider_id: 'opencode',
+        model_id: 'minimax-m2.5-free',
+        name: 'minimax-m2.5-free',
+        is_default: false,
+    },
+    {
+        provider_id: 'opencode',
+        model_id: 'big-pickle',
+        name: 'big-pickle',
+        is_default: false,
+    },
+    {
         provider_id: 'research-agent',
         model_id: 'claude-sonnet-4-20250514',
         name: 'Claude Sonnet 4',

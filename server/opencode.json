@@ -18,6 +18,29 @@
     "todoread": true
   },
   "provider": {
+    "opencode": {
+      "name": "OpenCode",
+      "models": {
+        "kimi-k2.5-free": {
+          "name": "Kimi K2.5 (Free)"
+        },
+        "glm-4.7-free": {
+          "name": "glm-4.7-free"
+        },
+        "trinity-large-preview-free": {
+          "name": "trinity-large-preview-free"
+        },
+        "minimax-m2.1-free": {
+          "name": "minimax-m2.1-free"
+        },
+        "minimax-m2.5-free": {
+          "name": "minimax-m2.5-free"
+        },
+        "big-pickle": {
+          "name": "big-pickle"
+        }
+      }
+    },
     "research-agent": {
       "npm": "@ai-sdk/anthropic",
       "name": "ResearchAgent",

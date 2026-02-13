@@ -892,14 +892,25 @@ export function ChatInput({
       ? { provider_id: defaultModelOption.provider_id, model_id: defaultModelOption.model_id }
       : null
   )
-  const selectedModelOption = effectiveSelectedModel
-    ? modelOptions.find((option) => (
-        option.provider_id === effectiveSelectedModel.provider_id &&
-        option.model_id === effectiveSelectedModel.model_id
-      )) || null
-    : null
-  const selectedModelLabel = selectedModelOption?.name
-    || (effectiveSelectedModel ? `${effectiveSelectedModel.provider_id}/${effectiveSelectedModel.model_id}` : 'Model')
+  const selectedModelLabel = effectiveSelectedModel
+    ? `${effectiveSelectedModel.provider_id} > ${effectiveSelectedModel.model_id}`
+    : 'Model'
+
+  const modelOptionsByProvider = useMemo(() => {
+    const groups = new Map<string, ChatModelOption[]>()
+    modelOptions.forEach((option) => {
+      const key = option.provider_id
+      const existing = groups.get(key) || []
+      existing.push(option)
+      groups.set(key, existing)
+    })
+    return Array.from(groups.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([providerId, options]) => ({
+        providerId,
+        options: options.slice().sort((a, b) => a.model_id.localeCompare(b.model_id)),
+      }))
+  }, [modelOptions])
 
   return (
     <div
@@ -1339,49 +1350,55 @@ export function ChatInput({
                 </button>
               </PopoverTrigger>
               <PopoverContent side="top" align="start" className="w-72 p-1.5">
-                <p className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Model</p>
-                <div className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
-                  {modelOptions.map((option) => {
-                    const isSelected = Boolean(
-                      effectiveSelectedModel &&
-                      option.provider_id === effectiveSelectedModel.provider_id &&
-                      option.model_id === effectiveSelectedModel.model_id
-                    )
-                    return (
-                      <button
-                        key={`${option.provider_id}:${option.model_id}`}
-                        type="button"
-                        disabled={isModelUpdating}
-                        onClick={() => {
-                          void (async () => {
-                            try {
-                              await onModelChange({
-                                provider_id: option.provider_id,
-                                model_id: option.model_id,
-                              })
-                            } finally {
-                              setIsModelOpen(false)
-                            }
-                          })()
-                        }}
-                        className={`flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                          isSelected
-                            ? 'border border-border/70 bg-secondary'
-                            : 'border border-transparent hover:bg-secondary/70'
-                        }`}
-                      >
-                        <div className="mt-0.5 h-4 w-4 shrink-0 text-primary">
-                          {isSelected ? <Check className="h-4 w-4" /> : null}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium text-foreground">{option.name}</p>
-                          <p className="truncate text-[10px] text-muted-foreground">
-                            {option.provider_id}/{option.model_id}
-                          </p>
-                        </div>
-                      </button>
-                    )
-                  })}
+                <p className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Provider &gt; Model ID</p>
+                <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                  {modelOptionsByProvider.map((providerGroup) => (
+                    <div key={providerGroup.providerId} className="rounded-md border border-border/50 bg-background/60 p-1">
+                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {providerGroup.providerId}
+                      </p>
+                      <div className="flex flex-col gap-0.5">
+                        {providerGroup.options.map((option) => {
+                          const isSelected = Boolean(
+                            effectiveSelectedModel &&
+                            option.provider_id === effectiveSelectedModel.provider_id &&
+                            option.model_id === effectiveSelectedModel.model_id
+                          )
+                          return (
+                            <button
+                              key={`${option.provider_id}:${option.model_id}`}
+                              type="button"
+                              disabled={isModelUpdating}
+                              onClick={() => {
+                                void (async () => {
+                                  try {
+                                    await onModelChange({
+                                      provider_id: option.provider_id,
+                                      model_id: option.model_id,
+                                    })
+                                  } finally {
+                                    setIsModelOpen(false)
+                                  }
+                                })()
+                              }}
+                              className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                                isSelected
+                                  ? 'border border-border/70 bg-secondary'
+                                  : 'border border-transparent hover:bg-secondary/70'
+                              }`}
+                            >
+                              <div className="h-4 w-4 shrink-0 text-primary">
+                                {isSelected ? <Check className="h-4 w-4" /> : null}
+                              </div>
+                              <p className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                                {option.model_id}
+                              </p>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </PopoverContent>
             </Popover>

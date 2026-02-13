@@ -243,7 +243,7 @@ def load_available_opencode_models() -> list[dict[str, Any]]:
     # Ensure currently configured model is always selectable.
     add_entry(MODEL_PROVIDER, MODEL_ID)
 
-    entries.sort(key=lambda item: (str(item.get("provider_id", "")), str(item.get("name", ""))))
+    entries.sort(key=lambda item: (str(item.get("provider_id", "")), str(item.get("model_id", ""))))
     return entries
 
 
