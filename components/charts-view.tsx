@@ -2,12 +2,14 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Activity,
   BarChart3,
   ChevronDown,
   ChevronRight,
   Eye,
   GripVertical,
   Layers,
+  Loader2,
   Pin,
   Search,
   Settings,
@@ -108,13 +110,21 @@ function titleCaseWord(value: string): string {
 function metricDisplayName(path: string): string {
   const clean = path.replace(/^metrics\//, '')
   const parts = clean.split('/').filter(Boolean)
-  const last = parts.length > 0 ? parts[parts.length - 1] : clean
-  const name = last.replace(/[_\-]+/g, ' ').trim()
-  return titleCaseWord(name || clean)
+  if (parts.length <= 1) {
+    const name = clean.replace(/[_\-]+/g, ' ').trim()
+    return name.split(' ').map(titleCaseWord).join(' ') || clean
+  }
+  // Preserve prefix for disambiguation: "train/loss" → "Train Loss"
+  return parts
+    .map((part) => part.replace(/[_\-]+/g, ' ').trim())
+    .map((segment) => segment.split(' ').map(titleCaseWord).join(' '))
+    .join(' ')
 }
 
 function metricCategoryFromPath(path: string): 'primary' | 'secondary' {
   const key = path.toLowerCase()
+
+  // Keyword-based primary metrics
   if (
     key.includes('loss') ||
     key.includes('accuracy') ||
@@ -127,6 +137,16 @@ function metricCategoryFromPath(path: string): 'primary' | 'secondary' {
   ) {
     return 'primary'
   }
+
+  // Prefix-based: train/* and val/* are primary (unless they're grad/lr/step)
+  if (/^(train|val|validation|eval|test|final)\//.test(key)) {
+    // These specific sub-metrics are secondary even under train/val
+    if (key.includes('grad') || key.includes('lr') || key.includes('learning_rate') || key.includes('/step')) {
+      return 'secondary'
+    }
+    return 'primary'
+  }
+
   return 'secondary'
 }
 
@@ -343,7 +363,10 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
           normalized === 'train/loss' ||
           normalized === 'loss' ||
           normalized === 'val/loss' ||
-          normalized === 'validation/loss'
+          normalized === 'validation/loss' ||
+          normalized.includes('accuracy') ||
+          normalized.includes('reward') ||
+          normalized.includes('score')
 
         return {
           id: toMetricId(metricPath),
@@ -358,8 +381,40 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
       })
   }, [runs])
 
+  // Detect whether any run is actively running (for "waiting" state)
+  const hasActiveRunning = useMemo(
+    () => runs.some((r) => r.status === 'running' && !r.isArchived),
+    [runs]
+  )
+
+  // Detect whether any run has a wandb_dir set (real metrics source)
+  const hasWandbSource = useMemo(
+    () => runs.some((r) => !!r.wandb_dir && !r.isArchived),
+    [runs]
+  )
+
+  // Count unique real metric keys across all runs
+  const realMetricKeyCount = useMemo(() => {
+    const keys = new Set<string>()
+    runs.forEach((run) => {
+      if (!run.metricSeries) return
+      Object.entries(run.metricSeries).forEach(([key, points]) => {
+        if (points && points.length > 0) keys.add(key)
+      })
+    })
+    return keys.size
+  }, [runs])
+
+  // Whether we're in a "waiting for metrics" state: active runs but no real metric data yet
+  const isWaitingForMetrics = hasActiveRunning && dynamicMetricVisualizations.length === 0
+
   useEffect(() => {
     if (dynamicMetricVisualizations.length === 0) {
+      // If runs are actively running, don't fall back to mock data — show waiting state instead
+      if (hasActiveRunning) {
+        setMetrics([])
+        return
+      }
       setMetrics((prev) => {
         const hasDynamicMetrics = prev.some((metric) => metric.id.startsWith('metric:'))
         return hasDynamicMetrics ? defaultMetricVisualizations : prev
@@ -382,7 +437,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
         }
       })
     })
-  }, [dynamicMetricVisualizations])
+  }, [dynamicMetricVisualizations, hasActiveRunning])
 
   useEffect(() => {
     const activeIdSet = new Set(activeRuns.map((r) => r.id))
@@ -915,8 +970,24 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
                 </Select>
               </div>
             </div>
-            <div className="text-[11px] text-muted-foreground">
-              {visibleRuns.length} visible run{visibleRuns.length !== 1 ? 's' : ''} in workspace
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>{visibleRuns.length} visible run{visibleRuns.length !== 1 ? 's' : ''} in workspace</span>
+              {realMetricKeyCount > 0 && (
+                <Badge variant="outline" className="h-4 rounded px-1.5 text-[10px] text-muted-foreground">
+                  {realMetricKeyCount} metric{realMetricKeyCount !== 1 ? 's' : ''}
+                </Badge>
+              )}
+              {hasWandbSource && (
+                <Badge variant="outline" className="h-4 rounded border-blue-500/40 bg-blue-500/10 px-1.5 text-[10px] text-blue-400">
+                  wandb
+                </Badge>
+              )}
+              {hasActiveRunning && (
+                <Badge variant="outline" className="h-4 rounded border-emerald-500/40 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">
+                  <Activity className="mr-0.5 inline h-2.5 w-2.5 animate-pulse" />
+                  Live
+                </Badge>
+              )}
             </div>
           </div>
         )}
@@ -947,9 +1018,25 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
                 {renderMetricSection('secondary', 'Secondary Metrics', secondaryMetrics.filter((m) => !m.isPinned))}
 
                 {pinnedMetrics.length === 0 && primaryMetrics.length === 0 && secondaryMetrics.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                    No metrics match your filter.
-                  </div>
+                  isWaitingForMetrics ? (
+                    <div className="rounded-lg border border-dashed border-border p-8 text-center">
+                      <Loader2 className="mx-auto mb-3 h-6 w-6 animate-spin text-muted-foreground/60" />
+                      <p className="text-sm font-medium text-foreground">Waiting for metrics...</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {hasWandbSource
+                          ? 'Connected to wandb — metrics will appear as training progresses.'
+                          : 'Metrics will appear once the training script starts logging.'}
+                      </p>
+                    </div>
+                  ) : filterQuery ? (
+                    <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                      No metrics match your filter.
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                      No metrics match your filter.
+                    </div>
+                  )
                 )}
               </>
             ) : activeSection === 'custom' ? (
