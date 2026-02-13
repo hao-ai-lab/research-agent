@@ -107,6 +107,24 @@ export interface StreamEvent {
     prompt_type?: string
 }
 
+export interface TerminalSessionInfo {
+    session_id: string
+    workdir: string
+    shell: string
+    cols: number
+    rows: number
+    created_at?: number
+}
+
+export interface TerminalStreamEvent {
+    type: 'ready' | 'output' | 'closed' | 'error'
+    session_id?: string
+    workdir?: string
+    shell?: string
+    data?: string
+    message?: string
+}
+
 // API Functions
 
 /**
@@ -320,6 +338,138 @@ export async function* streamSession(
     } finally {
         reader.releaseLock()
     }
+}
+
+/**
+ * Create a backend terminal session.
+ */
+export async function createTerminalSession(request: {
+    workdir?: string
+    cols?: number
+    rows?: number
+} = {}): Promise<TerminalSessionInfo> {
+    const response = await fetch(`${API_URL()}/terminal/sessions`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create terminal session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get terminal session metadata.
+ */
+export async function getTerminalSession(sessionId: string): Promise<TerminalSessionInfo & { closed: boolean }> {
+    const response = await fetch(`${API_URL()}/terminal/sessions/${sessionId}`, {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get terminal session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stream terminal output as NDJSON.
+ */
+export async function* streamTerminalSession(
+    sessionId: string,
+    signal?: AbortSignal
+): AsyncGenerator<TerminalStreamEvent, void, unknown> {
+    const response = await fetch(`${API_URL()}/terminal/sessions/${sessionId}/stream`, {
+        method: 'GET',
+        headers: getHeaders(),
+        signal,
+    })
+
+    if (!response.ok) {
+        throw new Error(`Failed to stream terminal session: ${response.statusText}`)
+    }
+    if (!response.body) {
+        throw new Error('Terminal stream response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) {
+                if (buffer.trim()) {
+                    try {
+                        yield JSON.parse(buffer.trim()) as TerminalStreamEvent
+                    } catch {
+                        console.warn('Failed to parse terminal stream buffer:', buffer)
+                    }
+                }
+                break
+            }
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+                if (!line.trim()) continue
+                try {
+                    yield JSON.parse(line) as TerminalStreamEvent
+                } catch {
+                    console.warn('Failed to parse terminal stream line:', line)
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
+}
+
+/**
+ * Send raw input bytes to terminal session.
+ */
+export async function sendTerminalInput(sessionId: string, data: string): Promise<{ ok: boolean }> {
+    const response = await fetch(`${API_URL()}/terminal/sessions/${sessionId}/input`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ data }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to send terminal input: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Resize terminal session viewport.
+ */
+export async function resizeTerminalSession(sessionId: string, cols: number, rows: number): Promise<{ ok: boolean; cols: number; rows: number }> {
+    const response = await fetch(`${API_URL()}/terminal/sessions/${sessionId}/resize`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ cols, rows }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to resize terminal session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Close terminal session.
+ */
+export async function closeTerminalSession(sessionId: string): Promise<{ ok: boolean }> {
+    const response = await fetch(`${API_URL()}/terminal/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to close terminal session: ${response.statusText}`)
+    }
+    return response.json()
 }
 
 /**

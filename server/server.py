@@ -17,6 +17,7 @@ import math
 import os
 import re
 import shlex
+import signal
 import sys
 import time
 import uuid
@@ -25,6 +26,10 @@ import asyncio
 import shutil
 import socket
 import subprocess
+import struct
+import pty
+import fcntl
+import termios
 from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
 from wild_loop import (
@@ -138,6 +143,7 @@ AUTH_PROTECTED_PREFIXES = (
     "/cluster",
     "/git",
     "/plans",
+    "/terminal",
 )
 
 
@@ -363,6 +369,267 @@ class ClusterUpdateRequest(BaseModel):
 
 class ClusterDetectRequest(BaseModel):
     preferred_type: Optional[str] = None
+
+
+# Terminal Models
+class TerminalSessionCreateRequest(BaseModel):
+    workdir: Optional[str] = None
+    cols: int = 120
+    rows: int = 30
+
+
+class TerminalInputRequest(BaseModel):
+    data: str
+
+
+class TerminalResizeRequest(BaseModel):
+    cols: int
+    rows: int
+
+
+# =============================================================================
+# Terminal Session Manager
+# =============================================================================
+
+TERMINAL_STREAM_EOF = "__RA_TERMINAL_STREAM_EOF__"
+TERMINAL_OUTPUT_QUEUE_MAX = 512
+TERMINAL_MAX_OUTPUT_CHUNK_BYTES = 64 * 1024
+TERMINAL_HISTORY_MAX_CHUNKS = 256
+
+
+class TerminalShellSession:
+    """A lightweight PTY-backed shell session for the chat terminal panel."""
+
+    def __init__(self, session_id: str, workdir: str):
+        self.id = session_id
+        self.workdir = workdir
+        self.master_fd: Optional[int] = None
+        self.process: Optional[subprocess.Popen] = None
+        self.closed = False
+        self.created_at = time.time()
+        self.last_active_at = time.time()
+        self._subscribers: set[asyncio.Queue] = set()
+        self._reader_task: Optional[asyncio.Task] = None
+        self.shell_command: str = ""
+        self.cols = 120
+        self.rows = 30
+        self._history: list[str] = []
+
+    @staticmethod
+    def _clamp_cols(cols: int) -> int:
+        return max(40, min(320, int(cols)))
+
+    @staticmethod
+    def _clamp_rows(rows: int) -> int:
+        return max(8, min(180, int(rows)))
+
+    def _resolve_shell_argv(self) -> list[str]:
+        shell_command = (
+            os.environ.get("RESEARCH_AGENT_TERMINAL_SHELL")
+            or os.environ.get("SHELL")
+            or "/bin/bash"
+        )
+        argv = shlex.split(shell_command) if shell_command else ["/bin/bash"]
+        if not argv:
+            argv = ["/bin/bash"]
+
+        shell_path = argv[0]
+        if not os.path.exists(shell_path):
+            fallback = shutil.which(shell_path) or shutil.which("bash") or shutil.which("sh")
+            if fallback:
+                argv[0] = fallback
+            else:
+                argv = ["/bin/sh"]
+
+        shell_name = os.path.basename(argv[0])
+        if shell_name in {"bash", "zsh"} and len(argv) == 1:
+            argv.append("-i")
+
+        self.shell_command = " ".join(shlex.quote(part) for part in argv)
+        return argv
+
+    def _set_winsize(self, cols: int, rows: int) -> None:
+        cols = self._clamp_cols(cols)
+        rows = self._clamp_rows(rows)
+        self.cols = cols
+        self.rows = rows
+
+        if self.master_fd is None:
+            return
+
+        winsize = struct.pack("HHHH", rows, cols, 0, 0)
+        try:
+            fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+            if self.process and self.process.poll() is None:
+                os.killpg(self.process.pid, signal.SIGWINCH)
+        except Exception:
+            # Best-effort resize. Some shells/processes ignore this.
+            pass
+
+    def _broadcast(self, data: str) -> None:
+        if not data:
+            return
+        if data != TERMINAL_STREAM_EOF:
+            self._history.append(data)
+            if len(self._history) > TERMINAL_HISTORY_MAX_CHUNKS:
+                self._history = self._history[-TERMINAL_HISTORY_MAX_CHUNKS:]
+
+        dead: list[asyncio.Queue] = []
+        for subscriber in self._subscribers:
+            try:
+                subscriber.put_nowait(data)
+            except asyncio.QueueFull:
+                try:
+                    subscriber.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    subscriber.put_nowait(data)
+                except asyncio.QueueFull:
+                    dead.append(subscriber)
+            except Exception:
+                dead.append(subscriber)
+
+        for subscriber in dead:
+            self._subscribers.discard(subscriber)
+
+    async def start(self, cols: int, rows: int) -> None:
+        if self.master_fd is not None:
+            return
+
+        master_fd, slave_fd = pty.openpty()
+        self.master_fd = master_fd
+        self._set_winsize(cols, rows)
+
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")
+        env.setdefault("LANG", "en_US.UTF-8")
+
+        argv = self._resolve_shell_argv()
+
+        try:
+            self.process = subprocess.Popen(
+                argv,
+                cwd=self.workdir,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                env=env,
+                start_new_session=True,
+                close_fds=True,
+            )
+        finally:
+            try:
+                os.close(slave_fd)
+            except OSError:
+                pass
+
+        self._reader_task = asyncio.create_task(self._reader_loop())
+
+    async def _reader_loop(self) -> None:
+        assert self.master_fd is not None
+        try:
+            while not self.closed:
+                try:
+                    chunk = await asyncio.to_thread(os.read, self.master_fd, TERMINAL_MAX_OUTPUT_CHUNK_BYTES)
+                except OSError:
+                    break
+
+                if not chunk:
+                    break
+
+                self.last_active_at = time.time()
+                decoded = chunk.decode("utf-8", errors="replace")
+                self._broadcast(decoded)
+        finally:
+            exit_code: Optional[int] = None
+            if self.process is not None:
+                exit_code = self.process.poll()
+            if exit_code is not None:
+                self._broadcast(f"\r\n[terminal exited with code {exit_code}]\r\n")
+            self._broadcast(TERMINAL_STREAM_EOF)
+            self.closed = True
+
+            if self.master_fd is not None:
+                try:
+                    os.close(self.master_fd)
+                except OSError:
+                    pass
+                self.master_fd = None
+
+    def subscribe(self) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=TERMINAL_OUTPUT_QUEUE_MAX)
+        self._subscribers.add(queue)
+        # Replay recent output so late subscribers still see prompt/history.
+        for chunk in self._history:
+            try:
+                queue.put_nowait(chunk)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    queue.put_nowait(chunk)
+                except asyncio.QueueFull:
+                    break
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue) -> None:
+        self._subscribers.discard(queue)
+
+    def write(self, data: str) -> None:
+        if self.closed or self.master_fd is None:
+            raise RuntimeError("Terminal session is closed")
+        if not data:
+            return
+        self.last_active_at = time.time()
+        os.write(self.master_fd, data.encode("utf-8", errors="ignore"))
+
+    def resize(self, cols: int, rows: int) -> None:
+        if self.closed:
+            return
+        self._set_winsize(cols, rows)
+
+    async def close(self) -> None:
+        if self.closed:
+            return
+
+        self.closed = True
+
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.terminate()
+                await asyncio.to_thread(self.process.wait, 1.5)
+            except subprocess.TimeoutExpired:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        if self._reader_task and self._reader_task is not asyncio.current_task():
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except Exception:
+                pass
+            self._reader_task = None
+
+        if self.master_fd is not None:
+            try:
+                os.close(self.master_fd)
+            except OSError:
+                pass
+            self.master_fd = None
+
+        self._broadcast(TERMINAL_STREAM_EOF)
+
+
+terminal_sessions: Dict[str, TerminalShellSession] = {}
+terminal_sessions_lock = asyncio.Lock()
 
 
 # =============================================================================
@@ -2485,6 +2752,162 @@ async def health():
 async def health_json():
     """JSON health endpoint."""
     return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+
+
+# =============================================================================
+# Terminal Endpoints
+# =============================================================================
+
+def _resolve_terminal_workdir(requested_workdir: Optional[str]) -> str:
+    if not requested_workdir:
+        target = WORKDIR
+    elif os.path.isabs(requested_workdir):
+        target = requested_workdir
+    else:
+        target = os.path.join(WORKDIR, requested_workdir)
+
+    resolved = os.path.abspath(target)
+    if not os.path.isdir(resolved):
+        raise HTTPException(status_code=400, detail=f"Workdir does not exist: {resolved}")
+    return resolved
+
+
+async def _get_terminal_session_or_404(session_id: str) -> TerminalShellSession:
+    async with terminal_sessions_lock:
+        session = terminal_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Terminal session not found: {session_id}")
+    return session
+
+
+@app.post("/terminal/sessions")
+async def create_terminal_shell_session(req: TerminalSessionCreateRequest):
+    """Create a backend shell session for the embedded chat terminal."""
+    workdir = _resolve_terminal_workdir(req.workdir)
+    session_id = f"term-{uuid.uuid4().hex[:12]}"
+    session = TerminalShellSession(session_id=session_id, workdir=workdir)
+
+    try:
+        await session.start(req.cols, req.rows)
+    except Exception as exc:
+        logger.error("Failed to create terminal session: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to create terminal session: {exc}") from exc
+
+    async with terminal_sessions_lock:
+        terminal_sessions[session_id] = session
+
+    return {
+        "session_id": session_id,
+        "workdir": workdir,
+        "shell": session.shell_command,
+        "cols": session.cols,
+        "rows": session.rows,
+        "created_at": session.created_at,
+    }
+
+
+@app.get("/terminal/sessions/{session_id}")
+async def get_terminal_shell_session(session_id: str):
+    session = await _get_terminal_session_or_404(session_id)
+    return {
+        "session_id": session.id,
+        "workdir": session.workdir,
+        "shell": session.shell_command,
+        "cols": session.cols,
+        "rows": session.rows,
+        "closed": session.closed,
+        "created_at": session.created_at,
+        "last_active_at": session.last_active_at,
+    }
+
+
+@app.get("/terminal/sessions/{session_id}/stream")
+async def stream_terminal_shell_session(session_id: str):
+    """Stream terminal output as NDJSON events."""
+    session = await _get_terminal_session_or_404(session_id)
+    queue = session.subscribe()
+
+    async def event_stream():
+        try:
+            yield json.dumps({
+                "type": "ready",
+                "session_id": session.id,
+                "workdir": session.workdir,
+                "shell": session.shell_command,
+            }) + "\n"
+
+            while True:
+                if session.closed and queue.empty():
+                    yield json.dumps({"type": "closed"}) + "\n"
+                    break
+
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=0.75)
+                except asyncio.TimeoutError:
+                    continue
+
+                if item == TERMINAL_STREAM_EOF:
+                    yield json.dumps({"type": "closed"}) + "\n"
+                    break
+
+                yield json.dumps({"type": "output", "data": item}) + "\n"
+        finally:
+            session.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/terminal/sessions/{session_id}/input")
+async def send_terminal_shell_input(session_id: str, req: TerminalInputRequest):
+    session = await _get_terminal_session_or_404(session_id)
+    if len(req.data) > 10_000:
+        raise HTTPException(status_code=413, detail="Input payload too large")
+
+    try:
+        session.write(req.data)
+    except Exception as exc:
+        logger.error("Failed to write terminal input: %s", exc)
+        raise HTTPException(status_code=409, detail=f"Failed to write terminal input: {exc}") from exc
+
+    return {"ok": True}
+
+
+@app.post("/terminal/sessions/{session_id}/resize")
+async def resize_terminal_shell_session(session_id: str, req: TerminalResizeRequest):
+    session = await _get_terminal_session_or_404(session_id)
+    session.resize(req.cols, req.rows)
+    return {"ok": True, "cols": session.cols, "rows": session.rows}
+
+
+@app.delete("/terminal/sessions/{session_id}")
+async def close_terminal_shell_session(session_id: str):
+    async with terminal_sessions_lock:
+        session = terminal_sessions.pop(session_id, None)
+
+    if session:
+        await session.close()
+    return {"ok": True}
+
+
+@app.on_event("shutdown")
+async def shutdown_terminal_sessions():
+    """Close all active terminal sessions on shutdown."""
+    async with terminal_sessions_lock:
+        sessions = list(terminal_sessions.values())
+        terminal_sessions.clear()
+
+    for session in sessions:
+        try:
+            await session.close()
+        except Exception:
+            pass
 
 
 # =============================================================================
