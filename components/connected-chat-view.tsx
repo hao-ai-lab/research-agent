@@ -363,6 +363,12 @@ export function ConnectedChatView({
         if (effectiveMode === 'wild' && wildLoop && !wildLoop.isActive) {
             wildLoop.start(message, sessionId)
 
+            // Auto-name the session since wild mode bypasses sendMessage
+            const title = `🚀 ${message.slice(0, 60)}${message.length > 60 ? '...' : ''}`
+            import('@/lib/api').then(({ renameSession }) =>
+                renameSession(sessionId, title).catch(() => { })
+            )
+
             // V2 starts asynchronously — poll selectSession to attach to the stream
             // once the backend starts the first iteration's chat worker
             const pollForStream = async () => {
