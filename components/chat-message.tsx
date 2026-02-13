@@ -546,9 +546,12 @@ export function ChatMessage({
           </div>
         )}
 
-        <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
-          {renderMarkdown(message.content)}
-        </div>
+        {/* Text content — skip when parts are present since text parts already render it */}
+        {!(message.parts && message.parts.length > 0) && message.content && (
+          <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
+            {renderMarkdown(message.content)}
+          </div>
+        )}
 
         {/* Context references bar */}
         {contextReferences.length > 0 && (

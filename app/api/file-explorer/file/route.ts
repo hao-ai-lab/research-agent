@@ -1,6 +1,6 @@
 import { open, stat } from 'node:fs/promises'
 import { NextRequest, NextResponse } from 'next/server'
-import { normalizeExplorerPath, resolveExplorerPath } from '../_utils'
+import { getWorkspaceRoot, normalizeExplorerPath, resolveExplorerPath } from '../_utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -43,12 +43,13 @@ function getErrorCode(error: unknown): string | undefined {
 
 export async function GET(request: NextRequest) {
   try {
+    const workspaceRoot = await getWorkspaceRoot()
     const relativePath = normalizeExplorerPath(request.nextUrl.searchParams.get('path'))
     if (!relativePath) {
       return NextResponse.json({ error: 'A file path is required' }, { status: 400 })
     }
 
-    const absolutePath = resolveExplorerPath(relativePath)
+    const absolutePath = resolveExplorerPath(relativePath, workspaceRoot)
     const fileStat = await stat(absolutePath)
 
     if (!fileStat.isFile()) {

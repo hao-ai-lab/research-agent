@@ -81,7 +81,6 @@ class TestWildV2Session:
         d = s.to_dict()
         assert d["session_id"] == "s1"
         assert d["goal"] == "Test"
-        assert d["pending_events_count"] == 0
         assert "status" in d
 
 
@@ -93,7 +92,7 @@ class TestWildV2Engine:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         self.engine = WildV2Engine(
-            workdir=self.tmpdir,
+            get_workdir=lambda: self.tmpdir,
             server_url="http://localhost:10000",
         )
 
@@ -164,77 +163,66 @@ class TestWildV2Engine:
         status = self.engine.get_status()
         assert status["active"] is True
         assert status["goal"] == "Test"
-        assert "system_health" in status
         self.engine.stop()
 
-    def test_events(self):
-        self.engine.start(goal="Test")
-        self.engine.session.pending_events = [
-            {"id": "e1", "type": "alert", "title": "Error", "detail": "OOM"},
-            {"id": "e2", "type": "run_complete", "title": "Run done", "detail": "OK"},
-        ]
-        events = self.engine.get_events()
-        assert len(events) == 2
-
-        result = self.engine.resolve_events(["e1"])
-        assert result["resolved"] == 1
-        assert len(self.engine.session.pending_events) == 1
-        assert self.engine.session.pending_events[0]["id"] == "e2"
-        self.engine.stop()
-
-    def test_build_prompt_contains_goal(self):
-        self.engine.start(goal="Train ResNet on CIFAR-10")
-        session = self.engine.session
-        ctx = self.engine._build_context(session)
-        prompt = build_iteration_prompt(ctx)
-        assert "Train ResNet on CIFAR-10" in prompt
-        assert "iteration" in prompt.lower()
-        self.engine.stop()
-
-    def test_build_prompt_includes_steer(self):
-        self.engine.start(goal="Test")
-        self.engine.steer("Use learning rate 0.001")
-        ctx = self.engine._build_context(self.engine.session)
-        prompt = build_iteration_prompt(ctx)
-        assert "Use learning rate 0.001" in prompt
-        self.engine.stop()
-
-    def test_system_health_default(self):
-        health = self.engine._get_system_health()
-        assert health["running"] == 0
-        assert health["total"] == 0
-
-    def test_system_health_with_runs(self):
+    def test_system_health_from_runs_static(self):
         runs = {
             "r1": {"status": "running"},
             "r2": {"status": "finished"},
             "r3": {"status": "queued"},
             "r4": {"status": "failed"},
         }
-        engine = WildV2Engine(
-            workdir=self.tmpdir,
-            get_runs=lambda: runs,
-        )
-        health = engine._get_system_health()
+        health = WildV2Engine.get_system_health_from_runs(runs)
         assert health["running"] == 1
         assert health["completed"] == 1
         assert health["queued"] == 1
         assert health["failed"] == 1
         assert health["total"] == 4
 
-    def test_collect_events_from_alerts(self):
-        alerts = {
-            "a1": {"status": "pending", "type": "oom", "message": "Out of memory", "created_at": time.time()},
-        }
+    def test_system_health_empty(self):
+        health = WildV2Engine.get_system_health_from_runs({})
+        assert health["running"] == 0
+        assert health["total"] == 0
+
+    def test_build_prompt_with_render_fn(self):
+        """Verify prompts use render_fn when provided."""
+        def mock_render(skill_id, variables):
+            return f"RENDERED:{skill_id}:{variables['goal']}"
+
         engine = WildV2Engine(
-            workdir=self.tmpdir,
-            get_alerts=lambda: alerts,
+            get_workdir=lambda: self.tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=mock_render,
         )
-        engine.start(goal="Test")
-        engine._collect_events()
-        assert len(engine.session.pending_events) == 1
-        assert engine.session.pending_events[0]["type"] == "alert"
+        engine.start(goal="Test render")
+        ctx = engine._build_context(engine.session)
+        prompt = build_planning_prompt(ctx, render_fn=mock_render)
+        assert prompt == "RENDERED:wild_v2_planning:Test render"
+
+        prompt = build_iteration_prompt(ctx, render_fn=mock_render)
+        assert prompt == "RENDERED:wild_v2_iteration:Test render"
         engine.stop()
+
+    def test_prompt_fallback_without_render_fn(self):
+        """Verify prompts fall back to inline templates without render_fn."""
+        self.engine.start(goal="Fallback test")
+        ctx = self.engine._build_context(self.engine.session)
+        prompt = build_planning_prompt(ctx)  # no render_fn
+        assert "Fallback test" in prompt
+        assert "iteration 0" in prompt.lower() or "planning" in prompt.lower()
+        self.engine.stop()
+
+    def test_api_catalog_in_prompt(self):
+        """Verify the API catalog appears in iteration prompts."""
+        self.engine.start(goal="API catalog test")
+        ctx = self.engine._build_context(self.engine.session)
+        ctx.iteration = 1
+        prompt = build_iteration_prompt(ctx)  # fallback
+        assert "/sweeps/wild" in prompt
+        assert "/runs" in prompt
+        assert "/wild/v2/events" in prompt
+        assert "/wild/v2/system-health" in prompt
+        self.engine.stop()
 
     def test_save_and_load_state(self):
         self.engine.start(goal="Persist test", max_iterations=10)
@@ -261,7 +249,7 @@ def test_loop_done_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
 
         call_count = 0
 
@@ -332,7 +320,7 @@ def test_loop_max_iterations():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
 
         call_count = 0
 
@@ -371,7 +359,7 @@ def test_loop_waiting_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
 
         call_count = 0
 

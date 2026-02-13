@@ -1,10 +1,10 @@
-"""Wild Loop V2 — Ralph-style event-driven autonomous loop.
+"""Wild Loop V2 — Ralph-style autonomous loop.
 
 Design:
   - Iteration 0 = planning (explore codebase, build task checklist)
   - Iterations 1+ = execution (one task per iteration)
   - Per-iteration fresh OpenCode session (clean agent context)
-  - Events are prompt-driven (agent checks endpoints, not a queue)
+  - Agent is endpoint-aware: curls server API for sweeps/runs/alerts/events
   - Git commit per iteration
   - Plan persisted in .agents/wild/<session_id>/tasks.md
   - <promise>DONE</promise> / <promise>WAITING</promise> signal parsing
@@ -61,7 +61,6 @@ class WildV2Session:
     history: list = field(default_factory=list)
     started_at: float = 0.0
     finished_at: Optional[float] = None
-    pending_events: list = field(default_factory=list)
     steer_context: str = ""          # user-injected context for next iter
     chat_session_id: Optional[str] = None
     wait_seconds: float = 30.0       # sleep between iterations when WAITING
@@ -84,8 +83,6 @@ class WildV2Session:
             "history": self.history,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
-            "pending_events_count": len(self.pending_events),
-            "pending_events": self.pending_events,
             "steer_context": self.steer_context,
             "chat_session_id": self.chat_session_id,
             "opencode_sessions": self.opencode_sessions,
@@ -107,14 +104,12 @@ class WildV2Engine:
         opencode_url: str = "http://127.0.0.1:4096",
         model_provider: str = "opencode",
         model_id: str = "kimi-k2.5-free",
-        workdir: str = ".",
+        get_workdir: Optional[Callable[[], str]] = None,
         server_url: str = "http://127.0.0.1:10000",
         auth_token: Optional[str] = None,
         get_auth: Optional[Callable] = None,
-        # Callbacks into server.py
-        get_runs: Optional[Callable] = None,
-        get_sweeps: Optional[Callable] = None,
-        get_alerts: Optional[Callable] = None,
+        # Skill-based prompt rendering
+        render_fn: Optional[Callable] = None,
         save_chat_state: Optional[Callable] = None,
         chat_sessions: Optional[dict] = None,
         # Chat streaming callback: (chat_session_id, prompt, display_message) -> response_text
@@ -125,13 +120,11 @@ class WildV2Engine:
         self._opencode_url = opencode_url
         self._model_provider = model_provider
         self._model_id = model_id
-        self._workdir = workdir
+        self._get_workdir = get_workdir or (lambda: ".")
         self._server_url = server_url
         self._auth_token = auth_token
         self._get_auth = get_auth
-        self._get_runs = get_runs
-        self._get_sweeps = get_sweeps
-        self._get_alerts = get_alerts
+        self._render_fn = render_fn
         self._save_chat_state = save_chat_state
         self._chat_sessions = chat_sessions or {}
         self._send_chat_message = send_chat_message
@@ -263,8 +256,7 @@ class WildV2Engine:
         d = self._session.to_dict()
         d["active"] = self._session.status == "running"
 
-        # Add system health
-        d["system_health"] = self._get_system_health()
+        # System health is served via /wild/v2/system-health endpoint
 
         # Add file contents from disk
         sid = self._session.session_id
@@ -291,23 +283,8 @@ class WildV2Engine:
 
         return d
 
-    def get_events(self) -> list:
-        """Return pending events for the agent to handle."""
-        if not self._session:
-            return []
-        return list(self._session.pending_events)
-
-    def resolve_events(self, event_ids: list) -> dict:
-        """Mark events as resolved."""
-        if not self._session:
-            return {"resolved": 0}
-        before = len(self._session.pending_events)
-        self._session.pending_events = [
-            e for e in self._session.pending_events
-            if e.get("id") not in set(event_ids)
-        ]
-        resolved = before - len(self._session.pending_events)
-        return {"resolved": resolved}
+    # Events are now API-driven — the agent curls /wild/v2/events/{session_id}
+    # Event storage/resolution is managed by the server, not the engine.
 
     def get_plan(self) -> str:
         """Return current plan/tasks markdown from disk."""
@@ -344,13 +321,13 @@ class WildV2Engine:
             goal=session.goal,
             iteration=session.iteration,
             max_iterations=session.max_iterations,
+            workdir=self._get_workdir(),
             tasks_path=os.path.join(session_dir, "tasks.md"),
             log_path=os.path.join(session_dir, "iteration_log.md"),
             server_url=self._server_url,
             session_id=session.session_id,
-            pending_events=session.pending_events,
+            auth_token=self._auth_token or "",
             steer_context=session.steer_context,
-            system_health=self._get_system_health(),
             history=session.history,
             no_progress_streak=session.no_progress_streak,
             short_iteration_count=session.short_iteration_count,
@@ -404,9 +381,8 @@ class WildV2Engine:
             logger.info("[wild-v2] ========== Iteration 0 (PLANNING) START ==========")
             plan_start = time.time()
 
-            self._collect_events()
             ctx = self._build_context(session)
-            planning_prompt = build_planning_prompt(ctx)
+            planning_prompt = build_planning_prompt(ctx, render_fn=self._render_fn)
             display_msg = "[Wild V2 — Planning]"
             logger.debug("[wild-v2] Planning prompt built, length=%d chars", len(planning_prompt))
 
@@ -469,15 +445,12 @@ class WildV2Engine:
                     session.iteration, session.max_iterations,
                 )
 
-                # Collect events from alerts/runs
-                self._collect_events()
-
                 # Snapshot files before iteration (for change detection)
                 files_before = self._snapshot_files()
 
                 # 1. Build the prompt
                 ctx = self._build_context(session)
-                prompt = build_iteration_prompt(ctx)
+                prompt = build_iteration_prompt(ctx, render_fn=self._render_fn)
                 display_msg = f"[Wild V2 — Iteration {session.iteration}/{session.max_iterations}]"
                 logger.debug("[wild-v2] Prompt built, length=%d chars", len(prompt))
                 logger.debug("[wild-v2] Display message: %s", display_msg)
@@ -677,76 +650,32 @@ class WildV2Engine:
 
     # -- Prompt builder --
 
-    # (_build_prompt removed — prompt construction now lives in v2_prompts.py)
+    # Prompt construction lives in v2_prompts.py, resolved from SKILL.md templates.
+    # Events are API-driven — the agent curls /wild/v2/events/{session_id}.
 
-    # -- Event collection --
+    @staticmethod
+    def get_system_health_from_runs(runs_dict: dict) -> dict:
+        """Compute system utilization stats from a runs dict.
 
-    def _collect_events(self):
-        """Collect new events from alerts and run status changes."""
-        if not self._session:
-            return
-
-        # Collect alerts
-        if self._get_alerts:
-            try:
-                all_alerts = self._get_alerts()
-                existing_ids = {e.get("id") for e in self._session.pending_events}
-                for alert_id, alert in all_alerts.items():
-                    if alert.get("status") == "pending" and alert_id not in existing_ids:
-                        self._session.pending_events.append({
-                            "id": alert_id,
-                            "type": "alert",
-                            "title": f"Alert: {alert.get('type', 'unknown')}",
-                            "detail": alert.get("message", ""),
-                            "run_id": alert.get("run_id"),
-                            "created_at": alert.get("created_at", time.time()),
-                        })
-            except Exception as err:
-                logger.debug("[wild-v2] Failed to collect alerts: %s", err)
-
-        # Collect run completions
-        if self._get_runs:
-            try:
-                runs = self._get_runs()
-                existing_ids = {e.get("id") for e in self._session.pending_events}
-                for rid, run in runs.items():
-                    event_id = f"run-{rid}-{run.get('status')}"
-                    if run.get("status") in ("finished", "failed") and event_id not in existing_ids:
-                        self._session.pending_events.append({
-                            "id": event_id,
-                            "type": "run_complete",
-                            "title": f"Run {run.get('status')}: {run.get('name', rid)}",
-                            "detail": f"Status: {run.get('status')}",
-                            "run_id": rid,
-                            "created_at": time.time(),
-                        })
-            except Exception as err:
-                logger.debug("[wild-v2] Failed to collect run events: %s", err)
-
-    # -- System health --
-
-    def _get_system_health(self) -> dict:
-        """Get system utilization stats."""
+        Called from the server endpoint handler (/wild/v2/system-health),
+        not from the engine itself.  The agent discovers health by curling
+        the endpoint.
+        """
         health = {
             "running": 0, "queued": 0, "completed": 0,
             "failed": 0, "total": 0, "max_concurrent": 5,
         }
-        if self._get_runs:
-            try:
-                runs = self._get_runs()
-                for r in runs.values():
-                    status = r.get("status", "")
-                    health["total"] += 1
-                    if status == "running":
-                        health["running"] += 1
-                    elif status in ("queued", "ready"):
-                        health["queued"] += 1
-                    elif status == "finished":
-                        health["completed"] += 1
-                    elif status == "failed":
-                        health["failed"] += 1
-            except Exception:
-                pass
+        for r in runs_dict.values():
+            status = r.get("status", "")
+            health["total"] += 1
+            if status == "running":
+                health["running"] += 1
+            elif status in ("queued", "ready"):
+                health["queued"] += 1
+            elif status == "finished":
+                health["completed"] += 1
+            elif status == "failed":
+                health["failed"] += 1
         return health
 
     # -- Chat session integration --
@@ -791,7 +720,7 @@ class WildV2Engine:
             # Check if there are changes
             result = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._workdir, timeout=10,
+                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
             )
             if not result.stdout.strip():
                 logger.debug("[wild-v2] No changes to commit")
@@ -800,14 +729,14 @@ class WildV2Engine:
             # Stage all changes (respecting .gitignore)
             subprocess.run(
                 ["git", "add", "-A"],
-                capture_output=True, cwd=self._workdir, timeout=10,
+                capture_output=True, cwd=self._get_workdir(), timeout=10,
             )
 
             # Commit
             msg = f"wild-v2: iteration {session.iteration} — {session.goal[:50]}"
             subprocess.run(
                 ["git", "commit", "-m", msg, "--no-verify"],
-                capture_output=True, cwd=self._workdir, timeout=30,
+                capture_output=True, cwd=self._get_workdir(), timeout=30,
             )
             logger.info("[wild-v2] Git commit: %s", msg)
         except Exception as err:
@@ -821,7 +750,7 @@ class WildV2Engine:
         try:
             result = subprocess.run(
                 ["git", "ls-files", "-s"],
-                capture_output=True, text=True, cwd=self._workdir, timeout=10,
+                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
             )
             for line in result.stdout.strip().split("\n"):
                 if line:
@@ -831,7 +760,7 @@ class WildV2Engine:
             # Also include unstaged files
             result2 = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._workdir, timeout=10,
+                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
             )
             for line in result2.stdout.strip().split("\n"):
                 if line:
@@ -898,7 +827,7 @@ class WildV2Engine:
     # -- File storage helpers --
 
     def _session_dir(self, session_id: str) -> str:
-        return os.path.join(self._workdir, ".agents", "wild", session_id)
+        return os.path.join(self._get_workdir(), ".agents", "wild", session_id)
 
     def _save_state(self, session_id: str):
         path = os.path.join(self._session_dir(session_id), "state.json")

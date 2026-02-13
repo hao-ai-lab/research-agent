@@ -806,13 +806,11 @@ wild_v2_engine = WildV2Engine(
     opencode_url=OPENCODE_URL,
     model_provider=MODEL_PROVIDER,
     model_id=MODEL_ID,
-    workdir=WORKDIR,
+    get_workdir=lambda: WORKDIR,
     server_url=SERVER_CALLBACK_URL,
     auth_token=USER_AUTH_TOKEN,
     get_auth=get_auth,
-    get_runs=lambda: runs,
-    get_sweeps=lambda: sweeps,
-    get_alerts=lambda: active_alerts,
+    render_fn=prompt_skill_manager.render,
     save_chat_state=lambda: save_chat_state(),
     chat_sessions=chat_sessions,
 )
@@ -3053,15 +3051,14 @@ async def _chat_worker(session_id: str, content: str, runtime: ChatStreamRuntime
         if runtime.full_text or runtime.full_thinking or parts:
             session = chat_sessions.get(session_id)
             if isinstance(session, dict):
-                # Filter out pure text parts to avoid duplication, as they are already in 'content'
-                start_parts = parts if parts else []
-                final_parts = [p for p in start_parts if p.get("type") != "text"]
-
+                # Keep ALL parts (including text) to preserve the interleaved
+                # order of text, thinking, and tool outputs.  The 'content'
+                # and 'thinking' fields are convenience aggregates.
                 assistant_msg = {
                     "role": "assistant",
                     "content": runtime.full_text.strip(),
                     "thinking": runtime.full_thinking.strip() if runtime.full_thinking else None,
-                    "parts": final_parts if final_parts else None,
+                    "parts": parts if parts else None,
                     "timestamp": time.time(),
                 }
                 session.setdefault("messages", []).append(assistant_msg)
@@ -3900,20 +3897,52 @@ async def wild_v2_status():
 
 @app.get("/wild/v2/events/{session_id}")
 async def wild_v2_events(session_id: str):
-    """Get pending events for a V2 session (agent calls this)."""
-    return wild_v2_engine.get_events()
+    """Get pending events for a V2 session (agent calls this).
+    
+    Events are now managed server-side in active_alerts and runs dicts.
+    """
+    events = []
+    # Collect pending alerts
+    for alert_id, alert in active_alerts.items():
+        if alert.get("status") == "pending":
+            events.append({
+                "id": alert_id,
+                "type": "alert",
+                "title": f"Alert: {alert.get('type', 'unknown')}",
+                "detail": alert.get("message", ""),
+                "run_id": alert.get("run_id"),
+                "created_at": alert.get("created_at", time.time()),
+            })
+    # Collect completed/failed runs
+    for rid, run in runs.items():
+        if run.get("status") in ("finished", "failed"):
+            events.append({
+                "id": f"run-{rid}-{run.get('status')}",
+                "type": "run_complete",
+                "title": f"Run {run.get('status')}: {run.get('name', rid)}",
+                "detail": f"Status: {run.get('status')}",
+                "run_id": rid,
+                "created_at": time.time(),
+            })
+    return events
 
 
 @app.post("/wild/v2/events/{session_id}/resolve")
 async def wild_v2_resolve_events(session_id: str, req: WildV2ResolveRequest):
     """Mark events as resolved (agent calls this after handling)."""
-    return wild_v2_engine.resolve_events(req.event_ids)
+    resolved = 0
+    ids_to_resolve = set(req.event_ids)
+    for alert_id in list(active_alerts.keys()):
+        if alert_id in ids_to_resolve:
+            active_alerts[alert_id]["status"] = "resolved"
+            resolved += 1
+    return {"resolved": resolved}
 
 
 @app.get("/wild/v2/system-health")
 async def wild_v2_system_health():
     """Get system utilization (agent calls this to check resources)."""
-    return wild_v2_engine._get_system_health()
+    return WildV2Engine.get_system_health_from_runs(runs)
 
 
 @app.get("/wild/v2/plan/{session_id}")

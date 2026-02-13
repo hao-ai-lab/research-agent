@@ -1,6 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  getWorkspaceRoot,
   joinExplorerPath,
   normalizeExplorerPath,
   resolveExplorerPath,
@@ -25,8 +26,9 @@ function sortTreeEntries(a: ExplorerTreeEntry, b: ExplorerTreeEntry): number {
 
 export async function GET(request: NextRequest) {
   try {
+    const workspaceRoot = await getWorkspaceRoot()
     const relativePath = normalizeExplorerPath(request.nextUrl.searchParams.get('path'))
-    const absolutePath = resolveExplorerPath(relativePath)
+    const absolutePath = resolveExplorerPath(relativePath, workspaceRoot)
     const dirEntries = await readdir(absolutePath, { withFileTypes: true })
 
     const entries: ExplorerTreeEntry[] = dirEntries
@@ -49,3 +51,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status })
   }
 }
+

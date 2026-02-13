@@ -1,12 +1,14 @@
 """V2 Wild Loop Prompt Builders — stateless functions for prompt construction.
 
 All prompt-building logic is isolated here as pure functions that take a
-PromptContext and return a string.  No class instances, no side effects.
+PromptContext and return a string.  Templates are always resolved via
+PromptSkillManager.render() from SKILL.md files in prompt_skills/.
+No inline fallback templates — the SKILL.md files are the single source of truth.
 """
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable
 
 
 # ---------------------------------------------------------------------------
@@ -44,15 +46,15 @@ class PromptContext:
     goal: str
     iteration: int
     max_iterations: int
+    workdir: str              # absolute path to the user's project root
     tasks_path: str           # absolute path to tasks.md
     log_path: str             # absolute path to iteration_log.md
     server_url: str
     session_id: str
+    auth_token: str = ""      # auth token for API requests
 
     # Dynamic state
-    pending_events: list = field(default_factory=list)
     steer_context: str = ""
-    system_health: dict = field(default_factory=dict)
     history: list = field(default_factory=list)
 
     # Struggle indicators
@@ -61,28 +63,8 @@ class PromptContext:
 
 
 # ---------------------------------------------------------------------------
-# Shared sections (used by both prompts)
+# Computed sections (injected as template variables)
 # ---------------------------------------------------------------------------
-
-def _events_section(ctx: PromptContext) -> str:
-    if ctx.pending_events:
-        lines = "\n".join(
-            f"- [{e.get('type', 'event')}] {e.get('title', 'Untitled')}: {e.get('detail', '')}"
-            for e in ctx.pending_events
-        )
-        return lines
-    return "No pending events."
-
-
-def _health_section(ctx: PromptContext) -> str:
-    h = ctx.system_health
-    return (
-        f"Running: {h.get('running', 0)}/{h.get('max_concurrent', 5)} | "
-        f"Queued: {h.get('queued', 0)} | "
-        f"Completed: {h.get('completed', 0)} | "
-        f"Failed: {h.get('failed', 0)}"
-    )
-
 
 def _steer_section(ctx: PromptContext) -> str:
     if not ctx.steer_context:
@@ -126,166 +108,112 @@ def _struggle_section(ctx: PromptContext) -> str:
     return ""
 
 
-def _api_endpoints_section(ctx: PromptContext) -> str:
-    return f"""7. **API endpoints** (use via bash/curl):
-   - Events: `curl -s {ctx.server_url}/wild/v2/events/{ctx.session_id}`
-   - Health: `curl -s {ctx.server_url}/wild/v2/system-health`
-   - Resolve: `curl -s -X POST {ctx.server_url}/wild/v2/events/{ctx.session_id}/resolve -H 'Content-Type: application/json' -d '{{"event_ids": ["<id>"]}}'`"""
+def _api_catalog(ctx: PromptContext) -> str:
+    """Build the full API catalog the agent can use via curl."""
+    s = ctx.server_url
+    sid = ctx.session_id
+    auth_header = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
+    auth_note = f"""### Authentication
+
+**All API requests require the auth header.** Include this in every `curl` call:
+```
+{auth_header}
+```
+
+""" if ctx.auth_token else ""
+    return f"""{auth_note}### Sweeps (experiment groups)
+- `POST {s}/sweeps/wild` — Create a tracking sweep (body: `{{"name": "...", "goal": "..."}}`)
+- `GET  {s}/sweeps` — List all sweeps
+- `GET  {s}/sweeps/{{id}}` — Get sweep details & progress
+
+### Runs (individual jobs)
+- `POST {s}/runs` — Create a run (body: `{{"name": "...", "command": "...", "sweep_id": "...", "auto_start": true}}`)
+- `POST {s}/runs/{{id}}/start` — Start a queued/ready run
+- `POST {s}/runs/{{id}}/stop` — Stop a running job
+- `GET  {s}/runs` — List all runs
+- `GET  {s}/runs/{{id}}` — Get run details & status
+
+### Alerts & Events
+- `GET  {s}/wild/v2/events/{sid}` — Pending events for this session
+- `POST {s}/wild/v2/events/{sid}/resolve` — Mark events handled (body: `{{"event_ids": ["<id>"]}}`)
+- `GET  {s}/wild/v2/system-health` — System utilization (running/queued/completed/failed counts)
+
+### Skills (prompt templates)
+- `GET  {s}/prompt-skills` — List available prompt skills
+- `GET  {s}/prompt-skills/search?q=query` — Search skills by name/description"""
 
 
 # ---------------------------------------------------------------------------
 # Planning prompt (iteration 0)
 # ---------------------------------------------------------------------------
 
-def build_planning_prompt(ctx: PromptContext) -> str:
+def build_planning_prompt(
+    ctx: PromptContext,
+    render_fn: Callable,
+) -> str:
     """Build the iteration-0 planning prompt.
 
-    The agent explores the codebase and produces a concrete task checklist
-    in ``tasks.md``.  No ``<promise>`` or ``<summary>`` expected — planning
-    always transitions to iteration 1.
+    The prompt is resolved from the ``wild_v2_planning`` SKILL.md template
+    via *render_fn* (typically ``PromptSkillManager.render``).
+
+    Raises RuntimeError if the template cannot be rendered.
     """
-    return f"""You are an autonomous research engineer about to start a multi-iteration work session.
+    auth_header_val = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
+    variables = {
+        "goal": ctx.goal,
+        "workdir": ctx.workdir,
+        "tasks_path": ctx.tasks_path,
+        "server_url": ctx.server_url,
+        "session_id": ctx.session_id,
+        "steer_section": _steer_section(ctx),
+        "api_catalog": _api_catalog(ctx),
+        "auth_header": auth_header_val,
+    }
 
-## 🎯 Goal
-
-{ctx.goal}
-{_steer_section(ctx)}
-## 📊 System Health
-
-{_health_section(ctx)}
-
-## 🔔 Pending Events
-
-{_events_section(ctx)}
-
----
-
-## Your Mission This Iteration: PLANNING
-
-This is **iteration 0** — the planning phase.  You must:
-
-1. **Explore the codebase** — use `ls`, `find`, `cat`, `head`, `grep` to understand:
-   - Directory structure and key files
-   - Existing patterns and conventions
-   - Dependencies and configuration
-   - Test infrastructure
-
-2. **Analyze the goal** — break it down into concrete, actionable tasks that:
-   - Can each be completed in a single iteration (~5-15 min of work)
-   - Are ordered by dependency (do prerequisites first)
-   - Are specific enough that you could hand them to another engineer
-
-3. **Write the task checklist** to `{ctx.tasks_path}`:
-
-```markdown
-# Tasks
-
-## Goal
-{ctx.goal}
-
-## Analysis
-(Brief summary of what you learned from codebase exploration)
-
-## Tasks
-- [ ] Task 1: Specific, actionable description
-- [ ] Task 2: Specific, actionable description
-...
-```
-
-4. **Output your plan** in `<plan>` tags so it can be parsed:
-
-```
-<plan>
-(Copy of the task list you wrote to tasks.md)
-</plan>
-```
-
-## Rules
-
-- You have full autonomy.  Do NOT ask clarifying questions.
-- Spend time exploring — good planning saves time in later iterations.
-- Each task should be ONE logical unit of work (one file change, one test fix, etc.)
-- Aim for 5-15 tasks; if the goal is very large, group into phases.
-- Do NOT start doing actual implementation work yet — just plan.
-- Your changes are auto-committed after this iteration.
-"""
+    rendered = render_fn("wild_v2_planning", variables)
+    if not rendered:
+        raise RuntimeError(
+            "Failed to render 'wild_v2_planning' skill template. "
+            "Ensure prompt_skills/wild_v2_planning/SKILL.md exists and is valid."
+        )
+    return rendered
 
 
 # ---------------------------------------------------------------------------
 # Iteration prompt (iterations 1+)
 # ---------------------------------------------------------------------------
 
-def build_iteration_prompt(ctx: PromptContext) -> str:
+def build_iteration_prompt(
+    ctx: PromptContext,
+    render_fn: Callable,
+) -> str:
     """Build the standard iteration prompt for iterations 1+.
 
-    Assumes ``tasks.md`` and ``iteration_log.md`` already exist on disk.
+    The prompt is resolved from the ``wild_v2_iteration`` SKILL.md template
+    via *render_fn* (typically ``PromptSkillManager.render``).
+
+    Raises RuntimeError if the template cannot be rendered.
     """
-    return f"""You are an autonomous research engineer running in a loop. This is **iteration {ctx.iteration} of {ctx.max_iterations}**.
+    auth_header_val = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
+    variables = {
+        "goal": ctx.goal,
+        "iteration": str(ctx.iteration),
+        "max_iterations": str(ctx.max_iterations),
+        "workdir": ctx.workdir,
+        "tasks_path": ctx.tasks_path,
+        "log_path": ctx.log_path,
+        "server_url": ctx.server_url,
+        "session_id": ctx.session_id,
+        "steer_section": _steer_section(ctx),
+        "struggle_section": _struggle_section(ctx),
+        "api_catalog": _api_catalog(ctx),
+        "auth_header": auth_header_val,
+    }
 
-## 🎯 Goal
-
-{ctx.goal}
-{_steer_section(ctx)}{_struggle_section(ctx)}
-## 📊 System Health
-
-{_health_section(ctx)}
-
-## 🔔 Pending Events
-
-{_events_section(ctx)}
-
----
-
-## Your Working Files
-
-You have two critical files that persist between iterations. **Read them first, update them as you work.**
-
-### 📋 Task File: `{ctx.tasks_path}`
-This is your task checklist. Read it at the start of each iteration to know what to do.
-- Mark tasks `[/]` when starting, `[x]` when complete
-- Add new tasks if you discover work needed
-- Focus on ONE task per iteration
-
-### 📜 Iteration Log: `{ctx.log_path}`
-This records what happened in every previous iteration — your results, errors, and lessons.
-Read it to learn from your own mistakes and avoid repeating them.
-
----
-
-## Iteration Protocol
-
-1. **Read `{ctx.tasks_path}`** to see what's done and what's next
-2. **Read `{ctx.log_path}`** to see previous iteration results and avoid past mistakes
-3. **Check events**: Handle any pending alerts/failures before continuing
-4. **Work on ONE task**: Focus on the current in-progress or next pending task
-5. **Update `{ctx.tasks_path}`**: Mark completed tasks `[x]`, current task `[/]`
-6. **Run tests/verification** if applicable
-{_api_endpoints_section(ctx)}
-
-## Output Format
-
-At the end of your response, output:
-
-```
-<summary>One paragraph describing what you accomplished this iteration</summary>
-```
-
-If the goal is **fully achieved** and ALL tasks in `{ctx.tasks_path}` are `[x]`:
-```
-<promise>DONE</promise>
-```
-
-If you need to **wait for runs/experiments** and have nothing else to do:
-```
-<promise>WAITING</promise>
-```
-
-## Rules
-
-- You have full autonomy. Do NOT ask clarifying questions.
-- Check `git log` to understand what previous iterations accomplished.
-- Each iteration should make concrete, measurable progress.
-- If you encounter errors, fix them and note what went wrong.
-- Your changes are auto-committed after each iteration.
-- Do NOT commit: build outputs, __pycache__, .env, node_modules, large binaries.
-"""
+    rendered = render_fn("wild_v2_iteration", variables)
+    if not rendered:
+        raise RuntimeError(
+            "Failed to render 'wild_v2_iteration' skill template. "
+            "Ensure prompt_skills/wild_v2_iteration/SKILL.md exists and is valid."
+        )
+    return rendered
