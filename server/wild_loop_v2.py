@@ -1,11 +1,12 @@
 """Wild Loop V2 — Ralph-style event-driven autonomous loop.
 
 Design:
-  - One prompt template, repeated each iteration
+  - Iteration 0 = planning (explore codebase, build task checklist)
+  - Iterations 1+ = execution (one task per iteration)
   - Per-iteration fresh OpenCode session (clean agent context)
   - Events are prompt-driven (agent checks endpoints, not a queue)
   - Git commit per iteration
-  - Plan persisted in .agents/wild/<session_id>/plan.md
+  - Plan persisted in .agents/wild/<session_id>/tasks.md
   - <promise>DONE</promise> / <promise>WAITING</promise> signal parsing
 """
 
@@ -13,7 +14,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import subprocess
 import time
 import uuid
@@ -22,30 +22,26 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+try:
+    from server.v2_prompts import (
+        PromptContext,
+        build_iteration_prompt,
+        build_planning_prompt,
+        parse_plan,
+        parse_promise,
+        parse_summary,
+    )
+except ImportError:
+    from v2_prompts import (  # type: ignore[no-redef]
+        PromptContext,
+        build_iteration_prompt,
+        build_planning_prompt,
+        parse_plan,
+        parse_promise,
+        parse_summary,
+    )
+
 logger = logging.getLogger("wild_loop_v2")
-
-# ---------------------------------------------------------------------------
-# Signal parsers
-# ---------------------------------------------------------------------------
-
-def parse_promise(text: str) -> Optional[str]:
-    """Parse <promise>...</promise> from agent output."""
-    m = re.search(r"<promise>([\s\S]*?)</promise>", text)
-    if m:
-        return m.group(1).strip().upper()
-    return None
-
-
-def parse_plan(text: str) -> Optional[str]:
-    """Parse <plan>...</plan> from agent output."""
-    m = re.search(r"<plan>([\s\S]*?)</plan>", text)
-    return m.group(1).strip() if m else None
-
-
-def parse_summary(text: str) -> Optional[str]:
-    """Parse <summary>...</summary> from agent output."""
-    m = re.search(r"<summary>([\s\S]*?)</summary>", text)
-    return m.group(1).strip() if m else None
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +337,55 @@ class WildV2Engine:
 
     # -- Main loop --
 
+    def _build_context(self, session: "WildV2Session") -> PromptContext:
+        """Create a PromptContext from current session + engine state."""
+        session_dir = self._session_dir(session.session_id)
+        return PromptContext(
+            goal=session.goal,
+            iteration=session.iteration,
+            max_iterations=session.max_iterations,
+            tasks_path=os.path.join(session_dir, "tasks.md"),
+            log_path=os.path.join(session_dir, "iteration_log.md"),
+            server_url=self._server_url,
+            session_id=session.session_id,
+            pending_events=session.pending_events,
+            steer_context=session.steer_context,
+            system_health=self._get_system_health(),
+            history=session.history,
+            no_progress_streak=session.no_progress_streak,
+            short_iteration_count=session.short_iteration_count,
+        )
+
+    async def _send_prompt(self, session: "WildV2Session", prompt: str, display_msg: str) -> str:
+        """Send a prompt through the chat callback or direct OpenCode. Returns response text."""
+        full_text = ""
+        if self._send_chat_message and session.chat_session_id:
+            logger.info("[wild-v2] Routing through chat session %s for live streaming", session.chat_session_id)
+            try:
+                full_text = await self._send_chat_message(
+                    session.chat_session_id, prompt, display_msg
+                )
+                logger.info("[wild-v2] Chat message returned, response length=%d", len(full_text))
+            except Exception as chat_err:
+                logger.error("[wild-v2] Chat message failed: %s, falling back to direct OpenCode", chat_err, exc_info=True)
+                oc_session_id = await self._create_opencode_session()
+                if not oc_session_id:
+                    logger.error("[wild-v2] Fallback OpenCode session creation also failed!")
+                    raise
+                session.opencode_sessions.append(oc_session_id)
+                full_text = await self._run_opencode(oc_session_id, prompt)
+                self._append_to_chat(session, prompt, full_text, session.iteration)
+        else:
+            logger.info("[wild-v2] No chat callback, using direct OpenCode")
+            oc_session_id = await self._create_opencode_session()
+            if not oc_session_id:
+                logger.error("[wild-v2] Failed to create OpenCode session")
+                raise RuntimeError("Failed to create OpenCode session")
+            session.opencode_sessions.append(oc_session_id)
+            full_text = await self._run_opencode(oc_session_id, prompt)
+            self._append_to_chat(session, prompt, full_text, session.iteration)
+        return full_text
+
     async def _run_loop(self):
         """The ralph-style main loop running as an async background task."""
         session = self._session
@@ -353,6 +398,66 @@ class WildV2Engine:
                     session.chat_session_id, session.max_iterations, bool(self._send_chat_message))
 
         try:
+            # ============================================================
+            # ITERATION 0: PLANNING
+            # ============================================================
+            logger.info("[wild-v2] ========== Iteration 0 (PLANNING) START ==========")
+            plan_start = time.time()
+
+            self._collect_events()
+            ctx = self._build_context(session)
+            planning_prompt = build_planning_prompt(ctx)
+            display_msg = "[Wild V2 — Planning]"
+            logger.debug("[wild-v2] Planning prompt built, length=%d chars", len(planning_prompt))
+
+            try:
+                plan_text = await self._send_prompt(session, planning_prompt, display_msg)
+            except Exception as plan_err:
+                logger.error("[wild-v2] Planning iteration failed: %s", plan_err, exc_info=True)
+                session.status = "failed"
+                return
+
+            # Parse plan and write to tasks.md
+            parsed_plan = parse_plan(plan_text)
+            if parsed_plan:
+                session.plan = parsed_plan
+                tasks_path = os.path.join(self._session_dir(session.session_id), "tasks.md")
+                with open(tasks_path, "w") as f:
+                    f.write(parsed_plan)
+                logger.info("[wild-v2] Planning produced %d-char plan, written to tasks.md", len(parsed_plan))
+            else:
+                # Agent may have written tasks.md directly — read it
+                tasks_path = os.path.join(self._session_dir(session.session_id), "tasks.md")
+                if os.path.exists(tasks_path):
+                    with open(tasks_path) as f:
+                        session.plan = f.read()
+                logger.info("[wild-v2] No <plan> tag, using tasks.md from disk (%d chars)", len(session.plan))
+
+            # Record planning iteration in history
+            plan_duration = time.time() - plan_start
+            plan_record = {
+                "iteration": 0,
+                "summary": parse_summary(plan_text) or "Planning: explored codebase and created task list",
+                "started_at": plan_start,
+                "finished_at": time.time(),
+                "duration_s": round(plan_duration, 1),
+                "opencode_session_id": session.chat_session_id or "",
+                "promise": None,
+                "files_modified": [],
+                "error_count": 0,
+                "errors": [],
+            }
+            session.history.append(plan_record)
+            self._append_iteration_log(session, plan_record)
+            await self._git_commit(session)
+            self._save_state(session.session_id)
+
+            logger.info("[wild-v2] ========== Iteration 0 (PLANNING) END (duration=%.1fs) ==========", plan_duration)
+            await asyncio.sleep(2)  # Brief pause before first execution iteration
+
+            # ============================================================
+            # ITERATIONS 1+: EXECUTION
+            # ============================================================
             while (
                 session.status == "running"
                 and session.iteration < session.max_iterations
@@ -371,41 +476,18 @@ class WildV2Engine:
                 files_before = self._snapshot_files()
 
                 # 1. Build the prompt
-                prompt = self._build_prompt(session)
+                ctx = self._build_context(session)
+                prompt = build_iteration_prompt(ctx)
                 display_msg = f"[Wild V2 — Iteration {session.iteration}/{session.max_iterations}]"
                 logger.debug("[wild-v2] Prompt built, length=%d chars", len(prompt))
                 logger.debug("[wild-v2] Display message: %s", display_msg)
 
-                # 2. Send prompt — route through chat session if available (live streaming),
-                #    otherwise fall back to direct OpenCode call
-                full_text = ""
-                if self._send_chat_message and session.chat_session_id:
-                    logger.info("[wild-v2] Routing through chat session %s for live streaming", session.chat_session_id)
-                    try:
-                        full_text = await self._send_chat_message(
-                            session.chat_session_id, prompt, display_msg
-                        )
-                        logger.info("[wild-v2] Chat message returned, response length=%d", len(full_text))
-                    except Exception as chat_err:
-                        logger.error("[wild-v2] Chat message failed: %s, falling back to direct OpenCode", chat_err, exc_info=True)
-                        oc_session_id = await self._create_opencode_session()
-                        if not oc_session_id:
-                            logger.error("[wild-v2] Fallback OpenCode session creation also failed!")
-                            session.status = "failed"
-                            break
-                        session.opencode_sessions.append(oc_session_id)
-                        full_text = await self._run_opencode(oc_session_id, prompt)
-                        self._append_to_chat(session, prompt, full_text, session.iteration)
-                else:
-                    logger.info("[wild-v2] No chat callback, using direct OpenCode")
-                    oc_session_id = await self._create_opencode_session()
-                    if not oc_session_id:
-                        logger.error("[wild-v2] Failed to create OpenCode session, stopping")
-                        session.status = "failed"
-                        break
-                    session.opencode_sessions.append(oc_session_id)
-                    full_text = await self._run_opencode(oc_session_id, prompt)
-                    self._append_to_chat(session, prompt, full_text, session.iteration)
+                # 2. Send prompt
+                try:
+                    full_text = await self._send_prompt(session, prompt, display_msg)
+                except Exception:
+                    session.status = "failed"
+                    break
 
                 logger.info("[wild-v2] Response received: %d chars (preview: %s)",
                            len(full_text), full_text[:100].replace('\n', ' ') if full_text else "<empty>")
@@ -595,134 +677,7 @@ class WildV2Engine:
 
     # -- Prompt builder --
 
-    def _build_prompt(self, session: WildV2Session) -> str:
-        """Build the single ralph-style prompt with all context."""
-        session_dir = self._session_dir(session.session_id)
-        tasks_path = os.path.join(session_dir, "tasks.md")
-        log_path = os.path.join(session_dir, "iteration_log.md")
-
-        events_summary = ""
-        if session.pending_events:
-            events_summary = "\n".join(
-                f"- [{e.get('type', 'event')}] {e.get('title', 'Untitled')}: {e.get('detail', '')}"
-                for e in session.pending_events
-            )
-        else:
-            events_summary = "No pending events."
-
-        health = self._get_system_health()
-        health_summary = (
-            f"Running: {health.get('running', 0)}/{health.get('max_concurrent', 5)} | "
-            f"Queued: {health.get('queued', 0)} | "
-            f"Completed: {health.get('completed', 0)} | "
-            f"Failed: {health.get('failed', 0)}"
-        )
-
-        steer_section = ""
-        if session.steer_context:
-            steer_section = f"""
-## 🗣️ User Context (injected mid-loop)
-
-{session.steer_context}
-
-*(Address this context in your work this iteration, then it will be cleared.)*
-"""
-
-        # Struggle warnings
-        struggle_section = ""
-        warnings = []
-        if session.no_progress_streak >= 3:
-            warnings.append(f"⚠️ No file changes for {session.no_progress_streak} consecutive iterations — try a different approach")
-        if session.short_iteration_count >= 3:
-            warnings.append(f"⚠️ {session.short_iteration_count} very short iterations (<30s) — are you making meaningful progress?")
-        # Check for repeated errors in recent history
-        recent_errors = []
-        for h in session.history[-3:]:
-            recent_errors.extend(h.get("errors", []))
-        if len(recent_errors) >= 3:
-            seen = {}
-            for e in recent_errors:
-                key = e[:80]
-                seen[key] = seen.get(key, 0) + 1
-            repeated = [k for k, v in seen.items() if v >= 2]
-            if repeated:
-                warnings.append(f"⚠️ Repeated errors across iterations: {repeated[0][:60]}...")
-        if warnings:
-            struggle_section = "\n## ⚠️ Struggle Indicators\n\n" + "\n".join(f"- {w}" for w in warnings) + "\n"
-
-        prompt = f"""You are an autonomous research engineer running in a loop. This is **iteration {session.iteration} of {session.max_iterations}**.
-
-## 🎯 Goal
-
-{session.goal}
-{steer_section}{struggle_section}
-## 📊 System Health
-
-{health_summary}
-
-## 🔔 Pending Events
-
-{events_summary}
-
----
-
-## Your Working Files
-
-You have two critical files that persist between iterations. **Read them first, update them as you work.**
-
-### 📋 Task File: `{tasks_path}`
-This is your task checklist. Read it at the start of each iteration to know what to do.
-- Mark tasks `[/]` when starting, `[x]` when complete
-- Add new tasks if you discover work needed
-- Focus on ONE task per iteration
-
-### 📜 Iteration Log: `{log_path}`
-This records what happened in every previous iteration — your results, errors, and lessons.
-Read it to learn from your own mistakes and avoid repeating them.
-
----
-
-## Iteration Protocol
-
-1. **Read `{tasks_path}`** to see what's done and what's next
-2. **Read `{log_path}`** to see previous iteration results and avoid past mistakes
-3. **Check events**: Handle any pending alerts/failures before continuing
-4. **Work on ONE task**: Focus on the current in-progress or next pending task
-5. **Update `{tasks_path}`**: Mark completed tasks `[x]`, current task `[/]`
-6. **Run tests/verification** if applicable
-7. **API endpoints** (use via bash/curl):
-   - Events: `curl -s {self._server_url}/wild/v2/events/{session.session_id}`
-   - Health: `curl -s {self._server_url}/wild/v2/system-health`
-   - Resolve: `curl -s -X POST {self._server_url}/wild/v2/events/{session.session_id}/resolve -H 'Content-Type: application/json' -d '{{"event_ids": ["<id>"]}}'`
-
-## Output Format
-
-At the end of your response, output:
-
-```
-<summary>One paragraph describing what you accomplished this iteration</summary>
-```
-
-If the goal is **fully achieved** and ALL tasks in `{tasks_path}` are `[x]`:
-```
-<promise>DONE</promise>
-```
-
-If you need to **wait for runs/experiments** and have nothing else to do:
-```
-<promise>WAITING</promise>
-```
-
-## Rules
-
-- You have full autonomy. Do NOT ask clarifying questions.
-- Check `git log` to understand what previous iterations accomplished.
-- Each iteration should make concrete, measurable progress.
-- If you encounter errors, fix them and note what went wrong.
-- Your changes are auto-committed after each iteration.
-- Do NOT commit: build outputs, __pycache__, .env, node_modules, large binaries.
-"""
-        return prompt
+    # (_build_prompt removed — prompt construction now lives in v2_prompts.py)
 
     # -- Event collection --
 
