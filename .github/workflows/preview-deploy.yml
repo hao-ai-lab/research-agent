@@ -55,9 +55,11 @@ jobs:
           APP_SLUG="research-agent-preview-pr-${{ github.event.pull_request.number }}"
           APP_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-app.modal.run"
           SERVER_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-server.modal.run"
+          OPENCODE_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-opencode.modal.run"
 
           echo "Checking preview app: ${APP_URL}"
           echo "Checking preview server health: ${SERVER_URL}/health"
+          echo "Checking preview opencode endpoint: ${OPENCODE_URL}"
 
           check_url() {
             local name="$1"
@@ -87,6 +89,28 @@ jobs:
           check_url "Preview app" "${APP_URL}"
           check_url "Preview server" "${SERVER_URL}/health" '"status"[[:space:]]*:[[:space:]]*"ok"'
 
+          check_opencode() {
+            local url="$1"
+            for attempt in $(seq 1 30); do
+              response="$(curl -sS -L --max-time 15 -X POST -H 'content-type: application/json' -d '{}' -w '\n%{http_code}' "${url}/session" || true)"
+              body="$(echo "${response}" | sed '$d')"
+              code="$(echo "${response}" | tail -n 1)"
+
+              if [[ "${code}" == "200" ]] && echo "${body}" | grep -Eq '"id"[[:space:]]*:'; then
+                echo "✅ Preview opencode healthy (attempt ${attempt})"
+                return 0
+              fi
+
+              echo "Attempt ${attempt}/30: Preview opencode not ready yet (status: ${code})"
+              sleep 10
+            done
+
+            echo "❌ Preview opencode failed health check after 30 attempts"
+            return 1
+          }
+
+          check_opencode "${OPENCODE_URL}"
+
       - name: Comment preview URL on PR
         uses: actions/github-script@v7
         with:
@@ -95,6 +119,7 @@ jobs:
             const sha = context.sha.slice(0, 7);
             const appSlug = `research-agent-preview-pr-${prNumber}`;
             const previewUrl = `https://${context.repo.owner}--${appSlug}-preview-app.modal.run`;
+            const opencodeUrl = `https://${context.repo.owner}--${appSlug}-preview-opencode.modal.run`;
 
             // Look for an existing preview bot comment to update
             const { data: comments } = await github.rest.issues.listComments({
@@ -113,6 +138,7 @@ jobs:
               `| | |`,
               `|---|---|`,
               `| **Preview** | [Open App](${previewUrl}) |`,
+              `| **OpenCode** | [Open OpenCode](${opencodeUrl}) |`,
               `| **Commit** | \`${sha}\` |`,
               `| **Status** | ✅ Deployed |`,
               '',

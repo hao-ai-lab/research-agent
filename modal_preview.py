@@ -66,6 +66,7 @@ image = (
 app = modal.App("research-agent-preview")
 
 OPENCODE_BIN = "/usr/local/bin/opencode"
+OPENCODE_PORT = "4096"
 
 
 @app.function(
@@ -158,3 +159,31 @@ def preview_app():
         cwd="/app",
     )
 
+
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name("research-agent-preview-secrets")],
+    timeout=7200,  # 2 hours max
+    cpu=2.0,
+    memory=2 * 1024,  # 2GB
+)
+@modal.concurrent(max_inputs=100)
+@modal.web_server(port=4096, startup_timeout=120)
+def preview_opencode():
+    """Expose OpenCode as a standalone preview endpoint."""
+    os.chdir("/app")
+
+    env = {**os.environ}
+    opencode_config = "/app/server/opencode.json"
+    if os.path.isfile(opencode_config):
+        env["OPENCODE_CONFIG"] = opencode_config
+
+    if not os.path.isfile(OPENCODE_BIN):
+        raise RuntimeError(f"opencode binary not found at {OPENCODE_BIN}")
+
+    print(f"Starting OpenCode server on port {OPENCODE_PORT}...")
+    subprocess.Popen(
+        [OPENCODE_BIN, "serve"],
+        env=env,
+        cwd="/app",
+    )
