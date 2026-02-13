@@ -93,6 +93,8 @@ export interface AppSettings {
     customButtonScalePercent?: number | null;
     chatToolbarButtonSizePx?: number | null;
     streamingToolBoxHeightRem?: number | null;
+    wildLoopTasksFontSizePx?: number | null;
+    wildLoopHistoryFontSizePx?: number | null;
     showStarterCards?: boolean;
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
@@ -116,6 +118,7 @@ export interface AppSettings {
     showWildLoopState?: boolean;
     showPlanPanel?: boolean;
     debugRefreshIntervalSeconds?: number;
+    wildLoopDebugPanelWidthPx?: number;
   };
 }
 
