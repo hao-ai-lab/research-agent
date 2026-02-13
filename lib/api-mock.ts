@@ -495,6 +495,25 @@ export async function deleteSession(sessionId: string): Promise<void> {
     mockSessions.delete(sessionId)
 }
 
+export async function rewindSession(sessionId: string, messageIndex: number): Promise<SessionWithMessages> {
+    await delay(120)
+    const session = mockSessions.get(sessionId)
+    if (!session) {
+        throw new Error('Session not found')
+    }
+    if (messageIndex < 0 || messageIndex >= session.messages.length) {
+        throw new Error('message_index is out of range')
+    }
+    const target = session.messages[messageIndex]
+    if (target?.role !== 'user') {
+        throw new Error('message_index must point to a user message')
+    }
+
+    session.messages = session.messages.slice(0, messageIndex)
+    session.message_count = session.messages.length
+    return session
+}
+
 // Simulated streaming chat response
 export async function* streamChat(
     sessionId: string,

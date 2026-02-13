@@ -7,6 +7,7 @@ import {
     getSession,
     deleteSession,
     renameSession as renameSessionApi,
+    rewindSession as rewindSessionApi,
     streamChat,
     streamSession,
     checkApiHealth,
@@ -77,6 +78,7 @@ export interface UseChatSessionResult {
     renameSession: (sessionId: string, title: string) => Promise<void>
     archiveSession: (sessionId: string) => Promise<void>
     removeSession: (sessionId: string) => Promise<void>
+    rewindSession: (messageIndex: number) => Promise<string | null>
     refreshSessions: () => Promise<void>
 
     // Messages
@@ -111,6 +113,18 @@ const initialStreamingState: StreamingState = {
 
 const STORAGE_KEY_ARCHIVED_CHAT_SESSIONS = 'archivedChatSessionIds'
 const STORAGE_KEY_SAVED_CHAT_SESSIONS = 'savedChatSessionIds'
+
+function buildHistorySeed(messages: ChatMessageData[]): string {
+    return messages
+        .map((message) => {
+            const content = (message.content || '').trim()
+            if (!content) return ''
+            const role = message.role === 'user' ? 'USER' : 'ASSISTANT'
+            return `[${role}] ${content}`
+        })
+        .filter(Boolean)
+        .join('\n\n')
+}
 
 function readArchivedSessionIds(): string[] {
     if (typeof window === 'undefined') return []
@@ -443,6 +457,8 @@ export function useChatSession(): UseChatSessionResult {
 
     // Prompt provenance: content-keyed map populated from SSE provenance events
     const provenanceMapRef = useRef<Map<string, PromptProvenance>>(new Map())
+    const rewindSeedBySessionRef = useRef<Map<string, string>>(new Map())
+    const rewindPrefixBySessionRef = useRef<Map<string, ChatMessageData[]>>(new Map())
     const [provenanceVersion, setProvenanceVersion] = useState(0)
 
     // Get current session object
@@ -584,7 +600,19 @@ export function useChatSession(): UseChatSessionResult {
         try {
             const sessionList = await listSessions()
             const archivedSet = new Set(archivedSessionIds)
-            setSessions(sessionList.filter((session) => !archivedSet.has(session.id)))
+            const visibleSessions = sessionList
+                .filter((session) => !archivedSet.has(session.id))
+                .map((session) => {
+                    const prefixMessages = rewindPrefixBySessionRef.current.get(session.id)
+                    if (!prefixMessages || prefixMessages.length === 0) {
+                        return session
+                    }
+                    return {
+                        ...session,
+                        message_count: session.message_count + prefixMessages.length,
+                    }
+                })
+            setSessions(visibleSessions)
         } catch (err) {
             console.error('Failed to refresh sessions:', err)
             setError(err instanceof Error ? err.message : 'Failed to load sessions')
@@ -713,7 +741,9 @@ export function useChatSession(): UseChatSessionResult {
 
             const sessionData = await getSession(sessionId)
             setCurrentSessionId(sessionId)
-            setMessages(sessionData.messages.map(normalizeMessage))
+            const normalizedMessages = sessionData.messages.map(normalizeMessage)
+            const prefixMessages = rewindPrefixBySessionRef.current.get(sessionId)
+            setMessages(prefixMessages ? [...prefixMessages, ...normalizedMessages] : normalizedMessages)
             const activeStream = sessionData.active_stream
             if (activeStream && activeStream.status === 'running') {
                 attachToExistingStream(sessionId, activeStream)
@@ -734,6 +764,8 @@ export function useChatSession(): UseChatSessionResult {
             setError(null)
             await deleteSession(sessionId)
             setSessions(prev => prev.filter(s => s.id !== sessionId))
+            rewindSeedBySessionRef.current.delete(sessionId)
+            rewindPrefixBySessionRef.current.delete(sessionId)
 
             // If we deleted the current session, clear state
             if (sessionId === currentSessionId) {
@@ -762,6 +794,8 @@ export function useChatSession(): UseChatSessionResult {
     // Archive a session client-side (keeps backend data intact)
     const archiveSession = useCallback(async (sessionId: string) => {
         setError(null)
+        rewindSeedBySessionRef.current.delete(sessionId)
+        rewindPrefixBySessionRef.current.delete(sessionId)
 
         if (sessionId === currentSessionId && abortControllerRef.current) {
             abortControllerRef.current.abort()
@@ -790,6 +824,65 @@ export function useChatSession(): UseChatSessionResult {
         setError(null)
         setSavedSessionIds((prev) => prev.filter((id) => id !== sessionId))
     }, [])
+
+    const rewindSession = useCallback(async (messageIndex: number): Promise<string | null> => {
+        if (!currentSessionId) {
+            setError('No active session. Please create or select a chat.')
+            return null
+        }
+        if (streamingState.isStreaming) {
+            return null
+        }
+
+        try {
+            setError(null)
+            const sessionData = await rewindSessionApi(currentSessionId, messageIndex)
+            setMessages(sessionData.messages.map(normalizeMessage))
+            setSessions((prev) => prev.map((session) => (
+                session.id === currentSessionId
+                    ? { ...session, title: sessionData.title, message_count: sessionData.messages.length }
+                    : session
+            )))
+            return currentSessionId
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Failed to rewind session'
+            const isMissingEndpoint = /not found/i.test(message) || /404/.test(message)
+            if (!isMissingEndpoint) {
+                console.error('Failed to rewind session:', err)
+                setError(message)
+                return null
+            }
+
+            // Backward-compatible fallback: fork to a new session and seed first prompt
+            // with retained transcript context when backend lacks /rewind.
+            try {
+                const retainedMessages = messages
+                    .slice(0, messageIndex)
+                    .map((msg) => ({ ...msg, parts: msg.parts ? [...msg.parts] : msg.parts }))
+                const currentTitle = sessions.find((session) => session.id === currentSessionId)?.title || 'New Chat'
+                const forkSession = await createSession(currentTitle)
+                const historySeed = buildHistorySeed(retainedMessages)
+                if (historySeed) {
+                    rewindSeedBySessionRef.current.set(forkSession.id, historySeed)
+                }
+                if (retainedMessages.length > 0) {
+                    rewindPrefixBySessionRef.current.set(forkSession.id, retainedMessages)
+                } else {
+                    rewindPrefixBySessionRef.current.delete(forkSession.id)
+                }
+                setCurrentSessionId(forkSession.id)
+                setMessages(retainedMessages)
+                setSessions((prev) => [forkSession, ...prev.filter((session) => session.id !== forkSession.id)])
+                setStreamingState(initialStreamingState)
+                setError(null)
+                return forkSession.id
+            } catch (fallbackError) {
+                console.error('Failed fallback rewind session fork:', fallbackError)
+                setError(message)
+                return null
+            }
+        }
+    }, [currentSessionId, messages, sessions, streamingState.isStreaming])
 
     // Send a message - accepts optional sessionIdOverride for newly created sessions
     const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string) => {
@@ -856,6 +949,13 @@ export function useChatSession(): UseChatSessionResult {
             // Create abort controller
             streamController = new AbortController()
             abortControllerRef.current = streamController
+            const rewindSeed = promptOverride ? null : rewindSeedBySessionRef.current.get(targetSessionId)
+            const effectivePromptOverride = promptOverride ?? (
+                rewindSeed
+                    ? `[CONVERSATION CONTEXT]\n${rewindSeed}\n[/CONVERSATION CONTEXT]\n\n${content}`
+                    : undefined
+            )
+            let consumedRewindSeed = false
 
             // Stream inactivity timeout: abort if no events for 180s (prevents stuck streams)
             // Note: OpenCode tool calls can take 60-120s, so 180s is a safe value
@@ -873,8 +973,12 @@ export function useChatSession(): UseChatSessionResult {
             }, 5_000)
 
             try {
-            for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal, promptOverride)) {
+            for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal, effectivePromptOverride)) {
                 lastEventTime = Date.now()
+                if (rewindSeed && !consumedRewindSeed) {
+                    rewindSeedBySessionRef.current.delete(targetSessionId)
+                    consumedRewindSeed = true
+                }
 
                 // Debug logging for stream events
                 if (event.type === 'session_status' || event.type === 'error') {
@@ -903,7 +1007,15 @@ export function useChatSession(): UseChatSessionResult {
             // Sync from backend so persisted ordered parts are reflected exactly
             if (finalText || finalThinking || sawToolPart) {
                 const sessionData = await getSession(targetSessionId)
-                setMessages(sessionData.messages.map(normalizeMessage))
+                const normalizedMessages = sessionData.messages.map(normalizeMessage)
+                const prefixMessages = rewindPrefixBySessionRef.current.get(targetSessionId)
+                const mergedMessages = prefixMessages ? [...prefixMessages, ...normalizedMessages] : normalizedMessages
+                setMessages(mergedMessages)
+                setSessions((prev) => prev.map((session) => (
+                    session.id === targetSessionId
+                        ? { ...session, title: sessionData.title, message_count: mergedMessages.length }
+                        : session
+                )))
                 await refreshSessions()
             }
 
@@ -917,7 +1029,9 @@ export function useChatSession(): UseChatSessionResult {
                 }
                 try {
                     const sessionData = await getSession(targetSessionId)
-                    setMessages(sessionData.messages.map(normalizeMessage))
+                    const normalizedMessages = sessionData.messages.map(normalizeMessage)
+                    const prefixMessages = rewindPrefixBySessionRef.current.get(targetSessionId)
+                    setMessages(prefixMessages ? [...prefixMessages, ...normalizedMessages] : normalizedMessages)
                 } catch (syncErr) {
                     console.warn('Failed to sync session after abort:', syncErr)
                 }
@@ -999,6 +1113,7 @@ export function useChatSession(): UseChatSessionResult {
         renameSession,
         archiveSession,
         removeSession,
+        rewindSession,
         refreshSessions,
         messages,
         streamingState,
