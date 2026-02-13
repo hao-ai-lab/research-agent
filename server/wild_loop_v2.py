@@ -104,7 +104,7 @@ class WildV2Engine:
         opencode_url: str = "http://127.0.0.1:4096",
         model_provider: str = "opencode",
         model_id: str = "kimi-k2.5-free",
-        workdir: str = ".",
+        get_workdir: Optional[Callable[[], str]] = None,
         server_url: str = "http://127.0.0.1:10000",
         auth_token: Optional[str] = None,
         get_auth: Optional[Callable] = None,
@@ -120,7 +120,7 @@ class WildV2Engine:
         self._opencode_url = opencode_url
         self._model_provider = model_provider
         self._model_id = model_id
-        self._workdir = workdir
+        self._get_workdir = get_workdir or (lambda: ".")
         self._server_url = server_url
         self._auth_token = auth_token
         self._get_auth = get_auth
@@ -718,7 +718,7 @@ class WildV2Engine:
             # Check if there are changes
             result = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._workdir, timeout=10,
+                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
             )
             if not result.stdout.strip():
                 logger.debug("[wild-v2] No changes to commit")
@@ -727,14 +727,14 @@ class WildV2Engine:
             # Stage all changes (respecting .gitignore)
             subprocess.run(
                 ["git", "add", "-A"],
-                capture_output=True, cwd=self._workdir, timeout=10,
+                capture_output=True, cwd=self._get_workdir(), timeout=10,
             )
 
             # Commit
             msg = f"wild-v2: iteration {session.iteration} — {session.goal[:50]}"
             subprocess.run(
                 ["git", "commit", "-m", msg, "--no-verify"],
-                capture_output=True, cwd=self._workdir, timeout=30,
+                capture_output=True, cwd=self._get_workdir(), timeout=30,
             )
             logger.info("[wild-v2] Git commit: %s", msg)
         except Exception as err:
@@ -748,7 +748,7 @@ class WildV2Engine:
         try:
             result = subprocess.run(
                 ["git", "ls-files", "-s"],
-                capture_output=True, text=True, cwd=self._workdir, timeout=10,
+                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
             )
             for line in result.stdout.strip().split("\n"):
                 if line:
@@ -758,7 +758,7 @@ class WildV2Engine:
             # Also include unstaged files
             result2 = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._workdir, timeout=10,
+                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
             )
             for line in result2.stdout.strip().split("\n"):
                 if line:
@@ -825,7 +825,7 @@ class WildV2Engine:
     # -- File storage helpers --
 
     def _session_dir(self, session_id: str) -> str:
-        return os.path.join(self._workdir, ".agents", "wild", session_id)
+        return os.path.join(self._get_workdir(), ".agents", "wild", session_id)
 
     def _save_state(self, session_id: str):
         path = os.path.join(self._session_dir(session_id), "state.json")

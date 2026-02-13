@@ -92,7 +92,7 @@ class TestWildV2Engine:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         self.engine = WildV2Engine(
-            workdir=self.tmpdir,
+            get_workdir=lambda: self.tmpdir,
             server_url="http://localhost:10000",
         )
 
@@ -190,7 +190,7 @@ class TestWildV2Engine:
             return f"RENDERED:{skill_id}:{variables['goal']}"
 
         engine = WildV2Engine(
-            workdir=self.tmpdir,
+            get_workdir=lambda: self.tmpdir,
             server_url="http://localhost:10000",
             render_fn=mock_render,
         )
@@ -249,7 +249,7 @@ def test_loop_done_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
 
         call_count = 0
 
@@ -320,7 +320,7 @@ def test_loop_max_iterations():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
 
         call_count = 0
 
@@ -359,7 +359,7 @@ def test_loop_waiting_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(workdir=tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
 
         call_count = 0
 
