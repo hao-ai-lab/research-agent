@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 from wild_loop_v2 import (
     WildV2Engine,
     WildV2Session,
+    parse_human_signal,
     parse_plan,
     parse_promise,
     parse_summary,
@@ -61,6 +62,30 @@ class TestParseSummary:
 
     def test_none(self):
         assert parse_summary("no summary") is None
+
+
+class TestParseHumanSignal:
+    def test_valid_advisory(self):
+        signal = parse_human_signal(
+            '<human_signal>{"mode":"advisory","severity":"warning","title":"Off","detail":"Trying fix"}</human_signal>'
+        )
+        assert signal is not None
+        assert signal["mode"] == "advisory"
+        assert signal["severity"] == "warning"
+
+    def test_valid_blocking_defaults(self):
+        signal = parse_human_signal(
+            '<human_signal>{"mode":"blocking","title":"Blocked","detail":"Cannot proceed safely"}</human_signal>'
+        )
+        assert signal is not None
+        assert signal["mode"] == "blocking"
+        assert signal["severity"] == "warning"
+
+    def test_invalid_json(self):
+        assert parse_human_signal("<human_signal>{bad-json}</human_signal>") is None
+
+    def test_invalid_mode(self):
+        assert parse_human_signal('<human_signal>{"mode":"unknown"}</human_signal>') is None
 
 
 # ---------------------------------------------------------------------------
@@ -203,25 +228,34 @@ class TestWildV2Engine:
         assert prompt == "RENDERED:wild_v2_iteration:Test render"
         engine.stop()
 
-    def test_prompt_fallback_without_render_fn(self):
-        """Verify prompts fall back to inline templates without render_fn."""
+    def test_prompt_requires_render_fn(self):
+        """Prompt builders require render_fn-backed SKILL templates."""
         self.engine.start(goal="Fallback test")
         ctx = self.engine._build_context(self.engine.session)
-        prompt = build_planning_prompt(ctx)  # no render_fn
-        assert "Fallback test" in prompt
-        assert "iteration 0" in prompt.lower() or "planning" in prompt.lower()
+        with pytest.raises(TypeError):
+            build_planning_prompt(ctx)  # type: ignore[call-arg]
         self.engine.stop()
 
     def test_api_catalog_in_prompt(self):
         """Verify the API catalog appears in iteration prompts."""
+        def mock_render(_skill_id, variables):
+            return variables["api_catalog"]
+
         self.engine.start(goal="API catalog test")
         ctx = self.engine._build_context(self.engine.session)
         ctx.iteration = 1
-        prompt = build_iteration_prompt(ctx)  # fallback
+        prompt = build_iteration_prompt(ctx, render_fn=mock_render)
         assert "/sweeps/wild" in prompt
         assert "/runs" in prompt
         assert "/wild/v2/events" in prompt
         assert "/wild/v2/system-health" in prompt
+        assert "/wild/v2/human-signal" in prompt
+        assert "/wild/v2/openevolve/start" in prompt
+        self.engine.stop()
+
+    def test_start_applies_human_timeout(self):
+        result = self.engine.start(goal="Timeout test", human_away_timeout_seconds=123)
+        assert result["human_away_timeout_seconds"] == 123
         self.engine.stop()
 
     def test_save_and_load_state(self):
@@ -249,7 +283,11 @@ def test_loop_done_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=lambda _sid, _vars: "prompt",
+        )
 
         call_count = 0
 
@@ -320,7 +358,11 @@ def test_loop_max_iterations():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=lambda _sid, _vars: "prompt",
+        )
 
         call_count = 0
 
@@ -359,7 +401,11 @@ def test_loop_waiting_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=lambda _sid, _vars: "prompt",
+        )
 
         call_count = 0
 
@@ -394,5 +440,132 @@ def test_loop_waiting_signal():
         assert engine.session.history[0]["iteration"] == 0  # planning
         assert engine.session.history[1]["promise"] == "WAITING"
         assert engine.session.history[2]["promise"] == "DONE"
+
+    asyncio.run(_run())
+
+
+def test_loop_advisory_human_signal_does_not_pause():
+    """Advisory signal should be recorded and loop can continue to DONE."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=lambda _sid, _vars: "prompt",
+        )
+
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "Plan.\n<plan># Tasks\n- [ ] Continue</plan>\n<summary>Planned.</summary>"
+            return (
+                "Working.\n<summary>Handled advisory.</summary>"
+                '<human_signal>{"mode":"advisory","severity":"warning","title":"Off","detail":"Trying fix"}</human_signal>'
+                "\n<promise>DONE</promise>"
+            )
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+        engine._emit_human_signal = AsyncMock()
+
+        engine.start(goal="Advisory test", max_iterations=5)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert engine.session.status == "done"
+        assert engine.session.blocking_since is None
+        assert engine._emit_human_signal.await_count == 1
+
+    asyncio.run(_run())
+
+
+def test_loop_blocking_human_signal_pauses():
+    """Blocking signal should pause the loop and set blocking reason."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=lambda _sid, _vars: "prompt",
+        )
+
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "Plan.\n<plan># Tasks\n- [ ] Continue</plan>\n<summary>Planned.</summary>"
+            return (
+                "Blocked.\n<summary>Need help.</summary>"
+                '<human_signal>{"mode":"blocking","severity":"critical","title":"Blocked","detail":"Cannot proceed safely"}</human_signal>'
+            )
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+        engine._emit_human_signal = AsyncMock()
+
+        engine.start(goal="Blocking test", max_iterations=5, human_away_timeout_seconds=5)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert engine.session.status == "paused"
+        assert engine.session.blocking_since is not None
+        assert "Cannot proceed safely" in (engine.session.blocking_reason or "")
+        assert engine._emit_human_signal.await_count == 1
+        engine._cancel_blocking_timeout_watchdog()
+
+    asyncio.run(_run())
+
+
+def test_blocking_timeout_transitions_to_failed():
+    """Paused blocking session should fail-safe after timeout."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=lambda _sid, _vars: "prompt",
+        )
+        engine.start(goal="Timeout watchdog", human_away_timeout_seconds=1)
+
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        session = engine.session
+        assert session is not None
+        session.status = "paused"
+        session.blocking_since = time.time()
+        session.blocking_reason = "Awaiting human"
+        engine._start_blocking_timeout_watchdog(session)
+
+        await asyncio.sleep(1.2)
+        assert session.status == "failed"
+        assert "safe stop" in (session.blocking_reason or "")
+        engine._cancel_blocking_timeout_watchdog()
 
     asyncio.run(_run())

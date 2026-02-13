@@ -292,7 +292,47 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                             {(v2Status.pending_events || []).slice(0, 5).map((ev) => (
                                                 <div key={ev.id} className="text-[10px] flex items-start gap-1">
                                                     <Circle className="h-2 w-2 mt-0.5 text-yellow-400 fill-yellow-400/30" />
-                                                    <span className="truncate">{ev.title}</span>
+                                                    <div className="min-w-0">
+                                                        <div className="truncate">{ev.title}</div>
+                                                        <div className="text-[9px] text-muted-foreground truncate">
+                                                            {ev.type}
+                                                            {ev.mode ? ` • ${ev.mode}` : ''}
+                                                            {ev.severity ? ` • ${ev.severity}` : ''}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* OpenEvolve Jobs */}
+                                {v2Status.openevolve_jobs && v2Status.openevolve_jobs.length > 0 && (
+                                    <div className="border-t border-border/30 pt-2">
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">
+                                            OpenEvolve Jobs ({v2Status.openevolve_jobs.length})
+                                        </div>
+                                        <div className="space-y-1 max-h-[140px] overflow-y-auto">
+                                            {v2Status.openevolve_jobs.map((job) => (
+                                                <div
+                                                    key={job.id}
+                                                    className="rounded border border-border/30 bg-secondary/20 px-2 py-1 text-[10px]"
+                                                >
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="truncate text-foreground">{job.name || job.id}</span>
+                                                        <span className={statusColor(job.status)}>{job.status}</span>
+                                                    </div>
+                                                    <div className="text-[9px] text-muted-foreground truncate">
+                                                        {job.mode} • iter {job.last_iteration ?? 'n/a'}
+                                                    </div>
+                                                    {job.latest_checkpoint && (
+                                                        <div className="text-[9px] text-blue-400 truncate" title={job.latest_checkpoint}>
+                                                            {job.latest_checkpoint}
+                                                        </div>
+                                                    )}
+                                                    <div className="text-[9px] text-muted-foreground truncate">
+                                                        best={job.best_program_id ?? 'n/a'} score={job.best_score ?? 'n/a'}
+                                                    </div>
                                                 </div>
                                             ))}
                                         </div>

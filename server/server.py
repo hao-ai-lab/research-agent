@@ -302,6 +302,8 @@ class AlertRecord(BaseModel):
     run_id: str
     timestamp: float
     severity: str = "warning"
+    mode: str = "blocking"  # advisory | blocking
+    source: Optional[str] = None
     message: str
     choices: List[str]
     status: str = "pending"  # pending, resolved
@@ -315,6 +317,8 @@ class CreateAlertRequest(BaseModel):
     message: str
     choices: List[str]
     severity: str = "warning"
+    mode: str = "blocking"  # advisory | blocking
+    source: Optional[str] = None
 
 
 class RespondAlertRequest(BaseModel):
@@ -719,6 +723,9 @@ plans: Dict[str, dict] = {}
 # Access via wild_loop_mod.wild_mode_enabled / wild_loop_state (imported ref)
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
+v2_human_signals: Dict[str, dict] = {}
+openevolve_jobs: Dict[str, dict] = {}
+v2_resolved_event_ids: set[str] = set()
 
 
 # WildEventQueue class + wild_event_queue instance → imported from wild_loop module
@@ -1878,7 +1885,14 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     # Build sidecar command
     server_url = SERVER_CALLBACK_URL
     run_workdir = run_data.get("workdir") or WORKDIR
-    
+    human_wait_timeout_seconds = 600
+    try:
+        current_v2 = wild_v2_engine.session if "wild_v2_engine" in globals() else None
+        if current_v2 and getattr(current_v2, "human_away_timeout_seconds", None):
+            human_wait_timeout_seconds = max(1, int(current_v2.human_away_timeout_seconds))
+    except Exception:
+        human_wait_timeout_seconds = 600
+
     if getattr(sys, "frozen", False):
         sidecar_cmd = (
             f"{shlex.quote(sys.executable)} --run-sidecar "
@@ -1886,7 +1900,8 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
             f"--server_url {shlex.quote(server_url)} "
             f"--command_file {shlex.quote(command_file)} "
             f"--agent_run_dir {shlex.quote(run_dir)} "
-            f"--workdir {shlex.quote(run_workdir)}"
+            f"--workdir {shlex.quote(run_workdir)} "
+            f"--human_wait_timeout_seconds {human_wait_timeout_seconds}"
         )
     else:
         sidecar_cmd = (
@@ -1895,7 +1910,8 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
             f'--server_url {shlex.quote(server_url)} '
             f'--command_file {shlex.quote(command_file)} '
             f'--agent_run_dir {shlex.quote(run_dir)} '
-            f'--workdir {shlex.quote(run_workdir)}'
+            f'--workdir {shlex.quote(run_workdir)} '
+            f'--human_wait_timeout_seconds {human_wait_timeout_seconds}'
         )
     if USER_AUTH_TOKEN:
         sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
@@ -3540,6 +3556,10 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
     severity = (req.severity or "warning").strip().lower()
     if severity not in ["info", "warning", "critical"]:
         severity = "warning"
+    mode = (req.mode or "blocking").strip().lower()
+    if mode not in ["advisory", "blocking"]:
+        mode = "blocking"
+    source = (req.source or "").strip() or "sidecar"
 
     alert_id = uuid.uuid4().hex
     alert = AlertRecord(
@@ -3547,6 +3567,8 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
         run_id=run_id,
         timestamp=time.time(),
         severity=severity,
+        mode=mode,
+        source=source,
         message=req.message,
         choices=req.choices,
         status="pending",
@@ -3580,7 +3602,7 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
                 run_data = runs.get(run_id, {})
                 user_visible_message = (
                     f"Resolve alert {alert_id} for {run_data.get('name', run_id)}. "
-                    f"Severity: {severity}. Message: {req.message}"
+                    f"Severity: {severity}. Mode: {mode}. Source: {source}. Message: {req.message}"
                 )
                 prompt = (
                     "[SYSTEM] Wild mode is ON. Be proactive and resolve the alert if safe.\n"
@@ -3590,6 +3612,8 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
                     f"Run: {run_data.get('name', run_id)}\n"
                     f"Command: {run_data.get('command', '')}\n"
                     f"Severity: {severity}\n"
+                    f"Mode: {mode}\n"
+                    f"Source: {source}\n"
                     f"Message: {req.message}\n"
                     f"Choices: {', '.join(req.choices)}\n"
                     "If a rerun is needed, explain why and what you would change."
@@ -3851,12 +3875,195 @@ class WildV2StartRequest(BaseModel):
     chat_session_id: Optional[str] = None
     max_iterations: int = 25
     wait_seconds: float = 30.0
+    autonomy_level: str = "balanced"
+    queue_modify_enabled: bool = True
+    human_away_timeout_seconds: int = 600
 
 class WildV2SteerRequest(BaseModel):
     context: str
 
 class WildV2ResolveRequest(BaseModel):
     event_ids: list
+
+
+class WildV2HumanSignalRequest(BaseModel):
+    mode: str
+    severity: str = "warning"
+    title: str
+    detail: str
+    source: str = "wild_v2_agent"
+    session_id: str
+    metadata: Optional[dict] = None
+
+
+class WildV2OpenEvolveStartRequest(BaseModel):
+    mode: str  # smoke | real
+    initial_program: str
+    evaluation_file: str
+    config: Optional[str] = None
+    iterations: Optional[int] = None
+    output_dir: Optional[str] = None
+    name: Optional[str] = None
+
+
+def _find_latest_openevolve_checkpoint(output_dir: str) -> Optional[str]:
+    checkpoint_root = os.path.join(output_dir, "checkpoints")
+    if not os.path.isdir(checkpoint_root):
+        return None
+
+    latest_path: Optional[str] = None
+    latest_mtime = 0.0
+    try:
+        for name in os.listdir(checkpoint_root):
+            if not name.startswith("checkpoint_"):
+                continue
+            path = os.path.join(checkpoint_root, name)
+            if not os.path.isdir(path):
+                continue
+            mtime = os.path.getmtime(path)
+            if mtime >= latest_mtime:
+                latest_mtime = mtime
+                latest_path = path
+    except Exception:
+        return None
+    return latest_path
+
+
+def _parse_openevolve_checkpoint(checkpoint_dir: str) -> dict:
+    info: dict[str, Any] = {
+        "latest_checkpoint": checkpoint_dir,
+        "last_iteration": None,
+        "best_program_id": None,
+        "best_score": None,
+    }
+
+    metadata_path = os.path.join(checkpoint_dir, "metadata.json")
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+            info["last_iteration"] = metadata.get("last_iteration")
+            info["best_program_id"] = metadata.get("best_program_id")
+        except Exception:
+            pass
+
+    best_info_path = os.path.join(checkpoint_dir, "best_program_info.json")
+    if os.path.exists(best_info_path):
+        try:
+            with open(best_info_path, "r") as f:
+                best_info = json.load(f)
+            metrics = best_info.get("metrics", {}) if isinstance(best_info, dict) else {}
+            if isinstance(metrics, dict):
+                score = metrics.get("combined_score")
+                if isinstance(score, (int, float)):
+                    info["best_score"] = float(score)
+        except Exception:
+            pass
+
+    return info
+
+
+def _refresh_openevolve_jobs() -> None:
+    now = time.time()
+    for job in openevolve_jobs.values():
+        run_id = job.get("run_id")
+        run = runs.get(run_id) if isinstance(run_id, str) else None
+        if run:
+            run_status = run.get("status")
+            if run_status in {"failed", "stopped"}:
+                job["status"] = "failed"
+            elif run_status == "finished":
+                job["status"] = "completed"
+            elif run_status in {"queued", "launching", "running", "ready"}:
+                job["status"] = "running"
+
+        output_dir = job.get("output_dir")
+        if isinstance(output_dir, str) and output_dir:
+            checkpoint = _find_latest_openevolve_checkpoint(output_dir)
+            if checkpoint:
+                parsed = _parse_openevolve_checkpoint(checkpoint)
+                job.update(parsed)
+        job["updated_at"] = now
+
+
+def _collect_v2_pending_events(session_id: Optional[str]) -> list[dict]:
+    _refresh_openevolve_jobs()
+
+    events: list[dict] = []
+
+    for alert_id, alert in active_alerts.items():
+        if alert.get("status") != "pending":
+            continue
+        event_id = f"alert-{alert_id}"
+        if event_id in v2_resolved_event_ids:
+            continue
+        events.append(
+            {
+                "id": event_id,
+                "type": "alert",
+                "title": f"Alert: {alert.get('severity', 'warning')}",
+                "detail": alert.get("message", ""),
+                "run_id": alert.get("run_id"),
+                "created_at": alert.get("timestamp", time.time()),
+                "severity": alert.get("severity", "warning"),
+                "mode": alert.get("mode", "blocking"),
+                "source": alert.get("source", "sidecar"),
+                "choices": alert.get("choices", []),
+            }
+        )
+
+    for signal_id, signal in v2_human_signals.items():
+        if signal.get("status") != "pending":
+            continue
+        if session_id and signal.get("session_id") != session_id:
+            continue
+        if signal_id in v2_resolved_event_ids:
+            continue
+        events.append(
+            {
+                "id": signal_id,
+                "type": "human_signal",
+                "title": signal.get("title", "Human signal"),
+                "detail": signal.get("detail", ""),
+                "run_id": signal.get("run_id"),
+                "created_at": signal.get("created_at", time.time()),
+                "severity": signal.get("severity", "warning"),
+                "mode": signal.get("mode", "blocking"),
+                "source": signal.get("source", "wild_v2_agent"),
+                "session_id": signal.get("session_id"),
+                "metadata": signal.get("metadata") or {},
+            }
+        )
+
+    for job_id, job in openevolve_jobs.items():
+        status = job.get("status", "running")
+        event_id = f"openevolve-{job_id}-{status}"
+        if event_id in v2_resolved_event_ids:
+            continue
+
+        if status not in {"running", "completed", "failed"}:
+            continue
+        detail = (
+            f"status={status} "
+            f"iteration={job.get('last_iteration', 'n/a')} "
+            f"checkpoint={job.get('latest_checkpoint', 'n/a')}"
+        )
+        events.append(
+            {
+                "id": event_id,
+                "type": "openevolve",
+                "title": f"OpenEvolve {status}: {job.get('name', job_id)}",
+                "detail": detail,
+                "run_id": job.get("run_id"),
+                "created_at": job.get("created_at", time.time()),
+                "source": "openevolve_bridge",
+                "mode": "advisory",
+                "severity": "info" if status == "running" else ("warning" if status == "failed" else "info"),
+            }
+        )
+
+    events.sort(key=lambda e: e.get("created_at", 0), reverse=True)
+    return events
 
 
 @app.post("/wild/v2/start")
@@ -3867,6 +4074,9 @@ async def wild_v2_start(req: WildV2StartRequest):
         chat_session_id=req.chat_session_id,
         max_iterations=req.max_iterations,
         wait_seconds=req.wait_seconds,
+        autonomy_level=req.autonomy_level,
+        queue_modify_enabled=req.queue_modify_enabled,
+        human_away_timeout_seconds=req.human_away_timeout_seconds,
     )
     return result
 
@@ -3892,39 +4102,27 @@ async def wild_v2_resume():
 @app.get("/wild/v2/status")
 async def wild_v2_status():
     """Get current V2 session state, plan, and history."""
-    return wild_v2_engine.get_status()
+    status = wild_v2_engine.get_status()
+    session_id = status.get("session_id") if isinstance(status, dict) else None
+    pending = _collect_v2_pending_events(session_id if isinstance(session_id, str) else None)
+    _refresh_openevolve_jobs()
+
+    if isinstance(status, dict):
+        status["pending_events_count"] = len(pending)
+        status["pending_events"] = pending
+        status["system_health"] = WildV2Engine.get_system_health_from_runs(runs)
+        status["openevolve_jobs"] = sorted(
+            [dict(job) for job in openevolve_jobs.values()],
+            key=lambda j: j.get("updated_at", 0),
+            reverse=True,
+        )
+    return status
 
 
 @app.get("/wild/v2/events/{session_id}")
 async def wild_v2_events(session_id: str):
-    """Get pending events for a V2 session (agent calls this).
-    
-    Events are now managed server-side in active_alerts and runs dicts.
-    """
-    events = []
-    # Collect pending alerts
-    for alert_id, alert in active_alerts.items():
-        if alert.get("status") == "pending":
-            events.append({
-                "id": alert_id,
-                "type": "alert",
-                "title": f"Alert: {alert.get('type', 'unknown')}",
-                "detail": alert.get("message", ""),
-                "run_id": alert.get("run_id"),
-                "created_at": alert.get("created_at", time.time()),
-            })
-    # Collect completed/failed runs
-    for rid, run in runs.items():
-        if run.get("status") in ("finished", "failed"):
-            events.append({
-                "id": f"run-{rid}-{run.get('status')}",
-                "type": "run_complete",
-                "title": f"Run {run.get('status')}: {run.get('name', rid)}",
-                "detail": f"Status: {run.get('status')}",
-                "run_id": rid,
-                "created_at": time.time(),
-            })
-    return events
+    """Get pending V2 events for a session."""
+    return _collect_v2_pending_events(session_id)
 
 
 @app.post("/wild/v2/events/{session_id}/resolve")
@@ -3932,10 +4130,35 @@ async def wild_v2_resolve_events(session_id: str, req: WildV2ResolveRequest):
     """Mark events as resolved (agent calls this after handling)."""
     resolved = 0
     ids_to_resolve = set(req.event_ids)
-    for alert_id in list(active_alerts.keys()):
-        if alert_id in ids_to_resolve:
-            active_alerts[alert_id]["status"] = "resolved"
+
+    for event_id in ids_to_resolve:
+        handled = False
+        if event_id.startswith("alert-"):
+            alert_id = event_id[len("alert-") :]
+            alert = active_alerts.get(alert_id)
+            if alert and alert.get("status") == "pending":
+                alert["status"] = "resolved"
+                handled = True
+        elif event_id in active_alerts:
+            alert = active_alerts.get(event_id)
+            if alert and alert.get("status") == "pending":
+                alert["status"] = "resolved"
+                handled = True
+
+        signal = v2_human_signals.get(event_id)
+        if signal and signal.get("status") == "pending":
+            signal["status"] = "resolved"
+            handled = True
+
+        if event_id.startswith("openevolve-"):
+            handled = True
+
+        if handled:
+            v2_resolved_event_ids.add(event_id)
             resolved += 1
+
+    if resolved:
+        save_alerts_state()
     return {"resolved": resolved}
 
 
@@ -3943,6 +4166,171 @@ async def wild_v2_resolve_events(session_id: str, req: WildV2ResolveRequest):
 async def wild_v2_system_health():
     """Get system utilization (agent calls this to check resources)."""
     return WildV2Engine.get_system_health_from_runs(runs)
+
+
+@app.post("/wild/v2/human-signal")
+async def wild_v2_human_signal(req: WildV2HumanSignalRequest):
+    """Create a human-facing signal emitted by wild-v2 or side systems."""
+    mode = (req.mode or "blocking").strip().lower()
+    if mode not in {"advisory", "blocking"}:
+        mode = "blocking"
+
+    severity = (req.severity or "warning").strip().lower()
+    if severity not in {"info", "warning", "critical"}:
+        severity = "warning"
+
+    signal_id = f"sig-{uuid.uuid4().hex[:12]}"
+    signal = {
+        "id": signal_id,
+        "mode": mode,
+        "severity": severity,
+        "title": req.title.strip() or "Human attention requested",
+        "detail": req.detail.strip() or req.title.strip() or "Human attention requested",
+        "source": req.source.strip() or "wild_v2_agent",
+        "session_id": req.session_id,
+        "metadata": req.metadata or {},
+        "status": "pending",
+        "created_at": time.time(),
+    }
+    v2_human_signals[signal_id] = signal
+
+    session = wild_v2_engine.session
+    if (
+        mode == "blocking"
+        and session
+        and session.session_id == req.session_id
+        and session.status in {"running", "paused"}
+    ):
+        session.status = "paused"
+        session.blocking_since = time.time()
+        session.blocking_reason = signal["detail"]
+        try:
+            wild_v2_engine._start_blocking_timeout_watchdog(session)
+            wild_v2_engine._save_state(session.session_id)
+        except Exception:
+            pass
+
+    logger.warning(
+        "[wild-v2] human signal created id=%s mode=%s severity=%s source=%s",
+        signal_id,
+        mode,
+        severity,
+        signal["source"],
+    )
+    return {"event_id": signal_id, "status": "pending"}
+
+
+@app.post("/wild/v2/openevolve/start")
+async def wild_v2_openevolve_start(req: WildV2OpenEvolveStartRequest):
+    """Launch an OpenEvolve job through the black-box bridge."""
+    mode = (req.mode or "smoke").strip().lower()
+    if mode not in {"smoke", "real"}:
+        raise HTTPException(status_code=400, detail="mode must be 'smoke' or 'real'")
+
+    if mode == "real":
+        try:
+            preflight = subprocess.run(
+                [sys.executable, "-m", "openevolve.cli", "--help"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if preflight.returncode != 0:
+                detail = (preflight.stderr or preflight.stdout or "").strip()
+                detail = detail[:240] if detail else "unknown error"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"OpenEvolve CLI unavailable for real mode: {detail}",
+                )
+        except FileNotFoundError:
+            raise HTTPException(status_code=400, detail="Python runtime not available for OpenEvolve preflight")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=400, detail="OpenEvolve preflight timed out for real mode")
+
+    bridge_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openevolve_bridge.py")
+    if not os.path.exists(bridge_path):
+        raise HTTPException(status_code=500, detail="openevolve_bridge.py not found")
+
+    run_id = uuid.uuid4().hex[:12]
+    job_id = f"oe-{uuid.uuid4().hex[:10]}"
+    output_dir = req.output_dir or os.path.join(DATA_DIR, "openevolve", job_id)
+    os.makedirs(output_dir, exist_ok=True)
+
+    cmd_parts = [
+        shlex.quote(sys.executable),
+        shlex.quote(bridge_path),
+        "--mode",
+        shlex.quote(mode),
+        "--output_dir",
+        shlex.quote(output_dir),
+        "--initial_program",
+        shlex.quote(req.initial_program),
+        "--evaluation_file",
+        shlex.quote(req.evaluation_file),
+    ]
+    if req.config:
+        cmd_parts.extend(["--config", shlex.quote(req.config)])
+    if req.iterations is not None:
+        cmd_parts.extend(["--iterations", str(int(req.iterations))])
+
+    run_name = req.name or f"OpenEvolve {mode} ({job_id})"
+    run_data = {
+        "name": run_name,
+        "command": " ".join(cmd_parts),
+        "workdir": WORKDIR,
+        "status": "queued",
+        "created_at": time.time(),
+        "is_archived": False,
+        "sweep_id": None,
+        "parent_run_id": None,
+        "origin_alert_id": None,
+        "tmux_window": None,
+        "run_dir": None,
+        "exit_code": None,
+        "error": None,
+        "wandb_dir": None,
+        "run_type": "openevolve",
+    }
+    runs[run_id] = run_data
+    save_runs_state()
+
+    try:
+        tmux_window = launch_run_in_tmux(run_id, run_data)
+    except Exception as err:
+        run_data["status"] = "failed"
+        run_data["error"] = f"Failed to launch openevolve bridge: {err}"
+        save_runs_state()
+        raise HTTPException(status_code=500, detail=str(err))
+
+    openevolve_jobs[job_id] = {
+        "id": job_id,
+        "name": run_name,
+        "run_id": run_id,
+        "status": "running",
+        "mode": mode,
+        "output_dir": output_dir,
+        "latest_checkpoint": None,
+        "last_iteration": None,
+        "best_program_id": None,
+        "best_score": None,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+    }
+
+    logger.info(
+        "[openevolve] started job_id=%s run_id=%s mode=%s output_dir=%s",
+        job_id,
+        run_id,
+        mode,
+        output_dir,
+    )
+    return {
+        "job_id": job_id,
+        "run_id": run_id,
+        "tmux_window": tmux_window,
+        "output_dir": output_dir,
+        "mode": mode,
+    }
 
 
 @app.get("/wild/v2/plan/{session_id}")

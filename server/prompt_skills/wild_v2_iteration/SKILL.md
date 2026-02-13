@@ -100,6 +100,18 @@ If you need to **wait for runs/experiments** and have nothing else to do:
 <promise>WAITING</promise>
 ```
 
+If you detect a weird signal and want human visibility, emit:
+```json
+<human_signal>{"mode":"advisory","severity":"warning","title":"Something looks off","detail":"I saw X and I will try Y while you review.","source":"wild_v2_agent","metadata":{"iteration":"{{iteration}}"}}</human_signal>
+```
+Use `mode="advisory"` when you can continue safely.
+
+If you cannot proceed safely without human input, emit:
+```json
+<human_signal>{"mode":"blocking","severity":"critical","title":"Blocked on unknown failure","detail":"I cannot safely proceed because ...","source":"wild_v2_agent","metadata":{"iteration":"{{iteration}}"}}</human_signal>
+```
+Use `mode="blocking"` only when you need the system to pause/stop for human input.
+
 ## Environment Setup
 
 If no environment is set up yet, create one before running experiments:

@@ -76,6 +76,8 @@ def trigger_alert(
     message: str,
     choices: list[str],
     severity: str = "warning",
+    mode: str = "blocking",
+    source: str = "sidecar",
     auth_token: str | None = None,
 ) -> str | None:
     """Create alert via server and return alert_id."""
@@ -83,6 +85,8 @@ def trigger_alert(
         "message": message,
         "choices": choices,
         "severity": severity,
+        "mode": mode,
+        "source": source,
     }
     try:
         logger.info("Triggering alert: %s", message)
@@ -197,6 +201,7 @@ def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
             "action": "alert",
             "message": "Training loss became NaN/Inf. This run is unstable.",
             "severity": "critical",
+            "mode": "blocking",
             "choices": ["Ignore", "Stop Job"],
             "source": "rulebased",
             "signature": signature,
@@ -240,6 +245,7 @@ def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
         "action": "alert",
         "message": message,
         "severity": "warning",
+        "mode": "blocking",
         "choices": ["Ignore", "Stop Job"],
         "source": "rulebased",
         "signature": signature,
@@ -354,6 +360,7 @@ def alert_judge(job_id: str, wandb_dir: str, workdir: str, state: dict) -> dict:
         "action": "alert",
         "message": message,
         "severity": decision.get("severity") or "warning",
+        "mode": "advisory",
         "choices": decision.get("choices") or ["Ignore", "Stop Job"],
         "source": "alert_judge",
         "signature": signature,
@@ -365,6 +372,7 @@ def maybe_trigger_manual_alert(
     job_id: str,
     workdir: str,
     run_dir: str,
+    human_wait_timeout_seconds: int = 600,
     auth_token: str | None = None,
 ) -> bool:
     """Manual trigger path for testing alert flow."""
@@ -384,13 +392,18 @@ def maybe_trigger_manual_alert(
         message="Manual Trigger Detected",
         choices=["Ignore", "Stop Job"],
         severity="warning",
+        mode="blocking",
+        source="manual_trigger",
         auth_token=auth_token,
     )
     if not alert_id:
         return False
 
-    response = wait_for_response(run_dir, alert_id)
+    response = wait_for_response(run_dir, alert_id, timeout_seconds=human_wait_timeout_seconds)
     logger.info("Manual alert response: %s", response)
+    if response is None:
+        logger.warning("Manual alert timed out; safe stopping job")
+        return True
     return should_stop_from_choice(response)
 
 
@@ -399,6 +412,7 @@ def apply_alert_decision(
     job_id: str,
     run_dir: str,
     decision: dict | None,
+    human_wait_timeout_seconds: int = 600,
     auth_token: str | None = None,
 ) -> bool:
     if not decision or decision.get("action") != "alert":
@@ -406,6 +420,9 @@ def apply_alert_decision(
 
     message = decision.get("message") or "Metric anomaly detected."
     source = decision.get("source") or "alerts"
+    mode = (decision.get("mode") or "blocking").strip().lower()
+    if mode not in {"advisory", "blocking"}:
+        mode = "blocking"
     logger.warning("%s produced alert: %s", source, message)
 
     alert_id = trigger_alert(
@@ -414,13 +431,22 @@ def apply_alert_decision(
         message=message,
         choices=decision.get("choices") or ["Ignore", "Stop Job"],
         severity=decision.get("severity") or "warning",
+        mode=mode,
+        source=source,
         auth_token=auth_token,
     )
     if not alert_id:
         return False
 
-    response = wait_for_response(run_dir, alert_id)
+    if mode == "advisory":
+        logger.info("Advisory alert (%s): no blocking wait", source)
+        return False
+
+    response = wait_for_response(run_dir, alert_id, timeout_seconds=human_wait_timeout_seconds)
     logger.info("Alert response (%s): %s", source, response)
+    if response is None:
+        logger.warning("Blocking alert (%s) timed out; safe stopping job", source)
+        return True
     return should_stop_from_choice(response)
 
 
@@ -472,6 +498,7 @@ def monitor_job(
     command: str,
     workdir: str,
     run_dir: str,
+    human_wait_timeout_seconds: int = 600,
     auth_token: str | None = None,
 ):
     """Main job monitoring loop."""
@@ -546,7 +573,14 @@ def monitor_job(
                     report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
 
             # Manual alert trigger path (for testing and operations)
-            if maybe_trigger_manual_alert(server_url, job_id, workdir, run_dir, auth_token=auth_token):
+            if maybe_trigger_manual_alert(
+                server_url,
+                job_id,
+                workdir,
+                run_dir,
+                human_wait_timeout_seconds=human_wait_timeout_seconds,
+                auth_token=auth_token,
+            ):
                 logger.info("Stopping job due to manual alert response")
                 job_pane.cmd("kill-pane")
                 report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
@@ -555,14 +589,28 @@ def monitor_job(
             # Rule-based alerts first, then LLM alert judge.
             if found_wandb_dir:
                 rule_decision = rulebased_alerts(job_id, found_wandb_dir, alert_state)
-                if apply_alert_decision(server_url, job_id, run_dir, rule_decision, auth_token=auth_token):
+                if apply_alert_decision(
+                    server_url,
+                    job_id,
+                    run_dir,
+                    rule_decision,
+                    human_wait_timeout_seconds=human_wait_timeout_seconds,
+                    auth_token=auth_token,
+                ):
                     logger.info("Stopping job due to rulebased alert response")
                     job_pane.cmd("kill-pane")
                     report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
                     return
 
                 judge_decision = alert_judge(job_id, found_wandb_dir, workdir, alert_state)
-                if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
+                if apply_alert_decision(
+                    server_url,
+                    job_id,
+                    run_dir,
+                    judge_decision,
+                    human_wait_timeout_seconds=human_wait_timeout_seconds,
+                    auth_token=auth_token,
+                ):
                     logger.info("Stopping job due to alert_judge response")
                     job_pane.cmd("kill-pane")
                     report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
@@ -604,6 +652,12 @@ def main(argv: list[str] | None = None):
         default=os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", ""),
         help="Optional X-Auth-Token for server callbacks",
     )
+    parser.add_argument(
+        "--human_wait_timeout_seconds",
+        type=int,
+        default=600,
+        help="How long to wait for blocking human responses before safe stop",
+    )
     args = parser.parse_args(argv)
     
     # Read command from file
@@ -628,6 +682,7 @@ def main(argv: list[str] | None = None):
         command=command,
         workdir=args.workdir or os.getcwd(),
         run_dir=args.agent_run_dir or "/tmp",
+        human_wait_timeout_seconds=max(1, int(args.human_wait_timeout_seconds)),
         auth_token=args.auth_token or None,
     )
 

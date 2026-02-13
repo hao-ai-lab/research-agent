@@ -27,6 +27,7 @@ try:
         PromptContext,
         build_iteration_prompt,
         build_planning_prompt,
+        parse_human_signal,
         parse_plan,
         parse_promise,
         parse_summary,
@@ -36,6 +37,7 @@ except ImportError:
         PromptContext,
         build_iteration_prompt,
         build_planning_prompt,
+        parse_human_signal,
         parse_plan,
         parse_promise,
         parse_summary,
@@ -64,6 +66,9 @@ class WildV2Session:
     steer_context: str = ""          # user-injected context for next iter
     chat_session_id: Optional[str] = None
     wait_seconds: float = 30.0       # sleep between iterations when WAITING
+    autonomy_level: str = "balanced"  # cautious | balanced | full
+    queue_modify_enabled: bool = True
+    human_away_timeout_seconds: int = 600
 
     # Per-iteration OpenCode session IDs (for debugging)
     opencode_sessions: list = field(default_factory=list)
@@ -71,6 +76,8 @@ class WildV2Session:
     # Struggle detection
     no_progress_streak: int = 0      # consecutive iterations with no file changes
     short_iteration_count: int = 0   # iterations < 30s
+    blocking_since: Optional[float] = None
+    blocking_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -88,6 +95,11 @@ class WildV2Session:
             "opencode_sessions": self.opencode_sessions,
             "no_progress_streak": self.no_progress_streak,
             "short_iteration_count": self.short_iteration_count,
+            "autonomy_level": self.autonomy_level,
+            "queue_modify_enabled": self.queue_modify_enabled,
+            "human_away_timeout_seconds": self.human_away_timeout_seconds,
+            "blocking_since": self.blocking_since,
+            "blocking_reason": self.blocking_reason,
         }
 
 
@@ -131,6 +143,7 @@ class WildV2Engine:
 
         self._session: Optional[WildV2Session] = None
         self._task: Optional[asyncio.Task] = None
+        self._blocking_timeout_task: Optional[asyncio.Task] = None
 
     # -- Properties --
 
@@ -150,6 +163,9 @@ class WildV2Engine:
         chat_session_id: Optional[str] = None,
         max_iterations: int = 25,
         wait_seconds: float = 30.0,
+        autonomy_level: str = "balanced",
+        queue_modify_enabled: bool = True,
+        human_away_timeout_seconds: int = 600,
     ) -> dict:
         """Start a new V2 wild session."""
         logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d", goal[:80], chat_session_id, max_iterations)
@@ -157,6 +173,7 @@ class WildV2Engine:
         if self._session and self._session.status == "running":
             logger.info("[wild-v2] Existing session running, stopping first")
             self.stop()
+        self._cancel_blocking_timeout_watchdog()
 
         sid = f"wild-{uuid.uuid4().hex[:8]}"
         self._session = WildV2Session(
@@ -166,6 +183,9 @@ class WildV2Engine:
             started_at=time.time(),
             chat_session_id=chat_session_id,
             wait_seconds=wait_seconds,
+            autonomy_level=autonomy_level,
+            queue_modify_enabled=queue_modify_enabled,
+            human_away_timeout_seconds=max(1, int(human_away_timeout_seconds)),
         )
 
         # Create session storage dir
@@ -209,6 +229,7 @@ class WildV2Engine:
         if not self._session:
             return {"stopped": False}
 
+        self._cancel_blocking_timeout_watchdog()
         self._session.status = "done"
         self._session.finished_at = time.time()
 
@@ -228,6 +249,9 @@ class WildV2Engine:
 
     def resume(self) -> dict:
         if self._session and self._session.status == "paused":
+            self._cancel_blocking_timeout_watchdog()
+            self._session.blocking_since = None
+            self._session.blocking_reason = None
             self._session.status = "running"
             self._save_state(self._session.session_id)
             try:
@@ -254,7 +278,7 @@ class WildV2Engine:
             return {"active": False}
 
         d = self._session.to_dict()
-        d["active"] = self._session.status == "running"
+        d["active"] = self._session.status in {"running", "paused"}
 
         # System health is served via /wild/v2/system-health endpoint
 
@@ -469,8 +493,16 @@ class WildV2Engine:
                 promise = parse_promise(full_text)
                 new_plan = parse_plan(full_text)
                 summary = parse_summary(full_text) or full_text[:300]
+                human_signal = parse_human_signal(full_text)
                 logger.info("[wild-v2] Parsed: promise=%s, has_plan=%s, summary=%s",
                            promise, bool(new_plan), summary[:80].replace('\n', ' '))
+                if human_signal:
+                    logger.info(
+                        "[wild-v2] Parsed human signal: mode=%s severity=%s title=%s",
+                        human_signal.get("mode"),
+                        human_signal.get("severity"),
+                        human_signal.get("title"),
+                    )
 
                 # 4. Update plan in memory (tasks.md is managed by agent on disk)
                 if new_plan:
@@ -532,6 +564,22 @@ class WildV2Engine:
                 # 10. Save state
                 self._save_state(session.session_id)
 
+                # 10.5 Human signal handling
+                if human_signal:
+                    await self._emit_human_signal(session, human_signal)
+                    if human_signal.get("mode") == "blocking":
+                        session.status = "paused"
+                        session.blocking_since = time.time()
+                        session.blocking_reason = human_signal.get("detail", "Blocked by human signal")
+                        self._start_blocking_timeout_watchdog(session)
+                        self._save_state(session.session_id)
+                        logger.warning(
+                            "[wild-v2] Blocking human signal paused session %s (timeout=%ss)",
+                            session.session_id,
+                            session.human_away_timeout_seconds,
+                        )
+                        break
+
                 # 11. Check promise
                 logger.info("[wild-v2] ========== Iteration %d/%d END (promise=%s, duration=%.1fs) ==========",
                            session.iteration, session.max_iterations, promise, iter_duration)
@@ -567,6 +615,63 @@ class WildV2Engine:
         finally:
             self._save_state(session.session_id)
             logger.info("[wild-v2] Loop ended for session %s (status=%s)", session.session_id, session.status)
+
+    async def _emit_human_signal(self, session: "WildV2Session", payload: dict):
+        """Forward a parsed human signal to the server for visibility/queueing."""
+        body = {
+            "mode": payload.get("mode", "blocking"),
+            "severity": payload.get("severity", "warning"),
+            "title": payload.get("title", "Human attention requested"),
+            "detail": payload.get("detail", ""),
+            "source": payload.get("source", "wild_v2_agent"),
+            "session_id": session.session_id,
+            "metadata": payload.get("metadata") or {},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{self._server_url}/wild/v2/human-signal",
+                    json=body,
+                    auth=self._get_auth() if self._get_auth else None,
+                )
+                resp.raise_for_status()
+        except Exception as err:
+            logger.warning("[wild-v2] Failed emitting human signal to server: %s", err)
+
+    def _cancel_blocking_timeout_watchdog(self):
+        if self._blocking_timeout_task and not self._blocking_timeout_task.done():
+            self._blocking_timeout_task.cancel()
+        self._blocking_timeout_task = None
+
+    def _start_blocking_timeout_watchdog(self, session: "WildV2Session"):
+        self._cancel_blocking_timeout_watchdog()
+
+        async def _watchdog():
+            timeout_s = max(1, int(session.human_away_timeout_seconds))
+            blocked_since = session.blocking_since
+            await asyncio.sleep(timeout_s)
+
+            current = self._session
+            if not current or current.session_id != session.session_id:
+                return
+            if current.status != "paused":
+                return
+            if not blocked_since or current.blocking_since != blocked_since:
+                return
+
+            current.status = "failed"
+            current.finished_at = time.time()
+            reason = current.blocking_reason or "Blocking human signal timed out"
+            current.blocking_reason = f"{reason} (timeout after {timeout_s}s; safe stop)"
+            logger.error("[wild-v2] Blocking timeout reached, failing session %s", current.session_id)
+            self._save_state(current.session_id)
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                self._blocking_timeout_task = loop.create_task(_watchdog())
+        except RuntimeError:
+            self._blocking_timeout_task = None
 
     # -- OpenCode interaction --
 

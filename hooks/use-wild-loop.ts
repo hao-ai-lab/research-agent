@@ -51,7 +51,18 @@ export interface UseWildLoopResult {
   history: WildV2IterationHistory[]
   noProgressStreak: number
   shortIterationCount: number
-  pendingEvents: Array<{ id: string; type: string; title: string; detail: string }>
+  pendingEvents: Array<{
+    id: string
+    type: string
+    title: string
+    detail: string
+    severity?: string
+    mode?: string
+    source?: string
+    created_at?: number
+    run_id?: string
+    choices?: string[]
+  }>
 
   // Lifecycle
   start: (goal: string, sessionId: string) => void
@@ -89,6 +100,11 @@ export function useWildLoop(): UseWildLoopResult {
   const [status, setStatus] = useState<WildV2Status | null>(null)
   const statusRef = useRef(status)
   statusRef.current = status
+  const setupRef = useRef<WildModeSetup>({
+    awayDurationMinutes: 360,
+    autonomyLevel: 'balanced',
+    queueModifyEnabled: true,
+  })
 
   // ---- Poll backend status every 2s ----
   useEffect(() => {
@@ -115,10 +131,14 @@ export function useWildLoop(): UseWildLoopResult {
 
   const start = useCallback(async (goal: string, sessionId: string) => {
     try {
+      const setup = setupRef.current
       console.log('[wild-loop-v2] Starting: goal=%s session=%s', goal, sessionId)
       const s = await startWildV2({
         goal,
         chat_session_id: sessionId,
+        autonomy_level: setup.autonomyLevel,
+        queue_modify_enabled: setup.queueModifyEnabled,
+        human_away_timeout_seconds: Math.max(1, Math.round(setup.awayDurationMinutes * 60)),
       })
       setStatus(s)
     } catch (err) {
@@ -197,9 +217,9 @@ export function useWildLoop(): UseWildLoopResult {
 
   // ---- Apply setup from WildModeSetupPanel ----
 
-  const applySetup = useCallback(async (_setup: WildModeSetup) => {
-    // V2 setup is applied at start time via startWildV2 params
-    console.log('[wild-loop-v2] Setup will be applied on next start')
+  const applySetup = useCallback(async (setup: WildModeSetup) => {
+    setupRef.current = setup
+    console.log('[wild-loop-v2] Setup staged for next start:', setup)
   }, [])
 
   // ---- Derive return values from V2 backend state ----
@@ -249,7 +269,7 @@ export function useWildLoop(): UseWildLoopResult {
     title: e.title,
     prompt: e.detail,
     type: e.type as QueuedEvent['type'],
-    createdAt: Date.now(),
+    createdAt: e.created_at ? Math.round(e.created_at * 1000) : Date.now(),
   }))
 
   return {

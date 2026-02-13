@@ -245,7 +245,7 @@ export default function ResearchChat() {
   }, [])
 
   const events = useMemo<RunEvent[]>(() => {
-    const toEvent = alerts.map((alert) => {
+    const alertEvents = alerts.map((alert) => {
       const run = runs.find(r => r.id === alert.run_id)
       const eventId = `alert-${alert.id}`
       const baseStatus: EventStatus = alert.status === 'resolved' ? 'resolved' : 'new'
@@ -290,6 +290,46 @@ export default function ResearchChat() {
       }
     })
 
+    const wildEvents = (wildLoop.pendingEvents || [])
+      .filter((ev) => ev.type !== 'alert')
+      .map((ev) => {
+        const run = runs.find(r => r.id === ev.run_id)
+        const eventId = ev.id
+        const override = eventStatusOverrides[eventId]
+        const severity = (ev.severity || '').toLowerCase()
+        const severityType: RunEvent['type'] =
+          severity === 'critical' ? 'error' :
+            severity === 'warning' ? 'warning' : 'info'
+        const priority: RunEvent['priority'] =
+          severity === 'critical' ? 'critical' :
+            severity === 'warning' ? 'high' : 'medium'
+
+        const meta = [ev.type, ev.mode, ev.source].filter(Boolean).join(' • ')
+        return {
+          id: eventId,
+          runId: ev.run_id || 'system',
+          runName: run?.name || (ev.run_id ? `Run ${ev.run_id}` : 'System'),
+          runAlias: run?.alias,
+          type: severityType,
+          priority,
+          status: override || 'new',
+          title: ev.title,
+          summary: ev.detail,
+          description: meta ? `${ev.detail}\n\n${meta}` : ev.detail,
+          timestamp: new Date((ev.created_at || Date.now() / 1000) * 1000),
+          choices: ev.choices,
+          suggestedActions: ev.choices?.length
+            ? ev.choices.map(choice => `Respond with: ${choice}`)
+            : undefined,
+        } as RunEvent
+      })
+
+    const mergedById = new Map<string, RunEvent>()
+    for (const event of [...alertEvents, ...wildEvents]) {
+      mergedById.set(event.id, event)
+    }
+    const toEvent = Array.from(mergedById.values())
+
     const priorityRank: Record<RunEvent['priority'], number> = {
       critical: 0,
       high: 1,
@@ -303,7 +343,7 @@ export default function ResearchChat() {
       }
       return b.timestamp.getTime() - a.timestamp.getTime()
     })
-  }, [alerts, runs, eventStatusOverrides])
+  }, [alerts, runs, eventStatusOverrides, wildLoop.pendingEvents])
 
   useEffect(() => {
     const syncWildMode = async () => {
@@ -430,10 +470,13 @@ export default function ResearchChat() {
     handleTabChange('chat')
 
     if (!existingSessionId) {
+      const refLine = event.alertId
+        ? `Alert: @alert:${alert?.id || event.alertId}`
+        : `Event: ${event.id}`
       const prompt = [
         `New alert detected. Please diagnose and suggest the safest next steps.`,
         ``,
-        `Alert: @alert:${alert?.id || event.alertId}`,
+        refLine,
         `Severity: ${alert?.severity || event.type}`,
         `Message: ${event.summary}`,
         `Run: ${run?.name || event.runName} (${event.runId})`,

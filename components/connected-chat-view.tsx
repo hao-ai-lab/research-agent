@@ -125,6 +125,10 @@ export function ConnectedChatView({
     // Counter to force re-render when provenance is added (ref alone won't trigger)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
+    const initializedAlertNotificationsRef = useRef(false)
+    const initializedSignalNotificationsRef = useRef(false)
+    const seenAlertNotificationIdsRef = useRef<Set<string>>(new Set())
+    const seenSignalNotificationIdsRef = useRef<Set<string>>(new Set())
 
     // Web notification hook
     const { notify } = useWebNotification(webNotificationsEnabled)
@@ -295,6 +299,35 @@ export function ConnectedChatView({
         }
         prevStreamingRef.current = streamingState.isStreaming
     }, [streamingState.isStreaming, wildLoop, notify])
+
+    // Notify on newly appearing pending alerts / signals
+    useEffect(() => {
+        const pendingAlerts = alerts.filter((a) => a.status === 'pending')
+        if (!initializedAlertNotificationsRef.current) {
+            initializedAlertNotificationsRef.current = true
+            seenAlertNotificationIdsRef.current = new Set(pendingAlerts.map((a) => a.id))
+        } else {
+            for (const alert of pendingAlerts) {
+                if (seenAlertNotificationIdsRef.current.has(alert.id)) continue
+                seenAlertNotificationIdsRef.current.add(alert.id)
+                const title = alert.severity === 'critical' ? '🚨 Critical Alert' : '⚠️ New Alert'
+                notify(title, alert.message.slice(0, 140))
+            }
+        }
+
+        const pendingSignals = (wildLoop?.pendingEvents || []).filter((e) => e.type !== 'alert')
+        if (!initializedSignalNotificationsRef.current) {
+            initializedSignalNotificationsRef.current = true
+            seenSignalNotificationIdsRef.current = new Set(pendingSignals.map((e) => e.id))
+        } else {
+            for (const signal of pendingSignals) {
+                if (seenSignalNotificationIdsRef.current.has(signal.id)) continue
+                seenSignalNotificationIdsRef.current.add(signal.id)
+                const modeLabel = signal.mode ? `${signal.mode} ` : ''
+                notify(`🧭 ${modeLabel}Signal`, `${signal.title}: ${signal.detail}`.slice(0, 140))
+            }
+        }
+    }, [alerts, wildLoop?.pendingEvents, notify])
 
     // Auto-reconnect to the next iteration's stream when wild loop is active.
     // When the V2 backend finishes one iteration, it sends `session_status: idle`,

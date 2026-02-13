@@ -7,8 +7,9 @@ No inline fallback templates — the SKILL.md files are the single source of tru
 """
 
 import re
+import json
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +34,63 @@ def parse_summary(text: str) -> Optional[str]:
     """Parse <summary>...</summary> from agent output."""
     m = re.search(r"<summary>([\s\S]*?)</summary>", text)
     return m.group(1).strip() if m else None
+
+
+def parse_human_signal(text: str) -> Optional[dict]:
+    """Parse <human_signal>{json}</human_signal> from agent output.
+
+    Expected JSON keys:
+      - mode: advisory|blocking
+      - severity: info|warning|critical
+      - title: short title
+      - detail: longer context
+      - source: optional source hint
+      - metadata: optional dict
+    """
+    m = re.search(r"<human_signal>([\s\S]*?)</human_signal>", text)
+    if not m:
+        return None
+
+    raw = m.group(1).strip()
+    if not raw:
+        return None
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    mode = str(payload.get("mode", "blocking")).strip().lower()
+    if mode not in {"advisory", "blocking"}:
+        return None
+
+    severity = str(payload.get("severity", "warning")).strip().lower()
+    if severity not in {"info", "warning", "critical"}:
+        severity = "warning"
+
+    title = str(payload.get("title", "")).strip()
+    detail = str(payload.get("detail", "")).strip()
+    if not title:
+        title = "Human attention requested"
+    if not detail:
+        detail = title
+
+    source = str(payload.get("source", "")).strip() or "wild_v2_agent"
+    metadata = payload.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        metadata = None
+
+    return {
+        "mode": mode,
+        "severity": severity,
+        "title": title,
+        "detail": detail,
+        "source": source,
+        "metadata": metadata or {},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +194,9 @@ def _api_catalog(ctx: PromptContext) -> str:
 ### Alerts & Events
 - `GET  {s}/wild/v2/events/{sid}` — Pending events for this session
 - `POST {s}/wild/v2/events/{sid}/resolve` — Mark events handled (body: `{{"event_ids": ["<id>"]}}`)
+- `POST {s}/wild/v2/human-signal` — Emit a human escalation signal from this loop
 - `GET  {s}/wild/v2/system-health` — System utilization (running/queued/completed/failed counts)
+- `POST {s}/wild/v2/openevolve/start` — Launch an OpenEvolve job (smoke or real mode)
 
 ### Skills (prompt templates)
 - `GET  {s}/prompt-skills` — List available prompt skills

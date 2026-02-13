@@ -372,6 +372,8 @@ export interface Alert {
     run_id: string
     timestamp: number
     severity: 'info' | 'warning' | 'critical'
+    mode?: 'advisory' | 'blocking'
+    source?: string
     message: string
     choices: string[]
     status: 'pending' | 'resolved'
@@ -1042,7 +1044,18 @@ export interface WildV2Status {
     started_at?: number
     finished_at?: number | null
     pending_events_count?: number
-    pending_events?: Array<{ id: string; type: string; title: string; detail: string }>
+    pending_events?: Array<{
+        id: string
+        type: string
+        title: string
+        detail: string
+        severity?: string
+        mode?: string
+        source?: string
+        created_at?: number
+        run_id?: string
+        choices?: string[]
+    }>
     steer_context?: string
     no_progress_streak?: number
     short_iteration_count?: number
@@ -1054,6 +1067,19 @@ export interface WildV2Status {
         total: number
         max_concurrent: number
     }
+    openevolve_jobs?: Array<{
+        id: string
+        run_id: string
+        status: string
+        mode: 'smoke' | 'real'
+        output_dir: string
+        latest_checkpoint?: string | null
+        last_iteration?: number | null
+        best_program_id?: string | null
+        best_score?: number | null
+        updated_at: number
+        name?: string
+    }>
 }
 
 /**
@@ -1064,6 +1090,9 @@ export async function startWildV2(params: {
     chat_session_id?: string
     max_iterations?: number
     wait_seconds?: number
+    autonomy_level?: 'cautious' | 'balanced' | 'full'
+    queue_modify_enabled?: boolean
+    human_away_timeout_seconds?: number
 }): Promise<WildV2Status> {
     const response = await fetch(`${API_URL()}/wild/v2/start`, {
         method: 'POST',
@@ -1142,6 +1171,32 @@ export async function steerWildV2(context: string): Promise<{ ok: boolean }> {
     })
     if (!response.ok) {
         throw new Error(`Failed to steer wild v2: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function startWildV2OpenEvolve(params: {
+    mode: 'smoke' | 'real'
+    initial_program: string
+    evaluation_file: string
+    config?: string
+    iterations?: number
+    output_dir?: string
+    name?: string
+}): Promise<{
+    job_id: string
+    run_id: string
+    tmux_window: string
+    output_dir: string
+    mode: 'smoke' | 'real'
+}> {
+    const response = await fetch(`${API_URL()}/wild/v2/openevolve/start`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(params),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to start OpenEvolve bridge: ${response.statusText}`)
     }
     return response.json()
 }
