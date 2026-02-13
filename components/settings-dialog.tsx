@@ -87,6 +87,9 @@ export function SettingsDialog({
   const [chatToolbarSizeInput, setChatToolbarSizeInput] = useState<string>(
     settings.appearance.chatToolbarButtonSizePx?.toString() ?? ''
   )
+  const [chatInputInitialHeightInput, setChatInputInitialHeightInput] = useState<string>(
+    settings.appearance.chatInputInitialHeightPx?.toString() ?? ''
+  )
   const [toolBoxHeightInput, setToolBoxHeightInput] = useState<string>(
     settings.appearance.streamingToolBoxHeightRem?.toString() ?? ''
   )
@@ -109,6 +112,10 @@ export function SettingsDialog({
   React.useEffect(() => {
     setChatToolbarSizeInput(settings.appearance.chatToolbarButtonSizePx?.toString() ?? '')
   }, [settings.appearance.chatToolbarButtonSizePx])
+
+  React.useEffect(() => {
+    setChatInputInitialHeightInput(settings.appearance.chatInputInitialHeightPx?.toString() ?? '')
+  }, [settings.appearance.chatInputInitialHeightPx])
 
   React.useEffect(() => {
     setToolBoxHeightInput(settings.appearance.streamingToolBoxHeightRem?.toString() ?? '')
@@ -452,6 +459,33 @@ export function SettingsDialog({
     setChatToolbarSizeInput(clamped.toString())
   }
 
+  const handleChatInputInitialHeightChange = (value: string, currentInput: string) => {
+    // If input was empty and spinner was clicked, browser uses min value - adjust to default (48)
+    if (!currentInput && value === '40') {
+      setChatInputInitialHeightInput('48')
+      updateAppearanceSettings({ chatInputInitialHeightPx: 48 })
+      return
+    }
+    setChatInputInitialHeightInput(value)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 40 && parsed <= 120) {
+      updateAppearanceSettings({ chatInputInitialHeightPx: parsed })
+    }
+  }
+
+  const handleChatInputInitialHeightBlur = (value: string) => {
+    if (!value.trim()) {
+      updateAppearanceSettings({ chatInputInitialHeightPx: null })
+      setChatInputInitialHeightInput('')
+      return
+    }
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(40, Math.min(120, parsed))
+    updateAppearanceSettings({ chatInputInitialHeightPx: clamped })
+    setChatInputInitialHeightInput(clamped.toString())
+  }
+
   const handleToolBoxHeightChange = (value: string, currentInput: string) => {
     if (!currentInput && value === '4') {
       setToolBoxHeightInput('7.5')
@@ -788,6 +822,24 @@ export function SettingsDialog({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
+                      <Label htmlFor="chat-input-initial-height-dialog" className="text-xs">Chat Input Initial Height (px) <span className="font-normal text-muted-foreground">40–120</span></Label>
+                      <p className="text-[11px] text-muted-foreground">Default one-line composer height before expansion</p>
+                    </div>
+                    <Input
+                      id="chat-input-initial-height-dialog"
+                      type="number"
+                      min={40}
+                      max={120}
+                      value={chatInputInitialHeightInput}
+                      onChange={(e) => handleChatInputInitialHeightChange(e.target.value, chatInputInitialHeightInput)}
+                      onBlur={(e) => handleChatInputInitialHeightBlur(e.target.value)}
+                      placeholder="48"
+                      className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
                       <Label htmlFor="tool-box-height-dialog" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">4–30</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
                     </div>
@@ -850,6 +902,7 @@ export function SettingsDialog({
                           customFontSizePx: null,
                           customButtonScalePercent: null,
                           chatToolbarButtonSizePx: null,
+                          chatInputInitialHeightPx: null,
                           streamingToolBoxHeightRem: null,
                           wildLoopTasksFontSizePx: null,
                           wildLoopHistoryFontSizePx: null,
