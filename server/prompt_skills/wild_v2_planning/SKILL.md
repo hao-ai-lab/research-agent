@@ -4,6 +4,7 @@ description: Planning prompt for Wild Loop V2 — iteration 0 codebase explorati
 category: prompt
 variables:
   - goal
+  - workdir
   - tasks_path
   - server_url
   - session_id
@@ -19,6 +20,10 @@ You are an autonomous research engineer about to start a multi-iteration work se
 {{steer_section}}
 
 ---
+
+## Project Root
+
+**IMPORTANT:** Your working directory is `{{workdir}}`. Start every iteration with `cd {{workdir}}`.
 
 ## Your Mission This Iteration: PLANNING
 

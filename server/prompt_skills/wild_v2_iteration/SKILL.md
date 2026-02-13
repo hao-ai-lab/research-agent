@@ -4,6 +4,7 @@ description: Iteration prompt for Wild Loop V2 — execution iterations 1+ with 
 category: prompt
 variables:
   - goal
+  - workdir
   - iteration
   - max_iterations
   - tasks_path
@@ -23,6 +24,10 @@ You are an autonomous research engineer running in a loop. This is **iteration {
 {{steer_section}}{{struggle_section}}
 
 ---
+
+## Project Root
+
+**IMPORTANT:** Your working directory is `{{workdir}}`. Start every iteration with `cd {{workdir}}`.
 
 ## Your Working Files
 

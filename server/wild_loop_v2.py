@@ -321,6 +321,7 @@ class WildV2Engine:
             goal=session.goal,
             iteration=session.iteration,
             max_iterations=session.max_iterations,
+            workdir=self._get_workdir(),
             tasks_path=os.path.join(session_dir, "tasks.md"),
             log_path=os.path.join(session_dir, "iteration_log.md"),
             server_url=self._server_url,

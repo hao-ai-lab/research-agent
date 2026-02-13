@@ -45,6 +45,7 @@ class PromptContext:
     goal: str
     iteration: int
     max_iterations: int
+    workdir: str              # absolute path to the user's project root
     tasks_path: str           # absolute path to tasks.md
     log_path: str             # absolute path to iteration_log.md
     server_url: str
@@ -144,6 +145,10 @@ _FALLBACK_PLANNING = """You are an autonomous research engineer about to start a
 
 ---
 
+## Project Root
+
+**IMPORTANT:** Your working directory is `{workdir}`. Start every iteration with `cd {workdir}`.
+
 ## Your Mission This Iteration: PLANNING
 
 This is **iteration 0** — the planning phase.  You must:
@@ -179,6 +184,7 @@ def build_planning_prompt(
     """
     variables = {
         "goal": ctx.goal,
+        "workdir": ctx.workdir,
         "tasks_path": ctx.tasks_path,
         "server_url": ctx.server_url,
         "session_id": ctx.session_id,
@@ -207,6 +213,10 @@ _FALLBACK_ITERATION = """You are an autonomous research engineer running in a lo
 {steer_section}{struggle_section}
 
 ---
+
+## Project Root
+
+**IMPORTANT:** Your working directory is `{workdir}`. Start every iteration with `cd {workdir}`.
 
 ## Your Working Files
 
@@ -270,6 +280,7 @@ def build_iteration_prompt(
         "goal": ctx.goal,
         "iteration": str(ctx.iteration),
         "max_iterations": str(ctx.max_iterations),
+        "workdir": ctx.workdir,
         "tasks_path": ctx.tasks_path,
         "log_path": ctx.log_path,
         "server_url": ctx.server_url,
