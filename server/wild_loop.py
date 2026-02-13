@@ -19,6 +19,7 @@ import logging
 import re
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel
@@ -48,11 +49,13 @@ class WildLoopConfigRequest(BaseModel):
 
 class WildEvent(BaseModel):
     id: str
-    priority: int          # 10=user, 20=critical, 30=warning, 50=run_event, 70=analysis, 90=exploring
+    priority: int          # 10=user, 15=job_sched, 20=critical, 30=warning, 50=run_event, 70=analysis, 90=exploring
     title: str
     prompt: str
-    type: str              # "steer"|"alert"|"run_event"|"analysis"|"exploring"
+    type: str              # "steer"|"alert"|"run_event"|"analysis"|"exploring"|"job_scheduling"|"action"
     created_at: float
+    handler: Optional[str] = None          # If set, resolved by engine (no LLM)
+    handler_config: Optional[dict] = None  # Config passed to the handler
 
 
 class EnqueueEventRequest(BaseModel):
@@ -102,6 +105,116 @@ class BuildPromptResponse(BaseModel):
 
 
 # =============================================================================
+# Action Event Infrastructure
+# =============================================================================
+
+@dataclass
+class ActionResult:
+    """Return type for action event handlers."""
+    success: bool
+    summary: str = ""
+    enqueue_events: list = field(default_factory=list)   # New events to enqueue
+    state_updates: dict = field(default_factory=dict)    # Updates to wild_loop_state
+    resolve_event: bool = True                           # Mark event resolved?
+
+
+@dataclass
+class CronTask:
+    """Periodic action event that fires on a timer."""
+    name: str                       # Unique name
+    handler: str                    # Registered handler name
+    interval_seconds: float         # How often to fire
+    handler_config: dict = field(default_factory=dict)
+    priority: int = 25              # Default priority for cron events
+    last_fired: float = 0.0         # Timestamp of last fire
+    max_retries: int = 3
+
+
+# Handler registry: name → async callable(event, config, context) → ActionResult
+_action_handlers: Dict[str, Callable] = {}
+
+
+def register_action_handler(name: str, fn: Callable):
+    """Register a named handler for action events."""
+    _action_handlers[name] = fn
+    logger.debug("[wild-engine] Registered action handler: %s", name)
+
+
+def get_action_handler(name: str) -> Optional[Callable]:
+    """Look up a registered action handler by name."""
+    return _action_handlers.get(name)
+
+
+# ---------------------------------------------------------------------------
+# Built-in handler: resource_monitor
+# ---------------------------------------------------------------------------
+
+async def resource_monitor_handler(event: dict, config: dict, context: dict) -> ActionResult:
+    """Check system utilization and directly start queued runs if capacity allows.
+
+    This is a **script-based** handler — no LLM prompt is needed.
+    It checks running vs max_concurrent slots, finds queued/ready runs,
+    and starts them directly via the start_sweep helper.
+
+    Config keys:
+        max_concurrent (int): max runs before system is "full" (default 5)
+    """
+    runs = context.get("runs", {})
+    sweeps = context.get("sweeps", {})
+    start_sweep_fn = context.get("start_sweep")
+
+    running_count = sum(1 for r in runs.values() if r.get("status") == "running")
+    queued_count = sum(1 for r in runs.values() if r.get("status") in ("queued", "ready"))
+    max_concurrent = config.get("max_concurrent", 5)
+    slots = max_concurrent - running_count
+
+    if slots <= 0:
+        return ActionResult(
+            success=True,
+            summary=f"System full: {running_count}/{max_concurrent} running, {queued_count} queued — no action",
+        )
+
+    if queued_count == 0:
+        return ActionResult(
+            success=True,
+            summary=f"System OK: {running_count}/{max_concurrent} running, 0 queued — nothing to start",
+        )
+
+    # Directly start queued runs (no LLM needed)
+    started: list[str] = []
+    for sweep_id, sweep in sweeps.items():
+        if slots <= 0:
+            break
+        sweep_run_ids = sweep.get("run_ids", [])
+        queued_in_sweep = [
+            rid for rid in sweep_run_ids
+            if rid in runs and runs[rid].get("status") in ("queued", "ready")
+        ]
+        if queued_in_sweep and start_sweep_fn:
+            batch = min(len(queued_in_sweep), slots)
+            try:
+                start_sweep_fn(sweep_id, batch)
+                started.append(f"{sweep.get('name', sweep_id)}({batch})")
+                slots -= batch
+            except Exception as err:
+                logger.warning("[resource-monitor] Failed to start sweep %s: %s", sweep_id, err)
+
+    if started:
+        return ActionResult(
+            success=True,
+            summary=f"Started runs: {', '.join(started)} ({running_count + sum(int(s.split('(')[1].rstrip(')')) for s in started)}/{max_concurrent})",
+        )
+    return ActionResult(
+        success=True,
+        summary=f"Underutilized ({running_count}/{max_concurrent} running, {queued_count} queued) but no startable sweeps",
+    )
+
+register_action_handler("resource_monitor", resource_monitor_handler)
+
+
+
+
+# =============================================================================
 # Wild Event Queue (Backend Priority Queue)
 # =============================================================================
 
@@ -110,55 +223,82 @@ class WildEventQueue:
 
     Sorted by (priority ASC, created_at ASC).  Lower priority = higher urgency.
     Deduplicates by event id.
+
+    Events are persisted with a status field:
+      - "pending" (default) — waiting to be processed
+      - "resolved" — consumed/completed (kept for history)
     """
 
     def __init__(self):
         self._heap: list = []       # list of (priority, created_at, counter, event_dict)
-        self._id_set: set = set()
+        self._events: dict = {}     # id -> event_dict (all events, for lookup)
         self._counter: int = 0      # tie-breaker for heapq stability
 
     @property
     def size(self) -> int:
-        return len(self._heap)
+        """Count of pending (unresolved) events."""
+        return sum(1 for e in self._events.values() if e.get("status") == "pending")
 
     def enqueue(self, event: dict) -> bool:
         """Add an event. Returns False if the id is already present (dedup)."""
         eid = event.get("id", "")
-        if eid in self._id_set:
+        if eid in self._events:
             return False
-        self._id_set.add(eid)
+        event.setdefault("status", "pending")
+        self._events[eid] = event
         self._counter += 1
         heapq.heappush(self._heap, (event["priority"], event["created_at"], self._counter, event))
         return True
 
     def dequeue(self) -> Optional[dict]:
-        """Pop and return the highest-priority (lowest number) event, or None."""
+        """Pop and return the highest-priority pending event, or None."""
         while self._heap:
             _, _, _, event = heapq.heappop(self._heap)
             eid = event.get("id", "")
-            if eid in self._id_set:
-                self._id_set.discard(eid)
+            if eid in self._events and self._events[eid].get("status") == "pending":
+                self._events[eid]["status"] = "resolved"
                 return event
         return None
 
     def peek(self) -> Optional[dict]:
-        """Look at the next event without removing it."""
+        """Look at the next pending event without removing it."""
         for entry in self._heap:
-            if entry[3].get("id", "") in self._id_set:
-                return entry[3]
+            ev = entry[3]
+            if ev.get("id", "") in self._events and self._events[ev["id"]].get("status") == "pending":
+                return ev
         return None
 
-    def items(self) -> list:
-        """Return a sorted snapshot of all live events."""
+    def resolve(self, event_id: str) -> bool:
+        """Mark an event as resolved by ID (out-of-order consumption).
+
+        Returns True if the event was found and resolved, False otherwise.
+        """
+        if event_id in self._events and self._events[event_id].get("status") == "pending":
+            self._events[event_id]["status"] = "resolved"
+            return True
+        return False
+
+    def get_event(self, event_id: str) -> Optional[dict]:
+        """Return a specific event by ID, or None."""
+        return self._events.get(event_id)
+
+    def items(self, include_resolved: bool = False) -> list:
+        """Return a sorted snapshot of events.
+
+        By default only pending events. Set include_resolved=True for all.
+        """
         result = []
         for _, _, _, event in sorted(self._heap):
-            if event.get("id", "") in self._id_set:
+            eid = event.get("id", "")
+            if eid not in self._events:
+                continue
+            if include_resolved or self._events[eid].get("status") == "pending":
                 result.append(event)
         return result
 
     def clear(self):
         self._heap.clear()
-        self._id_set.clear()
+        self._events.clear()
         self._counter = 0
 
 
@@ -182,6 +322,8 @@ wild_loop_state: dict = {
     "autonomy_level": "balanced",
     "queue_modify_enabled": True,
     "plan_autonomy": "agent",
+    "created_sweep_ids": [],
+    "created_run_ids": [],
     "termination": {
         "max_iterations": None,
         "max_time_seconds": None,
@@ -301,6 +443,42 @@ def get_queue_state() -> dict:
     }
 
 
+def resolve_event(event_id: str) -> dict:
+    """Resolve a specific event by ID (out-of-order consumption)."""
+    event = wild_event_queue.get_event(event_id)
+    if event is None:
+        return {"resolved": False, "error": "Event not found", "event": None}
+    if event.get("status") == "resolved":
+        return {"resolved": False, "error": "Already resolved", "event": event}
+    wild_event_queue.resolve(event_id)
+    return {"resolved": True, "event": event, "queue_size": wild_event_queue.size}
+
+
+def get_all_events() -> dict:
+    """Return all events including resolved ones."""
+    return {
+        "queue_size": wild_event_queue.size,
+        "events": wild_event_queue.items(include_resolved=True),
+    }
+
+
+# =============================================================================
+# Entity Creation Tracking (called from server.py endpoints)
+# =============================================================================
+
+def record_created_entity(entity_type: str, entity_id: str):
+    """Track a sweep or run created during the current wild session.
+
+    entity_type: 'sweep' or 'run'
+    """
+    if not wild_loop_state.get("is_active"):
+        return
+    key = "created_sweep_ids" if entity_type == "sweep" else "created_run_ids"
+    if entity_id not in wild_loop_state.get(key, []):
+        wild_loop_state.setdefault(key, []).append(entity_id)
+        logger.debug("[wild-engine] Tracked %s creation: %s", entity_type, entity_id)
+
+
 # =============================================================================
 # Auto-Enqueue Helpers (called from server.py create_alert / update_run_status)
 # =============================================================================
@@ -346,6 +524,9 @@ def auto_enqueue_run_terminal(run_id: str, run_name: str, status: str, exit_code
         "created_at": time.time(),
     })
     logger.info(f"Auto-enqueued wild event for run {run_id} ({status}, priority={priority})")
+
+
+
 
 
 # =============================================================================
@@ -406,10 +587,12 @@ def build_experiment_context(
 
 # Skill ID mapping per prompt_type
 _PROMPT_TYPE_SKILL_MAP = {
+    "planning": "wild_planning",
     "exploring": "wild_exploring",
     "run_event": "wild_monitoring",
     "alert": "wild_alert",
     "analysis": "wild_analyzing",
+    "job_scheduling": "wild_job_scheduling",
 }
 
 
@@ -746,7 +929,7 @@ def parse_next_step(text: str) -> Optional[str]:
     return None
 
 
-_VALID_ROLES = {"exploring", "monitoring", "analyzing", "alert"}
+_VALID_ROLES = {"planning", "exploring", "monitoring", "analyzing", "alert", "job_scheduling"}
 
 def parse_next_role(text: str) -> Optional[str]:
     """Parse a <next_role>...</next_role> tag from the agent's response.
@@ -760,6 +943,18 @@ def parse_next_role(text: str) -> Optional[str]:
         if role in _VALID_ROLES:
             return role
         logger.warning("[wild-engine] Invalid next_role '%s', ignoring", role)
+    return None
+
+
+def parse_summary(text: str) -> Optional[str]:
+    """Parse a <summary>...</summary> tag from the agent's response.
+
+    Returns the summary string, or None if no tag found.
+    """
+    m = re.search(r"<summary>([\s\S]*?)</summary>", text)
+    if m:
+        s = m.group(1).strip()
+        return s if s else None
     return None
 
 
@@ -807,6 +1002,12 @@ class WildLoopEngine:
         # The prompt that is currently "pending" for the frontend to pick up
         self._pending_prompt: Optional[dict] = None  # WildNextPrompt-shaped dict
 
+        # ---- Action event / cron infrastructure ----
+        self._cron_tasks: List[CronTask] = []
+        self._action_timeout: float = 10.0  # seconds
+        self._action_log: List[dict] = []    # Recent action results (visible to frontend)
+        self._action_log_max: int = 50       # Cap log size
+
     def set_callbacks(
         self,
         get_runs: Callable,
@@ -849,8 +1050,8 @@ class WildLoopEngine:
 
         now = time.time()
         wild_loop_state.update({
-            "phase": "exploring",
-            "stage": "exploring",
+            "phase": "planning",
+            "stage": "planning",
             "is_active": True,
             "is_paused": False,
             "iteration": 0,
@@ -859,6 +1060,8 @@ class WildLoopEngine:
             "session_id": req.session_id,
             "started_at": now,
             "sweep_id": None,
+            "created_sweep_ids": [],
+            "created_run_ids": [],
             "termination": {
                 "max_iterations": req.max_iterations,
                 "max_time_seconds": req.max_time_seconds,
@@ -876,8 +1079,18 @@ class WildLoopEngine:
         self._paused_duration = 0.0
         self._pending_prompt = None
 
-        # Enqueue the first exploring prompt
-        self._enqueue_exploring_prompt(iteration=1)
+        self._enqueue_planning_prompt(iteration=0)
+
+        # Register default cron tasks
+        self._cron_tasks = [
+            CronTask(
+                name="resource_monitor",
+                handler="resource_monitor",
+                interval_seconds=5.0,
+                handler_config={"max_concurrent": 1},
+                priority=25,
+            ),
+        ]
 
         # Start the background polling task
         self._start_poll_task()
@@ -897,6 +1110,7 @@ class WildLoopEngine:
         wild_event_queue.clear()
         self._pending_prompt = None
         self._analysis_queued = False
+        self._cron_tasks.clear()
 
         wild_loop_state.update({
             "phase": "idle",
@@ -1004,6 +1218,12 @@ class WildLoopEngine:
             wild_loop_state["next_step_role"] = next_role
             logger.info("[wild-engine] Next step role: %s", next_role)
 
+        # Parse summary from agent response
+        summary = parse_summary(response_text)
+        if summary:
+            wild_loop_state["last_summary"] = summary
+            logger.info("[wild-engine] Step summary: %s", summary[:200])
+
         if signal == "COMPLETE":
             logger.info("[wild-engine] COMPLETE signal at iteration %d", iteration)
             self.stop()
@@ -1016,13 +1236,19 @@ class WildLoopEngine:
 
         stage = wild_loop_state.get("stage", "exploring")
 
-        if stage == "exploring":
+        if stage == "planning":
+            self._handle_planning_response(response_text, iteration)
+        elif stage == "exploring":
             self._handle_exploring_response(response_text, iteration)
         elif stage == "running":
             self._handle_running_response(response_text)
             # running stage: don't auto-queue; polling handles next events
         elif stage == "analyzing":
             self._handle_analyzing_response(response_text, iteration)
+        # job_scheduling is now handled entirely by action handlers (no LLM).
+        # If somehow the stage is still "job_scheduling", treat it like exploring.
+        elif stage == "job_scheduling":
+            self._handle_exploring_response(response_text, iteration)
 
         if self._save_settings:
             self._save_settings()
@@ -1047,6 +1273,10 @@ class WildLoopEngine:
 
         event = wild_event_queue.peek()
         if event is None:
+            return {"has_prompt": False}
+
+        # Skip action events — they are resolved by the engine, not the frontend
+        if event.get("handler"):
             return {"has_prompt": False}
 
         # Build the prompt with provenance
@@ -1144,6 +1374,28 @@ class WildLoopEngine:
                     if a.get("run_id") in sweep_run_ids and a.get("status") == "pending"
                 ]
 
+        # Enrich created entity summaries for the debug panel
+        created_sweeps_detail = []
+        for sid in wild_loop_state.get("created_sweep_ids", []):
+            if sid in sweeps_dict:
+                s = sweeps_dict[sid]
+                created_sweeps_detail.append({
+                    "id": sid,
+                    "name": s.get("name", sid),
+                    "status": s.get("status", "unknown"),
+                    "run_count": len(s.get("run_ids", [])),
+                })
+
+        created_runs_detail = []
+        for rid in wild_loop_state.get("created_run_ids", []):
+            if rid in runs_dict:
+                r = runs_dict[rid]
+                created_runs_detail.append({
+                    "id": rid,
+                    "name": r.get("name", rid),
+                    "status": r.get("status", "unknown"),
+                })
+
         return {
             **wild_loop_state,
             "queue_size": wild_event_queue.size,
@@ -1152,11 +1404,76 @@ class WildLoopEngine:
             "active_alerts": active_alerts_list,
             "has_pending_prompt": self._pending_prompt is not None,
             "pending_event_id": self._pending_prompt.get("event_id") if self._pending_prompt else None,
+            "created_sweeps": created_sweeps_detail,
+            "created_runs": created_runs_detail,
         }
 
     # -----------------------------------------------------------------
     # Internal: Stage-specific response handlers
     # -----------------------------------------------------------------
+
+    def _enqueue_planning_prompt(self, iteration: int):
+        """Build and enqueue a planning prompt."""
+        goal = wild_loop_state.get("goal", "Continue working")
+        prompt_type = "planning"
+
+        provenance = None
+        prompt_text = None
+        if self._skill_get_fn:
+            try:
+                max_iter = wild_loop_state.get("termination", {}).get("max_iterations")
+                result = build_prompt_for_frontend(
+                    BuildPromptRequest(
+                        prompt_type=prompt_type,
+                        goal=goal,
+                        step_goal=None,
+                        iteration=iteration,
+                        max_iterations=max_iter,
+                    ),
+                    self._skill_get_fn,
+                    server_url=self._server_url,
+                    auth_token=self._auth_token,
+                )
+                prompt_text = result.get("rendered", "")
+                provenance = result
+            except Exception as err:
+                logger.debug("[wild-engine] Skill template failed for planning: %s", err)
+
+        if not prompt_text:
+            logger.warning("[wild-engine] No prompt rendered for planning iteration %d", iteration)
+            prompt_text = f"Wild Loop planning — Goal: {goal}. Create a step-by-step plan."
+
+        event = {
+            "id": f"plan-{iteration}-{uuid.uuid4().hex[:6]}",
+            "priority": 85,
+            "title": f"Planning (iteration {iteration})",
+            "prompt": prompt_text,
+            "display_message": None,
+            "type": "planning",
+            "created_at": time.time(),
+            "provenance": provenance,
+        }
+        wild_event_queue.enqueue(event)
+        self._pending_prompt = None
+        logger.debug("[wild-engine] Enqueued planning prompt iter=%d", iteration)
+
+    def _handle_planning_response(self, response_text: str, iteration: int):
+        """Handle response while in planning stage.
+
+        After planning, transition to exploring stage automatically
+        and enqueue the first exploring prompt.
+        """
+        # The plan's next_step and summary are already parsed in on_response_complete
+        wild_loop_state["stage"] = "exploring"
+        wild_loop_state["phase"] = "exploring"
+        logger.info("[wild-engine] Planning complete, transitioning to exploring")
+        self._enqueue_exploring_prompt(iteration + 1)
+
+    # NOTE: _enqueue_job_scheduling_prompt and _handle_job_scheduling_response
+    # have been removed.  Job scheduling is now handled entirely by the
+    # script-based `job_scheduling_action` action handler (no LLM call).
+    # See auto_enqueue_job_scheduling() and job_scheduling_action_handler().
+
 
     def _handle_exploring_response(self, response_text: str, iteration: int):
         """Handle response while in exploring stage."""
@@ -1171,14 +1488,7 @@ class WildLoopEngine:
                 wild_loop_state["stage"] = "running"
                 wild_loop_state["phase"] = "monitoring"
                 logger.info("[wild-engine] Created sweep %s, transitioning to running", sweep_id)
-
-                # Auto-start the sweep
-                if self._start_sweep:
-                    try:
-                        self._start_sweep(sweep_id, 100)
-                        logger.info("[wild-engine] Auto-started sweep %s", sweep_id)
-                    except Exception as err:
-                        logger.warning("[wild-engine] Failed to auto-start sweep: %s", err)
+                # Cron-based resource_monitor will start queued runs
                 return
             except Exception as err:
                 logger.error("[wild-engine] Failed to create sweep: %s", err)
@@ -1448,6 +1758,80 @@ class WildLoopEngine:
     # -----------------------------------------------------------------
     # Internal: Background Polling Task
     # -----------------------------------------------------------------
+    #
+    # ARCHITECTURE NOTES — Poll Loop
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #
+    # The poll loop is the heartbeat of the wild loop engine.  It runs as
+    # a single asyncio.Task, waking every 5 seconds, and executes three
+    # phases sequentially:
+    #
+    #   ┌─────────────────────────────────────────────────────────────┐
+    #   │  _poll_loop (every 5s)                                     │
+    #   │                                                            │
+    #   │  ① _process_action_events()                                │
+    #   │     Peek the event queue.  If the head event has a         │
+    #   │     `handler` field, resolve it inline via the handler     │
+    #   │     registry (no LLM).  Repeats until the head is a       │
+    #   │     prompt event or the queue is empty.                    │
+    #   │                                                            │
+    #   │  ② _process_cron_tasks()                                   │
+    #   │     For each CronTask, check if `now - last_fired >=       │
+    #   │     interval_seconds`.  If so, execute the handler inline  │
+    #   │     (NOT via the queue) and apply its ActionResult          │
+    #   │     immediately (state_updates, enqueue_events).           │
+    #   │                                                            │
+    #   │  ③ _poll_events()                                          │
+    #   │     Poll runs/sweeps/alerts for status transitions.        │
+    #   │     Enqueue prompt events for the LLM to handle.           │
+    #   └─────────────────────────────────────────────────────────────┘
+    #
+    # EVENT RESOLUTION PATHS:
+    #
+    #   Prompt events (handler=None):
+    #     queue → get_next_prompt() → frontend → LLM → on_response_complete
+    #
+    #   Action events (handler="name"):
+    #     queue → _process_action_events() → _run_action_handler() → done
+    #     (processed in the poll loop, never sent to frontend)
+    #
+    #   Cron tasks:
+    #     timer fires → _process_cron_tasks() → _run_action_handler() → done
+    #     (never enter the queue at all; execute inline)
+    #
+    # HANDLER EXECUTION:
+    #   All handlers share _run_action_handler() which provides:
+    #   - asyncio.wait_for() timeout (default 10s)
+    #   - try/except crash isolation
+    #   - Logging results to _action_log for frontend visibility
+    #
+    # KNOWN LIMITATIONS (candidates for future redesign):
+    #
+    #   1. SINGLE-THREADED SEQUENTIAL: All three phases run in one
+    #      asyncio Task.  A slow action handler or poll blocks the
+    #      entire loop.  Future: consider asyncio.TaskGroup or a
+    #      dedicated worker pool for handlers.
+    #
+    #   2. NO BACKPRESSURE: If action handlers enqueue faster than
+    #      they drain, the queue grows unbounded (only soft-capped at
+    #      10 action events per cycle).  Future: add queue size limits
+    #      and handler throttling.
+    #
+    #   3. CRON IMPRECISION: Cron tasks fire "at most once per poll
+    #      cycle" (5s).  A task with interval_seconds=1 still fires
+    #      at most every 5s.  Future: separate high-frequency timer.
+    #
+    #   4. NO PRIORITY INVERSION PREVENTION: A burst of low-priority
+    #      action events can delay processing of higher-priority
+    #      prompt events since action events are resolved first.
+    #      Future: interleave action and prompt processing, or
+    #      separate the action queue from the prompt queue.
+    #
+    #   5. FRONTEND VISIBILITY: Action events are invisible to the
+    #      frontend (get_next_prompt skips them).  Only _action_log
+    #      preserves their history.  Future: expose _action_log via
+    #      an API endpoint and show in debug panel.
+    #
 
     def _start_poll_task(self):
         """Start the background event polling loop."""
@@ -1468,11 +1852,13 @@ class WildLoopEngine:
             self._poll_task = None
 
     async def _poll_loop(self):
-        """Background loop: poll for run/sweep events every 5 seconds."""
+        """Background loop: process action events, cron tasks, and poll for run/sweep events."""
         logger.debug("[wild-engine] Poll loop started")
         try:
             while wild_loop_state.get("is_active"):
                 if not wild_loop_state.get("is_paused"):
+                    await self._process_action_events()
+                    await self._process_cron_tasks()
                     await self._poll_events()
                 await asyncio.sleep(5)
         except asyncio.CancelledError:
@@ -1481,6 +1867,146 @@ class WildLoopEngine:
             logger.error("[wild-engine] Poll loop error: %s", err, exc_info=True)
         finally:
             logger.debug("[wild-engine] Poll loop ended")
+
+    async def _process_action_events(self):
+        """Resolve action events (events with a handler) without LLM.
+
+        Processes all pending action events in priority order. Each handler
+        runs with a timeout and crash isolation.  Results are appended to
+        _action_log for frontend visibility.
+        """
+        processed = 0
+        while True:
+            # Peek at next event — if it's an action event, process it
+            event = wild_event_queue.peek()
+            if event is None or not event.get("handler"):
+                break
+
+            result = await self._run_action_handler(event)
+
+            # Process result
+            if result.resolve_event:
+                wild_event_queue.dequeue()
+
+            if result.state_updates:
+                wild_loop_state.update(result.state_updates)
+
+            for new_event in result.enqueue_events:
+                if "created_at" not in new_event:
+                    new_event["created_at"] = time.time()
+                if "id" not in new_event:
+                    new_event["id"] = f"action-{uuid.uuid4().hex[:6]}"
+                wild_event_queue.enqueue(new_event)
+
+            processed += 1
+            if processed >= 10:  # Safety: don't process more than 10 per poll cycle
+                break
+
+    async def _process_cron_tasks(self):
+        """Fire periodic cron tasks whose interval has elapsed.
+
+        Cron tasks execute their handler directly (inline) — no queue
+        indirection.  This is the simplest model: check timer → run function
+        → record result.  The handler output (enqueue_events, state_updates)
+        is applied immediately.
+        """
+        now = time.time()
+        for task in self._cron_tasks:
+            if now - task.last_fired < task.interval_seconds:
+                continue
+
+            # Cron tasks are script-only (no LLM), so they always run
+            # regardless of pending prompts or LLM state.
+
+            task.last_fired = now
+            handler = get_action_handler(task.handler)
+            if handler is None:
+                logger.warning("[wild-engine] Cron '%s': no handler '%s' registered", task.name, task.handler)
+                continue
+
+            # Build a synthetic event dict for the handler signature
+            event = {
+                "id": f"cron-{task.name}-{uuid.uuid4().hex[:4]}",
+                "type": "cron",
+                "handler": task.handler,
+                "handler_config": task.handler_config,
+                "title": f"\u23f0 Cron: {task.name}",
+                "priority": task.priority,
+                "created_at": now,
+            }
+
+            result = await self._run_action_handler(event)
+
+            # Apply result directly (no queue hop)
+            if result.state_updates:
+                wild_loop_state.update(result.state_updates)
+
+            for new_event in result.enqueue_events:
+                # Singleton: skip if a job_scheduling event already exists in queue
+                if new_event.get("type") == "job_scheduling":
+                    already_queued = any(
+                        ev.get("type") == "job_scheduling"
+                        for ev in wild_event_queue.items()
+                    )
+                    if already_queued:
+                        logger.debug("[wild-engine] Cron '%s': job_scheduling already in queue, skipping", task.name)
+                        continue
+                if "created_at" not in new_event:
+                    new_event["created_at"] = time.time()
+                if "id" not in new_event:
+                    new_event["id"] = f"cron-evt-{uuid.uuid4().hex[:6]}"
+                wild_event_queue.enqueue(new_event)
+
+            logger.debug("[wild-engine] Cron '%s' fired: %s", task.name, result.summary[:120])
+
+    async def _run_action_handler(self, event: dict) -> ActionResult:
+        """Execute an action handler with timeout + crash isolation.
+
+        Records the result to _action_log for frontend visibility.
+        """
+        handler_name = event.get("handler", "")
+        handler = get_action_handler(handler_name)
+        if handler is None:
+            logger.warning("[wild-engine] No handler '%s', skipping", handler_name)
+            return ActionResult(success=False, summary=f"No handler: {handler_name}")
+
+        config = event.get("handler_config") or {}
+        context = {
+            "wild_loop_state": wild_loop_state,
+            "runs": self._get_runs() if self._get_runs else {},
+            "sweeps": self._get_sweeps() if self._get_sweeps else {},
+            "start_sweep": self._start_sweep,
+            "queue_size": wild_event_queue.size,
+        }
+
+        try:
+            result = await asyncio.wait_for(
+                handler(event, config, context),
+                timeout=self._action_timeout,
+            )
+        except asyncio.TimeoutError:
+            result = ActionResult(success=False, summary=f"Timeout ({self._action_timeout:.0f}s)")
+            logger.warning("[wild-engine] Handler '%s' timed out", handler_name)
+        except Exception as err:
+            result = ActionResult(success=False, summary=f"Error: {err}")
+            logger.error("[wild-engine] Handler '%s' failed: %s", handler_name, err, exc_info=True)
+
+        # Record to action log for frontend visibility
+        self._action_log.append({
+            "handler": handler_name,
+            "event_id": event.get("id"),
+            "success": result.success,
+            "summary": result.summary,
+            "timestamp": time.time(),
+            "enqueued": len(result.enqueue_events),
+        })
+        # Cap log size
+        if len(self._action_log) > self._action_log_max:
+            self._action_log = self._action_log[-self._action_log_max:]
+
+        logger.info("[wild-engine] Action '%s' [%s]: %s",
+                    handler_name, 'OK' if result.success else 'FAIL', result.summary[:200])
+        return result
 
     async def _poll_events(self):
         """Poll runs/sweeps/alerts and enqueue events for status transitions."""

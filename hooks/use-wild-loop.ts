@@ -2,18 +2,18 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { WildLoopPhase, TerminationConditions } from '@/lib/types'
-import type { PromptProvenance, WildModeSetup } from '@/lib/types'
+import type { WildModeSetup } from '@/lib/types'
 import {
-  getWildLoopStatus,
-  startWildLoop, stopWildLoop, pauseWildLoop, resumeWildLoop,
-  wildResponseComplete,
-  getWildNextPrompt, consumeWildPrompt,
-  steerWildLoop,
-  configureWildLoop,
+  startWildV2,
+  stopWildV2,
+  pauseWildV2,
+  resumeWildV2,
+  getWildV2Status,
+  steerWildV2,
   enqueueWildEvent,
-  getWildEventQueue,
 } from '@/lib/api'
-import type { WildLoopStatus, WildNextPrompt, Alert } from '@/lib/api'
+import type { WildV2Status, WildV2IterationHistory } from '@/lib/api'
+import type { Alert } from '@/lib/api'
 import type { QueuedEvent } from '@/lib/event-queue'
 
 export interface WildLoopSignal {
@@ -31,28 +31,37 @@ export interface RunStats {
 }
 
 export interface UseWildLoopResult {
+  // State
   isActive: boolean
   isPaused: boolean
   phase: WildLoopPhase
   stage: WildLoopStage
   iteration: number
+  maxIterations: number
   goal: string | null
   startedAt: number | null
   terminationConditions: TerminationConditions
   sweepId: string | null
   runStats: RunStats
   activeAlerts: Alert[]
+
+  // V2-specific
+  v2Status: string | null        // running | paused | done | failed
+  tasks: string                  // tasks.md content
+  history: WildV2IterationHistory[]
+  noProgressStreak: number
+  shortIterationCount: number
+  pendingEvents: Array<{ id: string; type: string; title: string; detail: string }>
+
+  // Lifecycle
   start: (goal: string, sessionId: string) => void
   pause: () => void
   resume: () => void
   stop: () => void
   setTerminationConditions: (conditions: TerminationConditions) => void
   applySetup: (setup: WildModeSetup) => void
-  onResponseComplete: (responseText: string) => void
-  pendingPrompt: string | null
-  pendingProvenance: PromptProvenance | null
-  pendingDisplayMessage: string | null
-  consumePrompt: () => void
+  steer: (context: string) => void
+
   // Queue API
   eventQueue: QueuedEvent[]
   reorderQueue: (orderedIds: string[]) => void
@@ -63,163 +72,114 @@ export interface UseWildLoopResult {
 const DEFAULT_RUN_STATS: RunStats = { total: 0, running: 0, completed: 0, failed: 0, queued: 0 }
 
 /**
- * useWildLoop — Thin polling client for the backend-driven Wild Loop engine.
+ * useWildLoop — Thin polling client for the V2 backend-driven Wild Loop engine.
  *
- * All state is owned by the backend (WildLoopEngine in wild_loop.py).
- * This hook:
- *   1. Polls GET /wild/status every 1.5s to read backend state
- *   2. Polls GET /wild/next-prompt every 1s while active & not streaming
- *   3. Exposes lifecycle methods as thin API wrappers
- *   4. Bridges response completion: frontend calls onResponseComplete(text)
- *      which hits POST /wild/response-complete
+ * V2 Architecture: The backend (WildV2Engine) runs its own async loop,
+ * creating OpenCode sessions and sending prompts autonomously.
+ * This hook only:
+ *   1. Polls GET /wild/v2/status every 2s to read backend state
+ *   2. Exposes lifecycle methods (start/stop/pause/resume/steer)
+ *   3. Maps V2 status to frontend display state
+ *
+ * Unlike V1, there is NO prompt polling, no autoSend, no response-complete bridge.
+ * The backend handles all iteration logic.
  */
 export function useWildLoop(): UseWildLoopResult {
   // ---- State (derived from backend polling) ----
-  const [status, setStatus] = useState<WildLoopStatus | null>(null)
-  const [nextPrompt, setNextPrompt] = useState<WildNextPrompt | null>(null)
+  const [status, setStatus] = useState<WildV2Status | null>(null)
   const statusRef = useRef(status)
   statusRef.current = status
 
-  // ---- Poll backend status every 1.5s ----
+  // ---- Poll backend status every 2s ----
   useEffect(() => {
     let cancelled = false
 
     const poll = async () => {
       try {
-        const s = await getWildLoopStatus()
+        const s = await getWildV2Status()
         if (!cancelled) setStatus(s)
       } catch (err) {
-        console.warn('[wild-loop] Status poll failed:', err)
+        console.warn('[wild-loop-v2] Status poll failed:', err)
       }
     }
 
     poll() // immediate first poll
-    const id = setInterval(poll, 1500)
+    const id = setInterval(poll, 2000)
     return () => {
       cancelled = true
       clearInterval(id)
     }
   }, [])
-
-  // ---- Poll next prompt every 1s while active ----
-  useEffect(() => {
-    if (!status?.is_active || status?.is_paused) {
-      setNextPrompt(null)
-      return
-    }
-
-    let cancelled = false
-
-    const pollPrompt = async () => {
-      try {
-        const np = await getWildNextPrompt()
-        if (!cancelled) setNextPrompt(np)
-      } catch (err) {
-        console.warn('[wild-loop] Next prompt poll failed:', err)
-      }
-    }
-
-    pollPrompt() // immediate first poll
-    const id = setInterval(pollPrompt, 1000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [status?.is_active, status?.is_paused])
 
   // ---- Lifecycle actions ----
 
   const start = useCallback(async (goal: string, sessionId: string) => {
     try {
-      console.log('[wild-loop] Starting: goal=%s session=%s', goal, sessionId)
-      const s = await startWildLoop({ goal, session_id: sessionId })
-      setStatus(s as WildLoopStatus)
+      console.log('[wild-loop-v2] Starting: goal=%s session=%s', goal, sessionId)
+      const s = await startWildV2({
+        goal,
+        chat_session_id: sessionId,
+      })
+      setStatus(s)
     } catch (err) {
-      console.error('[wild-loop] Start failed:', err)
+      console.error('[wild-loop-v2] Start failed:', err)
     }
   }, [])
 
   const stop = useCallback(async () => {
     try {
-      console.log('[wild-loop] Stopping')
-      const s = await stopWildLoop()
-      setStatus(s as WildLoopStatus)
-      setNextPrompt(null)
+      console.log('[wild-loop-v2] Stopping')
+      const s = await stopWildV2()
+      setStatus(s)
     } catch (err) {
-      console.error('[wild-loop] Stop failed:', err)
+      console.error('[wild-loop-v2] Stop failed:', err)
     }
   }, [])
 
   const pause = useCallback(async () => {
     try {
-      console.log('[wild-loop] Pausing')
-      const s = await pauseWildLoop()
-      setStatus(s as WildLoopStatus)
+      console.log('[wild-loop-v2] Pausing')
+      const s = await pauseWildV2()
+      setStatus(s)
     } catch (err) {
-      console.error('[wild-loop] Pause failed:', err)
+      console.error('[wild-loop-v2] Pause failed:', err)
     }
   }, [])
 
   const resume = useCallback(async () => {
     try {
-      console.log('[wild-loop] Resuming')
-      const s = await resumeWildLoop()
-      setStatus(s as WildLoopStatus)
+      console.log('[wild-loop-v2] Resuming')
+      const s = await resumeWildV2()
+      setStatus(s)
     } catch (err) {
-      console.error('[wild-loop] Resume failed:', err)
+      console.error('[wild-loop-v2] Resume failed:', err)
     }
   }, [])
 
-  // ---- Response completion bridge ----
-
-  const onResponseComplete = useCallback(async (responseText: string) => {
+  const steer = useCallback(async (context: string) => {
     try {
-      console.log('[wild-loop] Response complete, text length:', responseText.length)
-      const s = await wildResponseComplete(responseText)
-      setStatus(s as WildLoopStatus)
-      // Clear next prompt so we fetch the new one
-      setNextPrompt(null)
+      console.log('[wild-loop-v2] Steering with context:', context.slice(0, 50))
+      await steerWildV2(context)
     } catch (err) {
-      console.error('[wild-loop] Response complete failed:', err)
+      console.error('[wild-loop-v2] Steer failed:', err)
     }
   }, [])
 
-  // ---- Prompt consumption ----
+  // ---- Termination conditions (configure via start params) ----
 
-  const consumePromptFn = useCallback(async () => {
-    try {
-      await consumeWildPrompt()
-      setNextPrompt(null)
-    } catch (err) {
-      console.error('[wild-loop] Consume prompt failed:', err)
-    }
+  const setTerminationConditions = useCallback(async (_conditions: TerminationConditions) => {
+    // V2 sets max_iterations at start time. Runtime updates not yet supported.
+    console.warn('[wild-loop-v2] Runtime termination config not yet supported in V2')
   }, [])
 
-  // ---- Termination conditions ----
-
-  const setTerminationConditions = useCallback(async (conditions: TerminationConditions) => {
-    try {
-      await configureWildLoop({
-        max_iterations: conditions.maxIterations ?? undefined,
-        max_time_seconds: conditions.maxTimeSeconds ?? undefined,
-        max_tokens: conditions.maxTokens ?? undefined,
-        custom_condition: conditions.customCondition ?? undefined,
-      })
-    } catch (err) {
-      console.error('[wild-loop] Configure termination failed:', err)
-    }
-  }, [])
-
-  // ---- Queue operations (delegate to backend) ----
+  // ---- Queue operations ----
 
   const reorderQueue = useCallback((_orderedIds: string[]) => {
-    // TODO: Backend reorder endpoint not yet implemented
-    console.warn('[wild-loop] Queue reorder not yet implemented in backend')
+    console.warn('[wild-loop-v2] Queue reorder not yet implemented')
   }, [])
 
   const removeFromQueue = useCallback((_id: string) => {
-    // TODO: Backend remove-from-queue endpoint
-    console.warn('[wild-loop] Queue remove not yet implemented in backend')
+    console.warn('[wild-loop-v2] Queue remove not yet implemented')
   }, [])
 
   const insertIntoQueue = useCallback(async (event: QueuedEvent, _index?: number) => {
@@ -231,62 +191,66 @@ export function useWildLoop(): UseWildLoopResult {
         type: event.type,
       })
     } catch (err) {
-      console.error('[wild-loop] Insert into queue failed:', err)
+      console.error('[wild-loop-v2] Insert into queue failed:', err)
     }
   }, [])
-
-  // ---- Derive return values from backend state ----
-
-  const isActive = status?.is_active ?? false
-  const isPaused = status?.is_paused ?? false
-  const phase = (status?.phase ?? 'idle') as WildLoopPhase
-  const stage = (status?.stage ?? 'exploring') as WildLoopStage
-  const iteration = status?.iteration ?? 0
-  const goal = status?.goal ?? null
-  const startedAt = status?.started_at ?? null
-  const sweepId = status?.sweep_id ?? null
-  const runStats: RunStats = status?.run_stats ?? DEFAULT_RUN_STATS
-  const activeAlerts: Alert[] = status?.active_alerts ?? []
-
-  const termination = status?.termination
-  const terminationConditions: TerminationConditions = {
-    maxIterations: termination?.max_iterations ?? null,
-    maxTimeSeconds: termination?.max_time_seconds ?? null,
-    maxTokens: termination?.max_tokens ?? null,
-    customCondition: termination?.custom_condition ?? null,
-  }
-
-  // Map backend queue events to frontend QueuedEvent type, excluding the active/pending item
-  const pendingEventId = status?.pending_event_id ?? null
-  const eventQueue: QueuedEvent[] = (status?.queue_events ?? [])
-    .filter((e) => e.id !== pendingEventId)
-    .map((e) => ({
-      id: e.id,
-      priority: e.priority,
-      title: e.title,
-      prompt: e.prompt,
-      type: e.type as QueuedEvent['type'],
-      createdAt: e.created_at,
-    }))
 
   // ---- Apply setup from WildModeSetupPanel ----
 
-  const applySetup = useCallback(async (setup: WildModeSetup) => {
-    try {
-      await configureWildLoop({
-        max_time_seconds: setup.awayDurationMinutes * 60,
-        autonomy_level: setup.autonomyLevel,
-        queue_modify_enabled: setup.queueModifyEnabled,
-      })
-    } catch (err) {
-      console.error('[wild-loop] Apply setup failed:', err)
-    }
+  const applySetup = useCallback(async (_setup: WildModeSetup) => {
+    // V2 setup is applied at start time via startWildV2 params
+    console.log('[wild-loop-v2] Setup will be applied on next start')
   }, [])
 
-  // Derive pending prompt from the next-prompt poll
-  const pendingPrompt = nextPrompt?.has_prompt ? (nextPrompt.prompt ?? null) : null
-  const pendingDisplayMessage = nextPrompt?.has_prompt ? (nextPrompt.display_message ?? null) : null
-  const pendingProvenance = nextPrompt?.has_prompt ? (nextPrompt.provenance as PromptProvenance | null ?? null) : null
+  // ---- Derive return values from V2 backend state ----
+
+  const isActive = status?.active ?? false
+  const isPaused = status?.status === 'paused'
+  const v2Status = status?.status ?? null
+  const iteration = status?.iteration ?? 0
+  const maxIterations = status?.max_iterations ?? 25
+  const goal = status?.goal ?? null
+  const startedAt = status?.started_at ?? null
+  const tasks = status?.plan ?? ''
+  const history = status?.history ?? []
+  const noProgressStreak = status?.no_progress_streak ?? 0
+  const shortIterationCount = status?.short_iteration_count ?? 0
+  const pendingEvents = status?.pending_events ?? []
+
+  // Map V2 status to V1-compatible phase for UI components that use it
+  const phase: WildLoopPhase = isActive
+    ? isPaused ? 'paused' : 'exploring'
+    : 'idle'
+
+  // Derive stage from iteration progress
+  const stage: WildLoopStage = 'exploring'
+
+  const runStats: RunStats = status?.system_health
+    ? {
+      total: status.system_health.total,
+      running: status.system_health.running,
+      completed: status.system_health.completed,
+      failed: status.system_health.failed,
+      queued: status.system_health.queued,
+    }
+    : DEFAULT_RUN_STATS
+
+  const terminationConditions: TerminationConditions = {
+    maxIterations: maxIterations,
+    maxTimeSeconds: null,
+    maxTokens: null,
+    customCondition: null,
+  }
+
+  // Map pending events to QueuedEvent type for the EventQueuePanel
+  const eventQueue: QueuedEvent[] = pendingEvents.map((e) => ({
+    id: e.id,
+    priority: 5,
+    title: e.title,
+    prompt: e.detail,
+    type: e.type as QueuedEvent['type'],
+    createdAt: Date.now(),
+  }))
 
   return {
     isActive,
@@ -294,23 +258,26 @@ export function useWildLoop(): UseWildLoopResult {
     phase,
     stage,
     iteration,
+    maxIterations,
     goal,
     startedAt,
     terminationConditions,
-    sweepId,
+    sweepId: null,
     runStats,
-    activeAlerts,
+    activeAlerts: [],
+    v2Status,
+    tasks,
+    history,
+    noProgressStreak,
+    shortIterationCount,
+    pendingEvents,
     start,
     pause,
     resume,
     stop,
     setTerminationConditions,
     applySetup,
-    onResponseComplete,
-    pendingPrompt,
-    pendingProvenance,
-    pendingDisplayMessage,
-    consumePrompt: consumePromptFn,
+    steer,
     eventQueue,
     reorderQueue,
     removeFromQueue,

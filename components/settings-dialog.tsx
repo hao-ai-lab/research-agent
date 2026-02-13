@@ -87,6 +87,9 @@ export function SettingsDialog({
   const [chatToolbarSizeInput, setChatToolbarSizeInput] = useState<string>(
     settings.appearance.chatToolbarButtonSizePx?.toString() ?? ''
   )
+  const [toolBoxHeightInput, setToolBoxHeightInput] = useState<string>(
+    settings.appearance.streamingToolBoxHeightRem?.toString() ?? ''
+  )
 
   // Sync local inputs when settings change externally (e.g. reset)
   React.useEffect(() => {
@@ -100,6 +103,10 @@ export function SettingsDialog({
   React.useEffect(() => {
     setChatToolbarSizeInput(settings.appearance.chatToolbarButtonSizePx?.toString() ?? '')
   }, [settings.appearance.chatToolbarButtonSizePx])
+
+  React.useEffect(() => {
+    setToolBoxHeightInput(settings.appearance.streamingToolBoxHeightRem?.toString() ?? '')
+  }, [settings.appearance.streamingToolBoxHeightRem])
 
   // Sync apiUrlInput when apiUrl changes (e.g. on reset)
   React.useEffect(() => {
@@ -431,6 +438,32 @@ export function SettingsDialog({
     setChatToolbarSizeInput(clamped.toString())
   }
 
+  const handleToolBoxHeightChange = (value: string, currentInput: string) => {
+    if (!currentInput && value === '4') {
+      setToolBoxHeightInput('7.5')
+      updateAppearanceSettings({ streamingToolBoxHeightRem: 7.5 })
+      return
+    }
+    setToolBoxHeightInput(value)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 4 && parsed <= 30) {
+      updateAppearanceSettings({ streamingToolBoxHeightRem: parsed })
+    }
+  }
+
+  const handleToolBoxHeightBlur = (value: string) => {
+    if (!value.trim()) {
+      updateAppearanceSettings({ streamingToolBoxHeightRem: null })
+      setToolBoxHeightInput('')
+      return
+    }
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(4, Math.min(30, parsed))
+    updateAppearanceSettings({ streamingToolBoxHeightRem: clamped })
+    setToolBoxHeightInput(clamped.toString())
+  }
+
   const handleAlertsToggle = (enabled: boolean) => {
     onSettingsChange({
       ...settings,
@@ -687,6 +720,25 @@ export function SettingsDialog({
                     />
                   </div>
 
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
+                      <Label htmlFor="tool-box-height-dialog" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">4–30</span></Label>
+                      <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
+                    </div>
+                    <Input
+                      id="tool-box-height-dialog"
+                      type="number"
+                      min={4}
+                      max={30}
+                      step={0.5}
+                      value={toolBoxHeightInput}
+                      onChange={(e) => handleToolBoxHeightChange(e.target.value, toolBoxHeightInput)}
+                      onBlur={(e) => handleToolBoxHeightBlur(e.target.value)}
+                      placeholder="7.5"
+                      className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
                   <div className="flex justify-end">
                     <Button
                       variant="ghost"
@@ -696,6 +748,7 @@ export function SettingsDialog({
                           customFontSizePx: null,
                           customButtonScalePercent: null,
                           chatToolbarButtonSizePx: null,
+                          streamingToolBoxHeightRem: null,
                         })
                       }
                     >

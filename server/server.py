@@ -34,8 +34,8 @@ from wild_loop import (
     wild_loop_state,
     get_wild_mode_state, set_wild_mode_state,
     get_loop_status, update_loop_status, configure_loop,
-    enqueue_event, dequeue_event, get_queue_state,
-    auto_enqueue_alert, auto_enqueue_run_terminal,
+    enqueue_event, dequeue_event, get_queue_state, resolve_event, get_all_events,
+    auto_enqueue_alert, auto_enqueue_run_terminal, record_created_entity,
     build_experiment_context, build_wild_prompt, build_prompt_for_frontend,
     get_serializable_state as get_wild_serializable_state,
     load_from_saved as load_wild_from_saved,
@@ -44,6 +44,7 @@ from wild_loop import (
     engine as wild_engine,
 )
 import wild_loop as wild_loop_mod
+from wild_loop_v2 import WildV2Engine
 
 import httpx
 import uvicorn
@@ -54,10 +55,22 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Configure logging
-# logging.basicConfig(level=logging.INFO)
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging — explicit handlers so uvicorn.run() can't override them
+_log_formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(_log_formatter)
+
+# App logger
 logger = logging.getLogger("research-agent-server")
+logger.setLevel(logging.DEBUG)
+logger.addHandler(_log_handler)
+logger.propagate = False  # Don't depend on root logger (uvicorn resets it)
+
+# Wild loop logger
+_wild_logger = logging.getLogger("wild_loop")
+_wild_logger.setLevel(logging.DEBUG)
+_wild_logger.addHandler(_log_handler)
+_wild_logger.propagate = False
 
 # =============================================================================
 # Configuration
@@ -786,6 +799,22 @@ wild_engine.set_callbacks(
     save_settings=lambda: save_settings_state(),
     server_url=SERVER_CALLBACK_URL,
     auth_token=USER_AUTH_TOKEN or "",
+)
+
+# Wild Loop V2 engine (ralph-style)
+wild_v2_engine = WildV2Engine(
+    opencode_url=OPENCODE_URL,
+    model_provider=MODEL_PROVIDER,
+    model_id=MODEL_ID,
+    workdir=WORKDIR,
+    server_url=SERVER_CALLBACK_URL,
+    auth_token=USER_AUTH_TOKEN,
+    get_auth=get_auth,
+    get_runs=lambda: runs,
+    get_sweeps=lambda: sweeps,
+    get_alerts=lambda: active_alerts,
+    save_chat_state=lambda: save_chat_state(),
+    chat_sessions=chat_sessions,
 )
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
@@ -3078,6 +3107,78 @@ async def _start_chat_worker(session_id: str, content: str, mode: str = "agent")
     return runtime
 
 
+async def _send_chat_for_v2(chat_session_id: str, prompt: str, display_message: str) -> str:
+    """Route a V2 iteration through the frontend's chat session for live streaming.
+
+    1. Adds a user message to the chat session (so the frontend shows the iteration)
+    2. Starts the chat worker (which streams the response via SSE)
+    3. Waits for completion
+    4. Returns the full response text
+
+    This is the callback passed to WildV2Engine.send_chat_message.
+    """
+    logger.info("[wild-v2-chat] _send_chat_for_v2 called: session=%s, prompt_len=%d, display=%s",
+                chat_session_id, len(prompt), display_message)
+
+    if chat_session_id not in chat_sessions:
+        logger.error("[wild-v2-chat] Chat session %s not found!", chat_session_id)
+        raise ValueError(f"Chat session {chat_session_id} not found")
+
+    session = chat_sessions[chat_session_id]
+
+    # Check if there's already an active stream on this session
+    existing_runtime = active_chat_streams.get(chat_session_id)
+    if existing_runtime and existing_runtime.status == "running":
+        logger.warning("[wild-v2-chat] Session %s already has an active stream (run=%s), waiting for it to finish...",
+                       chat_session_id, existing_runtime.run_id)
+        # Wait for the existing task to complete before starting a new one
+        existing_task = active_chat_tasks.get(chat_session_id)
+        if existing_task:
+            try:
+                await existing_task
+                logger.info("[wild-v2-chat] Previous task finished, proceeding")
+            except Exception:
+                logger.warning("[wild-v2-chat] Previous task failed, proceeding anyway")
+
+    # Add user message showing the iteration context
+    user_msg = {
+        "role": "user",
+        "content": display_message,
+        "timestamp": time.time(),
+        "wild_v2": True,
+    }
+    session.setdefault("messages", []).append(user_msg)
+    save_chat_state()
+    logger.debug("[wild-v2-chat] Added user message to chat session")
+
+    # Start the chat worker — this sends the full prompt to OpenCode and streams
+    # the response via SSE, so the frontend picks it up live
+    logger.info("[wild-v2-chat] Starting chat worker for session %s", chat_session_id)
+    runtime = await _start_chat_worker(chat_session_id, prompt, mode="agent")
+    logger.info("[wild-v2-chat] Chat worker started: run_id=%s", runtime.run_id)
+
+    # Wait for the background task to finish
+    task = active_chat_tasks.get(chat_session_id)
+    if task:
+        logger.info("[wild-v2-chat] Waiting for chat worker task to complete...")
+        try:
+            await task
+            logger.info("[wild-v2-chat] Chat worker task completed successfully")
+        except Exception as err:
+            logger.error("[wild-v2-chat] Chat worker task failed: %s", err, exc_info=True)
+    else:
+        logger.warning("[wild-v2-chat] No task found in active_chat_tasks for session %s", chat_session_id)
+
+    full_text = runtime.full_text or ""
+    logger.info("[wild-v2-chat] Got %d chars from chat session %s (status=%s)",
+                len(full_text), chat_session_id, runtime.status)
+    return full_text
+
+
+# Wire the chat streaming callback into the V2 engine
+wild_v2_engine._send_chat_message = _send_chat_for_v2
+
+
 @app.get("/sessions/{session_id}/stream")
 async def stream_session(session_id: str, from_seq: int = Query(1, ge=1), run_id: Optional[str] = Query(None)):
     """Attach/re-attach to an in-flight chat stream with catch-up replay."""
@@ -3219,6 +3320,7 @@ async def create_run(req: RunCreate):
     _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
     
+    record_created_entity("run", run_id)
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
     return {"id": run_id, **run_data}
 
@@ -3618,6 +3720,27 @@ async def get_wild_event_queue_endpoint():
     return get_queue_state()
 
 
+@app.post("/wild/events/{event_id}/resolve")
+async def resolve_wild_event(event_id: str):
+    """Resolve (consume) a specific event by ID, out of normal queue order."""
+    return resolve_event(event_id)
+
+
+@app.get("/wild/events/all")
+async def get_all_wild_events():
+    """Return all events including resolved (history view)."""
+    return get_all_events()
+
+
+@app.get("/wild/events/{event_id}")
+async def peek_wild_event(event_id: str):
+    """Peek at a specific event by ID without consuming it."""
+    event = wild_event_queue.get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+
 @app.get("/wild/status")
 async def get_wild_status():
     """Get the current wild loop state (enriched with queue/run stats)."""
@@ -3720,6 +3843,95 @@ async def wild_consume_prompt():
 async def wild_steer(req: WildSteerRequest):
     """Insert a user steer message into the wild loop queue."""
     return wild_engine.steer(req)
+
+
+# =============================================================================
+# Wild Loop V2 Endpoints (Ralph-style)
+# =============================================================================
+
+class WildV2StartRequest(BaseModel):
+    goal: str
+    chat_session_id: Optional[str] = None
+    max_iterations: int = 25
+    wait_seconds: float = 30.0
+
+class WildV2SteerRequest(BaseModel):
+    context: str
+
+class WildV2ResolveRequest(BaseModel):
+    event_ids: list
+
+
+@app.post("/wild/v2/start")
+async def wild_v2_start(req: WildV2StartRequest):
+    """Start a new V2 wild session (ralph-style loop)."""
+    result = wild_v2_engine.start(
+        goal=req.goal,
+        chat_session_id=req.chat_session_id,
+        max_iterations=req.max_iterations,
+        wait_seconds=req.wait_seconds,
+    )
+    return result
+
+
+@app.post("/wild/v2/stop")
+async def wild_v2_stop():
+    """Stop the active V2 wild session."""
+    return wild_v2_engine.stop()
+
+
+@app.post("/wild/v2/pause")
+async def wild_v2_pause():
+    """Pause the V2 wild session."""
+    return wild_v2_engine.pause()
+
+
+@app.post("/wild/v2/resume")
+async def wild_v2_resume():
+    """Resume the V2 wild session."""
+    return wild_v2_engine.resume()
+
+
+@app.get("/wild/v2/status")
+async def wild_v2_status():
+    """Get current V2 session state, plan, and history."""
+    return wild_v2_engine.get_status()
+
+
+@app.get("/wild/v2/events/{session_id}")
+async def wild_v2_events(session_id: str):
+    """Get pending events for a V2 session (agent calls this)."""
+    return wild_v2_engine.get_events()
+
+
+@app.post("/wild/v2/events/{session_id}/resolve")
+async def wild_v2_resolve_events(session_id: str, req: WildV2ResolveRequest):
+    """Mark events as resolved (agent calls this after handling)."""
+    return wild_v2_engine.resolve_events(req.event_ids)
+
+
+@app.get("/wild/v2/system-health")
+async def wild_v2_system_health():
+    """Get system utilization (agent calls this to check resources)."""
+    return wild_v2_engine._get_system_health()
+
+
+@app.get("/wild/v2/plan/{session_id}")
+async def wild_v2_plan(session_id: str):
+    """Get the current tasks/plan markdown (reads tasks.md from disk)."""
+    return {"plan": wild_v2_engine.get_plan()}
+
+
+@app.get("/wild/v2/iteration-log/{session_id}")
+async def wild_v2_iteration_log(session_id: str):
+    """Get the iteration log markdown."""
+    return {"log": wild_v2_engine.get_iteration_log()}
+
+
+@app.post("/wild/v2/steer")
+async def wild_v2_steer(req: WildV2SteerRequest):
+    """Inject user context for the next iteration."""
+    return wild_v2_engine.steer(req.context)
 
 
 @app.get("/cluster")
@@ -4113,6 +4325,7 @@ async def create_sweep(req: SweepCreate):
         }
         sweeps[sweep_id] = sweep_data
         save_runs_state()
+        record_created_entity("sweep", sweep_id)
         logger.info(f"Created draft sweep {sweep_id}: {req.name}")
         return {"id": sweep_id, **sweep_data}
     
@@ -4173,6 +4386,9 @@ async def create_sweep(req: SweepCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
     
+    record_created_entity("sweep", sweep_id)
+    for rid in run_ids:
+        record_created_entity("run", rid)
     logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
 
@@ -4283,6 +4499,50 @@ async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max p
     save_runs_state()
     
     return {"message": f"Started {started}/{attempted} runs", "sweep_id": sweep_id}
+
+
+@app.post("/sweeps/{sweep_id}/runs")
+async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
+    """Create a new run and attach it to a sweep in one call.
+
+    This allows adding runs to a sweep even if they are outside the original
+    parameter/hyperparameter grid (e.g. a one-off baseline, a manual rerun
+    with custom flags, etc.).
+    """
+    if sweep_id not in sweeps:
+        raise HTTPException(status_code=404, detail="Sweep not found")
+
+    # Force sweep_id on the run regardless of what was provided
+    req.sweep_id = sweep_id
+
+    run_id = uuid.uuid4().hex[:12]
+    initial_status = "queued" if req.auto_start else "ready"
+
+    run_data = {
+        "name": req.name,
+        "command": req.command,
+        "workdir": req.workdir or WORKDIR,
+        "status": initial_status,
+        "created_at": time.time(),
+        "is_archived": False,
+        "sweep_id": sweep_id,
+        "parent_run_id": req.parent_run_id,
+        "origin_alert_id": req.origin_alert_id,
+        "tmux_window": None,
+        "run_dir": None,
+        "exit_code": None,
+        "error": None,
+        "wandb_dir": None,
+    }
+
+    runs[run_id] = run_data
+    sweeps[sweep_id].setdefault("run_ids", []).append(run_id)
+    recompute_sweep_state(sweep_id)
+    save_runs_state()
+
+    record_created_entity("run", run_id)
+    logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
+    return {"id": run_id, **run_data}
 
 
 @app.post("/runs/{run_id}/add-to-sweep")
@@ -4670,7 +4930,7 @@ def main():
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
     logger.info(f"Working directory: {WORKDIR}")
     
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, log_config=None)
 
 
 if __name__ == "__main__":

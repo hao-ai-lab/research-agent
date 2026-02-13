@@ -89,16 +89,18 @@ curl -s -X GET "{{server_url}}/runs" -H "X-Auth-Token: {{auth_token}}"
 
 At the END of your response, output these structured tags:
 
-6. **Signal** — exactly ONE `<promise>` tag:
+6. **Summary** — a brief summary of what you did this iteration:
+   - `<summary>Created a sweep with 4 runs to test learning rate sensitivity. Launched all runs.</summary>`
+7. **Signal** — exactly ONE `<promise>` tag:
    - `<promise>CONTINUE</promise>` — DEFAULT. Use this if you did anything or are waiting for results
    - `<promise>COMPLETE</promise>` — ONLY when goal is fully verified with evidence
    - `<promise>NEEDS_HUMAN</promise>` — if you need human intervention
-7. **Next step** — describe what the NEXT iteration should focus on:
+8. **Next step** — describe what the NEXT iteration should focus on:
    - `<next_step>Check the results of the sweep runs and analyze metrics</next_step>`
    - If completing, you may omit this tag
-8. **Next role** — propose which role should handle the next step:
+9. **Next role** — propose which role should handle the next step:
    - `<next_role>monitoring</next_role>`
-   - Valid roles: `exploring`, `monitoring`, `analyzing`, `alert`
+   - Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`, `job_scheduling`
    - If completing, you may omit this tag
 
 ## Critical Rules

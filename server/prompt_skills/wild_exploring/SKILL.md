@@ -1,6 +1,6 @@
 ---
 name: "Wild Loop — Exploring"
-description: "Exploring stage prompt. Guides the agent to analyze the codebase, design experiments, and create sweeps or runs via the server API."
+description: "Exploring stage prompt. Guides the agent to analyze the codebase, design experiments, and create sweeps via the server API. Always use sweeps to organize runs."
 variables: ["goal", "step_goal", "iteration", "max_iteration", "server_url", "auth_token"]
 ---
 
@@ -14,25 +14,31 @@ variables: ["goal", "step_goal", "iteration", "max_iteration", "server_url", "au
 
 {{step_goal}}
 
-## Status
-
-No sweep has been created yet. You need to define one.
-
 ## Server Access
 
 - **Base URL**: `{{server_url}}`
 - **Auth Header**: `X-Auth-Token: {{auth_token}}`
 - **API Docs**: `{{server_url}}/docs`
 
-### Standard Operating Procedure
+### Sweep & Run Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/sweeps` | POST | Create a new sweep (parameter grid or just a container) |
+| `/sweeps` | GET | List all sweeps |
+| `/sweeps/{id}` | GET | Get sweep details and run list |
+| `/sweeps/{id}/start` | POST | Start all ready/queued runs in a sweep |
+| `/sweeps/{id}/runs` | POST | Create a new run and attach it to the sweep |
+| `/runs/{id}/add-to-sweep` | POST | Attach an existing run to a sweep |
+
+## Standard Operating Procedure
 
 1. **Explore**: Read the codebase, understand what experiments are needed
-2. **Create a sweep**: Send a POST to `{{server_url}}/sweeps` with the sweep specification
-3. **Start the sweep**: Send a POST to `{{server_url}}/sweeps/{id}/start`
+2. **Create a sweep**: Always organize runs under a sweep — even a single run should be in a sweep
+3. **Add runs**: Either let the sweep generate runs from a parameter grid, or add individual runs via `/sweeps/{id}/runs`
+4. **Start**: Send `POST /sweeps/{id}/start` to launch
 
-### Sweep Creation
-
-Send a JSON body to `POST {{server_url}}/sweeps`:
+### Creating a Sweep with Parameter Grid
 
 ```bash
 curl -s -X POST "{{server_url}}/sweeps" \
@@ -47,10 +53,12 @@ curl -s -X POST "{{server_url}}/sweeps" \
   }'
 ```
 
-Alternatively, create individual runs via `POST {{server_url}}/runs`:
+### Adding a Run to an Existing Sweep
+
+Use this to attach runs outside the original parameter grid (baselines, one-off experiments, reruns with custom flags):
 
 ```bash
-curl -s -X POST "{{server_url}}/runs" \
+curl -s -X POST "{{server_url}}/sweeps/SWEEP_ID/runs" \
   -H "Content-Type: application/json" \
   -H "X-Auth-Token: {{auth_token}}" \
   -d '{
@@ -62,24 +70,31 @@ curl -s -X POST "{{server_url}}/runs" \
 
 ## Rules
 
+- **Always use sweeps** — never create standalone runs. Every run must belong to a sweep.
+- **Do NOT start runs or sweeps yourself** — set `auto_start: false` when creating sweeps. The **job scheduler** will handle starting runs based on available resources.
+- If you already created a sweep this session, attach new runs to it via `POST /sweeps/{id}/runs`
 - Use the server API endpoints directly — do NOT embed sweep specs as XML tags in your response
 - If you need more info before creating a sweep, explain what you need and output `<promise>CONTINUE</promise>`
-- After creating runs or a sweep, output `<promise>CONTINUE</promise>` to monitor results
+- After creating runs or a sweep, output `<promise>CONTINUE</promise>` and suggest `<next_role>job_scheduling</next_role>` so the scheduler can start them
 
 ## Output Requirements
 
 At the end of your response, output these structured tags:
 
-1. **Signal** — exactly ONE:
+1. **Summary** — a brief summary of what you did this iteration:
+   ```
+   <summary>Analyzed the training code, designed a sweep with 4 hyperparameter combinations, and launched it.</summary>
+   ```
+2. **Signal** — exactly ONE:
    - `<promise>CONTINUE</promise>` — you launched runs or need more info
    - `<promise>COMPLETE</promise>` — goal fully achieved
    - `<promise>NEEDS_HUMAN</promise>` — need human input
-2. **Next step** — what the next iteration should do:
+3. **Next step** — what the next iteration should do:
    ```
    <next_step>Monitor the sweep runs and check for completion</next_step>
    ```
-3. **Next role** — which wild loop role should handle the next step:
+4. **Next role** — which wild loop role should handle the next step:
    ```
    <next_role>monitoring</next_role>
    ```
-   Valid roles: `exploring`, `monitoring`, `analyzing`, `alert`
+   Valid roles: `planning`, `exploring`, `monitoring`, `analyzing`, `alert`, `job_scheduling`
