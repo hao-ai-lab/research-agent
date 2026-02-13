@@ -138,6 +138,10 @@ export function ConnectedChatView({
         currentSessionId,
         messages,
         streamingState,
+        availableModels,
+        selectedModel,
+        isModelUpdating,
+        setSelectedModel,
         sendMessage,
         createNewSession,
         selectSession,
@@ -506,6 +510,10 @@ export function ConnectedChatView({
                 } : undefined}
                 onOpenReplyExcerpt={handleOpenReplyExcerpt}
                 contextTokenCount={contextTokenCount}
+                modelOptions={availableModels}
+                selectedModel={selectedModel}
+                isModelUpdating={isModelUpdating}
+                onModelChange={setSelectedModel}
             />
         </>
     )

@@ -5,6 +5,8 @@
 
 import type {
     ChatSession,
+    ChatModelOption,
+    SessionModelSelection,
     ActiveSessionStream,
     SessionWithMessages,
     StreamEvent,
@@ -33,7 +35,7 @@ import type {
 } from './api'
 
 // Re-export types
-export type { ChatSession, ActiveSessionStream, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
+export type { ChatSession, ChatModelOption, SessionModelSelection, ActiveSessionStream, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -54,12 +56,46 @@ const RUN_COLORS = [
     '#34d399', // emerald
 ]
 
+const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
+    {
+        provider_id: 'opencode',
+        model_id: 'kimi-k2.5-free',
+        name: 'Kimi K2.5 (Free)',
+        context_limit: 200000,
+        output_limit: 8192,
+        is_default: true,
+    },
+    {
+        provider_id: 'research-agent',
+        model_id: 'claude-sonnet-4-20250514',
+        name: 'Claude Sonnet 4',
+        context_limit: 200000,
+        output_limit: 16384,
+        is_default: false,
+    },
+    {
+        provider_id: 'research-agent',
+        model_id: 'claude-opus-4-6-20260205',
+        name: 'Claude Opus 4.6',
+        context_limit: 1000000,
+        output_limit: 16384,
+        is_default: false,
+    },
+]
+
+const DEFAULT_MODEL_SELECTION: SessionModelSelection = {
+    provider_id: 'opencode',
+    model_id: 'kimi-k2.5-free',
+}
+
 const mockSessions: Map<string, SessionWithMessages> = new Map([
     ['demo-session-1', {
         id: 'demo-session-1',
         title: 'Training MLP on MNIST',
         created_at: Date.now() / 1000 - 3600,
         message_count: 4,
+        model_provider: DEFAULT_MODEL_SELECTION.provider_id,
+        model_id: DEFAULT_MODEL_SELECTION.model_id,
         messages: [
             { role: 'user', content: 'Help me train an MLP on the MNIST dataset', timestamp: Date.now() / 1000 - 3500 },
             { role: 'assistant', content: 'I\'ll help you set up a Multi-Layer Perceptron for MNIST classification. Here\'s a basic PyTorch implementation:\n\n```python\nimport torch\nimport torch.nn as nn\n\nclass MLP(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.layers = nn.Sequential(\n            nn.Flatten(),\n            nn.Linear(784, 256),\n            nn.ReLU(),\n            nn.Linear(256, 10)\n        )\n    \n    def forward(self, x):\n        return self.layers(x)\n```\n\nWould you like me to add training code as well?', timestamp: Date.now() / 1000 - 3400 },
@@ -72,6 +108,8 @@ const mockSessions: Map<string, SessionWithMessages> = new Map([
         title: 'Hyperparameter Sweep Setup',
         created_at: Date.now() / 1000 - 7200,
         message_count: 2,
+        model_provider: DEFAULT_MODEL_SELECTION.provider_id,
+        model_id: DEFAULT_MODEL_SELECTION.model_id,
         messages: [
             { role: 'user', content: 'How do I set up a hyperparameter sweep?', timestamp: Date.now() / 1000 - 7100 },
             { role: 'assistant', content: 'You can use the Runs tab to create a sweep! Go to **Runs → Create Sweep** and specify:\n\n1. **Base Command**: Your training script\n2. **Parameters**: Define ranges like `{"lr": [0.001, 0.01, 0.1], "batch_size": [32, 64]}`\n\nThe system will automatically create runs for each parameter combination.', timestamp: Date.now() / 1000 - 7000 },
@@ -456,21 +494,33 @@ export async function listSessions(): Promise<ChatSession[]> {
         title: s.title,
         created_at: s.created_at,
         message_count: s.message_count,
+        model_provider: s.model_provider,
+        model_id: s.model_id,
     }))
 }
 
-export async function createSession(title?: string): Promise<ChatSession> {
+export async function createSession(title?: string, model?: SessionModelSelection): Promise<ChatSession> {
     await delay(150)
     const id = `session-${generateId()}`
+    const selectedModel = model ?? DEFAULT_MODEL_SELECTION
     const session: SessionWithMessages = {
         id,
         title: title || 'New Chat',
         created_at: Date.now() / 1000,
         message_count: 0,
+        model_provider: selectedModel.provider_id,
+        model_id: selectedModel.model_id,
         messages: [],
     }
     mockSessions.set(id, session)
-    return { id, title: session.title, created_at: session.created_at, message_count: 0 }
+    return {
+        id,
+        title: session.title,
+        created_at: session.created_at,
+        message_count: 0,
+        model_provider: session.model_provider,
+        model_id: session.model_id,
+    }
 }
 
 export async function getSession(sessionId: string): Promise<SessionWithMessages> {
@@ -487,12 +537,47 @@ export async function renameSession(sessionId: string, title: string): Promise<C
     const session = mockSessions.get(sessionId)
     if (!session) throw new Error('Session not found')
     session.title = title
-    return { id: sessionId, title: session.title, created_at: session.created_at, message_count: session.messages.length }
+    return {
+        id: sessionId,
+        title: session.title,
+        created_at: session.created_at,
+        message_count: session.messages.length,
+        model_provider: session.model_provider,
+        model_id: session.model_id,
+    }
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
     await delay(100)
     mockSessions.delete(sessionId)
+}
+
+export async function listModels(): Promise<ChatModelOption[]> {
+    await delay(80)
+    return MOCK_MODEL_OPTIONS
+}
+
+export async function getSessionModel(sessionId: string): Promise<SessionModelSelection> {
+    await delay(80)
+    const session = mockSessions.get(sessionId)
+    if (!session) {
+        throw new Error('Session not found')
+    }
+    return {
+        provider_id: session.model_provider || DEFAULT_MODEL_SELECTION.provider_id,
+        model_id: session.model_id || DEFAULT_MODEL_SELECTION.model_id,
+    }
+}
+
+export async function setSessionModel(sessionId: string, model: SessionModelSelection): Promise<SessionModelSelection> {
+    await delay(80)
+    const session = mockSessions.get(sessionId)
+    if (!session) {
+        throw new Error('Session not found')
+    }
+    session.model_provider = model.provider_id
+    session.model_id = model.model_id
+    return model
 }
 
 // Simulated streaming chat response

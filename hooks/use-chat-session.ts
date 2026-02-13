@@ -7,11 +7,15 @@ import {
     getSession,
     deleteSession,
     renameSession as renameSessionApi,
+    listModels,
+    setSessionModel as setSessionModelApi,
     streamChat,
     streamSession,
     checkApiHealth,
     stopSession,
     type ChatSession,
+    type ChatModelOption,
+    type SessionModelSelection,
     type ActiveSessionStream,
     type ChatMessageData,
     type StreamEvent,
@@ -78,6 +82,10 @@ export interface UseChatSessionResult {
     archiveSession: (sessionId: string) => Promise<void>
     removeSession: (sessionId: string) => Promise<void>
     refreshSessions: () => Promise<void>
+    availableModels: ChatModelOption[]
+    selectedModel: SessionModelSelection | null
+    isModelUpdating: boolean
+    setSelectedModel: (model: SessionModelSelection) => Promise<void>
 
     // Messages
     messages: ChatMessageData[]
@@ -154,6 +162,17 @@ function parseDevelopCommand(content: string): string | null {
         return 'Usage: /develop <text>'
     }
     return payload
+}
+
+function normalizeSessionModel(source: {
+    model_provider?: string | null
+    model_id?: string | null
+} | null | undefined): SessionModelSelection | null {
+    if (!source) return null
+    const providerId = source.model_provider?.trim()
+    const modelId = source.model_id?.trim()
+    if (!providerId || !modelId) return null
+    return { provider_id: providerId, model_id: modelId }
 }
 
 type ToolStatus = 'pending' | 'running' | 'completed' | 'error'
@@ -430,6 +449,9 @@ export function useChatSession(): UseChatSessionResult {
     const [savedSessionIds, setSavedSessionIds] = useState<string[]>(() => readSavedSessionIds())
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
     const [messages, setMessages] = useState<ChatMessageData[]>([])
+    const [availableModels, setAvailableModels] = useState<ChatModelOption[]>([])
+    const [selectedModel, setSelectedModelState] = useState<SessionModelSelection | null>(null)
+    const [isModelUpdating, setIsModelUpdating] = useState(false)
 
     // Streaming state
     const [streamingState, setStreamingState] = useState<StreamingState>(initialStreamingState)
@@ -591,6 +613,21 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [archivedSessionIds])
 
+    const refreshModels = useCallback(async () => {
+        try {
+            const models = await listModels()
+            setAvailableModels(models)
+            setSelectedModelState((prev) => {
+                if (prev) return prev
+                const defaultModel = models.find((item) => item.is_default) || models[0]
+                if (!defaultModel) return null
+                return { provider_id: defaultModel.provider_id, model_id: defaultModel.model_id }
+            })
+        } catch (err) {
+            console.warn('Failed to fetch model options:', err)
+        }
+    }, [])
+
     const attachToExistingStream = useCallback((sessionId: string, activeStream: ActiveSessionStream) => {
         if (activeStream.status !== 'running') {
             return
@@ -624,6 +661,10 @@ export function useChatSession(): UseChatSessionResult {
                 if (finalText || finalThinking || sawToolPart) {
                     const sessionData = await getSession(sessionId)
                     setMessages(sessionData.messages.map(normalizeMessage))
+                    const sessionModel = normalizeSessionModel(sessionData)
+                    if (sessionModel) {
+                        setSelectedModelState(sessionModel)
+                    }
                     await refreshSessions()
                 }
             } catch (err) {
@@ -644,8 +685,9 @@ export function useChatSession(): UseChatSessionResult {
     useEffect(() => {
         if (isConnected) {
             refreshSessions()
+            refreshModels()
         }
-    }, [isConnected, refreshSessions])
+    }, [isConnected, refreshSessions, refreshModels])
 
     useEffect(() => {
         if (typeof window === 'undefined') return
@@ -667,10 +709,14 @@ export function useChatSession(): UseChatSessionResult {
     const createNewSession = useCallback(async (): Promise<string | null> => {
         try {
             setError(null)
-            const newSession = await createSession()
+            const newSession = await createSession(undefined, selectedModel || undefined)
             setArchivedSessionIds((prev) => prev.filter((id) => id !== newSession.id))
             setSessions(prev => [newSession, ...prev.filter((session) => session.id !== newSession.id)])
             setCurrentSessionId(newSession.id)
+            const createdModel = normalizeSessionModel(newSession)
+            if (createdModel) {
+                setSelectedModelState(createdModel)
+            }
             setMessages([])
             setStreamingState(initialStreamingState)
             return newSession.id
@@ -679,7 +725,7 @@ export function useChatSession(): UseChatSessionResult {
             setError(err instanceof Error ? err.message : 'Failed to create session')
             return null
         }
-    }, [])
+    }, [selectedModel])
 
     // Start new chat - clears current session without creating backend session
     // Session will be created when user sends first message
@@ -714,6 +760,10 @@ export function useChatSession(): UseChatSessionResult {
             const sessionData = await getSession(sessionId)
             setCurrentSessionId(sessionId)
             setMessages(sessionData.messages.map(normalizeMessage))
+            const sessionModel = normalizeSessionModel(sessionData)
+            if (sessionModel) {
+                setSelectedModelState(sessionModel)
+            }
             const activeStream = sessionData.active_stream
             if (activeStream && activeStream.status === 'running') {
                 attachToExistingStream(sessionId, activeStream)
@@ -790,6 +840,45 @@ export function useChatSession(): UseChatSessionResult {
         setError(null)
         setSavedSessionIds((prev) => prev.filter((id) => id !== sessionId))
     }, [])
+
+    const setSelectedModel = useCallback(async (model: SessionModelSelection) => {
+        const nextModel: SessionModelSelection = {
+            provider_id: model.provider_id.trim(),
+            model_id: model.model_id.trim(),
+        }
+        if (!nextModel.provider_id || !nextModel.model_id) {
+            return
+        }
+
+        const previousModel = selectedModel
+        setSelectedModelState(nextModel)
+
+        if (!currentSessionId) {
+            return
+        }
+
+        try {
+            setError(null)
+            setIsModelUpdating(true)
+            const persisted = await setSessionModelApi(currentSessionId, nextModel)
+            setSelectedModelState(persisted)
+            setSessions((prev) => prev.map((session) => (
+                session.id === currentSessionId
+                    ? {
+                        ...session,
+                        model_provider: persisted.provider_id,
+                        model_id: persisted.model_id,
+                    }
+                    : session
+            )))
+        } catch (err) {
+            setSelectedModelState(previousModel)
+            console.error('Failed to update session model:', err)
+            setError(err instanceof Error ? err.message : 'Failed to update session model')
+        } finally {
+            setIsModelUpdating(false)
+        }
+    }, [currentSessionId, selectedModel])
 
     // Send a message - accepts optional sessionIdOverride for newly created sessions
     const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string) => {
@@ -904,6 +993,10 @@ export function useChatSession(): UseChatSessionResult {
             if (finalText || finalThinking || sawToolPart) {
                 const sessionData = await getSession(targetSessionId)
                 setMessages(sessionData.messages.map(normalizeMessage))
+                const sessionModel = normalizeSessionModel(sessionData)
+                if (sessionModel) {
+                    setSelectedModelState(sessionModel)
+                }
                 await refreshSessions()
             }
 
@@ -918,6 +1011,10 @@ export function useChatSession(): UseChatSessionResult {
                 try {
                     const sessionData = await getSession(targetSessionId)
                     setMessages(sessionData.messages.map(normalizeMessage))
+                    const sessionModel = normalizeSessionModel(sessionData)
+                    if (sessionModel) {
+                        setSelectedModelState(sessionModel)
+                    }
                 } catch (syncErr) {
                     console.warn('Failed to sync session after abort:', syncErr)
                 }
@@ -1000,6 +1097,10 @@ export function useChatSession(): UseChatSessionResult {
         archiveSession,
         removeSession,
         refreshSessions,
+        availableModels,
+        selectedModel,
+        isModelUpdating,
+        setSelectedModel,
         messages,
         streamingState,
         sendMessage,
