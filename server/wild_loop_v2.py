@@ -615,28 +615,35 @@ class WildV2Engine:
                         if not line.startswith("data: "):
                             continue
                         try:
-                            event_data = json.loads(line[6:])
+                            raw_data = json.loads(line[6:])
+                            # Unwrap opencode's {payload: {...}} wrapper if present
+                            event_data = raw_data.get("payload", raw_data)
+
                             if "error" in event_data:
                                 logger.error("[wild-v2] OpenCode error: %s", event_data["error"])
                                 break
 
-                            # Extract text from event
+                            event_type = event_data.get("type", "")
                             props = event_data.get("properties", {})
+
+                            # Extract text from event
                             content_parts = props.get("parts", [])
                             for part in content_parts:
                                 if part.get("type") == "text":
                                     full_text += part.get("content", "")
 
                             # Check for completion
-                            if event_data.get("type") == "message.updated":
+                            if event_type == "message.updated":
                                 metadata = props.get("metadata", {})
                                 if metadata.get("done"):
+                                    logger.info("[wild-v2] SSE: message.updated done=True")
                                     break
 
                             # Simple done detection: session idle
-                            if (event_data.get("type") == "session.updated"
+                            if (event_type == "session.updated"
                                 and props.get("id") == session_id):
                                 if props.get("busy") is False:
+                                    logger.info("[wild-v2] SSE: session %s no longer busy", session_id)
                                     break
                         except Exception as parse_err:
                             logger.debug("[wild-v2] Event parse error: %s", parse_err)

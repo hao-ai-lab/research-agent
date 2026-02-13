@@ -96,6 +96,12 @@ export function SettingsDialog({
   const [accentColorInput, setAccentColorInput] = useState<string>(
     settings.appearance.customAccentColor ?? ''
   )
+  const [wildLoopTasksFontSizeInput, setWildLoopTasksFontSizeInput] = useState<string>(
+    settings.appearance.wildLoopTasksFontSizePx?.toString() ?? ''
+  )
+  const [wildLoopHistoryFontSizeInput, setWildLoopHistoryFontSizeInput] = useState<string>(
+    settings.appearance.wildLoopHistoryFontSizePx?.toString() ?? ''
+  )
 
   // Sync local inputs when settings change externally (e.g. reset)
   React.useEffect(() => {
@@ -121,6 +127,14 @@ export function SettingsDialog({
   React.useEffect(() => {
     setAccentColorInput(settings.appearance.customAccentColor ?? '')
   }, [settings.appearance.customAccentColor])
+
+  React.useEffect(() => {
+    setWildLoopTasksFontSizeInput(settings.appearance.wildLoopTasksFontSizePx?.toString() ?? '')
+  }, [settings.appearance.wildLoopTasksFontSizePx])
+
+  React.useEffect(() => {
+    setWildLoopHistoryFontSizeInput(settings.appearance.wildLoopHistoryFontSizePx?.toString() ?? '')
+  }, [settings.appearance.wildLoopHistoryFontSizePx])
 
   // Sync apiUrlInput when apiUrl changes (e.g. on reset)
   React.useEffect(() => {
@@ -508,7 +522,57 @@ export function SettingsDialog({
       updateAppearanceSettings({ customAccentColor: normalized })
     }
   }
+  const handleWildLoopTasksFontSizeChange = (value: string, currentInput: string) => {
+    if (!currentInput && value === '12') {
+      setWildLoopTasksFontSizeInput('16')
+      updateAppearanceSettings({ wildLoopTasksFontSizePx: 16 })
+      return
+    }
+    setWildLoopTasksFontSizeInput(value)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 12 && parsed <= 28) {
+      updateAppearanceSettings({ wildLoopTasksFontSizePx: parsed })
+    }
+  }
 
+  const handleWildLoopTasksFontSizeBlur = (value: string) => {
+    if (!value.trim()) {
+      updateAppearanceSettings({ wildLoopTasksFontSizePx: null })
+      setWildLoopTasksFontSizeInput('')
+      return
+    }
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(12, Math.min(28, parsed))
+    updateAppearanceSettings({ wildLoopTasksFontSizePx: clamped })
+    setWildLoopTasksFontSizeInput(clamped.toString())
+  }
+
+  const handleWildLoopHistoryFontSizeChange = (value: string, currentInput: string) => {
+    if (!currentInput && value === '12') {
+      setWildLoopHistoryFontSizeInput('15')
+      updateAppearanceSettings({ wildLoopHistoryFontSizePx: 15 })
+      return
+    }
+    setWildLoopHistoryFontSizeInput(value)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 12 && parsed <= 28) {
+      updateAppearanceSettings({ wildLoopHistoryFontSizePx: parsed })
+    }
+  }
+
+  const handleWildLoopHistoryFontSizeBlur = (value: string) => {
+    if (!value.trim()) {
+      updateAppearanceSettings({ wildLoopHistoryFontSizePx: null })
+      setWildLoopHistoryFontSizeInput('')
+      return
+    }
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(12, Math.min(28, parsed))
+    updateAppearanceSettings({ wildLoopHistoryFontSizePx: clamped })
+    setWildLoopHistoryFontSizeInput(clamped.toString())
+  }
   const handleAlertsToggle = (enabled: boolean) => {
     onSettingsChange({
       ...settings,
@@ -803,6 +867,24 @@ export function SettingsDialog({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
+                      <Label htmlFor="wild-loop-tasks-font-size-dialog" className="text-xs">Wild Loop Tasks Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
+                      <p className="text-[11px] text-muted-foreground">tasks.md text size in the Wild Loop Debug panel</p>
+                    </div>
+                    <Input
+                      id="wild-loop-tasks-font-size-dialog"
+                      type="number"
+                      min={12}
+                      max={28}
+                      value={wildLoopTasksFontSizeInput}
+                      onChange={(e) => handleWildLoopTasksFontSizeChange(e.target.value, wildLoopTasksFontSizeInput)}
+                      onBlur={(e) => handleWildLoopTasksFontSizeBlur(e.target.value)}
+                      placeholder="16"
+                      className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
                       <Label htmlFor="custom-accent-color-dialog" className="text-xs">Accent Color</Label>
                       <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
                     </div>
@@ -813,6 +895,24 @@ export function SettingsDialog({
                       onBlur={(e) => handleAccentColorBlur(e.target.value)}
                       placeholder="#fb923c"
                       className="h-8 w-28 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
+                      <Label htmlFor="wild-loop-history-font-size-dialog" className="text-xs">Wild Loop History Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
+                      <p className="text-[11px] text-muted-foreground">iteration history text size in the Wild Loop Debug panel</p>
+                    </div>
+                    <Input
+                      id="wild-loop-history-font-size-dialog"
+                      type="number"
+                      min={12}
+                      max={28}
+                      value={wildLoopHistoryFontSizeInput}
+                      onChange={(e) => handleWildLoopHistoryFontSizeChange(e.target.value, wildLoopHistoryFontSizeInput)}
+                      onBlur={(e) => handleWildLoopHistoryFontSizeBlur(e.target.value)}
+                      placeholder="15"
+                      className="h-8 w-24 text-xs"
                     />
                   </div>
 
@@ -828,6 +928,8 @@ export function SettingsDialog({
                           streamingToolBoxHeightRem: null,
                           customPrimaryColor: null,
                           customAccentColor: null,
+                          wildLoopTasksFontSizePx: null,
+                          wildLoopHistoryFontSizePx: null,
                         })
                       }
                     >

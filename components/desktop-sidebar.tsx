@@ -7,10 +7,12 @@ import {
   AtSign,
   Archive,
   CheckCircle2,
+  CircleHelp,
   Clock3,
   ChevronsUpDown,
   Ellipsis,
   FlaskConical,
+  Loader2,
   PanelLeftClose,
   Pencil,
   Play,
@@ -31,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useApiConfig } from '@/lib/api-config'
-import type { ChatSession } from '@/lib/api'
+import type { Alert, ChatSession, ChatSessionStatus } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
 import { getStatusBadgeClass as getStatusBadgeClassUtil } from '@/lib/status-utils'
 import type { AppTab, HomeTab } from '@/lib/navigation'
@@ -53,6 +55,9 @@ interface DesktopSidebarProps {
   runs: ExperimentRun[]
   sweeps: Sweep[]
   pendingAlertsByRun?: Record<string, number>
+  alerts?: Alert[]
+  currentSessionId?: string | null
+  isCurrentSessionStreaming?: boolean
   onTabChange: (tab: HomeTab | 'contextual') => void
   onNewChat: () => Promise<void> | void
   onSelectSession: (sessionId: string) => Promise<void> | void
@@ -113,6 +118,9 @@ export function DesktopSidebar({
   runs,
   sweeps,
   pendingAlertsByRun = {},
+  alerts = [],
+  currentSessionId = null,
+  isCurrentSessionStreaming = false,
   onTabChange,
   onNewChat,
   onSelectSession,
@@ -204,6 +212,62 @@ export function DesktopSidebar({
     () => sessions.filter((session) => !savedSessionIdSet.has(session.id)).slice(0, 10),
     [sessions, savedSessionIdSet]
   )
+  const pendingAlertSessionIdSet = useMemo(
+    () =>
+      new Set(
+        alerts
+          .filter((alert) => alert.status === 'pending' && typeof alert.session_id === 'string')
+          .map((alert) => alert.session_id as string)
+      ),
+    [alerts]
+  )
+
+  const getSessionStatus = useCallback((session: ChatSession): ChatSessionStatus => {
+    if (pendingAlertSessionIdSet.has(session.id)) return 'awaiting_human'
+    if (isCurrentSessionStreaming && currentSessionId === session.id) return 'running'
+    return session.status || (session.message_count > 0 ? 'completed' : 'idle')
+  }, [currentSessionId, isCurrentSessionStreaming, pendingAlertSessionIdSet])
+
+  const renderSessionStatusIcon = useCallback((status: ChatSessionStatus) => {
+    switch (status) {
+      case 'running':
+        return (
+          <span title="Running" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-blue-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          </span>
+        )
+      case 'completed':
+        return (
+          <span title="Completed" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-emerald-500">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          </span>
+        )
+      case 'failed':
+        return (
+          <span title="Failed" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-destructive">
+            <XCircle className="h-3.5 w-3.5" />
+          </span>
+        )
+      case 'questionable':
+        return (
+          <span title="Needs review" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-amber-500">
+            <CircleHelp className="h-3.5 w-3.5" />
+          </span>
+        )
+      case 'awaiting_human':
+        return (
+          <span title="Awaiting response" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-amber-600">
+            <AlertCircle className="h-3.5 w-3.5" />
+          </span>
+        )
+      default:
+        return (
+          <span title="Idle" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
+            <Clock3 className="h-3.5 w-3.5" />
+          </span>
+        )
+    }
+  }, [])
 
   const handleResizeStart = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     if (hidden) return
@@ -356,6 +420,7 @@ export function DesktopSidebar({
                         >
                           <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
                             <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                            {renderSessionStatusIcon(getSessionStatus(session))}
                             <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
                           </span>
                           <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
@@ -444,7 +509,10 @@ export function DesktopSidebar({
                           }}
                           className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
                         >
-                          <span className="min-w-0 truncate text-foreground">{session.title || 'Untitled chat'}</span>
+                          <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
+                            {renderSessionStatusIcon(getSessionStatus(session))}
+                            <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                          </span>
                           <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                             {formatRelativeTime(new Date(session.created_at * 1000))}
                           </span>
