@@ -8,6 +8,8 @@ import type {
     ActiveSessionStream,
     SessionWithMessages,
     StreamEvent,
+    TerminalSessionInfo,
+    TerminalStreamEvent,
     Run,
     RunStatus,
     CreateRunRequest,
@@ -33,7 +35,7 @@ import type {
 } from './api'
 
 // Re-export types
-export type { ChatSession, ActiveSessionStream, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
+export type { ChatSession, ActiveSessionStream, SessionWithMessages, StreamEvent, TerminalSessionInfo, TerminalStreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -296,6 +298,14 @@ const mockAlerts: Map<string, Alert> = new Map([
 ])
 
 let wildModeEnabled = false
+
+interface MockTerminalSession {
+    info: TerminalSessionInfo
+    outputQueue: string[]
+    closed: boolean
+}
+
+const mockTerminalSessions: Map<string, MockTerminalSession> = new Map()
 
 const CLUSTER_TYPE_LABELS: Record<ClusterType, string> = {
     unknown: 'Unknown',
@@ -567,6 +577,143 @@ export async function* streamSession(
 ): AsyncGenerator<StreamEvent, void, unknown> {
     await delay(50)
     yield { type: 'session_status', status: 'idle' }
+}
+
+export async function createTerminalSession(request: {
+    workdir?: string
+    cols?: number
+    rows?: number
+} = {}): Promise<TerminalSessionInfo> {
+    await delay(80)
+    const sessionId = `term-${generateId()}`
+    const info: TerminalSessionInfo = {
+        session_id: sessionId,
+        workdir: request.workdir || '/workspace',
+        shell: '/bin/bash -i',
+        cols: request.cols || 120,
+        rows: request.rows || 30,
+        created_at: nowSeconds(),
+    }
+    mockTerminalSessions.set(sessionId, {
+        info,
+        outputQueue: [
+            `Mock terminal connected\r\n`,
+            `Working directory: ${info.workdir}\r\n`,
+            `$ `,
+        ],
+        closed: false,
+    })
+    return info
+}
+
+export async function getTerminalSession(sessionId: string): Promise<TerminalSessionInfo & { closed: boolean }> {
+    await delay(40)
+    const session = mockTerminalSessions.get(sessionId)
+    if (!session) {
+        throw new Error('Terminal session not found')
+    }
+    return {
+        ...session.info,
+        closed: session.closed,
+    }
+}
+
+export async function* streamTerminalSession(
+    sessionId: string,
+    signal?: AbortSignal
+): AsyncGenerator<TerminalStreamEvent, void, unknown> {
+    const session = mockTerminalSessions.get(sessionId)
+    if (!session) {
+        throw new Error('Terminal session not found')
+    }
+
+    yield {
+        type: 'ready',
+        session_id: session.info.session_id,
+        workdir: session.info.workdir,
+        shell: session.info.shell,
+    }
+
+    while (true) {
+        if (signal?.aborted) {
+            break
+        }
+
+        const chunk = session.outputQueue.shift()
+        if (chunk) {
+            yield { type: 'output', data: chunk }
+            continue
+        }
+
+        if (session.closed) {
+            yield { type: 'closed' }
+            break
+        }
+
+        await delay(75)
+    }
+}
+
+export async function sendTerminalInput(sessionId: string, data: string): Promise<{ ok: boolean }> {
+    await delay(25)
+    const session = mockTerminalSessions.get(sessionId)
+    if (!session || session.closed) {
+        throw new Error('Terminal session not found')
+    }
+
+    if (data.includes('\u0003')) {
+        session.outputQueue.push('^C\r\n$ ')
+        return { ok: true }
+    }
+
+    const commands = data
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+
+    for (const command of commands) {
+        session.outputQueue.push(`${command}\r\n`)
+
+        if (command === 'pwd') {
+            session.outputQueue.push(`${session.info.workdir}\r\n`)
+        } else if (command.startsWith('cd ')) {
+            const destination = command.slice(3).trim()
+            if (destination) {
+                session.info.workdir = destination.startsWith('/')
+                    ? destination
+                    : `${session.info.workdir}/${destination}`.replace(/\/+/g, '/')
+            }
+        } else if (command === 'clear') {
+            session.outputQueue.push('\r\n')
+        } else {
+            session.outputQueue.push(`(mock) executed: ${command}\r\n`)
+        }
+
+        session.outputQueue.push('$ ')
+    }
+
+    return { ok: true }
+}
+
+export async function resizeTerminalSession(sessionId: string, cols: number, rows: number): Promise<{ ok: boolean; cols: number; rows: number }> {
+    await delay(10)
+    const session = mockTerminalSessions.get(sessionId)
+    if (!session) {
+        throw new Error('Terminal session not found')
+    }
+    session.info.cols = cols
+    session.info.rows = rows
+    return { ok: true, cols, rows }
+}
+
+export async function closeTerminalSession(sessionId: string): Promise<{ ok: boolean }> {
+    await delay(20)
+    const session = mockTerminalSessions.get(sessionId)
+    if (session) {
+        session.closed = true
+        session.outputQueue.push('\r\n[terminal closed]\r\n')
+    }
+    return { ok: true }
 }
 
 export async function checkApiHealth(): Promise<boolean> {

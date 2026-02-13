@@ -49,6 +49,7 @@ const STORAGE_KEY_JOURNEY_SUB_TAB = 'journeySubTab'
 const STORAGE_KEY_CHAT_SHOW_ARTIFACTS = 'chatShowArtifacts'
 const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
 const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
+const STORAGE_KEY_CHAT_TERMINAL_OPEN = 'chatTerminalOpen'
 const DESKTOP_SIDEBAR_ICON_RAIL_TRIGGER_WIDTH = 136
 
 export default function ResearchChat() {
@@ -104,6 +105,7 @@ export default function ResearchChat() {
   const [showArtifacts, setShowArtifacts] = useState(false)
   const [collapseChats, setCollapseChats] = useState(false)
   const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+  const [chatTerminalOpen, setChatTerminalOpen] = useState(false)
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
@@ -148,6 +150,11 @@ export default function ResearchChat() {
     if (storedCollapseArtifacts != null) {
       setCollapseArtifactsInChat(storedCollapseArtifacts === 'true')
     }
+
+    const storedTerminalOpen = window.localStorage.getItem(STORAGE_KEY_CHAT_TERMINAL_OPEN)
+    if (storedTerminalOpen != null) {
+      setChatTerminalOpen(storedTerminalOpen === 'true')
+    }
   }, [])
 
   useEffect(() => {
@@ -173,6 +180,10 @@ export default function ResearchChat() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS, String(collapseArtifactsInChat))
   }, [collapseArtifactsInChat])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_CHAT_TERMINAL_OPEN, String(chatTerminalOpen))
+  }, [chatTerminalOpen])
 
   useEffect(() => {
     return () => {
@@ -679,6 +690,8 @@ export default function ResearchChat() {
             onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
             collapseArtifactsInChat={collapseArtifactsInChat}
             onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
+            chatTerminalOpen={chatTerminalOpen}
+            onToggleChatTerminal={() => setChatTerminalOpen(prev => !prev)}
             sessionTitle={currentSession?.title || 'New Chat'}
             currentSessionId={currentSessionId}
             sessions={sessions}
@@ -723,6 +736,7 @@ export default function ResearchChat() {
                 insertDraft={chatDraftInsert}
                 skills={promptSkills}
                 contextTokenCount={contextTokenCount}
+                showTerminal={chatTerminalOpen}
               />
             )}
             {activeTab === 'runs' && (

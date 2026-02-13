@@ -20,6 +20,8 @@ export type {
     SessionWithMessages,
     StreamEventType,
     StreamEvent,
+    TerminalSessionInfo,
+    TerminalStreamEvent,
     RunStatus,
     Run,
     CreateRunRequest,
@@ -72,6 +74,24 @@ export const streamChat = (...args: Parameters<typeof realApi.streamChat>) =>
 
 export const streamSession = (...args: Parameters<typeof realApi.streamSession>) =>
     getApi().streamSession(...args)
+
+export const createTerminalSession = (...args: Parameters<typeof realApi.createTerminalSession>) =>
+    getApi().createTerminalSession(...args)
+
+export const getTerminalSession = (...args: Parameters<typeof realApi.getTerminalSession>) =>
+    getApi().getTerminalSession(...args)
+
+export const streamTerminalSession = (...args: Parameters<typeof realApi.streamTerminalSession>) =>
+    getApi().streamTerminalSession(...args)
+
+export const sendTerminalInput = (...args: Parameters<typeof realApi.sendTerminalInput>) =>
+    getApi().sendTerminalInput(...args)
+
+export const resizeTerminalSession = (...args: Parameters<typeof realApi.resizeTerminalSession>) =>
+    getApi().resizeTerminalSession(...args)
+
+export const closeTerminalSession = (...args: Parameters<typeof realApi.closeTerminalSession>) =>
+    getApi().closeTerminalSession(...args)
 
 export const checkApiHealth = async (): Promise<boolean> => {
     if (isUsingMock()) {

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Orbit, Pause, Play, Square, Target } from 'lucide-react'
+import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Orbit, Pause, Play, Square, Target, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -75,6 +75,8 @@ interface FloatingNavProps {
   onToggleCollapseChats?: () => void
   collapseArtifactsInChat?: boolean
   onToggleCollapseArtifactsInChat?: () => void
+  chatTerminalOpen?: boolean
+  onToggleChatTerminal?: () => void
   // Session selector props (for chat tab)
   sessionTitle?: string
   currentSessionId?: string | null
@@ -104,6 +106,8 @@ export function FloatingNav({
   onToggleCollapseChats,
   collapseArtifactsInChat = false,
   onToggleCollapseArtifactsInChat,
+  chatTerminalOpen = false,
+  onToggleChatTerminal,
   sessionTitle = 'New Chat',
   currentSessionId,
   sessions = [],
@@ -249,6 +253,17 @@ export function FloatingNav({
           >
             <Orbit className="h-4 w-4" />
             <span className="sr-only">Open contextual chat</span>
+          </Button>
+
+          <Button
+            variant={chatTerminalOpen ? 'secondary' : 'ghost'}
+            size="icon"
+            onClick={onToggleChatTerminal}
+            className="h-8 w-8"
+            title={chatTerminalOpen ? 'Hide terminal' : 'Show terminal'}
+          >
+            <Terminal className="h-4 w-4" />
+            <span className="sr-only">{chatTerminalOpen ? 'Hide terminal' : 'Show terminal'}</span>
           </Button>
 
           {/* Settings Dropdown */}

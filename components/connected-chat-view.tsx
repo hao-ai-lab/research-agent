@@ -11,6 +11,8 @@ import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
 import { WildModeSetupPanel } from '@/components/wild-mode-setup-panel'
 import { WildLoopDebugPanel } from '@/components/wild-loop-debug-panel'
+import { ChatTerminalPanel } from '@/components/chat-terminal-panel'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import {
     Sheet,
     SheetContent,
@@ -61,6 +63,7 @@ interface ConnectedChatViewProps {
     onUserMessage?: (message: string) => void
     skills?: PromptSkill[]
     contextTokenCount?: number
+    showTerminal?: boolean
 }
 
 /**
@@ -89,6 +92,7 @@ export function ConnectedChatView({
     onUserMessage,
     skills = [],
     contextTokenCount = 0,
+    showTerminal = false,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
@@ -521,6 +525,120 @@ export function ConnectedChatView({
         }} />
     ) : null
 
+    const chatBody = !hasConversation ? (
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+            <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
+                {/* Welcome message for new chat */}
+                <div className="mb-6 text-center">
+                    <h2 className="text-2xl font-semibold text-foreground mb-2">
+                        What can I help you with?
+                    </h2>
+                </div>
+                <div className="w-full max-w-3xl">
+                    {renderChatInput('centered')}
+                </div>
+                {showStarterCards && mode !== 'wild' && (
+                    <div className="mt-4 lg:mt-5 w-full max-w-6xl">
+                        <ChatStarterCards
+                            runs={runs}
+                            sweeps={sweeps}
+                            alerts={alerts}
+                            customTemplates={customTemplates}
+                            onEditTemplate={handleEditTemplate}
+                            onPromptSelect={(prompt) => {
+                                setStarterDraftInsert({
+                                    id: Date.now(),
+                                    text: prompt,
+                                })
+                            }}
+                        />
+                    </div>
+                )}
+                {mode === 'wild' && wildLoop && (
+                    <div className="mt-4 lg:mt-5 w-full max-w-3xl">
+                        <WildModeSetupPanel
+                            onLaunch={(setup: WildModeSetup) => {
+                                wildLoop.applySetup(setup)
+                            }}
+                        />
+                    </div>
+                )}
+            </div>
+        </div>
+    ) : (
+        <>
+            {/* Scrollable Chat Area */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+                <ScrollArea className="h-full" ref={scrollRef}>
+                    <div className="pb-4">
+                        <div className="mt-4 space-y-1 px-2.5 min-w-0">
+                            {collapseChats
+                                ? messagePairs.map((pair, index) => (
+                                    <CollapsedChatPair
+                                        key={`${pair.user.id}-${index}`}
+                                        pair={pair}
+                                        collapseArtifacts={collapseArtifactsInChat}
+                                        sweeps={sweeps}
+                                        runs={runs}
+                                        alerts={alerts}
+                                        onEditSweep={onEditSweep}
+                                        onLaunchSweep={onLaunchSweep}
+                                        onRunClick={onRunClick}
+                                        onReplyToSelection={handleReplyToSelection}
+                                    />
+                                ))
+                                : displayMessages.map((message, index) => {
+                                    // Find the previous user message for context extraction
+                                    let prevUserContent: string | undefined
+                                    if (message.role === 'assistant') {
+                                        for (let i = index - 1; i >= 0; i--) {
+                                            if (displayMessages[i].role === 'user') {
+                                                prevUserContent = displayMessages[i].content
+                                                break
+                                            }
+                                        }
+                                    }
+                                    return (
+                                        <div
+                                            key={message.id}
+                                            style={message.source === 'agent_wild' ? {
+                                                borderLeft: '3px solid #a855f7',
+                                                paddingLeft: '8px',
+                                                marginLeft: '4px',
+                                            } : undefined}
+                                        >
+                                            <ChatMessage
+                                                message={message}
+                                                collapseArtifacts={collapseArtifactsInChat}
+                                                sweeps={sweeps}
+                                                runs={runs}
+                                                alerts={alerts}
+                                                onEditSweep={onEditSweep}
+                                                onLaunchSweep={onLaunchSweep}
+                                                onRunClick={onRunClick}
+                                                onReplyToSelection={handleReplyToSelection}
+                                                previousUserContent={prevUserContent}
+                                            />
+                                        </div>
+                                    )
+                                })}
+
+                            {/* Streaming message */}
+                            {streamingState.isStreaming && (
+                                <StreamingMessage streamingState={streamingState} />
+                            )}
+                        </div>
+                    </div>
+                </ScrollArea>
+            </div>
+
+            {/* Chat Input - Fixed at bottom once conversation starts */}
+            <div className="shrink-0">
+                {renderChatInput('docked')}
+            </div>
+        </>
+    )
+
     return (
         <div className="flex h-full overflow-hidden">
             <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
@@ -532,118 +650,18 @@ export function ConnectedChatView({
                     </div>
                 )}
 
-                {!hasConversation ? (
-                    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-                        <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
-                            {/* Welcome message for new chat */}
-                            <div className="mb-6 text-center">
-                                <h2 className="text-2xl font-semibold text-foreground mb-2">
-                                    What can I help you with?
-                                </h2>
-                            </div>
-                            <div className="w-full max-w-3xl">
-                                {renderChatInput('centered')}
-                            </div>
-                            {showStarterCards && mode !== 'wild' && (
-                                <div className="mt-4 lg:mt-5 w-full max-w-6xl">
-                                    <ChatStarterCards
-                                        runs={runs}
-                                        sweeps={sweeps}
-                                        alerts={alerts}
-                                        customTemplates={customTemplates}
-                                        onEditTemplate={handleEditTemplate}
-                                        onPromptSelect={(prompt) => {
-                                            setStarterDraftInsert({
-                                                id: Date.now(),
-                                                text: prompt,
-                                            })
-                                        }}
-                                    />
-                                </div>
-                            )}
-                            {mode === 'wild' && wildLoop && (
-                                <div className="mt-4 lg:mt-5 w-full max-w-3xl">
-                                    <WildModeSetupPanel
-                                        onLaunch={(setup: WildModeSetup) => {
-                                            wildLoop.applySetup(setup)
-                                        }}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                {showTerminal ? (
+                    <ResizablePanelGroup direction="vertical" className="flex-1 min-h-0">
+                        <ResizablePanel defaultSize={68} minSize={35}>
+                            {chatBody}
+                        </ResizablePanel>
+                        <ResizableHandle withHandle />
+                        <ResizablePanel defaultSize={32} minSize={18} maxSize={70}>
+                            <ChatTerminalPanel />
+                        </ResizablePanel>
+                    </ResizablePanelGroup>
                 ) : (
-                    <>
-                        {/* Scrollable Chat Area */}
-                        <div className="flex-1 min-h-0 overflow-hidden">
-                            <ScrollArea className="h-full" ref={scrollRef}>
-                                <div className="pb-4">
-                                    <div className="mt-4 space-y-1 px-2.5 min-w-0">
-                                        {collapseChats
-                                            ? messagePairs.map((pair, index) => (
-                                                <CollapsedChatPair
-                                                    key={`${pair.user.id}-${index}`}
-                                                    pair={pair}
-                                                    collapseArtifacts={collapseArtifactsInChat}
-                                                    sweeps={sweeps}
-                                                    runs={runs}
-                                                    alerts={alerts}
-                                                    onEditSweep={onEditSweep}
-                                                    onLaunchSweep={onLaunchSweep}
-                                                    onRunClick={onRunClick}
-                                                    onReplyToSelection={handleReplyToSelection}
-                                                />
-                                            ))
-                                            : displayMessages.map((message, index) => {
-                                                // Find the previous user message for context extraction
-                                                let prevUserContent: string | undefined
-                                                if (message.role === 'assistant') {
-                                                    for (let i = index - 1; i >= 0; i--) {
-                                                        if (displayMessages[i].role === 'user') {
-                                                            prevUserContent = displayMessages[i].content
-                                                            break
-                                                        }
-                                                    }
-                                                }
-                                                return (
-                                                    <div
-                                                        key={message.id}
-                                                        style={message.source === 'agent_wild' ? {
-                                                            borderLeft: '3px solid #a855f7',
-                                                            paddingLeft: '8px',
-                                                            marginLeft: '4px',
-                                                        } : undefined}
-                                                    >
-                                                        <ChatMessage
-                                                            message={message}
-                                                            collapseArtifacts={collapseArtifactsInChat}
-                                                            sweeps={sweeps}
-                                                            runs={runs}
-                                                            alerts={alerts}
-                                                            onEditSweep={onEditSweep}
-                                                            onLaunchSweep={onLaunchSweep}
-                                                            onRunClick={onRunClick}
-                                                            onReplyToSelection={handleReplyToSelection}
-                                                            previousUserContent={prevUserContent}
-                                                        />
-                                                    </div>
-                                                )
-                                            })}
-
-                                        {/* Streaming message */}
-                                        {streamingState.isStreaming && (
-                                            <StreamingMessage streamingState={streamingState} />
-                                        )}
-                                    </div>
-                                </div>
-                            </ScrollArea>
-                        </div>
-
-                        {/* Chat Input - Fixed at bottom once conversation starts */}
-                        <div className="shrink-0">
-                            {renderChatInput('docked')}
-                        </div>
-                    </>
+                    chatBody
                 )}
 
                 {/* Termination config dialog */}
