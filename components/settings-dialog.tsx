@@ -93,6 +93,12 @@ export function SettingsDialog({
   const [toolBoxHeightInput, setToolBoxHeightInput] = useState<string>(
     settings.appearance.streamingToolBoxHeightRem?.toString() ?? ''
   )
+  const [primaryColorInput, setPrimaryColorInput] = useState<string>(
+    settings.appearance.customPrimaryColor ?? ''
+  )
+  const [accentColorInput, setAccentColorInput] = useState<string>(
+    settings.appearance.customAccentColor ?? ''
+  )
   const [wildLoopTasksFontSizeInput, setWildLoopTasksFontSizeInput] = useState<string>(
     settings.appearance.wildLoopTasksFontSizePx?.toString() ?? ''
   )
@@ -120,6 +126,14 @@ export function SettingsDialog({
   React.useEffect(() => {
     setToolBoxHeightInput(settings.appearance.streamingToolBoxHeightRem?.toString() ?? '')
   }, [settings.appearance.streamingToolBoxHeightRem])
+
+  React.useEffect(() => {
+    setPrimaryColorInput(settings.appearance.customPrimaryColor ?? '')
+  }, [settings.appearance.customPrimaryColor])
+
+  React.useEffect(() => {
+    setAccentColorInput(settings.appearance.customAccentColor ?? '')
+  }, [settings.appearance.customAccentColor])
 
   React.useEffect(() => {
     setWildLoopTasksFontSizeInput(settings.appearance.wildLoopTasksFontSizePx?.toString() ?? '')
@@ -151,8 +165,18 @@ export function SettingsDialog({
   }, [focusAuthToken, open])
 
   const handleTestConnection = async () => {
+    const nextApiUrl = apiUrlInput.trim()
+    const nextAuthToken = authTokenInput.trim()
     setConnectionStatus('testing')
-    const isConnected = await testConnection()
+    const isConnected = await testConnection({
+      apiUrl: nextApiUrl,
+      authToken: nextAuthToken,
+    })
+    if (isConnected) {
+      setApiUrl(nextApiUrl)
+      setAuthToken(nextAuthToken)
+      onRefresh?.()
+    }
     setConnectionStatus(isConnected ? 'connected' : 'failed')
     // Reset after 3 seconds
     setTimeout(() => setConnectionStatus('idle'), 3000)
@@ -374,18 +398,16 @@ export function SettingsDialog({
     })
   }
 
-  const handleCustomFontSizeChange = (value: string, currentInput: string) => {
-    // If input was empty and spinner was clicked, browser uses min value - adjust to default
-    if (!currentInput && value === '12') {
-      const defaultSize = settings.appearance.fontSize === 'small' ? 14 : settings.appearance.fontSize === 'large' ? 18 : 16
-      setFontSizeInput(defaultSize.toString())
-      updateAppearanceSettings({ customFontSizePx: defaultSize })
-      return
-    }
+  const normalizeHexColor = (value: string): string | null => {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed.toLowerCase() : null
+  }
+
+  const handleCustomFontSizeChange = (value: string) => {
     setFontSizeInput(value)
-    // Apply immediately if value is within bounds (e.g. spinner click)
     const parsed = Number(value)
-    if (!Number.isNaN(parsed) && parsed >= 12 && parsed <= 24) {
+    if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 1000) {
       updateAppearanceSettings({ customFontSizePx: parsed })
     }
   }
@@ -398,22 +420,15 @@ export function SettingsDialog({
     }
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return
-    const clamped = Math.max(12, Math.min(24, parsed))
+    const clamped = Math.max(1, Math.min(1000, parsed))
     updateAppearanceSettings({ customFontSizePx: clamped })
     setFontSizeInput(clamped.toString())
   }
 
-  const handleCustomButtonScaleChange = (value: string, currentInput: string) => {
-    // If input was empty and spinner was clicked, browser uses min value - adjust to default (120)
-    if (!currentInput && value === '70') {
-      setButtonScaleInput('120')
-      updateAppearanceSettings({ customButtonScalePercent: 120 })
-      return
-    }
+  const handleCustomButtonScaleChange = (value: string) => {
     setButtonScaleInput(value)
-    // Apply immediately if value is within bounds (e.g. spinner click)
     const parsed = Number(value)
-    if (!Number.isNaN(parsed) && parsed >= 70 && parsed <= 160) {
+    if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 1000) {
       updateAppearanceSettings({ customButtonScalePercent: parsed })
     }
   }
@@ -426,22 +441,15 @@ export function SettingsDialog({
     }
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return
-    const clamped = Math.max(70, Math.min(160, parsed))
+    const clamped = Math.max(1, Math.min(1000, parsed))
     updateAppearanceSettings({ customButtonScalePercent: clamped })
     setButtonScaleInput(clamped.toString())
   }
 
-  const handleChatToolbarButtonSizeChange = (value: string, currentInput: string) => {
-    // If input was empty and spinner was clicked, browser uses min value - adjust to default (36)
-    if (!currentInput && value === '20') {
-      setChatToolbarSizeInput('36')
-      updateAppearanceSettings({ chatToolbarButtonSizePx: 36 })
-      return
-    }
+  const handleChatToolbarButtonSizeChange = (value: string) => {
     setChatToolbarSizeInput(value)
-    // Apply immediately if value is within bounds (e.g. spinner click)
     const parsed = Number(value)
-    if (!Number.isNaN(parsed) && parsed >= 20 && parsed <= 56) {
+    if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 1000) {
       updateAppearanceSettings({ chatToolbarButtonSizePx: parsed })
     }
   }
@@ -454,7 +462,7 @@ export function SettingsDialog({
     }
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return
-    const clamped = Math.max(20, Math.min(56, parsed))
+    const clamped = Math.max(1, Math.min(1000, parsed))
     updateAppearanceSettings({ chatToolbarButtonSizePx: clamped })
     setChatToolbarSizeInput(clamped.toString())
   }
@@ -494,7 +502,7 @@ export function SettingsDialog({
     }
     setToolBoxHeightInput(value)
     const parsed = Number(value)
-    if (!Number.isNaN(parsed) && parsed >= 4 && parsed <= 30) {
+    if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 1000) {
       updateAppearanceSettings({ streamingToolBoxHeightRem: parsed })
     }
   }
@@ -507,11 +515,52 @@ export function SettingsDialog({
     }
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return
-    const clamped = Math.max(4, Math.min(30, parsed))
+    const clamped = Math.max(1, Math.min(1000, parsed))
     updateAppearanceSettings({ streamingToolBoxHeightRem: clamped })
     setToolBoxHeightInput(clamped.toString())
   }
 
+  const handlePrimaryColorChange = (value: string) => {
+    setPrimaryColorInput(value)
+    const normalized = normalizeHexColor(value)
+    if (normalized) {
+      updateAppearanceSettings({ customPrimaryColor: normalized })
+    }
+  }
+
+  const handlePrimaryColorBlur = (value: string) => {
+    const normalized = normalizeHexColor(value)
+    if (!value.trim()) {
+      setPrimaryColorInput('')
+      updateAppearanceSettings({ customPrimaryColor: null })
+      return
+    }
+    if (normalized) {
+      setPrimaryColorInput(normalized)
+      updateAppearanceSettings({ customPrimaryColor: normalized })
+    }
+  }
+
+  const handleAccentColorChange = (value: string) => {
+    setAccentColorInput(value)
+    const normalized = normalizeHexColor(value)
+    if (normalized) {
+      updateAppearanceSettings({ customAccentColor: normalized })
+    }
+  }
+
+  const handleAccentColorBlur = (value: string) => {
+    const normalized = normalizeHexColor(value)
+    if (!value.trim()) {
+      setAccentColorInput('')
+      updateAppearanceSettings({ customAccentColor: null })
+      return
+    }
+    if (normalized) {
+      setAccentColorInput(normalized)
+      updateAppearanceSettings({ customAccentColor: normalized })
+    }
+  }
   const handleWildLoopTasksFontSizeChange = (value: string, currentInput: string) => {
     if (!currentInput && value === '12') {
       setWildLoopTasksFontSizeInput('16')
@@ -563,7 +612,6 @@ export function SettingsDialog({
     updateAppearanceSettings({ wildLoopHistoryFontSizePx: clamped })
     setWildLoopHistoryFontSizeInput(clamped.toString())
   }
-
   const handleAlertsToggle = (enabled: boolean) => {
     onSettingsChange({
       ...settings,
@@ -667,33 +715,35 @@ export function SettingsDialog({
       case 'select':
         return (
           <div className="rounded-lg bg-secondary/50 p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
-                <Icon className="h-5 w-5 text-muted-foreground" />
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-3 md:min-w-0 md:flex-1">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                  <Icon className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground md:truncate">{item.label}</p>
+                  <p className="text-xs text-muted-foreground md:truncate">{item.description}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">{item.label}</p>
-                <p className="text-xs text-muted-foreground">{item.description}</p>
+              <div className="flex w-full gap-2 md:ml-4 md:w-auto md:min-w-[280px] md:max-w-[420px] md:flex-1">
+                {item.options?.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => {
+                      if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
+                      if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
+                      if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
+                    }}
+                    className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
+                      ? 'bg-accent text-accent-foreground'
+                      : 'bg-background text-muted-foreground hover:text-foreground'
+                      }`}
+                  >
+                    {option}
+                  </button>
+                ))}
               </div>
-            </div>
-            <div className="flex gap-2 ml-13">
-              {item.options?.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => {
-                    if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
-                    if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
-                    if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
-                  }}
-                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize transition-colors ${item.value === option
-                    ? 'bg-accent text-accent-foreground'
-                    : 'bg-background text-muted-foreground hover:text-foreground'
-                    }`}
-                >
-                  {option}
-                </button>
-              ))}
             </div>
           </div>
         )
@@ -768,16 +818,16 @@ export function SettingsDialog({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
-                      <Label htmlFor="custom-font-size-dialog" className="text-xs">Font Size (px) <span className="font-normal text-muted-foreground">12–24</span></Label>
+                      <Label htmlFor="custom-font-size-dialog" className="text-xs">Font Size (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Overrides small/medium/large when set</p>
                     </div>
                     <Input
                       id="custom-font-size-dialog"
                       type="number"
-                      min={12}
-                      max={24}
+                      min={1}
+                      max={1000}
                       value={fontSizeInput}
-                      onChange={(e) => handleCustomFontSizeChange(e.target.value, fontSizeInput)}
+                      onChange={(e) => handleCustomFontSizeChange(e.target.value)}
                       onBlur={(e) => handleCustomFontSizeBlur(e.target.value)}
                       placeholder={settings.appearance.fontSize === 'small' ? '14' : settings.appearance.fontSize === 'large' ? '18' : '16'}
                       className="h-8 w-24 text-xs"
@@ -786,16 +836,16 @@ export function SettingsDialog({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
-                      <Label htmlFor="custom-button-scale-dialog" className="text-xs">Button Scale (%) <span className="font-normal text-muted-foreground">70–160</span></Label>
+                      <Label htmlFor="custom-button-scale-dialog" className="text-xs">Button Scale (%) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Scales global button sizes</p>
                     </div>
                     <Input
                       id="custom-button-scale-dialog"
                       type="number"
-                      min={70}
-                      max={160}
+                      min={1}
+                      max={1000}
                       value={buttonScaleInput}
-                      onChange={(e) => handleCustomButtonScaleChange(e.target.value, buttonScaleInput)}
+                      onChange={(e) => handleCustomButtonScaleChange(e.target.value)}
                       onBlur={(e) => handleCustomButtonScaleBlur(e.target.value)}
                       placeholder="120"
                       className="h-8 w-24 text-xs"
@@ -804,16 +854,16 @@ export function SettingsDialog({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
-                      <Label htmlFor="chat-toolbar-button-size-dialog" className="text-xs">Chat Bottom Buttons (px) <span className="font-normal text-muted-foreground">20–56</span></Label>
+                      <Label htmlFor="chat-toolbar-button-size-dialog" className="text-xs">Chat Bottom Buttons (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Mode/add/mention/command controls</p>
                     </div>
                     <Input
                       id="chat-toolbar-button-size-dialog"
                       type="number"
-                      min={20}
-                      max={56}
+                      min={1}
+                      max={1000}
                       value={chatToolbarSizeInput}
-                      onChange={(e) => handleChatToolbarButtonSizeChange(e.target.value, chatToolbarSizeInput)}
+                      onChange={(e) => handleChatToolbarButtonSizeChange(e.target.value)}
                       onBlur={(e) => handleChatToolbarButtonSizeBlur(e.target.value)}
                       placeholder="36"
                       className="h-8 w-24 text-xs"
@@ -840,20 +890,35 @@ export function SettingsDialog({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
-                      <Label htmlFor="tool-box-height-dialog" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">4–30</span></Label>
+                      <Label htmlFor="tool-box-height-dialog" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
                     </div>
                     <Input
                       id="tool-box-height-dialog"
                       type="number"
-                      min={4}
-                      max={30}
+                      min={1}
+                      max={1000}
                       step={0.5}
                       value={toolBoxHeightInput}
                       onChange={(e) => handleToolBoxHeightChange(e.target.value, toolBoxHeightInput)}
                       onBlur={(e) => handleToolBoxHeightBlur(e.target.value)}
                       placeholder="7.5"
                       className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
+                      <Label htmlFor="custom-primary-color-dialog" className="text-xs">Primary Color</Label>
+                      <p className="text-[11px] text-muted-foreground">Hex color for --primary (example: #f59e0b)</p>
+                    </div>
+                    <Input
+                      id="custom-primary-color-dialog"
+                      value={primaryColorInput}
+                      onChange={(e) => handlePrimaryColorChange(e.target.value)}
+                      onBlur={(e) => handlePrimaryColorBlur(e.target.value)}
+                      placeholder="#f59e0b"
+                      className="h-8 w-28 text-xs font-mono"
                     />
                   </div>
 
@@ -872,6 +937,21 @@ export function SettingsDialog({
                       onBlur={(e) => handleWildLoopTasksFontSizeBlur(e.target.value)}
                       placeholder="16"
                       className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
+                      <Label htmlFor="custom-accent-color-dialog" className="text-xs">Accent Color</Label>
+                      <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
+                    </div>
+                    <Input
+                      id="custom-accent-color-dialog"
+                      value={accentColorInput}
+                      onChange={(e) => handleAccentColorChange(e.target.value)}
+                      onBlur={(e) => handleAccentColorBlur(e.target.value)}
+                      placeholder="#fb923c"
+                      className="h-8 w-28 text-xs font-mono"
                     />
                   </div>
 
@@ -904,6 +984,8 @@ export function SettingsDialog({
                           chatToolbarButtonSizePx: null,
                           chatInputInitialHeightPx: null,
                           streamingToolBoxHeightRem: null,
+                          customPrimaryColor: null,
+                          customAccentColor: null,
                           wildLoopTasksFontSizePx: null,
                           wildLoopHistoryFontSizePx: null,
                         })
@@ -991,17 +1073,18 @@ export function SettingsDialog({
                         variant="outline"
                         size="sm"
                         onClick={() => setShowAuthToken((prev) => !prev)}
-                        className="gap-1.5"
+                        className="px-2"
                         title={showAuthToken ? 'Hide token' : 'Show token'}
                       >
                         {showAuthToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        {showAuthToken ? 'Hide' : 'Show'}
+                        <span className="sr-only">{showAuthToken ? 'Hide token' : 'Show token'}</span>
                       </Button>
                       <Button
                         variant="outline"
-                        size="icon"
+                        size="sm"
                         onClick={handleCopyAuthToken}
                         disabled={!authTokenInput.trim()}
+                        className="px-2"
                         title="Copy token"
                       >
                         {authTokenCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}

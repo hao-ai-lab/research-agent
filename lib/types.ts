@@ -94,6 +94,8 @@ export interface AppSettings {
     chatToolbarButtonSizePx?: number | null;
     chatInputInitialHeightPx?: number | null;
     streamingToolBoxHeightRem?: number | null;
+    customPrimaryColor?: string | null;
+    customAccentColor?: string | null;
     wildLoopTasksFontSizePx?: number | null;
     wildLoopHistoryFontSizePx?: number | null;
     showStarterCards?: boolean;

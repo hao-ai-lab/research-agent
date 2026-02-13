@@ -7,7 +7,7 @@ import { ChatInput, type ChatMode } from './chat-input'
 import { StreamingMessage } from './streaming-message'
 import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
-import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
 import { WildModeSetupPanel } from '@/components/wild-mode-setup-panel'
 import { WildLoopDebugPanel } from '@/components/wild-loop-debug-panel'
@@ -426,12 +426,20 @@ export function ConnectedChatView({
                 <div className="mt-6 flex flex-col gap-3">
                     <button
                         type="button"
+                        onClick={() => window.location.reload()}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                    >
+                        <RefreshCw className="h-4 w-4" />
+                        Refresh
+                    </button>
+                    <button
+                        type="button"
                         onClick={() => {
                             onOpenSettings?.()
                         }}
                         className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
                     >
-                        Enable Demo Mode
+                        Configure Server URL
                     </button>
                     <p className="text-xs text-muted-foreground">
                         You can also change the server URL in Settings

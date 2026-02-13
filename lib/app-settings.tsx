@@ -25,6 +25,12 @@ const STORAGE_KEY_APPEARANCE_CHAT_TOOLBAR_BUTTON_SIZE_PX =
   "research-agent-appearance-chat-toolbar-button-size-px";
 const STORAGE_KEY_APPEARANCE_CHAT_INPUT_INITIAL_HEIGHT_PX =
   "research-agent-appearance-chat-input-initial-height-px";
+const STORAGE_KEY_APPEARANCE_STREAMING_TOOL_BOX_HEIGHT_REM =
+  "research-agent-appearance-streaming-tool-box-height-rem";
+const STORAGE_KEY_APPEARANCE_CUSTOM_PRIMARY_COLOR =
+  "research-agent-appearance-custom-primary-color";
+const STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR =
+  "research-agent-appearance-custom-accent-color";
 
 export const defaultAppSettings: AppSettings = {
   appearance: {
@@ -36,6 +42,9 @@ export const defaultAppSettings: AppSettings = {
     customFontSizePx: null,
     customButtonScalePercent: null,
     chatToolbarButtonSizePx: null,
+    streamingToolBoxHeightRem: null,
+    customPrimaryColor: null,
+    customAccentColor: null,
     chatInputInitialHeightPx: null,
     wildLoopTasksFontSizePx: null,
     wildLoopHistoryFontSizePx: null,
@@ -100,6 +109,14 @@ function sanitizePositiveNumber(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
     return null;
   return value;
+}
+
+function sanitizeHexColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const isHexColor = /^#[0-9a-fA-F]{6}$/.test(trimmed)
+  return isHexColor ? trimmed.toLowerCase() : null
 }
 
 function writeSettingsToStorage(nextSettings: AppSettings) {
@@ -172,6 +189,27 @@ function writeSettingsToStorage(nextSettings: AppSettings) {
       String(chatInputInitialHeightPx),
     );
   }
+
+  const streamingToolBoxHeightRem = sanitizePositiveNumber(nextSettings.appearance.streamingToolBoxHeightRem)
+  if (streamingToolBoxHeightRem === null) {
+    localStorage.removeItem(STORAGE_KEY_APPEARANCE_STREAMING_TOOL_BOX_HEIGHT_REM)
+  } else {
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_STREAMING_TOOL_BOX_HEIGHT_REM, String(streamingToolBoxHeightRem))
+  }
+
+  const customPrimaryColor = sanitizeHexColor(nextSettings.appearance.customPrimaryColor)
+  if (customPrimaryColor === null) {
+    localStorage.removeItem(STORAGE_KEY_APPEARANCE_CUSTOM_PRIMARY_COLOR)
+  } else {
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_CUSTOM_PRIMARY_COLOR, customPrimaryColor)
+  }
+
+  const customAccentColor = sanitizeHexColor(nextSettings.appearance.customAccentColor)
+  if (customAccentColor === null) {
+    localStorage.removeItem(STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR)
+  } else {
+    localStorage.setItem(STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR, customAccentColor)
+  }
 }
 
 function readStoredSettings(): AppSettings {
@@ -235,6 +273,24 @@ function readStoredSettings(): AppSettings {
     );
     const storedChatInputInitialHeightPx = parseStoredNumber(
       localStorage.getItem(STORAGE_KEY_APPEARANCE_CHAT_INPUT_INITIAL_HEIGHT_PX),
+    );
+    const streamingToolBoxHeightRemFromBlob = sanitizePositiveNumber(
+      parsed?.appearance?.streamingToolBoxHeightRem,
+    );
+    const customPrimaryColorFromBlob = sanitizeHexColor(
+      parsed?.appearance?.customPrimaryColor,
+    );
+    const customAccentColorFromBlob = sanitizeHexColor(
+      parsed?.appearance?.customAccentColor,
+    );
+    const storedStreamingToolBoxHeightRem = parseStoredNumber(
+      localStorage.getItem(STORAGE_KEY_APPEARANCE_STREAMING_TOOL_BOX_HEIGHT_REM),
+    );
+    const storedCustomPrimaryColor = sanitizeHexColor(
+      localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_PRIMARY_COLOR),
+    );
+    const storedCustomAccentColor = sanitizeHexColor(
+      localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR),
     );
 
     const resolvedTheme = isValidTheme(storedTheme)
@@ -300,6 +356,18 @@ function readStoredSettings(): AppSettings {
         showSidebarNewChatButton:
           parsed?.appearance?.showSidebarNewChatButton ??
           defaultAppSettings.appearance.showSidebarNewChatButton,
+        streamingToolBoxHeightRem:
+          sanitizePositiveNumber(storedStreamingToolBoxHeightRem) ??
+          streamingToolBoxHeightRemFromBlob ??
+          defaultAppSettings.appearance.streamingToolBoxHeightRem,
+        customPrimaryColor:
+          storedCustomPrimaryColor ??
+          customPrimaryColorFromBlob ??
+          defaultAppSettings.appearance.customPrimaryColor,
+        customAccentColor:
+          storedCustomAccentColor ??
+          customAccentColorFromBlob ??
+          defaultAppSettings.appearance.customAccentColor,
         starterCardTemplates: parsed?.appearance?.starterCardTemplates ?? {},
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,
@@ -439,6 +507,20 @@ export function AppSettingsProvider({
       );
     } else {
       root.style.removeProperty("--app-streaming-tool-box-height");
+    }
+
+    const customPrimaryColor = sanitizeHexColor(settings.appearance.customPrimaryColor)
+    if (customPrimaryColor) {
+      root.style.setProperty('--primary', customPrimaryColor)
+    } else {
+      root.style.removeProperty('--primary')
+    }
+
+    const customAccentColor = sanitizeHexColor(settings.appearance.customAccentColor)
+    if (customAccentColor) {
+      root.style.setProperty('--accent', customAccentColor)
+    } else {
+      root.style.removeProperty('--accent')
     }
 
     const handleThemeChange = () => {

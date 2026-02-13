@@ -31,7 +31,7 @@ interface ApiConfig {
     setUseMock: (useMock: boolean) => void
     setAuthToken: (token: string) => void
     resetToDefaults: () => void
-    testConnection: () => Promise<boolean>
+    testConnection: (overrides?: { apiUrl?: string; authToken?: string }) => Promise<boolean>
 }
 
 const ApiConfigContext = createContext<ApiConfig | null>(null)
@@ -146,21 +146,32 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         setAuthTokenState('')
     }, [])
 
-    const testConnection = useCallback(async (): Promise<boolean> => {
+    const testConnection = useCallback(async (
+        overrides?: { apiUrl?: string; authToken?: string }
+    ): Promise<boolean> => {
         if (useMock) {
             return true // Mock is always "connected"
         }
 
+        const targetApiUrl = (overrides?.apiUrl ?? apiUrl).trim()
+        const targetAuthToken = overrides?.authToken ?? authToken
+
         try {
-            const response = await fetch(`${apiUrl}/`, {
+            const headers: HeadersInit = {}
+            if (targetAuthToken) {
+                headers['X-Auth-Token'] = targetAuthToken
+            }
+
+            const response = await fetch(`${targetApiUrl}/sessions`, {
                 method: 'GET',
+                headers,
                 signal: AbortSignal.timeout(5000)
             })
             return response.ok
         } catch {
             return false
         }
-    }, [apiUrl, useMock])
+    }, [apiUrl, authToken, useMock])
 
     // Don't render children until hydrated to avoid hydration mismatch
     if (!isHydrated) {
