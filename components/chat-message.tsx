@@ -108,8 +108,8 @@ function detectStandaloneCode(content: string): { language: string; code: string
   return null
 }
 
-export function ChatMessage({ 
-  message, 
+export function ChatMessage({
+  message,
   collapseArtifacts = false,
   sweeps = [],
   runs = [],
@@ -622,113 +622,113 @@ export function ChatMessage({
   return (
     <div ref={assistantContainerRef} className="px-0.5 py-2 min-w-0 overflow-hidden">
       <div className="space-y-2 min-w-0">
-          {/* Parts-based rendering (new) vs legacy thinking field */}
-          {message.parts && message.parts.length > 0 ? (
-            // NEW: Render each part in order for correct interleaving
-            message.parts.map((part) => (
-              <SavedPartRenderer 
-                key={part.id} 
-                part={part} 
-                renderMarkdown={renderMarkdown}
-              />
-            ))
-          ) : (
-            // Legacy: single thinking block
-            message.thinking && (
-              <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
-                <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-                  {isThinkingOpen ? (
-                    <ChevronDown className="h-3 w-3" />
-                  ) : (
-                    <ChevronRight className="h-3 w-3" />
-                  )}
-                  <Brain className="h-3 w-3" />
-                  <span>Thinking process</span>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
-                    {message.thinking.split('\n').map((line, i) => (
-                      <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
-                        {line}
-                      </p>
-                    ))}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )
-          )}
-
-          {/* Embedded Chart - rendered before text content */}
-          {message.chart && (
-            <Collapsible open={!collapseArtifacts && isChartOpen} onOpenChange={setIsChartOpen}>
-              <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground mb-2">
-                {(!collapseArtifacts && isChartOpen) ? (
+        {/* Parts-based rendering (new) vs legacy thinking field */}
+        {message.parts && message.parts.length > 0 ? (
+          // NEW: Render each part in order for correct interleaving
+          message.parts.map((part) => (
+            <SavedPartRenderer
+              key={part.id}
+              part={part}
+              renderMarkdown={renderMarkdown}
+            />
+          ))
+        ) : (
+          // Legacy: single thinking block
+          message.thinking && (
+            <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
+              <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                {isThinkingOpen ? (
                   <ChevronDown className="h-3 w-3" />
                 ) : (
                   <ChevronRight className="h-3 w-3" />
                 )}
-                <span>{message.chart.title}</span>
+                <Brain className="h-3 w-3" />
+                <span>Thinking process</span>
               </CollapsibleTrigger>
-              <CollapsibleContent className="mb-3">
-                <LossChart data={message.chart.data} title={message.chart.title} />
+              <CollapsibleContent className="mt-2">
+                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
+                  {message.thinking.split('\n').map((line, i) => (
+                    <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                      {line}
+                    </p>
+                  ))}
+                </div>
               </CollapsibleContent>
             </Collapsible>
-          )}
+          )
+        )}
 
-          {/* Sweep Config Artifact */}
-          {message.sweepConfig && (
-            <div className="mb-2">
-              {(() => {
-                const sweep = message.sweepId 
-                  ? sweeps.find(s => s.id === message.sweepId)
-                  : undefined
-                
-                if (sweep && sweep.status !== 'draft') {
-                  // Show sweep status if the sweep is running/completed
-                  return (
-                    <SweepStatus
-                      sweep={sweep}
-                      runs={runs}
-                      onRunClick={onRunClick}
-                      isCollapsed={collapseArtifacts}
-                    />
-                  )
-                }
-                
-                // Show sweep artifact (config) if draft or no sweep yet
+        {/* Embedded Chart - rendered before text content */}
+        {message.chart && (
+          <Collapsible open={!collapseArtifacts && isChartOpen} onOpenChange={setIsChartOpen}>
+            <CollapsibleTrigger className="flex items-center gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground mb-2">
+              {(!collapseArtifacts && isChartOpen) ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              <span>{message.chart.title}</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mb-3">
+              <LossChart data={message.chart.data} title={message.chart.title} />
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
+        {/* Sweep Config Artifact */}
+        {message.sweepConfig && (
+          <div className="mb-2">
+            {(() => {
+              const sweep = message.sweepId
+                ? sweeps.find(s => s.id === message.sweepId)
+                : undefined
+
+              if (sweep && sweep.status !== 'draft') {
+                // Show sweep status if the sweep is running/completed
                 return (
-                  <SweepArtifact
-                    config={message.sweepConfig}
+                  <SweepStatus
                     sweep={sweep}
-                    onEdit={onEditSweep}
-                    onLaunch={onLaunchSweep}
+                    runs={runs}
+                    onRunClick={onRunClick}
                     isCollapsed={collapseArtifacts}
                   />
                 )
-              })()}
-            </div>
-          )}
+              }
 
-          <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
-            {renderMarkdown(message.content)}
+              // Show sweep artifact (config) if draft or no sweep yet
+              return (
+                <SweepArtifact
+                  config={message.sweepConfig}
+                  sweep={sweep}
+                  onEdit={onEditSweep}
+                  onLaunch={onLaunchSweep}
+                  isCollapsed={collapseArtifacts}
+                />
+              )
+            })()}
           </div>
+        )}
 
-          {/* Context references bar */}
-          {contextReferences.length > 0 && (
-            <ContextReferencesBar
-              references={contextReferences}
-              sweeps={sweeps}
-              runs={runs}
-              alerts={alerts}
-              onEditSweep={onEditSweep}
-              onLaunchSweep={onLaunchSweep}
-              onRunClick={onRunClick}
-            />
-          )}
+        <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
+          {renderMarkdown(message.content)}
+        </div>
 
-          <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
-            {formatDateTime(message.timestamp)}
-          </span>
+        {/* Context references bar */}
+        {contextReferences.length > 0 && (
+          <ContextReferencesBar
+            references={contextReferences}
+            sweeps={sweeps}
+            runs={runs}
+            alerts={alerts}
+            onEditSweep={onEditSweep}
+            onLaunchSweep={onLaunchSweep}
+            onRunClick={onRunClick}
+          />
+        )}
+
+        <span className="text-[10px] text-muted-foreground" suppressHydrationWarning>
+          {formatDateTime(message.timestamp)}
+        </span>
       </div>
       {selectionReplyUi && (
         <button
@@ -758,12 +758,12 @@ export function ChatMessage({
 /**
  * Renders a saved message part (thinking, tool, or text) with collapsible behavior
  */
-function SavedPartRenderer({ 
-  part, 
-  renderMarkdown 
-}: { 
+function SavedPartRenderer({
+  part,
+  renderMarkdown
+}: {
   part: MessagePart
-  renderMarkdown: (content: string) => React.ReactNode 
+  renderMarkdown: (content: string) => React.ReactNode
 }) {
   const [isOpen, setIsOpen] = useState(false) // Default collapsed per user preference
 
@@ -778,6 +778,11 @@ function SavedPartRenderer({
           )}
           <Brain className="h-3 w-3" />
           <span>Thinking process</span>
+          {!isOpen && part.content && (
+            <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.content.split('\n')[0]}>
+              — {part.content.split('\n')[0].slice(0, 60)}{part.content.split('\n')[0].length > 60 ? '…' : ''}
+            </span>
+          )}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
           <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[7.5rem] overflow-y-auto">
@@ -831,6 +836,11 @@ function SavedPartRenderer({
             {getStatusText()}
           </span>
           {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
+          {!isOpen && part.toolInput && (
+            <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.toolInput}>
+              — {part.toolInput.slice(0, 60)}{part.toolInput.length > 60 ? '…' : ''}
+            </span>
+          )}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
           {(part.toolInput || part.toolOutput || part.content) && (

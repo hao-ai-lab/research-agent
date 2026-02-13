@@ -180,6 +180,8 @@ function readStoredSettings(): AppSettings {
         alertTypes: parsed?.notifications?.alertTypes || defaultAppSettings.notifications.alertTypes,
         webNotificationsEnabled: parsed?.notifications?.webNotificationsEnabled ?? defaultAppSettings.notifications.webNotificationsEnabled,
       },
+      developer: parsed?.developer ?? defaultAppSettings.developer,
+      leftPanel: parsed?.leftPanel ?? defaultAppSettings.leftPanel,
     }
   } catch {
     return defaultAppSettings

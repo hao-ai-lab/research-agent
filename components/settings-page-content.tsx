@@ -24,6 +24,8 @@ import {
   Wifi,
   WifiOff,
   X,
+  Bug,
+  FileText,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -47,7 +49,7 @@ export function SettingsPageContent({
   onNavigateToJourney,
   focusAuthToken = false,
 }: SettingsPageContentProps) {
-  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'about'>('api')
+  const [activeSectionId, setActiveSectionId] = useState<'api' | 'integrations' | 'appearance' | 'notifications' | 'developer' | 'about'>('api')
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
   const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
@@ -62,6 +64,17 @@ export function SettingsPageContent({
   const [appearanceAdvancedOpen, setAppearanceAdvancedOpen] = useState(false)
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
 
+  // Local state for advanced appearance inputs (only update settings on blur)
+  const [fontSizeInput, setFontSizeInput] = useState<string>(
+    settings.appearance.customFontSizePx?.toString() ?? ''
+  )
+  const [buttonScaleInput, setButtonScaleInput] = useState<string>(
+    settings.appearance.customButtonScalePercent?.toString() ?? ''
+  )
+  const [chatToolbarSizeInput, setChatToolbarSizeInput] = useState<string>(
+    settings.appearance.chatToolbarButtonSizePx?.toString() ?? ''
+  )
+
   React.useEffect(() => {
     setApiUrlInput(apiUrl)
   }, [apiUrl])
@@ -69,6 +82,19 @@ export function SettingsPageContent({
   React.useEffect(() => {
     setAuthTokenInput(authToken)
   }, [authToken])
+
+  // Sync local inputs when settings change externally (e.g. reset)
+  React.useEffect(() => {
+    setFontSizeInput(settings.appearance.customFontSizePx?.toString() ?? '')
+  }, [settings.appearance.customFontSizePx])
+
+  React.useEffect(() => {
+    setButtonScaleInput(settings.appearance.customButtonScalePercent?.toString() ?? '')
+  }, [settings.appearance.customButtonScalePercent])
+
+  React.useEffect(() => {
+    setChatToolbarSizeInput(settings.appearance.chatToolbarButtonSizePx?.toString() ?? '')
+  }, [settings.appearance.chatToolbarButtonSizePx])
 
   React.useEffect(() => {
     if (!focusAuthToken) return
@@ -220,6 +246,28 @@ export function SettingsPageContent({
       ],
     },
     {
+      id: 'developer',
+      title: 'Developer',
+      items: [
+        {
+          id: 'showWildLoopState',
+          label: 'Wild Loop Debug Panel',
+          description: 'Show backend state panel when in wild mode',
+          icon: Bug,
+          type: 'toggle' as const,
+          value: settings.developer?.showWildLoopState === true,
+        },
+        {
+          id: 'showPlanPanel',
+          label: 'Plan Panel',
+          description: 'Show the Plans tab for managing experiment plans',
+          icon: FileText,
+          type: 'toggle' as const,
+          value: settings.developer?.showPlanPanel === true,
+        },
+      ],
+    },
+    {
       id: 'about',
       title: 'About',
       items: [
@@ -281,34 +329,89 @@ export function SettingsPageContent({
     })
   }
 
-  const handleCustomFontSizeChange = (value: string) => {
+  const handleCustomFontSizeChange = (value: string, currentInput: string) => {
+    // If input was empty and spinner was clicked, browser uses min value - adjust to default
+    if (!currentInput && value === '12') {
+      const defaultSize = settings.appearance.fontSize === 'small' ? 14 : settings.appearance.fontSize === 'large' ? 18 : 16
+      setFontSizeInput(defaultSize.toString())
+      updateAppearanceSettings({ customFontSizePx: defaultSize })
+      return
+    }
+    setFontSizeInput(value)
+    // Apply immediately if value is within bounds (e.g. spinner click)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 12 && parsed <= 24) {
+      updateAppearanceSettings({ customFontSizePx: parsed })
+    }
+  }
+
+  const handleCustomFontSizeBlur = (value: string) => {
     if (!value.trim()) {
       updateAppearanceSettings({ customFontSizePx: null })
+      setFontSizeInput('')
       return
     }
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return
-    updateAppearanceSettings({ customFontSizePx: Math.max(12, Math.min(24, parsed)) })
+    const clamped = Math.max(12, Math.min(24, parsed))
+    updateAppearanceSettings({ customFontSizePx: clamped })
+    setFontSizeInput(clamped.toString())
   }
 
-  const handleCustomButtonScaleChange = (value: string) => {
+  const handleCustomButtonScaleChange = (value: string, currentInput: string) => {
+    // If input was empty and spinner was clicked, browser uses min value - adjust to default (120)
+    if (!currentInput && value === '70') {
+      setButtonScaleInput('120')
+      updateAppearanceSettings({ customButtonScalePercent: 120 })
+      return
+    }
+    setButtonScaleInput(value)
+    // Apply immediately if value is within bounds (e.g. spinner click)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 70 && parsed <= 160) {
+      updateAppearanceSettings({ customButtonScalePercent: parsed })
+    }
+  }
+
+  const handleCustomButtonScaleBlur = (value: string) => {
     if (!value.trim()) {
       updateAppearanceSettings({ customButtonScalePercent: null })
+      setButtonScaleInput('')
       return
     }
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return
-    updateAppearanceSettings({ customButtonScalePercent: Math.max(70, Math.min(160, parsed)) })
+    const clamped = Math.max(70, Math.min(160, parsed))
+    updateAppearanceSettings({ customButtonScalePercent: clamped })
+    setButtonScaleInput(clamped.toString())
   }
 
-  const handleChatToolbarButtonSizeChange = (value: string) => {
+  const handleChatToolbarButtonSizeChange = (value: string, currentInput: string) => {
+    // If input was empty and spinner was clicked, browser uses min value - adjust to default (36)
+    if (!currentInput && value === '20') {
+      setChatToolbarSizeInput('36')
+      updateAppearanceSettings({ chatToolbarButtonSizePx: 36 })
+      return
+    }
+    setChatToolbarSizeInput(value)
+    // Apply immediately if value is within bounds (e.g. spinner click)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 20 && parsed <= 56) {
+      updateAppearanceSettings({ chatToolbarButtonSizePx: parsed })
+    }
+  }
+
+  const handleChatToolbarButtonSizeBlur = (value: string) => {
     if (!value.trim()) {
       updateAppearanceSettings({ chatToolbarButtonSizePx: null })
+      setChatToolbarSizeInput('')
       return
     }
     const parsed = Number(value)
     if (Number.isNaN(parsed)) return
-    updateAppearanceSettings({ chatToolbarButtonSizePx: Math.max(20, Math.min(56, parsed)) })
+    const clamped = Math.max(20, Math.min(56, parsed))
+    updateAppearanceSettings({ chatToolbarButtonSizePx: clamped })
+    setChatToolbarSizeInput(clamped.toString())
   }
 
   const handleAlertsToggle = (enabled: boolean) => {
@@ -458,6 +561,18 @@ export function SettingsPageContent({
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showWildLoopState') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showWildLoopState: checked },
+                  })
+                }
+                if (item.id === 'showPlanPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
               }}
             />
           </div>
@@ -499,7 +614,7 @@ export function SettingsPageContent({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
-                      <Label htmlFor="custom-font-size" className="text-xs">Font Size (px)</Label>
+                      <Label htmlFor="custom-font-size" className="text-xs">Font Size (px) <span className="font-normal text-muted-foreground">12–24</span></Label>
                       <p className="text-[11px] text-muted-foreground">Overrides small/medium/large when set</p>
                     </div>
                     <Input
@@ -507,16 +622,17 @@ export function SettingsPageContent({
                       type="number"
                       min={12}
                       max={24}
-                      value={settings.appearance.customFontSizePx ?? ''}
-                      onChange={(e) => handleCustomFontSizeChange(e.target.value)}
-                      placeholder="12-24"
+                      value={fontSizeInput}
+                      onChange={(e) => handleCustomFontSizeChange(e.target.value, fontSizeInput)}
+                      onBlur={(e) => handleCustomFontSizeBlur(e.target.value)}
+                      placeholder={settings.appearance.fontSize === 'small' ? '14' : settings.appearance.fontSize === 'large' ? '18' : '16'}
                       className="h-8 w-24 text-xs"
                     />
                   </div>
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
-                      <Label htmlFor="custom-button-scale" className="text-xs">Button Scale (%)</Label>
+                      <Label htmlFor="custom-button-scale" className="text-xs">Button Scale (%) <span className="font-normal text-muted-foreground">70–160</span></Label>
                       <p className="text-[11px] text-muted-foreground">Scales global button sizes</p>
                     </div>
                     <Input
@@ -524,16 +640,17 @@ export function SettingsPageContent({
                       type="number"
                       min={70}
                       max={160}
-                      value={settings.appearance.customButtonScalePercent ?? ''}
-                      onChange={(e) => handleCustomButtonScaleChange(e.target.value)}
-                      placeholder="70-160"
+                      value={buttonScaleInput}
+                      onChange={(e) => handleCustomButtonScaleChange(e.target.value, buttonScaleInput)}
+                      onBlur={(e) => handleCustomButtonScaleBlur(e.target.value)}
+                      placeholder="120"
                       className="h-8 w-24 text-xs"
                     />
                   </div>
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
-                      <Label htmlFor="chat-toolbar-button-size" className="text-xs">Chat Bottom Buttons (px)</Label>
+                      <Label htmlFor="chat-toolbar-button-size" className="text-xs">Chat Bottom Buttons (px) <span className="font-normal text-muted-foreground">20–56</span></Label>
                       <p className="text-[11px] text-muted-foreground">Mode/add/mention/command controls</p>
                     </div>
                     <Input
@@ -541,9 +658,10 @@ export function SettingsPageContent({
                       type="number"
                       min={20}
                       max={56}
-                      value={settings.appearance.chatToolbarButtonSizePx ?? ''}
-                      onChange={(e) => handleChatToolbarButtonSizeChange(e.target.value)}
-                      placeholder="20-56"
+                      value={chatToolbarSizeInput}
+                      onChange={(e) => handleChatToolbarButtonSizeChange(e.target.value, chatToolbarSizeInput)}
+                      onBlur={(e) => handleChatToolbarButtonSizeBlur(e.target.value)}
+                      placeholder="36"
                       className="h-8 w-24 text-xs"
                     />
                   </div>
@@ -721,11 +839,10 @@ export function SettingsPageContent({
                     key={section.id}
                     type="button"
                     onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
-                    className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${
-                      activeSection.id === section.id
-                        ? 'bg-accent text-accent-foreground'
-                        : 'bg-secondary text-muted-foreground hover:text-foreground'
-                    }`}
+                    className={`h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors ${activeSection.id === section.id
+                      ? 'bg-accent text-accent-foreground'
+                      : 'bg-secondary text-muted-foreground hover:text-foreground'
+                      }`}
                   >
                     {section.title}
                   </button>
@@ -741,11 +858,10 @@ export function SettingsPageContent({
                   key={section.id}
                   type="button"
                   onClick={() => setActiveSectionId(section.id as typeof activeSectionId)}
-                  className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                    activeSection.id === section.id
-                      ? 'bg-secondary text-foreground'
-                      : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-                  }`}
+                  className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${activeSection.id === section.id
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                    }`}
                 >
                   {section.title}
                 </button>

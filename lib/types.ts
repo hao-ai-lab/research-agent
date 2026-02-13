@@ -111,6 +111,10 @@ export interface AppSettings {
   leftPanel?: {
     items: LeftPanelItemConfig[];
   };
+  developer?: {
+    showWildLoopState?: boolean;
+    showPlanPanel?: boolean;
+  };
 }
 
 export interface RunAlert {
@@ -196,6 +200,14 @@ export interface TerminationConditions {
   maxTimeSeconds?: number | null;
   maxTokens?: number | null;
   customCondition?: string | null;
+}
+
+export type AutonomyLevel = 'cautious' | 'balanced' | 'full';
+
+export interface WildModeSetup {
+  awayDurationMinutes: number;
+  autonomyLevel: AutonomyLevel;
+  queueModifyEnabled: boolean;
 }
 
 export interface WildLoopState {

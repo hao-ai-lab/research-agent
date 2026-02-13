@@ -9,6 +9,8 @@ import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
 import { AlertCircle, Loader2, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
+import { WildModeSetupPanel } from '@/components/wild-mode-setup-panel'
+import { WildLoopDebugPanel } from '@/components/wild-loop-debug-panel'
 import {
     Sheet,
     SheetContent,
@@ -27,6 +29,7 @@ import type {
     SweepConfig,
     InsightChart,
     PromptProvenance,
+    WildModeSetup,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
@@ -58,6 +61,7 @@ interface ConnectedChatViewProps {
     injectedMessages?: ChatMessageType[]
     onUserMessage?: (message: string) => void
     skills?: PromptSkill[]
+    contextTokenCount?: number
 }
 
 /**
@@ -85,6 +89,7 @@ export function ConnectedChatView({
     injectedMessages = [],
     onUserMessage,
     skills = [],
+    contextTokenCount = 0,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
@@ -231,7 +236,7 @@ export function ConnectedChatView({
             source: provenanceMapRef.current.has(msg.content) ? ('agent_wild' as const) : undefined,
             provenance: provenanceMapRef.current.get(msg.content) ?? undefined,
         }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [messages, currentSessionId, provenanceVersion])
 
     const displayMessages: ChatMessageType[] = useMemo(() => {
@@ -536,172 +541,196 @@ export function ConnectedChatView({
                     }, 0) // Insert at front of queue
                 } : undefined}
                 onOpenReplyExcerpt={handleOpenReplyExcerpt}
+                contextTokenCount={contextTokenCount}
             />
         </>
     )
 
-    return (
-        <div className="flex h-full flex-col overflow-hidden">
-            {/* Error banner */}
-            {error && (
-                <div className="shrink-0 bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 text-sm text-destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    {error}
-                </div>
-            )}
+    // Find the closing of the chat view to add debug panel
+    const showDebugPanel = settings.developer?.showWildLoopState === true
+    const debugPanelElement = showDebugPanel ? (
+        <WildLoopDebugPanel onClose={() => {
+            setSettings({
+                ...settings,
+                developer: { ...settings.developer, showWildLoopState: false },
+            })
+        }} />
+    ) : null
 
-            {!hasConversation ? (
-                <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-                    <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
-                        {/* Welcome message for new chat */}
-                        <div className="mb-6 text-center">
-                            <h2 className="text-2xl font-semibold text-foreground mb-2">
-                                What can I help you with?
-                            </h2>
-                        </div>
-                        <div className="w-full max-w-3xl">
-                            {renderChatInput('centered')}
-                        </div>
-                        {showStarterCards && (
-                            <div className="mt-4 lg:mt-5 w-full max-w-6xl">
-                                <ChatStarterCards
-                                    runs={runs}
-                                    sweeps={sweeps}
-                                    alerts={alerts}
-                                    customTemplates={customTemplates}
-                                    onEditTemplate={handleEditTemplate}
-                                    onPromptSelect={(prompt) => {
-                                        setStarterDraftInsert({
-                                            id: Date.now(),
-                                            text: prompt,
-                                        })
-                                    }}
-                                />
-                            </div>
-                        )}
+    return (
+        <div className="flex h-full overflow-hidden">
+            <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+                {/* Error banner */}
+                {error && (
+                    <div className="shrink-0 bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 text-sm text-destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        {error}
                     </div>
-                </div>
-            ) : (
-                <>
-                    {/* Scrollable Chat Area */}
-                    <div className="flex-1 min-h-0 overflow-hidden">
-                        <ScrollArea className="h-full" ref={scrollRef}>
-                            <div className="pb-4">
-                                <div className="mt-4 space-y-1 px-2.5 min-w-0">
-                                    {collapseChats
-                                        ? messagePairs.map((pair, index) => (
-                                            <CollapsedChatPair
-                                                key={`${pair.user.id}-${index}`}
-                                                pair={pair}
-                                                collapseArtifacts={collapseArtifactsInChat}
-                                                sweeps={sweeps}
-                                                runs={runs}
-                                                alerts={alerts}
-                                                onEditSweep={onEditSweep}
-                                                onLaunchSweep={onLaunchSweep}
-                                                onRunClick={onRunClick}
-                                                onReplyToSelection={handleReplyToSelection}
-                                                onSubmitEditedUserMessage={streamingState.isStreaming ? undefined : handleSubmitEditedUserMessage}
-                                            />
-                                        ))
-                                        : displayMessages.map((message, index) => {
-                                            // Find the previous user message for context extraction
-                                            let prevUserContent: string | undefined
-                                            if (message.role === 'assistant') {
-                                                for (let i = index - 1; i >= 0; i--) {
-                                                    if (displayMessages[i].role === 'user') {
-                                                        prevUserContent = displayMessages[i].content
-                                                        break
+                )}
+
+                {!hasConversation ? (
+                    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+                        <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
+                            {/* Welcome message for new chat */}
+                            <div className="mb-6 text-center">
+                                <h2 className="text-2xl font-semibold text-foreground mb-2">
+                                    What can I help you with?
+                                </h2>
+                            </div>
+                            <div className="w-full max-w-3xl">
+                                {renderChatInput('centered')}
+                            </div>
+                            {showStarterCards && mode !== 'wild' && (
+                                <div className="mt-4 lg:mt-5 w-full max-w-6xl">
+                                    <ChatStarterCards
+                                        runs={runs}
+                                        sweeps={sweeps}
+                                        alerts={alerts}
+                                        customTemplates={customTemplates}
+                                        onEditTemplate={handleEditTemplate}
+                                        onPromptSelect={(prompt) => {
+                                            setStarterDraftInsert({
+                                                id: Date.now(),
+                                                text: prompt,
+                                            })
+                                        }}
+                                    />
+                                </div>
+                            )}
+                            {mode === 'wild' && wildLoop && (
+                                <div className="mt-4 lg:mt-5 w-full max-w-3xl">
+                                    <WildModeSetupPanel
+                                        onLaunch={(setup: WildModeSetup) => {
+                                            wildLoop.applySetup(setup)
+                                        }}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        {/* Scrollable Chat Area */}
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                            <ScrollArea className="h-full" ref={scrollRef}>
+                                <div className="pb-4">
+                                    <div className="mt-4 space-y-1 px-2.5 min-w-0">
+                                        {collapseChats
+                                            ? messagePairs.map((pair, index) => (
+                                                <CollapsedChatPair
+                                                    key={`${pair.user.id}-${index}`}
+                                                    pair={pair}
+                                                    collapseArtifacts={collapseArtifactsInChat}
+                                                    sweeps={sweeps}
+                                                    runs={runs}
+                                                    alerts={alerts}
+                                                    onEditSweep={onEditSweep}
+                                                    onLaunchSweep={onLaunchSweep}
+                                                    onRunClick={onRunClick}
+                                                    onReplyToSelection={handleReplyToSelection}
+                                                    onSubmitEditedUserMessage={streamingState.isStreaming ? undefined : handleSubmitEditedUserMessage}
+                                                />
+                                            ))
+                                            : displayMessages.map((message, index) => {
+                                                // Find the previous user message for context extraction
+                                                let prevUserContent: string | undefined
+                                                if (message.role === 'assistant') {
+                                                    for (let i = index - 1; i >= 0; i--) {
+                                                        if (displayMessages[i].role === 'user') {
+                                                            prevUserContent = displayMessages[i].content
+                                                            break
+                                                        }
                                                     }
                                                 }
-                                            }
-                                            return (
-                                                <div
-                                                    key={message.id}
-                                                    style={message.source === 'agent_wild' ? {
-                                                        borderLeft: '3px solid #a855f7',
-                                                        paddingLeft: '8px',
-                                                        marginLeft: '4px',
-                                                    } : undefined}
-                                                >
-                                                    <ChatMessage
-                                                        message={message}
-                                                        collapseArtifacts={collapseArtifactsInChat}
-                                                        sweeps={sweeps}
-                                                        runs={runs}
-                                                        alerts={alerts}
-                                                        onEditSweep={onEditSweep}
-                                                        onLaunchSweep={onLaunchSweep}
-                                                        onRunClick={onRunClick}
-                                                        onReplyToSelection={handleReplyToSelection}
-                                                        onSubmitEditedUserMessage={streamingState.isStreaming ? undefined : handleSubmitEditedUserMessage}
-                                                        previousUserContent={prevUserContent}
-                                                    />
-                                                </div>
-                                            )
-                                        })}
+                                                return (
+                                                    <div
+                                                        key={message.id}
+                                                        style={message.source === 'agent_wild' ? {
+                                                            borderLeft: '3px solid #a855f7',
+                                                            paddingLeft: '8px',
+                                                            marginLeft: '4px',
+                                                        } : undefined}
+                                                    >
+                                                        <ChatMessage
+                                                            message={message}
+                                                            collapseArtifacts={collapseArtifactsInChat}
+                                                            sweeps={sweeps}
+                                                            runs={runs}
+                                                            alerts={alerts}
+                                                            onEditSweep={onEditSweep}
+                                                            onLaunchSweep={onLaunchSweep}
+                                                            onRunClick={onRunClick}
+                                                            onReplyToSelection={handleReplyToSelection}
+                                                            onSubmitEditedUserMessage={streamingState.isStreaming ? undefined : handleSubmitEditedUserMessage}
+                                                            previousUserContent={prevUserContent}
+                                                        />
+                                                    </div>
+                                                )
+                                            })}
 
-                                    {/* Streaming message */}
-                                    {streamingState.isStreaming && (
-                                        <StreamingMessage streamingState={streamingState} />
-                                    )}
+                                        {/* Streaming message */}
+                                        {streamingState.isStreaming && (
+                                            <StreamingMessage streamingState={streamingState} />
+                                        )}
+                                    </div>
+                                </div>
+                            </ScrollArea>
+                        </div>
+
+                        {/* Chat Input - Fixed at bottom once conversation starts */}
+                        <div className="shrink-0">
+                            {renderChatInput('docked')}
+                        </div>
+                    </>
+                )}
+
+                {/* Termination config dialog */}
+                {wildLoop && (
+                    <WildTerminationDialog
+                        open={showTerminationDialog}
+                        onClose={() => setShowTerminationDialog(false)}
+                        currentConditions={wildLoop.terminationConditions}
+                        onSave={wildLoop.setTerminationConditions}
+                    />
+                )}
+
+                <Sheet open={isExcerptPreviewOpen} onOpenChange={setIsExcerptPreviewOpen}>
+                    <SheetContent side="right" className="w-[92vw] p-0 sm:max-w-2xl">
+                        <SheetHeader className="border-b border-border/60 px-4 py-3">
+                            <SheetTitle className="truncate text-xl font-semibold">
+                                {excerptPreview?.fileName || 'excerpt_from_previous_message.txt'}
+                            </SheetTitle>
+                            <SheetDescription className="text-xs">
+                                {(() => {
+                                    const text = excerptPreview?.text ?? ''
+                                    const bytes = new TextEncoder().encode(text).length
+                                    const lineCount = text ? text.split('\n').length : 0
+                                    const kb = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(2)} KB`
+                                    const linesLabel = `${lineCount} line${lineCount === 1 ? '' : 's'}`
+                                    return `${kb} • ${linesLabel} • Formatting may be inconsistent from source`
+                                })()}
+                            </SheetDescription>
+                        </SheetHeader>
+                        <div className="h-[calc(100vh-84px)] overflow-auto p-3">
+                            <div className="overflow-hidden rounded-lg border border-border/70 bg-card/60">
+                                <div className="grid grid-cols-[auto_minmax(0,1fr)] text-sm font-mono leading-6">
+                                    {(excerptPreview?.text || '').split('\n').map((line, index) => (
+                                        <Fragment key={`excerpt-line-${index + 1}`}>
+                                            <span className="select-none border-r border-border/40 bg-background/70 px-3 text-right text-[11px] text-muted-foreground">
+                                                {index + 1}
+                                            </span>
+                                            <span className="border-b border-border/30 px-3 whitespace-pre-wrap break-words text-foreground/90">
+                                                {line || ' '}
+                                            </span>
+                                        </Fragment>
+                                    ))}
                                 </div>
                             </div>
-                        </ScrollArea>
-                    </div>
-
-                    {/* Chat Input - Fixed at bottom once conversation starts */}
-                    <div className="shrink-0">
-                        {renderChatInput('docked')}
-                    </div>
-                </>
-            )}
-
-            {/* Termination config dialog */}
-            {wildLoop && (
-                <WildTerminationDialog
-                    open={showTerminationDialog}
-                    onClose={() => setShowTerminationDialog(false)}
-                    currentConditions={wildLoop.terminationConditions}
-                    onSave={wildLoop.setTerminationConditions}
-                />
-            )}
-
-            <Sheet open={isExcerptPreviewOpen} onOpenChange={setIsExcerptPreviewOpen}>
-                <SheetContent side="right" className="w-[92vw] p-0 sm:max-w-2xl">
-                    <SheetHeader className="border-b border-border/60 px-4 py-3">
-                        <SheetTitle className="truncate text-xl font-semibold">
-                            {excerptPreview?.fileName || 'excerpt_from_previous_message.txt'}
-                        </SheetTitle>
-                        <SheetDescription className="text-xs">
-                            {(() => {
-                                const text = excerptPreview?.text ?? ''
-                                const bytes = new TextEncoder().encode(text).length
-                                const lineCount = text ? text.split('\n').length : 0
-                                const kb = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(2)} KB`
-                                const linesLabel = `${lineCount} line${lineCount === 1 ? '' : 's'}`
-                                return `${kb} • ${linesLabel} • Formatting may be inconsistent from source`
-                            })()}
-                        </SheetDescription>
-                    </SheetHeader>
-                    <div className="h-[calc(100vh-84px)] overflow-auto p-3">
-                        <div className="overflow-hidden rounded-lg border border-border/70 bg-card/60">
-                            <div className="grid grid-cols-[auto_minmax(0,1fr)] text-sm font-mono leading-6">
-                                {(excerptPreview?.text || '').split('\n').map((line, index) => (
-                                    <Fragment key={`excerpt-line-${index + 1}`}>
-                                        <span className="select-none border-r border-border/40 bg-background/70 px-3 text-right text-[11px] text-muted-foreground">
-                                            {index + 1}
-                                        </span>
-                                        <span className="border-b border-border/30 px-3 whitespace-pre-wrap break-words text-foreground/90">
-                                            {line || ' '}
-                                        </span>
-                                    </Fragment>
-                                ))}
-                            </div>
                         </div>
-                    </div>
-                </SheetContent>
-            </Sheet>
+                    </SheetContent>
+                </Sheet>
+            </div>
+            {debugPanelElement}
         </div>
     )
 }

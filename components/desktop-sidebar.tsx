@@ -244,11 +244,9 @@ export function DesktopSidebar({
 
   return (
     <aside
-      className={`relative hidden h-full shrink-0 border-r border-border/80 bg-sidebar/90 backdrop-blur supports-[backdrop-filter]:bg-sidebar/75 transition-[width] ${
-        isResizing ? 'duration-0' : 'duration-200'
-      } lg:flex ${
-        hidden ? 'w-0 border-r-0 overflow-hidden' : isIconRail ? 'w-[72px]' : ''
-      }`}
+      className={`relative hidden h-full shrink-0 border-r border-border/80 bg-sidebar/90 backdrop-blur supports-[backdrop-filter]:bg-sidebar/75 transition-[width] ${isResizing ? 'duration-0' : 'duration-200'
+        } lg:flex ${hidden ? 'w-0 border-r-0 overflow-hidden' : isIconRail ? 'w-[72px]' : ''
+        }`}
       style={hidden || isIconRail ? undefined : { width: `${width}px` }}
     >
       <div className={`flex h-full w-full flex-col ${hidden ? 'pointer-events-none opacity-0' : ''}`}>
@@ -302,35 +300,128 @@ export function DesktopSidebar({
                     <span className="sr-only">New Chat</span>
                   </Button>
                 )}
-                {PRIMARY_NAV_ITEMS.map((item) => (
-                  <NavTabButton
-                    key={item.tab}
-                    compact={isIconRail}
-                    label={item.label}
-                    icon={item.icon}
-                    active={activeTab === item.tab}
-                    onClick={() => onTabChange(item.tab)}
-                  />
-                ))}
+                {PRIMARY_NAV_ITEMS
+                  .filter((item) => item.tab !== 'plans' || settings.developer?.showPlanPanel)
+                  .map((item) => (
+                    <NavTabButton
+                      key={item.tab}
+                      compact={isIconRail}
+                      label={item.label}
+                      icon={item.icon}
+                      active={activeTab === item.tab}
+                      onClick={() => onTabChange(item.tab)}
+                    />
+                  ))}
               </div>
             </section>
 
             {!isIconRail && (
               <section>
-              <div className="mb-2 flex items-center justify-between px-1">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Saved
-                </p>
-              </div>
-              <div className="space-y-1">
-                {savedSessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
-                  >
-                    {editingSessionId === session.id ? (
-                      <div className="inline-flex min-w-0 flex-1 items-center gap-1">
-                        <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Saved
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  {savedSessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
+                    >
+                      {editingSessionId === session.id ? (
+                        <div className="inline-flex min-w-0 flex-1 items-center gap-1">
+                          <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                          <input
+                            ref={editInputRef}
+                            type="text"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                              if (e.key === 'Escape') cancelEditing()
+                            }}
+                            onBlur={commitRename}
+                            className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+                            autoFocus
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onTabChange('chat')
+                            void onSelectSession(session.id)
+                          }}
+                          className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                        >
+                          <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
+                            <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                            <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                          </span>
+                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                            {formatRelativeTime(new Date(session.created_at * 1000))}
+                          </span>
+                        </button>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                            title="Chat options"
+                          >
+                            <Ellipsis className="h-3.5 w-3.5" />
+                            <span className="sr-only">Chat options</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem onSelect={() => startEditing(session.id, session.title)}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" />
+                            Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void onUnsaveSession?.(session.id)}>
+                            <Star className="mr-2 h-3.5 w-3.5" />
+                            Unsave
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onInsertReference(`@chat:${session.id} `)}>
+                            <AtSign className="mr-2 h-3.5 w-3.5" />
+                            Reference @
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            disabled={!onArchiveSession}
+                            onSelect={() => void onArchiveSession?.(session.id)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Archive className="mr-2 h-3.5 w-3.5" />
+                            Archive
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  ))}
+                  {savedSessions.length === 0 && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">No saved chats yet.</p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {!isIconRail && (
+              <section>
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Chats
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  {recentSessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
+                    >
+                      {editingSessionId === session.id ? (
                         <input
                           ref={editInputRef}
                           type="text"
@@ -344,256 +435,165 @@ export function DesktopSidebar({
                           className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
                           autoFocus
                         />
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onTabChange('chat')
-                          void onSelectSession(session.id)
-                        }}
-                        className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onTabChange('chat')
+                            void onSelectSession(session.id)
+                          }}
+                          className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                        >
+                          <span className="min-w-0 truncate text-foreground">{session.title || 'Untitled chat'}</span>
+                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                            {formatRelativeTime(new Date(session.created_at * 1000))}
+                          </span>
+                        </button>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                            title="Chat options"
+                          >
+                            <Ellipsis className="h-3.5 w-3.5" />
+                            <span className="sr-only">Chat options</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem onSelect={() => startEditing(session.id, session.title)}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" />
+                            Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void onSaveSession?.(session.id)}>
+                            <Star className="mr-2 h-3.5 w-3.5" />
+                            Save
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onInsertReference(`@chat:${session.id} `)}>
+                            <AtSign className="mr-2 h-3.5 w-3.5" />
+                            Reference @
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            disabled={!onArchiveSession}
+                            onSelect={() => void onArchiveSession?.(session.id)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Archive className="mr-2 h-3.5 w-3.5" />
+                            Archive
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  ))}
+                  {recentSessions.length === 0 && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">No recent chats yet.</p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {!isIconRail && (
+              <section>
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Runs
+                  </p>
+                  <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
+                </div>
+                <div className="space-y-1">
+                  {recentRuns.map((run) => {
+                    const pendingAlertCount = pendingAlertsByRun[run.id] || run.alerts?.length || 0
+                    const hasPendingAlerts = pendingAlertCount > 0
+
+                    return (
+                      <div
+                        key={run.id}
+                        className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                       >
-                        <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
-                          <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
-                          <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
-                        </span>
-                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                          {formatRelativeTime(new Date(session.created_at * 1000))}
-                        </span>
-                      </button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToRun(run.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <p className="min-w-0 truncate text-foreground">{run.alias || run.name}</p>
+                            <span
+                              className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${getRunStatusBadgeClass(run.status)}`}
+                              title={run.status}
+                            >
+                              {getRunStatusIcon(run.status)}
+                            </span>
+                            {hasPendingAlerts && (
+                              <div
+                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
+                                title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}
+                              >
+                                <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+                                {pendingAlertCount > 1 && (
+                                  <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                                    {pendingAlertCount}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </button>
                         <Button
                           variant="ghost"
-                          size="icon-sm"
-                          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                          title="Chat options"
+                          size="sm"
+                          className="h-6 px-2 text-[16px]"
+                          onClick={() => onInsertReference(`@run:${run.id} `)}
                         >
-                          <Ellipsis className="h-3.5 w-3.5" />
-                          <span className="sr-only">Chat options</span>
+                          @
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
-                        <DropdownMenuItem onSelect={() => startEditing(session.id, session.title)}>
-                          <Pencil className="mr-2 h-3.5 w-3.5" />
-                          Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => void onUnsaveSession?.(session.id)}>
-                          <Star className="mr-2 h-3.5 w-3.5" />
-                          Unsave
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => onInsertReference(`@chat:${session.id} `)}>
-                          <AtSign className="mr-2 h-3.5 w-3.5" />
-                          Reference @
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          disabled={!onArchiveSession}
-                          onSelect={() => void onArchiveSession?.(session.id)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Archive className="mr-2 h-3.5 w-3.5" />
-                          Archive
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
-                {savedSessions.length === 0 && (
-                  <p className="px-2 py-1 text-xs text-muted-foreground">No saved chats yet.</p>
-                )}
-              </div>
+                      </div>
+                    )
+                  })}
+                  {recentRuns.length === 0 && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">No recent runs yet.</p>
+                  )}
+                </div>
               </section>
             )}
 
             {!isIconRail && (
               <section>
-              <div className="mb-2 flex items-center justify-between px-1">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Chats
-                </p>
-              </div>
-              <div className="space-y-1">
-                {recentSessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className="flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-secondary/50"
-                  >
-                    {editingSessionId === session.id ? (
-                      <input
-                        ref={editInputRef}
-                        type="text"
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') { e.preventDefault(); commitRename() }
-                          if (e.key === 'Escape') cancelEditing()
-                        }}
-                        onBlur={commitRename}
-                        className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
-                        autoFocus
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onTabChange('chat')
-                          void onSelectSession(session.id)
-                        }}
-                        className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
-                      >
-                        <span className="min-w-0 truncate text-foreground">{session.title || 'Untitled chat'}</span>
-                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                          {formatRelativeTime(new Date(session.created_at * 1000))}
-                        </span>
-                      </button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                        title="Chat options"
-                      >
-                        <Ellipsis className="h-3.5 w-3.5" />
-                        <span className="sr-only">Chat options</span>
-                      </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
-                        <DropdownMenuItem onSelect={() => startEditing(session.id, session.title)}>
-                          <Pencil className="mr-2 h-3.5 w-3.5" />
-                          Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => void onSaveSession?.(session.id)}>
-                          <Star className="mr-2 h-3.5 w-3.5" />
-                          Save
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => onInsertReference(`@chat:${session.id} `)}>
-                          <AtSign className="mr-2 h-3.5 w-3.5" />
-                          Reference @
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          disabled={!onArchiveSession}
-                          onSelect={() => void onArchiveSession?.(session.id)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Archive className="mr-2 h-3.5 w-3.5" />
-                          Archive
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
-                {recentSessions.length === 0 && (
-                  <p className="px-2 py-1 text-xs text-muted-foreground">No recent chats yet.</p>
-                )}
-              </div>
-              </section>
-            )}
-
-            {!isIconRail && (
-              <section>
-              <div className="mb-2 flex items-center justify-between px-1">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Runs
-                </p>
-                <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
-              </div>
-              <div className="space-y-1">
-                {recentRuns.map((run) => {
-                  const pendingAlertCount = pendingAlertsByRun[run.id] || run.alerts?.length || 0
-                  const hasPendingAlerts = pendingAlertCount > 0
-
-                  return (
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Sweeps
+                  </p>
+                  <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
+                </div>
+                <div className="space-y-1">
+                  {recentSweeps.map((sweep) => (
                     <div
-                      key={run.id}
+                      key={sweep.id}
                       className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                     >
-                      <button
-                        type="button"
-                        onClick={() => onNavigateToRun(run.id)}
-                        className="min-w-0 flex-1 text-left"
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <p className="min-w-0 truncate text-foreground">{run.alias || run.name}</p>
-                          <span
-                            className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${getRunStatusBadgeClass(run.status)}`}
-                            title={run.status}
-                          >
-                            {getRunStatusIcon(run.status)}
-                          </span>
-                          {hasPendingAlerts && (
-                            <div
-                              className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
-                              title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}
-                            >
-                              <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-                              {pendingAlertCount > 1 && (
-                                <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
-                                  {pendingAlertCount}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </button>
+                      <div className="min-w-0 flex-1 text-left">
+                        <p className="truncate text-sm text-foreground">{sweep.config.name}</p>
+                        <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
+                      </div>
+                      <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusClass(sweep.status)}`}>
+                        {sweep.status}
+                      </Badge>
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-6 px-2 text-[16px]"
-                        onClick={() => onInsertReference(`@run:${run.id} `)}
+                        onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
                       >
                         @
                       </Button>
                     </div>
-                  )
-                })}
-                {recentRuns.length === 0 && (
-                  <p className="px-2 py-1 text-xs text-muted-foreground">No recent runs yet.</p>
-                )}
-              </div>
-              </section>
-            )}
-
-            {!isIconRail && (
-              <section>
-              <div className="mb-2 flex items-center justify-between px-1">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Sweeps
-                </p>
-                <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
-              </div>
-              <div className="space-y-1">
-                {recentSweeps.map((sweep) => (
-                  <div
-                    key={sweep.id}
-                    className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
-                  >
-                    <div className="min-w-0 flex-1 text-left">
-                      <p className="truncate text-sm text-foreground">{sweep.config.name}</p>
-                      <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
-                    </div>
-                    <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusClass(sweep.status)}`}>
-                      {sweep.status}
-                    </Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[16px]"
-                      onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
-                    >
-                      @
-                    </Button>
-                  </div>
-                ))}
-                {recentSweeps.length === 0 && (
-                  <p className="px-2 py-1 text-xs text-muted-foreground">No sweeps yet.</p>
-                )}
-              </div>
+                  ))}
+                  {recentSweeps.length === 0 && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">No sweeps yet.</p>
+                  )}
+                </div>
               </section>
             )}
           </div>
@@ -605,9 +605,8 @@ export function DesktopSidebar({
               <button
                 type="button"
                 title={isIconRail ? 'Workspace / Settings' : undefined}
-                className={`flex w-full items-center rounded-lg border border-border bg-card text-left transition-colors hover:bg-secondary/60 ${
-                  isIconRail ? 'justify-center px-2 py-2' : 'justify-between px-3 py-2'
-                }`}
+                className={`flex w-full items-center rounded-lg border border-border bg-card text-left transition-colors hover:bg-secondary/60 ${isIconRail ? 'justify-center px-2 py-2' : 'justify-between px-3 py-2'
+                  }`}
               >
                 {isIconRail ? (
                   <Settings className="h-4 w-4 text-muted-foreground" />
@@ -645,9 +644,8 @@ export function DesktopSidebar({
           aria-orientation="vertical"
           aria-label="Resize sidebar"
           onMouseDown={handleResizeStart}
-          className={`absolute -right-2 inset-y-0 z-30 w-5 cursor-col-resize touch-none transition-colors before:absolute before:inset-y-0 before:left-1/2 before:w-0.5 before:-translate-x-1/2 ${
-            isResizing ? 'before:bg-primary/45' : 'before:bg-transparent hover:before:bg-border'
-          }`}
+          className={`absolute -right-2 inset-y-0 z-30 w-5 cursor-col-resize touch-none transition-colors before:absolute before:inset-y-0 before:left-1/2 before:w-0.5 before:-translate-x-1/2 ${isResizing ? 'before:bg-primary/45' : 'before:bg-transparent hover:before:bg-border'
+            }`}
         />
       )}
     </aside>

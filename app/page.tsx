@@ -14,6 +14,7 @@ import { ReportView, type ReportToolbarState } from '@/components/report-view'
 import { FileExplorerView } from '@/components/file-explorer-view'
 import { SettingsPageContent } from '@/components/settings-page-content'
 import { SkillsBrowserView } from '@/components/skills-browser-view'
+import { PlanPanel } from '@/components/plan-panel'
 import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
@@ -240,7 +241,7 @@ export default function ResearchChat() {
   // Load prompt skills for slash commands
   const [promptSkills, setPromptSkills] = useState<PromptSkill[]>([])
   useEffect(() => {
-    listPromptSkills().then(setPromptSkills).catch(() => {})
+    listPromptSkills().then(setPromptSkills).catch(() => { })
   }, [])
 
   const events = useMemo<RunEvent[]>(() => {
@@ -256,15 +257,15 @@ export default function ResearchChat() {
 
       const severityType: RunEvent['type'] =
         alert.severity === 'critical' ? 'error' :
-        alert.severity === 'warning' ? 'warning' : 'info'
+          alert.severity === 'warning' ? 'warning' : 'info'
 
       const priority: RunEvent['priority'] =
         alert.severity === 'critical' ? 'critical' :
-        alert.severity === 'warning' ? 'high' : 'low'
+          alert.severity === 'warning' ? 'high' : 'low'
 
       const title =
         alert.severity === 'critical' ? 'Critical Alert' :
-        alert.severity === 'warning' ? 'Warning' : 'Info'
+          alert.severity === 'warning' ? 'Warning' : 'Info'
 
       return {
         id: eventId,
@@ -395,9 +396,9 @@ export default function ResearchChat() {
     const defaultChoice = event.choices.includes('Ignore')
       ? 'Ignore'
       : (event.choices.find(choice => {
-          const normalized = choice.toLowerCase()
-          return !normalized.includes('stop') && !normalized.includes('kill') && !normalized.includes('terminate')
-        }) || event.choices[0])
+        const normalized = choice.toLowerCase()
+        return !normalized.includes('stop') && !normalized.includes('kill') && !normalized.includes('terminate')
+      }) || event.choices[0])
     try {
       await respondAlert(event.alertId, defaultChoice)
     } catch (e) {
@@ -721,6 +722,7 @@ export default function ResearchChat() {
                 onOpenSettings={() => handleTabChange('settings')}
                 insertDraft={chatDraftInsert}
                 skills={promptSkills}
+                contextTokenCount={contextTokenCount}
               />
             )}
             {activeTab === 'runs' && (
@@ -779,6 +781,9 @@ export default function ResearchChat() {
             )}
             {activeTab === 'skills' && (
               <SkillsBrowserView />
+            )}
+            {activeTab === 'plans' && settings.developer?.showPlanPanel && (
+              <PlanPanel />
             )}
             {activeTab === 'report' && (
               <ReportView runs={runs} onToolbarChange={setReportToolbar} />
