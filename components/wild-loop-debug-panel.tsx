@@ -4,8 +4,8 @@ import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { getWildLoopStatus, getWildEventQueue, configureWildLoop } from '@/lib/api'
-import type { WildLoopStatus, WildEventQueueItem } from '@/lib/api'
+import { getWildLoopStatus, getWildEventQueue, configureWildLoop, getWildV2Status } from '@/lib/api'
+import type { WildLoopStatus, WildEventQueueItem, WildV2Status } from '@/lib/api'
 import { useAppSettings } from '@/lib/app-settings'
 
 interface WildLoopDebugPanelProps {
@@ -22,6 +22,8 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
     const [queueOpen, setQueueOpen] = useState(true)
     const [entitiesOpen, setEntitiesOpen] = useState(true)
     const [settingsOpen, setSettingsOpen] = useState(false)
+    const [v2PlanOpen, setV2PlanOpen] = useState(true)
+    const [v2Status, setV2Status] = useState<WildV2Status | null>(null)
     const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
     const prevIterationRef = useRef<number | null>(null)
 
@@ -31,12 +33,14 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         setLoading(true)
         setError(null)
         try {
-            const [statusData, queueData] = await Promise.all([
+            const [statusData, queueData, v2Data] = await Promise.all([
                 getWildLoopStatus(),
                 getWildEventQueue(),
+                getWildV2Status().catch(() => ({ active: false } as WildV2Status)),
             ])
             setStatus(statusData)
             setQueue(queueData)
+            setV2Status(v2Data)
             setLastRefreshed(new Date())
 
             // Detect iteration changes for extra refresh (already handled by interval)
@@ -172,8 +176,8 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                         <button
                                             key={s}
                                             className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${refreshInterval === s
-                                                    ? 'bg-primary text-primary-foreground border-primary'
-                                                    : 'border-border/50 hover:bg-secondary text-muted-foreground'
+                                                ? 'bg-primary text-primary-foreground border-primary'
+                                                : 'border-border/50 hover:bg-secondary text-muted-foreground'
                                                 }`}
                                             onClick={() => setRefreshInterval(s)}
                                         >
@@ -185,6 +189,90 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                         </div>
                     </CollapsibleContent>
                 </Collapsible>
+
+                {/* V2 Plan Section */}
+                {v2Status && v2Status.active && (
+                    <Collapsible open={v2PlanOpen} onOpenChange={setV2PlanOpen}>
+                        <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-green-500/10 border border-green-500/20 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-green-500/15">
+                            {v2PlanOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                            <span>🤖 V2 Loop</span>
+                            <span className="ml-auto text-[10px] text-green-400">
+                                iter {v2Status.iteration}/{v2Status.max_iterations} • {v2Status.status}
+                            </span>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-2">
+                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-3 text-xs">
+                                {/* Goal */}
+                                <div>
+                                    <div className="text-[10px] text-muted-foreground mb-1 font-medium">Goal</div>
+                                    <div className="text-foreground">{v2Status.goal || '—'}</div>
+                                </div>
+
+                                {/* Plan */}
+                                {v2Status.plan && (
+                                    <div>
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Current Plan</div>
+                                        <pre className="text-[10px] bg-secondary/30 rounded p-2 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap">
+                                            {v2Status.plan}
+                                        </pre>
+                                    </div>
+                                )}
+
+                                {/* System Health */}
+                                {v2Status.system_health && (
+                                    <div className="border-t border-border/30 pt-2">
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">System Health</div>
+                                        <div className="flex flex-wrap gap-2 text-[10px]">
+                                            <span className="text-blue-400">▶ {v2Status.system_health.running}/{v2Status.system_health.max_concurrent}</span>
+                                            <span className="text-muted-foreground">⏳ {v2Status.system_health.queued}</span>
+                                            <span className="text-green-400">✓ {v2Status.system_health.completed}</span>
+                                            <span className="text-red-400">✗ {v2Status.system_health.failed}</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Pending Events */}
+                                {v2Status.pending_events_count != null && v2Status.pending_events_count > 0 && (
+                                    <div className="border-t border-border/30 pt-2">
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">
+                                            Pending Events ({v2Status.pending_events_count})
+                                        </div>
+                                        <div className="space-y-1">
+                                            {(v2Status.pending_events || []).slice(0, 5).map((ev) => (
+                                                <div key={ev.id} className="text-[10px] flex items-start gap-1">
+                                                    <Circle className="h-2 w-2 mt-0.5 text-yellow-400 fill-yellow-400/30" />
+                                                    <span className="truncate">{ev.title}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Iteration History */}
+                                {v2Status.history && v2Status.history.length > 0 && (
+                                    <div className="border-t border-border/30 pt-2">
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">
+                                            Iteration History ({v2Status.history.length})
+                                        </div>
+                                        <div className="space-y-1 max-h-[150px] overflow-y-auto">
+                                            {v2Status.history.slice().reverse().map((h) => (
+                                                <div key={h.iteration} className="text-[10px] flex items-start gap-1.5 rounded bg-secondary/30 px-2 py-1">
+                                                    <span className="text-muted-foreground shrink-0">#{h.iteration}</span>
+                                                    <span className="truncate flex-1" title={h.summary}>{h.summary}</span>
+                                                    {h.promise && (
+                                                        <span className={`shrink-0 font-medium ${h.promise === 'DONE' ? 'text-green-400' :
+                                                                h.promise === 'WAITING' ? 'text-yellow-400' : 'text-muted-foreground'
+                                                            }`}>{h.promise}</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </CollapsibleContent>
+                    </Collapsible>
+                )}
 
                 {/* Status Section */}
                 <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>

@@ -1012,6 +1012,133 @@ export async function steerWildLoop(message: string, priority: number = 10): Pro
 }
 
 // =============================================================================
+// Wild Loop V2 (Ralph-style) API Functions
+// =============================================================================
+
+export interface WildV2IterationHistory {
+    iteration: number
+    summary: string
+    started_at: number
+    finished_at: number
+    opencode_session_id: string
+    promise: string | null
+}
+
+export interface WildV2Status {
+    active: boolean
+    session_id?: string
+    goal?: string
+    status?: string  // running | paused | done | failed
+    iteration?: number
+    max_iterations?: number
+    plan?: string
+    history?: WildV2IterationHistory[]
+    started_at?: number
+    finished_at?: number | null
+    pending_events_count?: number
+    pending_events?: Array<{ id: string; type: string; title: string; detail: string }>
+    steer_context?: string
+    system_health?: {
+        running: number
+        queued: number
+        completed: number
+        failed: number
+        total: number
+        max_concurrent: number
+    }
+}
+
+/**
+ * Start a V2 wild session (ralph-style loop).
+ */
+export async function startWildV2(params: {
+    goal: string
+    chat_session_id?: string
+    max_iterations?: number
+    wait_seconds?: number
+}): Promise<WildV2Status> {
+    const response = await fetch(`${API_URL()}/wild/v2/start`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(params),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to start wild v2: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stop the active V2 wild session.
+ */
+export async function stopWildV2(): Promise<WildV2Status> {
+    const response = await fetch(`${API_URL()}/wild/v2/stop`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to stop wild v2: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Get V2 wild session status.
+ */
+export async function getWildV2Status(): Promise<WildV2Status> {
+    const response = await fetch(`${API_URL()}/wild/v2/status`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get wild v2 status: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Pause the V2 wild session.
+ */
+export async function pauseWildV2(): Promise<WildV2Status> {
+    const response = await fetch(`${API_URL()}/wild/v2/pause`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to pause wild v2: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Resume the V2 wild session.
+ */
+export async function resumeWildV2(): Promise<WildV2Status> {
+    const response = await fetch(`${API_URL()}/wild/v2/resume`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to resume wild v2: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Inject user context for the next V2 iteration.
+ */
+export async function steerWildV2(context: string): Promise<{ ok: boolean }> {
+    const response = await fetch(`${API_URL()}/wild/v2/steer`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ context }),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to steer wild v2: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+// =============================================================================
 // Prompt Skill Functions  
 // =============================================================================
 

@@ -44,6 +44,7 @@ from wild_loop import (
     engine as wild_engine,
 )
 import wild_loop as wild_loop_mod
+from wild_loop_v2 import WildV2Engine
 
 import httpx
 import uvicorn
@@ -798,6 +799,22 @@ wild_engine.set_callbacks(
     save_settings=lambda: save_settings_state(),
     server_url=SERVER_CALLBACK_URL,
     auth_token=USER_AUTH_TOKEN or "",
+)
+
+# Wild Loop V2 engine (ralph-style)
+wild_v2_engine = WildV2Engine(
+    opencode_url=OPENCODE_URL,
+    model_provider=MODEL_PROVIDER,
+    model_id=MODEL_ID,
+    workdir=WORKDIR,
+    server_url=SERVER_CALLBACK_URL,
+    auth_token=USER_AUTH_TOKEN,
+    get_auth=get_auth,
+    get_runs=lambda: runs,
+    get_sweeps=lambda: sweeps,
+    get_alerts=lambda: active_alerts,
+    save_chat_state=lambda: save_chat_state(),
+    chat_sessions=chat_sessions,
 )
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
@@ -3754,6 +3771,89 @@ async def wild_consume_prompt():
 async def wild_steer(req: WildSteerRequest):
     """Insert a user steer message into the wild loop queue."""
     return wild_engine.steer(req)
+
+
+# =============================================================================
+# Wild Loop V2 Endpoints (Ralph-style)
+# =============================================================================
+
+class WildV2StartRequest(BaseModel):
+    goal: str
+    chat_session_id: Optional[str] = None
+    max_iterations: int = 25
+    wait_seconds: float = 30.0
+
+class WildV2SteerRequest(BaseModel):
+    context: str
+
+class WildV2ResolveRequest(BaseModel):
+    event_ids: list
+
+
+@app.post("/wild/v2/start")
+async def wild_v2_start(req: WildV2StartRequest):
+    """Start a new V2 wild session (ralph-style loop)."""
+    result = wild_v2_engine.start(
+        goal=req.goal,
+        chat_session_id=req.chat_session_id,
+        max_iterations=req.max_iterations,
+        wait_seconds=req.wait_seconds,
+    )
+    return result
+
+
+@app.post("/wild/v2/stop")
+async def wild_v2_stop():
+    """Stop the active V2 wild session."""
+    return wild_v2_engine.stop()
+
+
+@app.post("/wild/v2/pause")
+async def wild_v2_pause():
+    """Pause the V2 wild session."""
+    return wild_v2_engine.pause()
+
+
+@app.post("/wild/v2/resume")
+async def wild_v2_resume():
+    """Resume the V2 wild session."""
+    return wild_v2_engine.resume()
+
+
+@app.get("/wild/v2/status")
+async def wild_v2_status():
+    """Get current V2 session state, plan, and history."""
+    return wild_v2_engine.get_status()
+
+
+@app.get("/wild/v2/events/{session_id}")
+async def wild_v2_events(session_id: str):
+    """Get pending events for a V2 session (agent calls this)."""
+    return wild_v2_engine.get_events()
+
+
+@app.post("/wild/v2/events/{session_id}/resolve")
+async def wild_v2_resolve_events(session_id: str, req: WildV2ResolveRequest):
+    """Mark events as resolved (agent calls this after handling)."""
+    return wild_v2_engine.resolve_events(req.event_ids)
+
+
+@app.get("/wild/v2/system-health")
+async def wild_v2_system_health():
+    """Get system utilization (agent calls this to check resources)."""
+    return wild_v2_engine._get_system_health()
+
+
+@app.get("/wild/v2/plan/{session_id}")
+async def wild_v2_plan(session_id: str):
+    """Get the current plan markdown."""
+    return {"plan": wild_v2_engine.get_plan()}
+
+
+@app.post("/wild/v2/steer")
+async def wild_v2_steer(req: WildV2SteerRequest):
+    """Inject user context for the next iteration."""
+    return wild_v2_engine.steer(req.context)
 
 
 @app.get("/cluster")
