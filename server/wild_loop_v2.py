@@ -326,6 +326,7 @@ class WildV2Engine:
             log_path=os.path.join(session_dir, "iteration_log.md"),
             server_url=self._server_url,
             session_id=session.session_id,
+            auth_token=self._auth_token or "",
             steer_context=session.steer_context,
             history=session.history,
             no_progress_streak=session.no_progress_streak,

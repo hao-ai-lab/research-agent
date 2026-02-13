@@ -296,6 +296,53 @@ export function ConnectedChatView({
         prevStreamingRef.current = streamingState.isStreaming
     }, [streamingState.isStreaming, wildLoop, notify])
 
+    // Auto-reconnect to the next iteration's stream when wild loop is active.
+    // When the V2 backend finishes one iteration, it sends `session_status: idle`,
+    // causing the frontend's SSE stream to disconnect. The backend then starts the
+    // next iteration with a new ChatStreamRuntime. This effect polls for a new
+    // active_stream and re-attaches when one appears.
+    const wildReconnectRef = useRef(false)
+    useEffect(() => {
+        // Track streaming transitions for reconnect logic
+        if (streamingState.isStreaming) {
+            wildReconnectRef.current = true  // mark that we were streaming
+            return
+        }
+        if (!wildReconnectRef.current) return  // wasn't streaming before
+        wildReconnectRef.current = false  // reset
+
+        if (!wildLoop?.isActive) return  // not in wild mode
+        if (!currentSessionId) return
+
+        let cancelled = false
+        const sessionId = currentSessionId
+
+        const pollForNextStream = async () => {
+            // Give the backend a moment to start the next iteration
+            await new Promise(r => setTimeout(r, 2000))
+
+            for (let attempt = 0; attempt < 30 && !cancelled; attempt++) {
+                try {
+                    const { getSession } = await import('@/lib/api')
+                    const sessionData = await getSession(sessionId)
+                    if (sessionData.active_stream?.status === 'running') {
+                        // New iteration stream found — re-attach
+                        console.log('[wild-reconnect] Found new active stream, re-attaching (attempt %d)', attempt)
+                        await selectSession(sessionId)
+                        break
+                    }
+                } catch {
+                    // Request failed, retry
+                }
+                await new Promise(r => setTimeout(r, 1500))
+            }
+        }
+
+        pollForNextStream()
+        return () => { cancelled = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [streamingState.isStreaming, wildLoop?.isActive, currentSessionId, selectSession])
+
     // Handle send - create session if needed, start wild loop if in wild mode
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
         let sessionId = currentSessionId
