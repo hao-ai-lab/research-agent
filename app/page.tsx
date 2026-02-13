@@ -645,6 +645,9 @@ export default function ResearchChat() {
           runs={runs}
           sweeps={sweeps}
           pendingAlertsByRun={pendingAlertsByRun}
+          alerts={alerts}
+          currentSessionId={currentSessionId}
+          isCurrentSessionStreaming={chatSession.streamingState.isStreaming}
           onTabChange={handleTabChange}
           onNewChat={() => {
             startNewChat()  // Just clear state, session created when message is sent

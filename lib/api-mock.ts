@@ -461,11 +461,18 @@ function buildClusterResponse(): ClusterStatusResponse {
 
 export async function listSessions(): Promise<ChatSession[]> {
     await delay(200)
+    const hasPendingAlertBySessionId = new Set(
+        Array.from(mockAlerts.values())
+            .filter((alert) => alert.status === 'pending' && typeof alert.session_id === 'string')
+            .map((alert) => alert.session_id as string)
+    )
+
     return Array.from(mockSessions.values()).map(s => ({
         id: s.id,
         title: s.title,
         created_at: s.created_at,
         message_count: s.message_count,
+        status: hasPendingAlertBySessionId.has(s.id) ? 'awaiting_human' : (s.message_count > 0 ? 'completed' : 'idle'),
     }))
 }
 
@@ -480,7 +487,7 @@ export async function createSession(title?: string): Promise<ChatSession> {
         messages: [],
     }
     mockSessions.set(id, session)
-    return { id, title: session.title, created_at: session.created_at, message_count: 0 }
+    return { id, title: session.title, created_at: session.created_at, message_count: 0, status: 'idle' }
 }
 
 export async function getSession(sessionId: string): Promise<SessionWithMessages> {
@@ -497,7 +504,13 @@ export async function renameSession(sessionId: string, title: string): Promise<C
     const session = mockSessions.get(sessionId)
     if (!session) throw new Error('Session not found')
     session.title = title
-    return { id: sessionId, title: session.title, created_at: session.created_at, message_count: session.messages.length }
+    return {
+        id: sessionId,
+        title: session.title,
+        created_at: session.created_at,
+        message_count: session.messages.length,
+        status: session.messages.length > 0 ? 'completed' : 'idle',
+    }
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

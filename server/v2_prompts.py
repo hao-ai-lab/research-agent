@@ -8,7 +8,7 @@ No inline fallback templates — the SKILL.md files are the single source of tru
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Optional
 
 
 # ---------------------------------------------------------------------------
