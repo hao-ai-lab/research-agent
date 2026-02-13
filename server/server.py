@@ -401,6 +401,12 @@ class AlertRecord(BaseModel):
     auto_session: bool = False
 
 
+class MetricsPushRequest(BaseModel):
+    rows: List[dict] = []
+    metrics_file: Optional[str] = None
+    total_rows_sent: int = 0
+
+
 class CreateAlertRequest(BaseModel):
     message: str
     choices: List[str]
@@ -3739,6 +3745,100 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
         recompute_sweep_state(run["sweep_id"])
     save_runs_state()
     return {"message": "Status updated"}
+
+
+# In-memory buffer for streamed metric rows from sidecar
+_streamed_metrics: Dict[str, list[dict]] = {}
+
+
+@app.post("/runs/{run_id}/metrics")
+async def push_run_metrics(run_id: str, req: MetricsPushRequest):
+    """Receive streamed metric rows from sidecar (called periodically).
+
+    This endpoint accumulates rows that are also persisted into the run's
+    wandb_dir so the existing ``_get_wandb_curve_data`` path can parse them.
+    When no wandb_dir exists on the run yet, metrics are buffered in-memory
+    and written once a wandb_dir is set.
+    """
+    if run_id not in runs:
+        # Accept metrics even for unknown runs (sidecar may report early)
+        runs[run_id] = {"created_at": time.time()}
+
+    run = runs[run_id]
+
+    # Accumulate rows in memory
+    buf = _streamed_metrics.setdefault(run_id, [])
+    for row in req.rows:
+        if isinstance(row, dict):
+            buf.append(row)
+
+    # If the run has a wandb_dir, write a metrics.jsonl so the existing
+    # chart pipeline can pick them up via _get_wandb_curve_data.
+    wandb_dir = run.get("wandb_dir")
+    if wandb_dir:
+        metrics_path = os.path.join(wandb_dir, "metrics.jsonl")
+        if not os.path.isabs(wandb_dir):
+            metrics_path = os.path.join(WORKDIR, wandb_dir, "metrics.jsonl")
+        try:
+            os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+            with open(metrics_path, "a") as f:
+                for row in req.rows:
+                    f.write(json.dumps(row, default=str) + "\n")
+        except OSError as e:
+            logger.debug("Could not append to metrics.jsonl: %s", e)
+
+    # Also write to run_dir if available (fallback for runs without wandb)
+    run_dir = run.get("run_dir")
+    if run_dir and not wandb_dir:
+        fallback_metrics = os.path.join(run_dir, "metrics.jsonl")
+        try:
+            os.makedirs(run_dir, exist_ok=True)
+            with open(fallback_metrics, "a") as f:
+                for row in req.rows:
+                    f.write(json.dumps(row, default=str) + "\n")
+            # Set wandb_dir to run_dir so charts can find it
+            if not run.get("wandb_dir"):
+                run["wandb_dir"] = run_dir
+                save_runs_state()
+        except OSError as e:
+            logger.debug("Could not write fallback metrics: %s", e)
+
+    # Invalidate metrics cache so next GET /runs picks up new data
+    if wandb_dir:
+        cache_key = _resolve_metrics_file(wandb_dir)
+        if cache_key and cache_key in _wandb_metrics_cache:
+            del _wandb_metrics_cache[cache_key]
+
+    logger.debug("Received %d metric rows for run %s (total buffered: %d)",
+                 len(req.rows), run_id, len(buf))
+    return {"message": "Metrics received", "total_buffered": len(buf)}
+
+
+@app.get("/runs/{run_id}/metrics")
+async def get_run_metrics(run_id: str, since_row: int = Query(0, description="Return rows starting from this index")):
+    """Get streamed metrics for a run.
+
+    Returns rows buffered in memory plus any data from wandb files.
+    The ``since_row`` parameter allows incremental polling.
+    """
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+
+    # Try to get parsed data from wandb files (existing pipeline)
+    parsed = _get_wandb_curve_data(run.get("wandb_dir"))
+
+    # Also include in-memory buffer
+    buf = _streamed_metrics.get(run_id, [])
+
+    return {
+        "run_id": run_id,
+        "buffered_rows": buf[since_row:],
+        "total_buffered": len(buf),
+        "wandb_parsed": parsed if parsed else None,
+        "has_wandb": bool(run.get("wandb_dir")),
+    }
 
 
 @app.post("/runs/{run_id}/alerts")
