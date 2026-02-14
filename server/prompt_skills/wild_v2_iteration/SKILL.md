@@ -38,7 +38,7 @@ Task file: `{{tasks_path}}`
 - Contains phased tasks and reflection gates.
 - Mark tasks `[/]` when starting and `[x]` when complete.
 - Add tasks if new dependencies or follow-ups are discovered.
-- Prefer one primary task per iteration.
+- Prefer one primary objective per iteration, but you may create/start multiple runs in parallel when capacity allows.
 
 Iteration log: `{{log_path}}`
 - Records prior outcomes, errors, and lessons.
@@ -53,7 +53,7 @@ Iteration log: `{{log_path}}`
 ```bash
 curl -sf {{server_url}}/docs >/dev/null
 curl -sf {{server_url}}/openapi.json >/dev/null
-curl -sf {{server_url}}/prompt-skills/wild_v2_sweep_run_audit_protocol >/dev/null
+curl -sf {{server_url}}/prompt-skills/wild_v2_execution_ops_protocol >/dev/null
 ```
 - If preflight fails, stop execution work immediately.
 - If preflight fails, output `<summary>Preflight failed; aborting run loop.</summary>` and `<promise>DONE</promise>`.
@@ -93,7 +93,7 @@ curl -sf {{server_url}}/prompt-skills/wild_v2_sweep_run_audit_protocol >/dev/nul
 > **Runs not created via API are invisible to users and not auditable.**
 
 Read and follow the mandatory skill:
-- `GET {{server_url}}/prompt-skills/wild_v2_sweep_run_audit_protocol`
+- `GET {{server_url}}/prompt-skills/wild_v2_execution_ops_protocol`
 
 Create a sweep (if none exists):
 ```bash
@@ -115,6 +115,25 @@ For grid search:
 - Create one run per configuration by repeating `POST {{server_url}}/runs`.
 - Keep each run name and command configuration-specific.
 - Do not execute the grid directly outside API tracking.
+
+For parallel execution:
+- Detect capacity before launching many runs:
+```bash
+curl -X POST {{server_url}}/cluster/detect {{auth_header}}
+curl -X GET {{server_url}}/cluster {{auth_header}}
+curl -X GET {{server_url}}/wild/v2/system-health {{auth_header}}
+```
+- If capacity exists, launch multiple runs in parallel in the same iteration.
+- Local multi-GPU: pin run commands to different GPUs.
+- Slurm: submit multiple resource-scoped runs and let scheduler place them.
+- Avoid unnecessary serialization when idle GPUs are available.
+- Recommended parallelism formula:
+  - `g = max(1, gpu_count)` for local GPU
+  - `g = max(1, gpu_count or 4)` for Slurm
+  - `r = current running runs`
+  - `q = ready/queued runs`
+  - `max_new_runs = max(0, min(q, g - r))`
+- Start up to `max_new_runs` runs now.
 
 Monitor with `GET {{server_url}}/runs`.
 If waiting on runs and no other meaningful task is available, output `<promise>WAITING</promise>`.

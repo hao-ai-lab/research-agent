@@ -138,10 +138,17 @@ def _api_catalog(ctx: PromptContext) -> str:
 - `POST {s}/wild/v2/events/{sid}/resolve` — Mark events handled (body: `{{"event_ids": ["<id>"]}}`)
 - `GET  {s}/wild/v2/system-health` — System utilization (running/queued/completed/failed counts)
 
+### Cluster & Capacity
+- `GET  {s}/cluster` — Cluster metadata and run summary
+- `POST {s}/cluster/detect` — Auto-detect cluster type/capacity
+- `POST {s}/cluster` — Update cluster metadata manually
+
 ### Skills (prompt templates)
 - `GET  {s}/prompt-skills` — List available prompt skills
 - `GET  {s}/prompt-skills/search?q=query` — Search skills by name/description
 - `GET  {s}/prompt-skills/{{id}}` — Fetch one skill (includes full template text)
+- `GET  {s}/prompt-skills/{{id}}/files` — List files for a skill
+- `GET  {s}/prompt-skills/{{id}}/files/{{path}}` — Read a skill file
 
 ### Docs & Schema
 - `GET  {s}/docs` — API docs UI (health/preflight probe)
