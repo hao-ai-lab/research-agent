@@ -48,6 +48,8 @@ export const defaultAppSettings: AppSettings = {
     chatInputInitialHeightPx: null,
     wildLoopTasksFontSizePx: null,
     wildLoopHistoryFontSizePx: null,
+    wildLoopTasksBoxHeightPx: null,
+    wildLoopHistoryBoxHeightPx: null,
     showStarterCards: false,
     showSidebarNewChatButton: false,
   },
@@ -251,6 +253,12 @@ function readStoredSettings(): AppSettings {
     const wildLoopHistoryFontSizePxFromBlob = sanitizePositiveNumber(
       parsed?.appearance?.wildLoopHistoryFontSizePx,
     );
+    const wildLoopTasksBoxHeightPxFromBlob = sanitizePositiveNumber(
+      parsed?.appearance?.wildLoopTasksBoxHeightPx,
+    );
+    const wildLoopHistoryBoxHeightPxFromBlob = sanitizePositiveNumber(
+      parsed?.appearance?.wildLoopHistoryBoxHeightPx,
+    );
 
     const storedTheme = localStorage.getItem(STORAGE_KEY_APPEARANCE_THEME);
     const storedFontSize = localStorage.getItem(
@@ -350,6 +358,12 @@ function readStoredSettings(): AppSettings {
         wildLoopHistoryFontSizePx:
           wildLoopHistoryFontSizePxFromBlob ??
           defaultAppSettings.appearance.wildLoopHistoryFontSizePx,
+        wildLoopTasksBoxHeightPx:
+          wildLoopTasksBoxHeightPxFromBlob ??
+          defaultAppSettings.appearance.wildLoopTasksBoxHeightPx,
+        wildLoopHistoryBoxHeightPx:
+          wildLoopHistoryBoxHeightPxFromBlob ??
+          defaultAppSettings.appearance.wildLoopHistoryBoxHeightPx,
         showStarterCards:
           parsed?.appearance?.showStarterCards ??
           defaultAppSettings.appearance.showStarterCards,
