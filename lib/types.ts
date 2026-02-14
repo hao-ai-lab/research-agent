@@ -98,6 +98,8 @@ export interface AppSettings {
     customAccentColor?: string | null;
     wildLoopTasksFontSizePx?: number | null;
     wildLoopHistoryFontSizePx?: number | null;
+    wildLoopTasksBoxHeightPx?: number | null;
+    wildLoopHistoryBoxHeightPx?: number | null;
     showStarterCards?: boolean;
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;

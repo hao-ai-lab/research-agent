@@ -203,6 +203,8 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
     const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 2
     const tasksFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopTasksFontSizePx ?? 16))
     const historyFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopHistoryFontSizePx ?? 15))
+    const tasksBoxHeightPx = Math.max(160, Math.min(1200, settings.appearance.wildLoopTasksBoxHeightPx ?? 420))
+    const historyBoxHeightPx = Math.max(120, Math.min(1000, settings.appearance.wildLoopHistoryBoxHeightPx ?? 300))
     const parsedPlan = useMemo(
         () => parseTasksMarkdown(v2Status?.plan ?? ''),
         [v2Status?.plan]
@@ -543,7 +545,7 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                         {planCounts.todo} todo
                                                     </span>
                                                 </div>
-                                                <div className="max-h-[320px] overflow-y-auto px-2 py-1.5">
+                                                <div className="overflow-y-auto px-2 py-1.5" style={{ maxHeight: `${tasksBoxHeightPx}px` }}>
                                                     <div className="space-y-0.5" style={{ fontSize: `${tasksFontSizePx}px`, lineHeight: 1.55 }}>
                                                         {parsedPlan.map((line) => {
                                                             if (line.kind === 'spacer') {
@@ -713,7 +715,7 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                                 {allHistoryExpanded ? 'Collapse all' : 'Expand all'}
                                             </button>
                                         </div>
-                                        <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+                                        <div className="space-y-1.5 overflow-y-auto pr-1" style={{ maxHeight: `${historyBoxHeightPx}px` }}>
                                             {reversedHistory.map((h) => {
                                                 const isExpanded = expandedHistoryRows[h.iteration] === true
                                                 const summaryPreview = stripMarkdownSyntax(h.summary || '')
