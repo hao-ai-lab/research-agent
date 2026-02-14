@@ -26,6 +26,7 @@ import {
   ClipboardList,
   Cpu,
   Check,
+  MoreHorizontal,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -195,10 +196,12 @@ export function ChatInput({
   const mentionPopoverRef = useRef<HTMLDivElement>(null)
   const modelButtonRef = useRef<HTMLButtonElement>(null)
   const modelLabelContainerRef = useRef<HTMLSpanElement>(null)
-  const modelLabelMeasureRef = useRef<HTMLSpanElement>(null)
   const modelCompactMeasureRef = useRef<HTMLSpanElement>(null)
+  const controlsRowRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
-  const [modelLabelMode, setModelLabelMode] = useState<'full' | 'model' | 'icon'>('full')
+  const [modelLabelMode, setModelLabelMode] = useState<'model' | 'icon'>('model')
+  const [isCompactControlsOpen, setIsCompactControlsOpen] = useState(false)
+  const [isUltraCompactLayout, setIsUltraCompactLayout] = useState(false)
 
   useEffect(() => {
     // Sweep mode is no longer exposed in the UI.
@@ -914,31 +917,21 @@ export function ChatInput({
     ? `${effectiveSelectedModel.provider_id} > ${effectiveSelectedModel.model_id}`
     : 'Model'
   const selectedModelCompactLabel = effectiveSelectedModel?.model_id || 'Model'
-  const selectedModelLabel = modelLabelMode === 'full'
-    ? selectedModelFullLabel
-    : selectedModelCompactLabel
+  const selectedModelLabel = selectedModelCompactLabel
 
   useEffect(() => {
     const updateModelLabelMode = () => {
       const button = modelButtonRef.current
       const container = modelLabelContainerRef.current
-      const fullMeasure = modelLabelMeasureRef.current
       const compactMeasure = modelCompactMeasureRef.current
-      if (!button || !container || !fullMeasure || !compactMeasure) return
+      if (!button || !container || !compactMeasure) return
 
       const iconOnlyThreshold = 74
       if (button.clientWidth <= iconOnlyThreshold) {
         setModelLabelMode('icon')
         return
       }
-
-      if (fullMeasure.offsetWidth <= container.clientWidth) {
-        setModelLabelMode('full')
-      } else if (compactMeasure.offsetWidth <= container.clientWidth) {
-        setModelLabelMode('model')
-      } else {
-        setModelLabelMode('icon')
-      }
+      setModelLabelMode(compactMeasure.offsetWidth <= container.clientWidth ? 'model' : 'icon')
     }
 
     updateModelLabelMode()
@@ -955,7 +948,7 @@ export function ChatInput({
 
     window.addEventListener('resize', updateModelLabelMode)
     return () => window.removeEventListener('resize', updateModelLabelMode)
-  }, [selectedModelCompactLabel, selectedModelFullLabel])
+  }, [selectedModelCompactLabel])
 
   const modelOptionsByProvider = useMemo(() => {
     const groups = new Map<string, ChatModelOption[]>()
@@ -972,6 +965,22 @@ export function ChatInput({
         options: options.slice().sort((a, b) => a.model_id.localeCompare(b.model_id)),
       }))
   }, [modelOptions])
+
+  useEffect(() => {
+    const updateCompactLayout = () => {
+      const width = controlsRowRef.current?.clientWidth || 0
+      setIsUltraCompactLayout(width > 0 && width <= 430)
+    }
+
+    updateCompactLayout()
+    if (typeof ResizeObserver !== 'undefined' && controlsRowRef.current) {
+      const observer = new ResizeObserver(updateCompactLayout)
+      observer.observe(controlsRowRef.current)
+      return () => observer.disconnect()
+    }
+    window.addEventListener('resize', updateCompactLayout)
+    return () => window.removeEventListener('resize', updateCompactLayout)
+  }, [])
 
   return (
     <div
@@ -1236,14 +1245,14 @@ export function ChatInput({
           </div>
         )}
 
-        <div className="relative rounded-xl border border-border bg-card focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+        <div className="relative rounded-lg border border-border bg-card focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
           <div
             ref={highlightRef}
             aria-hidden
-            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-4 py-3 text-base leading-6 text-foreground"
+            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-4 py-4 text-base leading-6 text-foreground"
           >
             {message ? highlightedMessage : (
-              <span className="text-muted-foreground">Message Research Assistant... (type @ or /)</span>
+              <span className="text-muted-foreground">Ask me about your research</span>
             )}
           </div>
           <textarea
@@ -1265,7 +1274,7 @@ export function ChatInput({
                 highlightRef.current.scrollTop = e.currentTarget.scrollTop
               }
             }}
-            placeholder="Message Research Assistant... (type @ or /)"
+            placeholder="Ask me about your research"
             disabled={disabled}
             rows={1}
             className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
@@ -1300,290 +1309,217 @@ export function ChatInput({
       </div>
 
       {/* Action buttons - bottom row */}
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div ref={controlsRowRef} className="flex flex-wrap items-center gap-1.5">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
-          {/* Mode toggle */}
-          <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                  mode === 'agent'
-                    ? 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
-                    : mode === 'wild'
-                    ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
-                    : mode === 'plan'
-                    ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
-                    : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
-                }`}
-              >
-                {mode === 'agent' ? (
-                  <MessageSquare className="h-3 w-3" />
-                ) : mode === 'wild' ? (
-                  <Zap className="h-3 w-3" />
-                ) : mode === 'plan' ? (
-                  <ClipboardList className="h-3 w-3" />
-                ) : (
-                  <MessageSquare className="h-3 w-3" />
-                )}
-                {mode === 'wild' ? 'Wild' : mode === 'plan' ? 'Plan' : 'Agent'}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-56 p-1.5">
-              <div className="flex flex-col gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onModeChange('agent')
-                    setIsModeOpen(false)
-                  }}
-                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                    mode === 'agent'
-                      ? 'bg-secondary border border-border/60'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <MessageSquare
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-foreground' : 'text-muted-foreground'}`}
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Agent Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Normal chat — ask and discuss</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onModeChange('plan')
-                    setIsModeOpen(false)
-                  }}
-                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                    mode === 'plan'
-                      ? 'bg-orange-500/10 border border-orange-500/35 dark:bg-orange-500/18 dark:border-orange-400/45'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <ClipboardList
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'plan' ? 'text-orange-600 dark:text-orange-300' : 'text-muted-foreground'}`}
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Plan Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Think first — propose a plan before acting</p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onModeChange('wild')
-                    setIsModeOpen(false)
-                  }}
-                  className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                    mode === 'wild'
-                      ? 'bg-violet-500/10 border border-violet-500/35 dark:bg-violet-500/18 dark:border-violet-400/45'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <Zap
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground'}`}
-                  />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Wild Mode</p>
-                    <p className="text-[10px] text-muted-foreground">Autonomous loop — agent runs experiments</p>
-                  </div>
-                </button>
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          {/* Model selector */}
-          {onModelChange && modelOptions.length > 0 && (
-            <Popover open={isModelOpen} onOpenChange={setIsModelOpen}>
+          {isUltraCompactLayout ? (
+            <Popover open={isCompactControlsOpen} onOpenChange={setIsCompactControlsOpen}>
               <PopoverTrigger asChild>
-                <button
-                  ref={modelButtonRef}
-                  type="button"
-                  disabled={isModelUpdating}
-                  className="chat-toolbar-pill flex max-w-[190px] min-w-9 items-center gap-1 rounded-lg border border-border/60 bg-secondary px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-60"
-                  title="Select model"
-                >
-                  <Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  <span
-                    ref={modelLabelContainerRef}
-                    className={`relative min-w-0 flex-1 truncate ${modelLabelMode === 'icon' ? 'hidden' : ''}`}
-                  >
-                    <span className="block truncate">{selectedModelLabel}</span>
-                    <span
-                      ref={modelLabelMeasureRef}
-                      aria-hidden="true"
-                      className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap"
-                    >
-                      {selectedModelFullLabel}
-                    </span>
-                    <span
-                      ref={modelCompactMeasureRef}
-                      aria-hidden="true"
-                      className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap"
-                    >
-                      {selectedModelCompactLabel}
-                    </span>
-                  </span>
-                  <ChevronDown className={`h-3 w-3 shrink-0 text-muted-foreground ${modelLabelMode === 'icon' ? 'hidden' : ''}`} />
-                </button>
+                <Button variant="ghost" size="icon" className="chat-toolbar-icon" title="More controls">
+                  <MoreHorizontal />
+                </Button>
               </PopoverTrigger>
-              <PopoverContent side="top" align="start" className="w-72 p-1.5">
-                <p className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Provider &gt; Model ID</p>
-                <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-                  {modelOptionsByProvider.map((providerGroup) => (
-                    <div key={providerGroup.providerId} className="rounded-md border border-border/50 bg-background/60 p-1">
-                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        {providerGroup.providerId}
-                      </p>
-                      <div className="flex flex-col gap-0.5">
-                        {providerGroup.options.map((option) => {
-                          const isSelected = Boolean(
-                            effectiveSelectedModel &&
-                            option.provider_id === effectiveSelectedModel.provider_id &&
-                            option.model_id === effectiveSelectedModel.model_id
-                          )
-                          return (
-                            <button
-                              key={`${option.provider_id}:${option.model_id}`}
-                              type="button"
-                              disabled={isModelUpdating}
-                              onClick={() => {
-                                void (async () => {
-                                  try {
-                                    await onModelChange({
-                                      provider_id: option.provider_id,
-                                      model_id: option.model_id,
-                                    })
-                                  } finally {
-                                    setIsModelOpen(false)
-                                  }
-                                })()
-                              }}
-                              className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
-                                isSelected
-                                  ? 'border border-border/70 bg-secondary'
-                                  : 'border border-transparent hover:bg-secondary/70'
-                              }`}
-                            >
-                              <div className="h-4 w-4 shrink-0 text-primary">
-                                {isSelected ? <Check className="h-4 w-4" /> : null}
-                              </div>
-                              <p className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                                {option.model_id}
-                              </p>
-                            </button>
-                          )
-                        })}
+              <PopoverContent side="top" align="start" className="w-72 p-2">
+                <div className="space-y-2">
+                  <div>
+                    <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Mode</p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(['agent', 'plan', 'wild'] as ChatMode[]).map((nextMode) => (
+                        <button
+                          key={nextMode}
+                          type="button"
+                          onClick={() => {
+                            onModeChange(nextMode)
+                            setIsCompactControlsOpen(false)
+                          }}
+                          className={`rounded-md border px-2 py-1 text-xs ${
+                            mode === nextMode ? 'border-border/70 bg-secondary text-foreground' : 'border-border/40 hover:bg-secondary/70'
+                          }`}
+                        >
+                          {nextMode === 'agent' ? 'Agent' : nextMode === 'plan' ? 'Plan' : 'Wild'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {onModelChange && modelOptions.length > 0 && (
+                    <div>
+                      <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Model</p>
+                      <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-border/50 p-1">
+                        {modelOptionsByProvider.flatMap((providerGroup) =>
+                          providerGroup.options.map((option) => {
+                            const key = `${option.provider_id}:${option.model_id}`
+                            const isSelected = Boolean(
+                              effectiveSelectedModel &&
+                              option.provider_id === effectiveSelectedModel.provider_id &&
+                              option.model_id === effectiveSelectedModel.model_id
+                            )
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                disabled={isModelUpdating}
+                                onClick={() => {
+                                  void (async () => {
+                                    try {
+                                      await onModelChange({ provider_id: option.provider_id, model_id: option.model_id })
+                                    } finally {
+                                      setIsCompactControlsOpen(false)
+                                    }
+                                  })()
+                                }}
+                                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
+                                  isSelected ? 'bg-secondary text-foreground' : 'hover:bg-secondary/70'
+                                }`}
+                              >
+                                <div className="h-3.5 w-3.5 shrink-0 text-primary">{isSelected ? <Check className="h-3.5 w-3.5" /> : null}</div>
+                                <span className="min-w-0 flex-1 truncate">{option.model_id}</span>
+                              </button>
+                            )
+                          })
+                        )}
                       </div>
                     </div>
-                  ))}
+                  )}
+
+                  <div>
+                    <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Insert</p>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button type="button" onClick={() => { fileInputRef.current?.click(); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Upload</button>
+                      <button type="button" onClick={() => { openMentionFromToolbar('all'); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">@ mention</button>
+                      <button type="button" onClick={() => { openMentionFromToolbar('run'); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Run</button>
+                      <button type="button" onClick={() => { openMentionFromToolbar('sweep'); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Sweep</button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Commands</p>
+                    <div className="max-h-24 space-y-1 overflow-y-auto rounded-md border border-border/50 p-1">
+                      {SLASH_COMMANDS.map((item) => (
+                        <button
+                          key={item.command}
+                          type="button"
+                          onClick={() => {
+                            insertText(`${item.command} `)
+                            setIsCompactControlsOpen(false)
+                          }}
+                          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-secondary/70"
+                        >
+                          <span style={{ color: item.color }}>{item.command}</span>
+                          <span className="text-[10px] text-muted-foreground">{item.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </PopoverContent>
             </Popover>
-          )}
-
-          {/* Add attachment */}
-          <Popover open={isAttachOpen} onOpenChange={setIsAttachOpen}>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="chat-toolbar-icon">
-                <Plus />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-40 p-1.5">
-              <div className="flex flex-col gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span>Upload file</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <ImageIcon className="h-3.5 w-3.5" />
-                  <span>Upload image</span>
-                </button>
-                <div className="my-1 border-t border-border" />
-                <button
-                  type="button"
-                  onClick={() => openMentionFromToolbar('run')}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <Play className="h-3.5 w-3.5" />
-                  <span>Add run</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openMentionFromToolbar('sweep')}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <Sparkles className="h-3.5 w-3.5 text-violet-500" />
-                  <span>Add sweep</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openMentionFromToolbar('artifact')}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <Archive className="h-3.5 w-3.5" />
-                  <span>Add artifact</span>
-                </button>
-                {/* <button
-                  type="button"
-                  onClick={() => openMentionFromToolbar('chat')}
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
-                >
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  <span>Add chat</span>
-                </button> */}
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          {/* Mention - triggers @ autocomplete */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="chat-toolbar-icon"
-            onClick={() => openMentionFromToolbar('all')}
-          >
-            <AtSign />
-          </Button>
-
-          {/* Commands */}
-          <Popover open={isCommandOpen} onOpenChange={setIsCommandOpen}>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="chat-toolbar-icon">
-                <Command />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-48 p-1.5">
-              <p className="text-[10px] text-muted-foreground mb-1.5 px-2">Quick commands</p>
-              <div className="flex flex-col gap-0.5">
-                {SLASH_COMMANDS.map((item) => (
+          ) : (
+            <>
+              {/* Mode toggle */}
+              <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
+                <PopoverTrigger asChild>
                   <button
-                    key={item.command}
                     type="button"
-                    onClick={() => {
-                      insertText(`${item.command} `)
-                      setIsCommandOpen(false)
-                    }}
-                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"
+                    className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      mode === 'agent'
+                        ? 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
+                        : mode === 'wild'
+                        ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
+                        : mode === 'plan'
+                        ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
+                        : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
+                    }`}
                   >
-                    <span style={{ color: item.color }}>{item.command}</span>
-                    <span className="text-muted-foreground text-[10px]">{item.description}</span>
+                    {mode === 'agent' ? <MessageSquare className="h-3 w-3" /> : mode === 'wild' ? <Zap className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
+                    {mode === 'wild' ? 'Wild' : mode === 'plan' ? 'Plan' : 'Agent'}
                   </button>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
+                </PopoverTrigger>
+                <PopoverContent side="top" align="start" className="w-56 p-1.5">
+                  <div className="flex flex-col gap-0.5">
+                    <button type="button" onClick={() => { onModeChange('agent'); setIsModeOpen(false) }} className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === 'agent' ? 'bg-secondary border border-border/60' : 'hover:bg-secondary'}`}><MessageSquare className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-foreground' : 'text-muted-foreground'}`} /><div><p className="text-xs font-medium text-foreground">Agent Mode</p><p className="text-[10px] text-muted-foreground">Normal chat — ask and discuss</p></div></button>
+                    <button type="button" onClick={() => { onModeChange('plan'); setIsModeOpen(false) }} className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === 'plan' ? 'bg-orange-500/10 border border-orange-500/35 dark:bg-orange-500/18 dark:border-orange-400/45' : 'hover:bg-secondary'}`}><ClipboardList className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'plan' ? 'text-orange-600 dark:text-orange-300' : 'text-muted-foreground'}`} /><div><p className="text-xs font-medium text-foreground">Plan Mode</p><p className="text-[10px] text-muted-foreground">Think first — propose a plan before acting</p></div></button>
+                    <button type="button" onClick={() => { onModeChange('wild'); setIsModeOpen(false) }} className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === 'wild' ? 'bg-violet-500/10 border border-violet-500/35 dark:bg-violet-500/18 dark:border-violet-400/45' : 'hover:bg-secondary'}`}><Zap className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground'}`} /><div><p className="text-xs font-medium text-foreground">Wild Mode</p><p className="text-[10px] text-muted-foreground">Autonomous loop — agent runs experiments</p></div></button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* Model selector */}
+              {onModelChange && modelOptions.length > 0 && (
+                <Popover open={isModelOpen} onOpenChange={setIsModelOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      ref={modelButtonRef}
+                      type="button"
+                      disabled={isModelUpdating}
+                      className="chat-toolbar-pill flex max-w-[190px] min-w-9 items-center gap-1 rounded-lg border border-border/60 bg-secondary px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Select model"
+                    >
+                      <Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span ref={modelLabelContainerRef} className={`relative min-w-0 flex-1 truncate ${modelLabelMode === 'icon' ? 'hidden' : ''}`}>
+                        <span className="block truncate">{selectedModelLabel}</span>
+                        <span ref={modelCompactMeasureRef} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap">{selectedModelCompactLabel}</span>
+                      </span>
+                      <ChevronDown className={`h-3 w-3 shrink-0 text-muted-foreground ${modelLabelMode === 'icon' ? 'hidden' : ''}`} />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="start" className="w-72 p-1.5">
+                    <p className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Provider &gt; Model ID</p>
+                    <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                      {modelOptionsByProvider.map((providerGroup) => (
+                        <div key={providerGroup.providerId} className="rounded-md border border-border/50 bg-background/60 p-1">
+                          <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{providerGroup.providerId}</p>
+                          <div className="flex flex-col gap-0.5">
+                            {providerGroup.options.map((option) => {
+                              const isSelected = Boolean(effectiveSelectedModel && option.provider_id === effectiveSelectedModel.provider_id && option.model_id === effectiveSelectedModel.model_id)
+                              return (
+                                <button key={`${option.provider_id}:${option.model_id}`} type="button" disabled={isModelUpdating} onClick={() => { void (async () => { try { await onModelChange({ provider_id: option.provider_id, model_id: option.model_id }) } finally { setIsModelOpen(false) } })() }} className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${isSelected ? 'border border-border/70 bg-secondary' : 'border border-transparent hover:bg-secondary/70'}`}>
+                                  <div className="h-4 w-4 shrink-0 text-primary">{isSelected ? <Check className="h-4 w-4" /> : null}</div>
+                                  <p className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{option.model_id}</p>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+
+              {/* Add attachment */}
+              <Popover open={isAttachOpen} onOpenChange={setIsAttachOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="chat-toolbar-icon"><Plus /></Button>
+                </PopoverTrigger>
+                <PopoverContent side="top" align="start" className="w-40 p-1.5">
+                  <div className="flex flex-col gap-0.5">
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Paperclip className="h-3.5 w-3.5" /><span>Upload file</span></button>
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><ImageIcon className="h-3.5 w-3.5" /><span>Upload image</span></button>
+                    <div className="my-1 border-t border-border" />
+                    <button type="button" onClick={() => openMentionFromToolbar('run')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Play className="h-3.5 w-3.5" /><span>Add run</span></button>
+                    <button type="button" onClick={() => openMentionFromToolbar('sweep')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Sparkles className="h-3.5 w-3.5 text-violet-500" /><span>Add sweep</span></button>
+                    <button type="button" onClick={() => openMentionFromToolbar('artifact')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Archive className="h-3.5 w-3.5" /><span>Add artifact</span></button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              <Button variant="ghost" size="icon" className="chat-toolbar-icon" onClick={() => openMentionFromToolbar('all')}><AtSign /></Button>
+
+              <Popover open={isCommandOpen} onOpenChange={setIsCommandOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="chat-toolbar-icon"><Command /></Button>
+                </PopoverTrigger>
+                <PopoverContent side="top" align="start" className="w-48 p-1.5">
+                  <p className="text-[10px] text-muted-foreground mb-1.5 px-2">Quick commands</p>
+                  <div className="flex flex-col gap-0.5">
+                    {SLASH_COMMANDS.map((item) => (
+                      <button key={item.command} type="button" onClick={() => { insertText(`${item.command} `); setIsCommandOpen(false) }} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><span style={{ color: item.color }}>{item.command}</span><span className="text-muted-foreground text-[10px]">{item.description}</span></button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </>
+          )}
         </div>
 
         {/* Stop + Send/Queue buttons */}

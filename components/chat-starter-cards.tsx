@@ -400,9 +400,9 @@ function StarterInteractiveCard({
           onActivate()
         }
       }}
-      className={`h-full w-full cursor-pointer overflow-hidden border bg-gradient-to-br ${toneClass} ${className || ''} transition-[border-color,box-shadow,transform] hover:border-foreground/30 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.995]`}
+      className={`w-full cursor-pointer overflow-hidden border bg-gradient-to-br ${toneClass} ${className || ''} transition-[border-color,box-shadow,transform] hover:border-foreground/30 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.995]`}
     >
-      <CardHeader className="space-y-1.5 px-3.5 py-3 pb-2">
+      <CardHeader className="space-y-1 px-3.5 py-2.5 pb-1.5">
         <CardTitle className="flex min-w-0 items-center gap-2 text-base leading-tight">
           <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-background/85 text-foreground">
             <Icon className="h-3.5 w-3.5" />
@@ -432,7 +432,7 @@ function StarterInteractiveCard({
         )}
       </CardHeader>
 
-      <CardContent className="space-y-2 px-3.5 pb-3.5 pt-0">
+      <CardContent className="space-y-1.5 px-3.5 pb-2.5 pt-0">
         {previewNode}
         {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
       </CardContent>
@@ -625,7 +625,7 @@ export function ChatStarterCards({
       </div>
 
       <div className="w-full">
-        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1.5 pb-2 [scrollbar-width:thin]">
+        <div className="flex items-start snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1.5 pb-2 [scrollbar-width:thin]">
           <StarterCardSlide>
             <StarterInteractiveCard
               title="Observe latest run"

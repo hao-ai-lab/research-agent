@@ -197,9 +197,9 @@ export function EventsView({
 
     return (
       <Collapsible key={event.id} open={isExpanded} onOpenChange={() => toggleExpanded(event.id)}>
-        <div className={`relative rounded-lg border ${getPriorityStyle(event.priority)} overflow-hidden`}>
+        <div className={`rounded-lg border ${getPriorityStyle(event.priority)} overflow-hidden`}>
           {/* Event Header — includes action icons */}
-          <div className="flex items-start gap-3 p-3 pb-8">
+          <div className="flex items-start gap-3 p-3">
             {/* Clickable left side (expand/collapse) */}
             <CollapsibleTrigger asChild>
               <button
@@ -292,16 +292,6 @@ export function EventsView({
               )}
             </div>
           </div>
-
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-              aria-label={isExpanded ? 'Collapse event details' : 'Expand event details'}
-            >
-              <ChevronRight className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-            </button>
-          </CollapsibleTrigger>
 
           {/* Expanded Content */}
           <CollapsibleContent>
