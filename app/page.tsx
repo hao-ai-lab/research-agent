@@ -66,7 +66,14 @@ export default function ResearchChat() {
   const sidebarRafRef = useRef<number | null>(null)
 
   // Use real API data via useRuns hook
-  const { runs, updateRun: apiUpdateRun, refetch: refetchRuns, startExistingRun, stopExistingRun } = useRuns()
+  const {
+    runs,
+    updateRun: apiUpdateRun,
+    refetch: refetchRuns,
+    createNewRun,
+    startExistingRun,
+    stopExistingRun,
+  } = useRuns()
   const {
     sweeps,
     refetch: refetchSweeps,
@@ -560,6 +567,12 @@ export default function ResearchChat() {
     await Promise.all([refetchRuns(), refetchSweeps(), refetchCluster()])
   }, [refetchRuns, refetchSweeps, refetchCluster])
 
+  const handleCreateRun = useCallback(async (request: Parameters<typeof createNewRun>[0]) => {
+    const created = await createNewRun(request)
+    setSelectedRun(created)
+    await Promise.all([refetchRuns(), refetchSweeps()])
+  }, [createNewRun, refetchRuns, refetchSweeps])
+
   const handleChatModeChange = useCallback(async (mode: ChatMode) => {
     setChatMode(mode)
     try {
@@ -757,6 +770,7 @@ export default function ResearchChat() {
                 onSelectedRunChange={setSelectedRun}
                 onShowVisibilityManageChange={setShowVisibilityManage}
                 onRefresh={handleRefreshExperimentState}
+                onCreateRun={handleCreateRun}
                 onStartRun={startExistingRun}
                 onStopRun={stopExistingRun}
                 onSaveSweep={handleSaveSweep}

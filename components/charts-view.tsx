@@ -761,42 +761,8 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 border-b border-border px-3 py-3">
-        <div className="flex items-center gap-2">
-          <div className="flex flex-1 min-w-0 rounded-md bg-secondary p-1">
-            <button
-              type="button"
-              onClick={() => setActiveSection('standard')}
-              className={cn(
-                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
-                activeSection === 'standard' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Layers className="h-3.5 w-3.5" />
-              <span className="truncate">Workspace</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSection('custom')}
-              className={cn(
-                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
-                activeSection === 'custom' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <BarChart3 className="h-3.5 w-3.5" />
-              <span className="truncate">Custom</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSection('videoCompare')}
-              className={cn(
-                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
-                activeSection === 'videoCompare' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              <span className="truncate">Video Compare</span>
-            </button>
-          </div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-xs font-medium text-foreground">Charts</h2>
 
           <Popover open={settingsOpen} onOpenChange={handleOpenSettings}>
             <PopoverTrigger asChild>
@@ -886,9 +852,36 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
           </Popover>
         </div>
 
-        {activeSection === 'standard' && (
-          <div className="mt-2 space-y-2">
-            <div className="flex items-center gap-2">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={activeSection} onValueChange={(value) => setActiveSection(value as 'standard' | 'custom' | 'videoCompare')}>
+              <SelectTrigger className="h-8 w-[180px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">
+                  <span className="inline-flex items-center gap-2">
+                    <Layers className="h-3.5 w-3.5" />
+                    Workspace
+                  </span>
+                </SelectItem>
+                <SelectItem value="custom">
+                  <span className="inline-flex items-center gap-2">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Custom
+                  </span>
+                </SelectItem>
+                <SelectItem value="videoCompare">
+                  <span className="inline-flex items-center gap-2">
+                    <Eye className="h-3.5 w-3.5" />
+                    Video Compare
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            {activeSection === 'standard' && (
+              <>
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
@@ -914,12 +907,15 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
                   </SelectContent>
                 </Select>
               </div>
-            </div>
+              </>
+            )}
+          </div>
+          {activeSection === 'standard' && (
             <div className="text-[11px] text-muted-foreground">
               {visibleRuns.length} visible run{visibleRuns.length !== 1 ? 's' : ''} in workspace
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {showVisibilitySection && (

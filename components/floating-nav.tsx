@@ -116,6 +116,7 @@ export function FloatingNav({
 }: FloatingNavProps) {
   const isChat = activeTab === 'chat'
   const isReport = activeTab === 'report'
+  const isSparseDesktopNav = !isChat && !isReport
   const { useMock: isDemoMode } = useApiConfig()
   const wl = wildLoop
 
@@ -125,7 +126,7 @@ export function FloatingNav({
   }
 
   return (
-    <header className="shrink-0 h-14 flex items-center gap-3 px-3 border-b border-border/80 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+    <header className={`shrink-0 h-14 flex items-center gap-3 px-3 border-b border-border/80 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75 ${isSparseDesktopNav ? 'lg:hidden' : ''}`}>
       <div className="relative">
         <Button
           variant="ghost"

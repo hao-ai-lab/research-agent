@@ -6,18 +6,14 @@ import {
   AlertTriangle,
   AtSign,
   Archive,
-  CheckCircle2,
-  CircleHelp,
   Clock3,
   ChevronsUpDown,
   Ellipsis,
-  Loader2,
   PanelLeftClose,
   Pencil,
   Plus,
   Settings,
   Star,
-  XCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -131,7 +127,7 @@ export function DesktopSidebar({
       case 'canceled':
         return { label: 'Canceled', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" /> }
       case 'queued':
-        return { label: 'Queued', className: 'text-amber-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> }
+        return { label: 'Queued', className: 'text-muted-foreground', icon: <Clock3 className="h-3 w-3" /> }
       case 'ready':
       default:
         return { label: 'Ready', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/90" /> }
@@ -147,9 +143,9 @@ export function DesktopSidebar({
       case 'failed':
         return { label: 'Failed', className: 'text-destructive', icon: <span className="h-2.5 w-2.5 rounded-full bg-destructive" /> }
       case 'pending':
-        return { label: 'Pending', className: 'text-amber-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> }
+        return { label: 'Pending', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/90" /> }
       case 'draft':
-        return { label: 'Draft', className: 'text-violet-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> }
+        return { label: 'Draft', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full border border-dashed border-muted-foreground/80 bg-transparent" /> }
       case 'canceled':
       default:
         return { label: 'Canceled', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" /> }
@@ -234,37 +230,37 @@ export function DesktopSidebar({
       case 'running':
         return (
           <span title="Running" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-blue-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span className="h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" />
           </span>
         )
       case 'completed':
         return (
           <span title="Completed" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-emerald-500">
-            <CheckCircle2 className="h-3.5 w-3.5" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
           </span>
         )
       case 'failed':
         return (
           <span title="Failed" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-destructive">
-            <XCircle className="h-3.5 w-3.5" />
+            <span className="h-2.5 w-2.5 rounded-full bg-destructive" />
           </span>
         )
       case 'questionable':
         return (
           <span title="Needs review" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-amber-500">
-            <CircleHelp className="h-3.5 w-3.5" />
+            <AlertTriangle className="h-3.5 w-3.5" />
           </span>
         )
       case 'awaiting_human':
         return (
-          <span title="Awaiting response" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-amber-600">
+          <span title="Awaiting response" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-amber-500">
             <AlertCircle className="h-3.5 w-3.5" />
           </span>
         )
       default:
         return (
           <span title="Idle" className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
-            <Clock3 className="h-3.5 w-3.5" />
+            <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/90" />
           </span>
         )
     }

@@ -64,12 +64,15 @@ import type {
   ClusterStatusResponse,
   ClusterType,
   ClusterUpdateRequest,
+  CreateRunRequest,
 } from '@/lib/api-client'
 import { startSweep as apiStartSweep, updateSweep as apiUpdateSweep } from '@/lib/api-client'
 import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { SweepArtifact } from '@/components/sweep-artifact'
 import { SweepStatus } from '@/components/sweep-status'
 import { useAppSettings } from '@/lib/app-settings'
@@ -120,6 +123,7 @@ interface RunsViewProps {
   onSaveSweep?: (config: SweepConfig) => Promise<void> | void
   onCreateSweep?: (config: SweepConfig) => Promise<void> | void
   onLaunchSweep?: (config: SweepConfig) => Promise<void> | void
+  onCreateRun?: (request: CreateRunRequest) => Promise<void> | void
   cluster?: ClusterState | null
   clusterRunSummary?: ClusterStatusResponse['run_summary'] | null
   clusterLoading?: boolean
@@ -147,6 +151,7 @@ export function RunsView({
   onSaveSweep,
   onCreateSweep,
   onLaunchSweep,
+  onCreateRun,
   cluster = null,
   clusterRunSummary = null,
   clusterLoading = false,
@@ -187,6 +192,14 @@ export function RunsView({
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
   const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
+  const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runCreateName, setRunCreateName] = useState('')
+  const [runCreateCommand, setRunCreateCommand] = useState('')
+  const [runCreateWorkdir, setRunCreateWorkdir] = useState('')
+  const [runCreateSweepId, setRunCreateSweepId] = useState<string>('none')
+  const [runCreateAutoStart, setRunCreateAutoStart] = useState(true)
+  const [runCreateError, setRunCreateError] = useState<string | null>(null)
+  const [runCreateSubmitting, setRunCreateSubmitting] = useState(false)
   const [isSelectedRunRefreshing, setIsSelectedRunRefreshing] = useState(false)
   const [isEditingSweepCommand, setIsEditingSweepCommand] = useState(false)
   const [sweepCommandDraft, setSweepCommandDraft] = useState('')
@@ -706,6 +719,64 @@ export function RunsView({
       }
     })
   }
+
+  const resetCreateRunForm = useCallback(() => {
+    setRunCreateName('')
+    setRunCreateCommand('')
+    setRunCreateWorkdir('')
+    setRunCreateSweepId('none')
+    setRunCreateAutoStart(true)
+    setRunCreateError(null)
+    setRunCreateSubmitting(false)
+  }, [])
+
+  const handleSubmitCreateRun = useCallback(async () => {
+    if (!onCreateRun || runCreateSubmitting) return
+
+    const name = runCreateName.trim()
+    const command = runCreateCommand.trim()
+    const workdir = runCreateWorkdir.trim()
+
+    if (!name) {
+      setRunCreateError('Run name is required.')
+      return
+    }
+    if (!command) {
+      setRunCreateError('Command is required.')
+      return
+    }
+
+    const request: CreateRunRequest = {
+      name,
+      command,
+      auto_start: runCreateAutoStart,
+      sweep_id: runCreateSweepId !== 'none' ? runCreateSweepId : undefined,
+      workdir: workdir || undefined,
+    }
+
+    setRunCreateSubmitting(true)
+    setRunCreateError(null)
+    try {
+      await onCreateRun(request)
+      setRunDialogOpen(false)
+      resetCreateRunForm()
+      await onRefresh?.()
+    } catch (error) {
+      setRunCreateError(error instanceof Error ? error.message : 'Failed to create run.')
+    } finally {
+      setRunCreateSubmitting(false)
+    }
+  }, [
+    onCreateRun,
+    onRefresh,
+    resetCreateRunForm,
+    runCreateAutoStart,
+    runCreateCommand,
+    runCreateName,
+    runCreateSubmitting,
+    runCreateSweepId,
+    runCreateWorkdir,
+  ])
 
   const handleShowVisibilityManage = (show: boolean) => {
     setShowVisibilityManage(show)
@@ -1695,20 +1766,39 @@ export function RunsView({
       {/* Top Nav Bar */}
       <div className="flex items-center justify-between border-b border-border bg-card/80 px-3 py-1.5 backdrop-blur-sm shrink-0">
         <h2 className="text-xs font-medium text-foreground">Runs</h2>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[11px] gap-1"
-              onClick={() => setSweepDialogOpen(true)}
-            >
-              <Plus className="h-3 w-3" />
-              Create Sweep
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Create a new sweep</TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-1.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] gap-1"
+                onClick={() => {
+                  setRunDialogOpen(true)
+                  setRunCreateError(null)
+                }}
+              >
+                <Play className="h-3 w-3" />
+                Create Run
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Create a new run</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] gap-1"
+                onClick={() => setSweepDialogOpen(true)}
+              >
+                <Plus className="h-3 w-3" />
+                Create Sweep
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Create a new sweep</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -2315,6 +2405,91 @@ export function RunsView({
             onCancel={() => setSweepDialogOpen(false)}
             onLaunch={async (config) => { await onLaunchSweep?.(config); setSweepDialogOpen(false); await onRefresh?.() }}
           />
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={runDialogOpen}
+        onOpenChange={(open) => {
+          setRunDialogOpen(open)
+          if (!open) resetCreateRunForm()
+        }}
+      >
+        <DialogContent className="max-w-xl p-0 overflow-hidden">
+          <div className="border-b border-border px-5 py-4">
+            <h3 className="text-sm font-semibold text-foreground">Create Run</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Create a single run and optionally attach it to an existing sweep.
+            </p>
+          </div>
+          <div className="space-y-4 px-5 py-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Run Name</label>
+              <Input
+                value={runCreateName}
+                onChange={(event) => setRunCreateName(event.target.value)}
+                placeholder="mnist-baseline-run"
+                className="h-9 text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Command</label>
+              <Textarea
+                value={runCreateCommand}
+                onChange={(event) => setRunCreateCommand(event.target.value)}
+                placeholder="python train.py --model ... --lr ..."
+                className="min-h-24 text-xs font-mono"
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground">Working Directory (Optional)</label>
+                <Input
+                  value={runCreateWorkdir}
+                  onChange={(event) => setRunCreateWorkdir(event.target.value)}
+                  placeholder="/workspace/project"
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground">Attach To Sweep</label>
+                <Select value={runCreateSweepId} onValueChange={setRunCreateSweepId}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Sweep</SelectItem>
+                    {sortedSweeps.map((sweep) => (
+                      <SelectItem key={sweep.id} value={sweep.id}>
+                        {sweep.config.name || sweep.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border/70 bg-secondary/20 px-3 py-2">
+              <div>
+                <p className="text-xs font-medium text-foreground">Auto Start</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Start in queue immediately after creation
+                </p>
+              </div>
+              <Switch checked={runCreateAutoStart} onCheckedChange={setRunCreateAutoStart} />
+            </div>
+            {runCreateError && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {runCreateError}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+            <Button variant="outline" size="sm" onClick={() => setRunDialogOpen(false)} disabled={runCreateSubmitting}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => { void handleSubmitCreateRun() }} disabled={runCreateSubmitting}>
+              {runCreateSubmitting ? 'Creating...' : 'Create Run'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </>
