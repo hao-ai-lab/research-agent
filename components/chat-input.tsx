@@ -1329,10 +1329,19 @@ export function ChatInput({
                           type="button"
                           onClick={() => {
                             onModeChange(nextMode)
-                            setIsCompactControlsOpen(false)
                           }}
-                          className={`rounded-md border px-2 py-1 text-xs ${
-                            mode === nextMode ? 'border-border/70 bg-secondary text-foreground' : 'border-border/40 hover:bg-secondary/70'
+                          className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+                            nextMode === 'agent'
+                              ? mode === nextMode
+                                ? 'border-border/60 bg-secondary text-foreground'
+                                : 'border-border/40 text-foreground/80 hover:bg-secondary/70'
+                              : nextMode === 'plan'
+                              ? mode === nextMode
+                                ? 'border-orange-500/45 bg-orange-500/18 text-orange-300'
+                                : 'border-orange-500/25 bg-orange-500/8 text-orange-300/80 hover:bg-orange-500/14'
+                              : mode === nextMode
+                              ? 'border-violet-500/45 bg-violet-500/18 text-violet-300'
+                              : 'border-violet-500/25 bg-violet-500/8 text-violet-300/80 hover:bg-violet-500/14'
                           }`}
                         >
                           {nextMode === 'agent' ? 'Agent' : nextMode === 'plan' ? 'Plan' : 'Wild'}
@@ -1360,11 +1369,7 @@ export function ChatInput({
                                 disabled={isModelUpdating}
                                 onClick={() => {
                                   void (async () => {
-                                    try {
-                                      await onModelChange({ provider_id: option.provider_id, model_id: option.model_id })
-                                    } finally {
-                                      setIsCompactControlsOpen(false)
-                                    }
+                                    await onModelChange({ provider_id: option.provider_id, model_id: option.model_id })
                                   })()
                                 }}
                                 className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
@@ -1384,10 +1389,10 @@ export function ChatInput({
                   <div>
                     <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Insert</p>
                     <div className="grid grid-cols-2 gap-1">
-                      <button type="button" onClick={() => { fileInputRef.current?.click(); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Upload</button>
-                      <button type="button" onClick={() => { openMentionFromToolbar('all'); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">@ mention</button>
-                      <button type="button" onClick={() => { openMentionFromToolbar('run'); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Run</button>
-                      <button type="button" onClick={() => { openMentionFromToolbar('sweep'); setIsCompactControlsOpen(false) }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Sweep</button>
+                      <button type="button" onClick={() => { fileInputRef.current?.click() }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Upload</button>
+                      <button type="button" onClick={() => { openMentionFromToolbar('all') }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">@ mention</button>
+                      <button type="button" onClick={() => { openMentionFromToolbar('run') }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Run</button>
+                      <button type="button" onClick={() => { openMentionFromToolbar('sweep') }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Sweep</button>
                     </div>
                   </div>
 
@@ -1400,7 +1405,6 @@ export function ChatInput({
                           type="button"
                           onClick={() => {
                             insertText(`${item.command} `)
-                            setIsCompactControlsOpen(false)
                           }}
                           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs hover:bg-secondary/70"
                         >
