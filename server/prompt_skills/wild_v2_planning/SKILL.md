@@ -32,6 +32,20 @@ This iteration is planning only. Create a high-quality phased task plan that is 
 
 You must complete the following planning work:
 
+0. Server preflight must pass before planning
+- Before writing any plan, verify server documentation and API availability:
+```bash
+curl -sf {{server_url}}/docs >/dev/null
+curl -sf {{server_url}}/openapi.json >/dev/null
+curl -sf {{server_url}}/prompt-skills >/dev/null
+curl -sf {{server_url}}/wild/v2/system-health >/dev/null
+```
+- If any command fails, abort immediately using one of these modes:
+  - Preferred: write an abort checklist to `{{tasks_path}}` with all items checked and sentinel `ABORT_EARLY_DOCS_CHECK_FAILED`.
+  - Alternative: do not write a plan and do not output `<plan>`.
+- In abort mode do not create sweeps/runs and do not proceed with planning.
+- In abort mode output `<summary>Server docs/API preflight failed; planning aborted.</summary>` and `<promise>DONE</promise>`.
+
 1. Explore the codebase and constraints
 - Use shell tools (`ls`, `find`, `rg`, `cat`, `head`) to map key code paths, entry points, configs, and tests.
 - Identify existing conventions for experiment folders and outputs (for example: `exp/`, `scripts/`, `outputs/`, `results/`, `analysis/`).
@@ -58,9 +72,12 @@ You must complete the following planning work:
 - Query available prompt skills using:
   - `GET {{server_url}}/prompt-skills`
   - `GET {{server_url}}/prompt-skills/search?q=<query>`
+- Fetch and read the mandatory audit protocol skill:
+  - `GET {{server_url}}/prompt-skills/wild_v2_sweep_run_audit_protocol`
 - Add a planning task to write a short playbook at:
   - `$(dirname "{{tasks_path}}")/prompt_skill_playbook.md`
 - The playbook should map skill name -> when to use -> expected output, especially for file organization, monitoring, and analysis workflows.
+- The playbook must include a section named `Sweep/Run Audit Protocol` summarizing the required API flow.
 
 4. Produce a phased plan (few phases, concrete tasks)
 - Organize the plan as 4-6 phases.
@@ -90,11 +107,11 @@ You must complete the following planning work:
 
 Use this shape:
 
-```markdown
-# Tasks
+## Phase 3 - Main Method and Tracked Runs
+- [ ] [P3-T1] ...
 
-## Goal
-{{goal}}
+## Phase 4 - Analytics and Validation
+- [ ] [P4-T1] ...
 
 ## Planning Notes
 - Key codebase findings
@@ -146,6 +163,7 @@ After writing `{{tasks_path}}`, output the same markdown inside:
 
 > **NEVER run training, evaluation, or experiment scripts directly (e.g. `python train.py`).**
 > **ALL experiments MUST be tracked through the server API.**
+> **If a run is not created via sweep/run endpoints, it is not user-visible or auditable and is considered non-compliant.**
 
 If the plan includes experiments, include tasks that use this flow:
 
@@ -166,6 +184,14 @@ curl -X POST {{server_url}}/runs \
   -d '{"name": "trial-name", "command": "cd {{workdir}} && python train.py --lr 0.001", "sweep_id": "<sweep_id_from_step_1>", "auto_start": true}'
 ```
 The `command` field should use planned script/log paths.
+
+Step 2b: Grid search means multiple run creations
+- For each hyperparameter combination, create a separate run via `POST {{server_url}}/runs`.
+- Example combinations:
+  - `lr=1e-2, batch_size=64, seed=1`
+  - `lr=1e-2, batch_size=128, seed=1`
+  - `lr=5e-3, batch_size=64, seed=1`
+- Do not replace this with one local shell loop that runs experiments outside the API.
 
 Step 3: Monitor
 - `GET {{server_url}}/runs`
