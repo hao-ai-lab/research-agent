@@ -699,7 +699,7 @@ export default function ResearchChat() {
           <FloatingNav
             activeTab={activeTab}
             onMenuClick={() => setLeftPanelOpen(true)}
-            showDesktopSidebarToggle={desktopSidebarHidden}
+            showDesktopSidebarToggle={desktopSidebarHidden && activeTab !== 'charts'}
             onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
@@ -803,6 +803,8 @@ export default function ResearchChat() {
                 onToggleOverview={handleToggleChartOverview}
                 onUpdateRun={handleUpdateRun}
                 onShowVisibilityManageChange={setShowVisibilityManage}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
               />
             )}
             {activeTab === 'memory' && (

@@ -311,7 +311,7 @@ export function DesktopSidebar({
       style={hidden || isIconRail ? undefined : { width: `${width}px` }}
     >
       <div className={`flex h-full w-full flex-col ${hidden ? 'pointer-events-none opacity-0' : ''}`}>
-        <div className={`shrink-0 border-b border-border/80 ${isIconRail ? 'px-2 py-2' : 'px-3 py-2'}`}>
+        <div className={`shrink-0 ${isIconRail ? 'px-2 py-2' : 'px-3 py-2'}`}>
           <div className={`relative inline-flex ${isIconRail ? 'mx-auto' : ''}`}>
             <Button
               variant="ghost"
