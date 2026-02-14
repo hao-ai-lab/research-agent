@@ -38,6 +38,7 @@ You must complete the following planning work:
 curl -sf {{server_url}}/docs >/dev/null
 curl -sf {{server_url}}/openapi.json >/dev/null
 curl -sf {{server_url}}/prompt-skills >/dev/null
+curl -sf {{server_url}}/prompt-skills/wild_v2_execution_ops_protocol >/dev/null
 curl -sf {{server_url}}/wild/v2/system-health >/dev/null
 ```
 - If any command fails, abort immediately using one of these modes:
@@ -55,13 +56,14 @@ curl -sf {{server_url}}/wild/v2/system-health >/dev/null
 - Choose an experiment root:
   - Prefer `{{workdir}}/exp` if it already exists.
   - Otherwise use `{{workdir}}/.wild/experiments`.
-- Plan a reusable per-experiment structure:
+- Suggested (not mandatory) reusable per-experiment structure:
   - `scripts/` (launchers)
   - `logs/` (stdout/stderr)
   - `outputs/` (raw run outputs)
   - `results/` (aggregated metrics)
   - `analysis/` (plots/tables/notebooks)
   - `metadata/` (run manifests, config snapshots, commit hashes)
+- This is a recommendation. Adapt to the repository's existing conventions when a different structure is better.
 - Add explicit tasks for logging quality:
   - deterministic run naming
   - stdout/stderr capture to files
@@ -72,12 +74,13 @@ curl -sf {{server_url}}/wild/v2/system-health >/dev/null
 - Query available prompt skills using:
   - `GET {{server_url}}/prompt-skills`
   - `GET {{server_url}}/prompt-skills/search?q=<query>`
-- Fetch and read the mandatory audit protocol skill:
-  - `GET {{server_url}}/prompt-skills/wild_v2_sweep_run_audit_protocol`
+- Fetch and read the single mandatory execution protocol skill:
+  - `GET {{server_url}}/prompt-skills/wild_v2_execution_ops_protocol`
+- Treat that skill as the source of truth for preflight, auditability, GPU discovery, and scheduling.
 - Add a planning task to write a short playbook at:
   - `$(dirname "{{tasks_path}}")/prompt_skill_playbook.md`
 - The playbook should map skill name -> when to use -> expected output, especially for file organization, monitoring, and analysis workflows.
-- The playbook must include a section named `Sweep/Run Audit Protocol` summarizing the required API flow.
+- The playbook must include a section named `Execution Ops Protocol`.
 
 4. Produce a phased plan (few phases, concrete tasks)
 - Organize the plan as 4-6 phases.
@@ -107,11 +110,11 @@ curl -sf {{server_url}}/wild/v2/system-health >/dev/null
 
 Use this shape:
 
-## Phase 3 - Main Method and Tracked Runs
-- [ ] [P3-T1] ...
+```markdown
+# Tasks
 
-## Phase 4 - Analytics and Validation
-- [ ] [P4-T1] ...
+## Goal
+{{goal}}
 
 ## Planning Notes
 - Key codebase findings
@@ -192,6 +195,23 @@ Step 2b: Grid search means multiple run creations
   - `lr=1e-2, batch_size=128, seed=1`
   - `lr=5e-3, batch_size=64, seed=1`
 - Do not replace this with one local shell loop that runs experiments outside the API.
+
+Step 2c: Discover capacity and plan parallel starts
+```bash
+curl -X POST {{server_url}}/cluster/detect {{auth_header}}
+curl -X GET {{server_url}}/cluster {{auth_header}}
+curl -X GET {{server_url}}/wild/v2/system-health {{auth_header}}
+```
+- Use discovered `cluster.type` and `cluster.gpu_count` to decide how many runs to launch in parallel.
+- If GPU capacity allows, plan starting multiple runs in the same iteration (not strictly one-at-a-time).
+- For local multi-GPU, assign runs by GPU (for example `CUDA_VISIBLE_DEVICES=0`, `CUDA_VISIBLE_DEVICES=1`).
+- For Slurm, encode scheduler resource flags in the run command and allow queued parallelism.
+- Recommended formula:
+  - `g = max(1, gpu_count)` for local GPU
+  - `g = max(1, gpu_count or 4)` for Slurm
+  - `r = current running runs`
+  - `q = queued/ready runs`
+  - `max_new_runs = max(0, min(q, g - r))`
 
 Step 3: Monitor
 - `GET {{server_url}}/runs`
