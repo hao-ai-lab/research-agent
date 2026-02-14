@@ -140,7 +140,12 @@ def _api_catalog(ctx: PromptContext) -> str:
 
 ### Skills (prompt templates)
 - `GET  {s}/prompt-skills` — List available prompt skills
-- `GET  {s}/prompt-skills/search?q=query` — Search skills by name/description"""
+- `GET  {s}/prompt-skills/search?q=query` — Search skills by name/description
+- `GET  {s}/prompt-skills/{{id}}` — Fetch one skill (includes full template text)
+
+### Docs & Schema
+- `GET  {s}/docs` — API docs UI (health/preflight probe)
+- `GET  {s}/openapi.json` — OpenAPI schema (health/preflight probe)"""
 
 
 # ---------------------------------------------------------------------------

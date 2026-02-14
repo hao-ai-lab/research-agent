@@ -48,9 +48,20 @@ Iteration log: `{{log_path}}`
 
 ## Iteration Protocol
 
+0. Preflight guard on server docs and audit skill
+- Verify API docs and key endpoints are healthy before execution work:
+```bash
+curl -sf {{server_url}}/docs >/dev/null
+curl -sf {{server_url}}/openapi.json >/dev/null
+curl -sf {{server_url}}/prompt-skills/wild_v2_sweep_run_audit_protocol >/dev/null
+```
+- If preflight fails, stop execution work immediately.
+- If preflight fails, output `<summary>Preflight failed; aborting run loop.</summary>` and `<promise>DONE</promise>`.
+
 1. Read `{{tasks_path}}` and choose the next task:
 - Prefer any in-progress `[/]` task.
 - Otherwise pick the next unfinished task in the earliest unfinished phase.
+- If `{{tasks_path}}` includes sentinel `ABORT_EARLY_DOCS_CHECK_FAILED`, emit `<promise>DONE</promise>` immediately.
 
 2. Read `{{log_path}}` for prior failures and constraints.
 
@@ -79,6 +90,10 @@ Iteration log: `{{log_path}}`
 
 > **NEVER run training, evaluation, or experiment scripts directly (e.g. `python train.py`).**
 > **ALL experiments MUST be tracked through the server API.**
+> **Runs not created via API are invisible to users and not auditable.**
+
+Read and follow the mandatory skill:
+- `GET {{server_url}}/prompt-skills/wild_v2_sweep_run_audit_protocol`
 
 Create a sweep (if none exists):
 ```bash
@@ -96,6 +111,11 @@ curl -X POST {{server_url}}/runs \
   -d '{"name": "trial-name", "command": "cd {{workdir}} && python train.py --lr 0.001", "sweep_id": "<sweep_id>", "auto_start": true}'
 ```
 
+For grid search:
+- Create one run per configuration by repeating `POST {{server_url}}/runs`.
+- Keep each run name and command configuration-specific.
+- Do not execute the grid directly outside API tracking.
+
 Monitor with `GET {{server_url}}/runs`.
 If waiting on runs and no other meaningful task is available, output `<promise>WAITING</promise>`.
 
@@ -103,6 +123,7 @@ When constructing `command` values for runs:
 - call project scripts from planned `scripts/` directories
 - write logs to planned `logs/` directories
 - preserve reproducible command lines and seeds
+- never replace run creation with direct local execution
 
 ## Output Format
 
