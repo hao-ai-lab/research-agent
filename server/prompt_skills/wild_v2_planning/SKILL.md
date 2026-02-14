@@ -110,11 +110,11 @@ curl -sf {{server_url}}/wild/v2/system-health >/dev/null
 
 Use this shape:
 
-## Phase 3 - Main Method and Tracked Runs
-- [ ] [P3-T1] ...
+```markdown
+# Tasks
 
-## Phase 4 - Analytics and Validation
-- [ ] [P4-T1] ...
+## Goal
+{{goal}}
 
 ## Planning Notes
 - Key codebase findings

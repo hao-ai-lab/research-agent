@@ -105,6 +105,12 @@ export function SettingsDialog({
   const [wildLoopHistoryFontSizeInput, setWildLoopHistoryFontSizeInput] = useState<string>(
     settings.appearance.wildLoopHistoryFontSizePx?.toString() ?? ''
   )
+  const [wildLoopTasksBoxHeightInput, setWildLoopTasksBoxHeightInput] = useState<string>(
+    settings.appearance.wildLoopTasksBoxHeightPx?.toString() ?? ''
+  )
+  const [wildLoopHistoryBoxHeightInput, setWildLoopHistoryBoxHeightInput] = useState<string>(
+    settings.appearance.wildLoopHistoryBoxHeightPx?.toString() ?? ''
+  )
 
   // Sync local inputs when settings change externally (e.g. reset)
   React.useEffect(() => {
@@ -142,6 +148,14 @@ export function SettingsDialog({
   React.useEffect(() => {
     setWildLoopHistoryFontSizeInput(settings.appearance.wildLoopHistoryFontSizePx?.toString() ?? '')
   }, [settings.appearance.wildLoopHistoryFontSizePx])
+
+  React.useEffect(() => {
+    setWildLoopTasksBoxHeightInput(settings.appearance.wildLoopTasksBoxHeightPx?.toString() ?? '')
+  }, [settings.appearance.wildLoopTasksBoxHeightPx])
+
+  React.useEffect(() => {
+    setWildLoopHistoryBoxHeightInput(settings.appearance.wildLoopHistoryBoxHeightPx?.toString() ?? '')
+  }, [settings.appearance.wildLoopHistoryBoxHeightPx])
 
   // Sync apiUrlInput when apiUrl changes (e.g. on reset)
   React.useEffect(() => {
@@ -612,6 +626,58 @@ export function SettingsDialog({
     updateAppearanceSettings({ wildLoopHistoryFontSizePx: clamped })
     setWildLoopHistoryFontSizeInput(clamped.toString())
   }
+
+  const handleWildLoopTasksBoxHeightChange = (value: string, currentInput: string) => {
+    if (!currentInput && value === '160') {
+      setWildLoopTasksBoxHeightInput('420')
+      updateAppearanceSettings({ wildLoopTasksBoxHeightPx: 420 })
+      return
+    }
+    setWildLoopTasksBoxHeightInput(value)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 160 && parsed <= 1200) {
+      updateAppearanceSettings({ wildLoopTasksBoxHeightPx: parsed })
+    }
+  }
+
+  const handleWildLoopTasksBoxHeightBlur = (value: string) => {
+    if (!value.trim()) {
+      updateAppearanceSettings({ wildLoopTasksBoxHeightPx: null })
+      setWildLoopTasksBoxHeightInput('')
+      return
+    }
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(160, Math.min(1200, parsed))
+    updateAppearanceSettings({ wildLoopTasksBoxHeightPx: clamped })
+    setWildLoopTasksBoxHeightInput(clamped.toString())
+  }
+
+  const handleWildLoopHistoryBoxHeightChange = (value: string, currentInput: string) => {
+    if (!currentInput && value === '120') {
+      setWildLoopHistoryBoxHeightInput('300')
+      updateAppearanceSettings({ wildLoopHistoryBoxHeightPx: 300 })
+      return
+    }
+    setWildLoopHistoryBoxHeightInput(value)
+    const parsed = Number(value)
+    if (!Number.isNaN(parsed) && parsed >= 120 && parsed <= 1000) {
+      updateAppearanceSettings({ wildLoopHistoryBoxHeightPx: parsed })
+    }
+  }
+
+  const handleWildLoopHistoryBoxHeightBlur = (value: string) => {
+    if (!value.trim()) {
+      updateAppearanceSettings({ wildLoopHistoryBoxHeightPx: null })
+      setWildLoopHistoryBoxHeightInput('')
+      return
+    }
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(120, Math.min(1000, parsed))
+    updateAppearanceSettings({ wildLoopHistoryBoxHeightPx: clamped })
+    setWildLoopHistoryBoxHeightInput(clamped.toString())
+  }
   const handleAlertsToggle = (enabled: boolean) => {
     onSettingsChange({
       ...settings,
@@ -942,6 +1008,24 @@ export function SettingsDialog({
 
                   <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
+                      <Label htmlFor="wild-loop-tasks-box-height-dialog" className="text-xs">Wild Loop Tasks Box Height (px) <span className="font-normal text-muted-foreground">160–1200</span></Label>
+                      <p className="text-[11px] text-muted-foreground">Max height of the tasks.md scroll area in the Wild Loop Debug panel</p>
+                    </div>
+                    <Input
+                      id="wild-loop-tasks-box-height-dialog"
+                      type="number"
+                      min={160}
+                      max={1200}
+                      value={wildLoopTasksBoxHeightInput}
+                      onChange={(e) => handleWildLoopTasksBoxHeightChange(e.target.value, wildLoopTasksBoxHeightInput)}
+                      onBlur={(e) => handleWildLoopTasksBoxHeightBlur(e.target.value)}
+                      placeholder="420"
+                      className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
                       <Label htmlFor="custom-accent-color-dialog" className="text-xs">Accent Color</Label>
                       <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
                     </div>
@@ -973,6 +1057,24 @@ export function SettingsDialog({
                     />
                   </div>
 
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
+                      <Label htmlFor="wild-loop-history-box-height-dialog" className="text-xs">Wild Loop History Box Height (px) <span className="font-normal text-muted-foreground">120–1000</span></Label>
+                      <p className="text-[11px] text-muted-foreground">Max height of iteration history list in the Wild Loop Debug panel</p>
+                    </div>
+                    <Input
+                      id="wild-loop-history-box-height-dialog"
+                      type="number"
+                      min={120}
+                      max={1000}
+                      value={wildLoopHistoryBoxHeightInput}
+                      onChange={(e) => handleWildLoopHistoryBoxHeightChange(e.target.value, wildLoopHistoryBoxHeightInput)}
+                      onBlur={(e) => handleWildLoopHistoryBoxHeightBlur(e.target.value)}
+                      placeholder="300"
+                      className="h-8 w-24 text-xs"
+                    />
+                  </div>
+
                   <div className="flex justify-end">
                     <Button
                       variant="ghost"
@@ -988,6 +1090,8 @@ export function SettingsDialog({
                           customAccentColor: null,
                           wildLoopTasksFontSizePx: null,
                           wildLoopHistoryFontSizePx: null,
+                          wildLoopTasksBoxHeightPx: null,
+                          wildLoopHistoryBoxHeightPx: null,
                         })
                       }
                     >
