@@ -369,13 +369,28 @@ export default function ResearchChat() {
     handleTabChange('runs')
   }, [handleTabChange])
 
+  const setRunsHash = useCallback((hashValue: string) => {
+    if (typeof window === 'undefined') return
+    const nextHash = `#${encodeURIComponent(hashValue)}`
+    if (window.location.hash === nextHash) {
+      window.dispatchEvent(new Event('hashchange'))
+      return
+    }
+    window.location.hash = nextHash
+  }, [])
+
   const handleNavigateToRun = useCallback((runId: string) => {
     const run = runs.find(r => r.id === runId)
-    if (run) {
-      handleTabChange('runs')
-      setSelectedRun(run)
-    }
-  }, [runs, handleTabChange])
+    handleTabChange('runs')
+    setSelectedRun(run ?? null)
+    setRunsHash(runId)
+  }, [runs, handleTabChange, setRunsHash])
+
+  const handleNavigateToSweep = useCallback((sweepId: string) => {
+    handleTabChange('runs')
+    setSelectedRun(null)
+    setRunsHash(`sweep:${sweepId}`)
+  }, [handleTabChange, setRunsHash])
 
   const handleNavigateToEvents = useCallback(() => {
     handleTabChange('events')
@@ -659,6 +674,7 @@ export default function ResearchChat() {
             await renameSession(sessionId, title)
           }}
           onNavigateToRun={handleNavigateToRun}
+          onNavigateToSweep={handleNavigateToSweep}
           onInsertReference={handleInsertChatReference}
           onSettingsClick={() => handleTabChange('settings')}
           onToggleCollapse={() => setDesktopSidebarHidden(true)}

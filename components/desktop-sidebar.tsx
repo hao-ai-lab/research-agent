@@ -15,7 +15,6 @@ import {
   Loader2,
   PanelLeftClose,
   Pencil,
-  Play,
   Plus,
   Settings,
   Star,
@@ -24,6 +23,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +36,6 @@ import {
 import { useApiConfig } from '@/lib/api-config'
 import type { Alert, ChatSession, ChatSessionStatus } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
-import { getStatusBadgeClass as getStatusBadgeClassUtil } from '@/lib/status-utils'
 import type { AppTab, HomeTab } from '@/lib/navigation'
 import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
 import { NavTabButton } from '@/components/navigation/nav-tab-button'
@@ -66,6 +66,7 @@ interface DesktopSidebarProps {
   onArchiveSession?: (sessionId: string) => Promise<void> | void
   onRenameSession?: (sessionId: string, title: string) => Promise<void> | void
   onNavigateToRun: (runId: string) => void
+  onNavigateToSweep?: (sweepId: string) => void
   onInsertReference: (text: string) => void
   onSettingsClick: () => void
   onToggleCollapse?: () => void
@@ -86,25 +87,6 @@ function formatRelativeTime(date: Date) {
   if (diffHours < 24) return `${diffHours}h`
   if (diffDays < 7) return `${diffDays}d`
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-}
-
-function getSweepStatusClass(status: Sweep['status']) {
-  switch (status) {
-    case 'draft':
-      return 'bg-violet-500/15 text-violet-500 border-violet-500/30'
-    case 'running':
-      return 'bg-blue-500/15 text-blue-500 border-blue-500/30'
-    case 'completed':
-      return 'bg-green-500/15 text-green-500 border-green-500/30'
-    case 'failed':
-      return 'bg-destructive/15 text-destructive border-destructive/30'
-    case 'pending':
-      return 'bg-amber-500/15 text-amber-500 border-amber-500/30'
-    case 'canceled':
-      return 'bg-muted text-muted-foreground border-muted-foreground/30'
-    default:
-      return 'bg-secondary text-muted-foreground border-border'
-  }
 }
 
 export function DesktopSidebar({
@@ -129,6 +111,7 @@ export function DesktopSidebar({
   onArchiveSession,
   onRenameSession,
   onNavigateToRun,
+  onNavigateToSweep,
   onInsertReference,
   onSettingsClick,
   onToggleCollapse,
@@ -136,23 +119,42 @@ export function DesktopSidebar({
   onResizeStart,
   onResizeEnd,
 }: DesktopSidebarProps) {
-  const getRunStatusIcon = useCallback((status: ExperimentRun['status']) => {
+  const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null)
+
+  const getRunStatusMeta = useCallback((status: ExperimentRun['status']) => {
     switch (status) {
       case 'running':
-        return <Play className="h-3 w-3" />
+        return { label: 'Running', className: 'text-blue-500', icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> }
       case 'failed':
-        return <AlertCircle className="h-3 w-3" />
+        return { label: 'Failed', className: 'text-destructive', icon: <AlertCircle className="h-3.5 w-3.5" /> }
       case 'completed':
-        return <CheckCircle2 className="h-3 w-3" />
+        return { label: 'Completed', className: 'text-emerald-500', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
       case 'canceled':
-        return <XCircle className="h-3 w-3" />
+        return { label: 'Canceled', className: 'text-muted-foreground', icon: <XCircle className="h-3.5 w-3.5" /> }
+      case 'queued':
+        return { label: 'Queued', className: 'text-amber-500', icon: <Clock3 className="h-3.5 w-3.5" /> }
+      case 'ready':
       default:
-        return <Clock3 className="h-3 w-3" />
+        return { label: 'Ready', className: 'text-muted-foreground', icon: <Clock3 className="h-3.5 w-3.5" /> }
     }
   }, [])
 
-  const getRunStatusBadgeClass = useCallback((status: ExperimentRun['status']) => {
-    return getStatusBadgeClassUtil(status)
+  const getSweepStatusMeta = useCallback((status: Sweep['status']) => {
+    switch (status) {
+      case 'running':
+        return { label: 'Running', className: 'text-blue-500', icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> }
+      case 'completed':
+        return { label: 'Completed', className: 'text-emerald-500', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
+      case 'failed':
+        return { label: 'Failed', className: 'text-destructive', icon: <XCircle className="h-3.5 w-3.5" /> }
+      case 'pending':
+        return { label: 'Pending', className: 'text-amber-500', icon: <Clock3 className="h-3.5 w-3.5" /> }
+      case 'draft':
+        return { label: 'Draft', className: 'text-violet-500', icon: <FlaskConical className="h-3.5 w-3.5" /> }
+      case 'canceled':
+      default:
+        return { label: 'Canceled', className: 'text-muted-foreground', icon: <XCircle className="h-3.5 w-3.5" /> }
+    }
   }, [])
 
   const isIconRail = !hidden && width <= ICON_RAIL_TRIGGER_WIDTH
@@ -421,7 +423,12 @@ export function DesktopSidebar({
                           <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
                             <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
                             {renderSessionStatusIcon(getSessionStatus(session))}
-                            <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                              </TooltipTrigger>
+                              <TooltipContent>{session.title || 'Untitled chat'}</TooltipContent>
+                            </Tooltip>
                           </span>
                           <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                             {formatRelativeTime(new Date(session.created_at * 1000))}
@@ -511,7 +518,12 @@ export function DesktopSidebar({
                         >
                           <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
                             {renderSessionStatusIcon(getSessionStatus(session))}
-                            <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                              </TooltipTrigger>
+                              <TooltipContent>{session.title || 'Untitled chat'}</TooltipContent>
+                            </Tooltip>
                           </span>
                           <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                             {formatRelativeTime(new Date(session.created_at * 1000))}
@@ -575,40 +587,85 @@ export function DesktopSidebar({
                   {recentRuns.map((run) => {
                     const pendingAlertCount = pendingAlertsByRun[run.id] || run.alerts?.length || 0
                     const hasPendingAlerts = pendingAlertCount > 0
+                    const runStatus = getRunStatusMeta(run.status)
+                    const runTitle = run.alias || run.name
 
                     return (
                       <div
                         key={run.id}
                         className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                       >
-                        <button
-                          type="button"
-                          onClick={() => onNavigateToRun(run.id)}
-                          className="min-w-0 flex-1 text-left"
+                        <Popover
+                          open={activePreviewKey === `run:${run.id}`}
+                          onOpenChange={(open) => setActivePreviewKey(open ? `run:${run.id}` : null)}
                         >
-                          <div className="flex items-center gap-1.5">
-                            <p className="min-w-0 truncate text-foreground">{run.alias || run.name}</p>
-                            <span
-                              className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${getRunStatusBadgeClass(run.status)}`}
-                              title={run.status}
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              title={runTitle}
+                              className="min-w-0 flex-1 text-left"
                             >
-                              {getRunStatusIcon(run.status)}
-                            </span>
-                            {hasPendingAlerts && (
-                              <div
-                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
-                                title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}
-                              >
-                                <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-                                {pendingAlertCount > 1 && (
-                                  <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
-                                    {pendingAlertCount}
-                                  </span>
+                              <div className="flex items-center gap-1.5">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center ${runStatus.className}`}>
+                                      {runStatus.icon}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{runStatus.label}</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <p className="min-w-0 truncate text-foreground">{runTitle}</p>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{runTitle}</TooltipContent>
+                                </Tooltip>
+                                {hasPendingAlerts && (
+                                  <div
+                                    className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
+                                    title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}
+                                  >
+                                    <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+                                    {pendingAlertCount > 1 && (
+                                      <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                                        {pendingAlertCount}
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
-                            )}
-                          </div>
-                        </button>
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent side="right" align="start" className="w-80 p-3">
+                            <div className="space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium text-foreground">{runTitle}</p>
+                                  <p className="truncate text-[11px] text-muted-foreground">{run.id}</p>
+                                </div>
+                                <span className={`inline-flex shrink-0 items-center gap-1 text-xs ${runStatus.className}`}>
+                                  {runStatus.icon}
+                                  {runStatus.label}
+                                </span>
+                              </div>
+                              <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
+                                {run.command}
+                              </p>
+                              <div className="flex justify-end">
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => {
+                                    setActivePreviewKey(null)
+                                    onNavigateToRun(run.id)
+                                  }}
+                                >
+                                  Detail
+                                </Button>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -636,28 +693,95 @@ export function DesktopSidebar({
                   <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
                 </div>
                 <div className="space-y-1">
-                  {recentSweeps.map((sweep) => (
-                    <div
-                      key={sweep.id}
-                      className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
-                    >
-                      <div className="min-w-0 flex-1 text-left">
-                        <p className="truncate text-sm text-foreground">{sweep.config.name}</p>
-                        <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
-                      </div>
-                      <Badge variant="outline" className={`h-5 text-[9px] capitalize ${getSweepStatusClass(sweep.status)}`}>
-                        {sweep.status}
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-[16px]"
-                        onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
+                  {recentSweeps.map((sweep) => {
+                    const sweepStatus = getSweepStatusMeta(sweep.status)
+                    const sweepTitle = sweep.config.name || sweep.creationContext.name || sweep.id
+                    const sweepCommand = sweep.config.command || sweep.creationContext.command
+
+                    return (
+                      <div
+                        key={sweep.id}
+                        className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                       >
-                        @
-                      </Button>
-                    </div>
-                  ))}
+                        <Popover
+                          open={activePreviewKey === `sweep:${sweep.id}`}
+                          onOpenChange={(open) => setActivePreviewKey(open ? `sweep:${sweep.id}` : null)}
+                        >
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              title={sweepTitle}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center ${sweepStatus.className}`}>
+                                      {sweepStatus.icon}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{sweepStatus.label}</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <p className="min-w-0 truncate text-sm text-foreground">{sweepTitle}</p>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{sweepTitle}</TooltipContent>
+                                </Tooltip>
+                              </div>
+                              <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent side="right" align="start" className="w-80 p-3">
+                            <div className="space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium text-foreground">{sweepTitle}</p>
+                                  <p className="truncate text-[11px] text-muted-foreground">{sweep.id}</p>
+                                </div>
+                                <span className={`inline-flex shrink-0 items-center gap-1 text-xs ${sweepStatus.className}`}>
+                                  {sweepStatus.icon}
+                                  {sweepStatus.label}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">
+                                {sweep.progress.completed}/{sweep.progress.total} runs completed
+                              </p>
+                              {sweepCommand && (
+                                <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
+                                  {sweepCommand}
+                                </p>
+                              )}
+                              <div className="flex justify-end">
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => {
+                                    setActivePreviewKey(null)
+                                    if (onNavigateToSweep) {
+                                      onNavigateToSweep(sweep.id)
+                                    } else {
+                                      onTabChange('runs')
+                                    }
+                                  }}
+                                >
+                                  Detail
+                                </Button>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[16px]"
+                          onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
+                        >
+                          @
+                        </Button>
+                      </div>
+                    )
+                  })}
                   {recentSweeps.length === 0 && (
                     <p className="px-2 py-1 text-xs text-muted-foreground">No sweeps yet.</p>
                   )}

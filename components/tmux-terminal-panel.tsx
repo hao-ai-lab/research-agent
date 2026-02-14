@@ -5,7 +5,6 @@ import {
     Terminal,
     Copy,
     Check,
-    ExternalLink,
     Monitor
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -15,7 +14,8 @@ interface TmuxTerminalPanelProps {
     tmuxWindow?: string
     tmuxPane?: string
     sessionName?: string
-    onAttach?: () => void
+    showHeader?: boolean
+    className?: string
 }
 
 export function TmuxTerminalPanel({
@@ -23,7 +23,8 @@ export function TmuxTerminalPanel({
     tmuxWindow,
     tmuxPane,
     sessionName = 'research-agent',
-    onAttach
+    showHeader = true,
+    className = '',
 }: TmuxTerminalPanelProps) {
     const [copied, setCopied] = useState<'window' | 'command' | null>(null)
 
@@ -43,11 +44,13 @@ export function TmuxTerminalPanel({
 
     if (!tmuxWindow) {
         return (
-            <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/30">
-                    <Terminal className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-xs font-medium">Terminal</span>
-                </div>
+            <div className={`rounded-lg border border-border bg-card overflow-hidden ${className}`}>
+                {showHeader && (
+                    <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-secondary/30">
+                        <Terminal className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium">Terminal</span>
+                    </div>
+                )}
                 <div className="p-4 text-center">
                     <Monitor className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
                     <p className="text-xs text-muted-foreground">
@@ -59,17 +62,18 @@ export function TmuxTerminalPanel({
     }
 
     return (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-secondary/30">
-                <div className="flex items-center gap-2">
-                    <Terminal className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-xs font-medium">Terminal</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">
-                        {tmuxWindow}
-                    </span>
+        <div className={`rounded-lg border border-border bg-card overflow-hidden ${className}`}>
+            {showHeader && (
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-secondary/30">
+                    <div className="flex items-center gap-2">
+                        <Terminal className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium">Terminal</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">
+                            {tmuxWindow}
+                        </span>
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* Terminal Placeholder */}
             <div className="bg-black/50 p-1">

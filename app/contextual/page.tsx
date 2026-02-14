@@ -205,7 +205,10 @@ export default function ContextualChatPage() {
             await archiveSession(sessionId)
           }}
           onNavigateToRun={(runId) => {
-            router.push(buildHomeHref('runs', journeySubTab) + `#${runId}`)
+            router.push(buildHomeHref('runs', journeySubTab) + `#${encodeURIComponent(runId)}`)
+          }}
+          onNavigateToSweep={(sweepId) => {
+            router.push(buildHomeHref('runs', journeySubTab) + `#${encodeURIComponent(`sweep:${sweepId}`)}`)
           }}
           onInsertReference={(text) => insertPrompt(text)}
           onSettingsClick={() => router.push(buildHomeHref('settings', journeySubTab))}

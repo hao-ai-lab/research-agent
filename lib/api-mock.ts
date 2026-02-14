@@ -14,6 +14,7 @@ import type {
     RunStatus,
     CreateRunRequest,
     RunRerunRequest,
+    RunUpdateRequest,
     LogResponse,
     Artifact,
     Alert,
@@ -35,7 +36,7 @@ import type {
 } from './api'
 
 // Re-export types
-export type { ChatSession, ChatModelOption, SessionModelSelection, ActiveSessionStream, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
+export type { ChatSession, ChatModelOption, SessionModelSelection, ActiveSessionStream, SessionWithMessages, StreamEvent, Run, RunStatus, CreateRunRequest, RunRerunRequest, RunUpdateRequest, LogResponse, Artifact, Alert, Sweep, CreateSweepRequest, UpdateSweepRequest, WildModeState, ClusterType, ClusterState, ClusterStatusResponse, ClusterUpdateRequest, ClusterDetectRequest, RepoDiffFileStatus, RepoDiffLine, RepoDiffFile, RepoDiffResponse, RepoFilesResponse, RepoFileResponse }
 export type { ChatMessageData, StreamEventType } from './api'
 
 // =============================================================================
@@ -737,6 +738,27 @@ export async function getRun(runId: string): Promise<Run> {
     return run
 }
 
+export async function updateRun(runId: string, request: RunUpdateRequest): Promise<Run> {
+    await delay(120)
+    const run = mockRuns.get(runId)
+    if (!run) {
+        throw new Error('Run not found')
+    }
+
+    if (request.command !== undefined) {
+        run.command = request.command
+    }
+    if (request.name !== undefined) {
+        run.name = request.name
+    }
+    if (request.workdir !== undefined) {
+        run.workdir = request.workdir
+    }
+
+    mockRuns.set(runId, run)
+    return run
+}
+
 export async function startRun(runId: string): Promise<{ message: string; tmux_window: string }> {
     await delay(300)
     const run = mockRuns.get(runId)
@@ -1118,7 +1140,29 @@ export async function updateSweep(sweepId: string, request: UpdateSweepRequest):
         throw new Error('Sweep not found')
     }
 
-    if (request.base_command !== undefined) sweep.base_command = request.base_command
+    if (request.base_command !== undefined) {
+        const baseCommand = request.base_command
+        sweep.base_command = baseCommand
+
+        if (sweep.creation_context) {
+            sweep.creation_context.command = baseCommand
+        }
+        if (sweep.ui_config && typeof sweep.ui_config === 'object') {
+            ;(sweep.ui_config as Record<string, unknown>).command = baseCommand
+            ;(sweep.ui_config as Record<string, unknown>).updatedAt = Date.now()
+        }
+
+        sweep.run_ids.forEach((runId) => {
+            const run = mockRuns.get(runId)
+            if (!run) return
+            const params = run.sweep_params && typeof run.sweep_params === 'object'
+                ? run.sweep_params
+                : {}
+            const paramStr = Object.entries(params).map(([k, v]) => `--${k}=${v}`).join(' ')
+            run.command = paramStr ? `${baseCommand} ${paramStr}` : baseCommand
+            mockRuns.set(runId, run)
+        })
+    }
     if (request.workdir !== undefined) sweep.workdir = request.workdir
     if (request.parameters !== undefined) sweep.parameters = request.parameters
     if (request.max_runs !== undefined) sweep.max_runs = request.max_runs

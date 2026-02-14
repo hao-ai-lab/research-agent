@@ -16,10 +16,11 @@ interface LogViewerProps {
     runId: string
     isFullPage?: boolean
     onExpand?: () => void
+    showHeader?: boolean
     className?: string
 }
 
-export function LogViewer({ runId, isFullPage = false, onExpand, className = '' }: LogViewerProps) {
+export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = true, className = '' }: LogViewerProps) {
     const [logs, setLogs] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [isStreaming, setIsStreaming] = useState(false)
@@ -164,43 +165,44 @@ export function LogViewer({ runId, isFullPage = false, onExpand, className = '' 
 
     return (
         <div className={`flex flex-col rounded-lg border border-border bg-card overflow-hidden ${className}`}>
-            {/* Header */}
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-secondary/30">
-                <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-xs font-medium">Logs</span>
-                    {logInfo.totalSize > 0 && (
-                        <span className="text-[10px] text-muted-foreground">
-                            ({(logInfo.totalSize / 1024).toFixed(1)} KB)
-                        </span>
-                    )}
-                    {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-                </div>
+            {showHeader && (
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-secondary/30">
+                    <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium">Logs</span>
+                        {logInfo.totalSize > 0 && (
+                            <span className="text-[10px] text-muted-foreground">
+                                ({(logInfo.totalSize / 1024).toFixed(1)} KB)
+                            </span>
+                        )}
+                        {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                    </div>
 
-                <div className="flex items-center gap-1">
-                    <Button
-                        variant={isStreaming ? "destructive" : "ghost"}
-                        size="sm"
-                        className="h-6 px-2 text-[10px]"
-                        onClick={isStreaming ? stopStreaming : startStreaming}
-                    >
-                        <Radio className={`h-3 w-3 mr-1 ${isStreaming ? 'animate-pulse' : ''}`} />
-                        {isStreaming ? 'Stop' : 'Stream'}
-                    </Button>
-
-                    {!isFullPage && onExpand && (
+                    <div className="flex items-center gap-1">
                         <Button
-                            variant="ghost"
+                            variant={isStreaming ? "destructive" : "ghost"}
                             size="sm"
                             className="h-6 px-2 text-[10px]"
-                            onClick={onExpand}
+                            onClick={isStreaming ? stopStreaming : startStreaming}
                         >
-                            <Maximize2 className="h-3 w-3 mr-1" />
-                            Expand
+                            <Radio className={`h-3 w-3 mr-1 ${isStreaming ? 'animate-pulse' : ''}`} />
+                            {isStreaming ? 'Stop' : 'Stream'}
                         </Button>
-                    )}
+
+                        {!isFullPage && onExpand && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[10px]"
+                                onClick={onExpand}
+                            >
+                                <Maximize2 className="h-3 w-3 mr-1" />
+                                Expand
+                            </Button>
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* Log content */}
             <div

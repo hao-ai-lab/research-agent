@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
     listRuns,
     createRun,
+    updateRun as apiUpdateRun,
     startRun,
     stopRun,
     archiveRun,
@@ -222,6 +223,19 @@ export function useRuns(): UseRunsResult {
         setRuns(prev => prev.map(r =>
             r.id === updatedRun.id ? updatedRun : r
         ))
+
+        if (previousRun && previousRun.command !== updatedRun.command) {
+            const persistCommand = async () => {
+                try {
+                    await apiUpdateRun(updatedRun.id, { command: updatedRun.command })
+                    await fetchRuns()
+                } catch (error) {
+                    console.error('Failed to persist run command:', error)
+                    await fetchRuns()
+                }
+            }
+            void persistCommand()
+        }
 
         if (previousRun && previousRun.isArchived !== updatedRun.isArchived) {
             const persistArchiveState = async () => {
