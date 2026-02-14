@@ -57,6 +57,7 @@ jobs:
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_PREVIEW_OPENCODE_URL: ${{ format('https://{0}--{1}-preview-opencode.modal.run', github.repository_owner, env.MODAL_APP_NAME) }}
 
       - name: Publish deployment summary
         run: |
