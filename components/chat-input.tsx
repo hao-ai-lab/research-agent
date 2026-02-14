@@ -187,13 +187,18 @@ export function ChatInput({
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0)
   const [mentionFilter, setMentionFilter] = useState<MentionType | 'all'>('all')
   const [isQueueExpanded, setIsQueueExpanded] = useState(true)
-  const [steerPriority, setSteerPriority] = useState(10)
+  const [steerPriority, setSteerPriority] = useState(15)
   const [dictationSupported, setDictationSupported] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
   const mentionPopoverRef = useRef<HTMLDivElement>(null)
+  const modelButtonRef = useRef<HTMLButtonElement>(null)
+  const modelLabelContainerRef = useRef<HTMLSpanElement>(null)
+  const modelLabelMeasureRef = useRef<HTMLSpanElement>(null)
+  const modelCompactMeasureRef = useRef<HTMLSpanElement>(null)
   const recognitionRef = useRef<any>(null)
+  const [modelLabelMode, setModelLabelMode] = useState<'full' | 'model' | 'icon'>('full')
 
   useEffect(() => {
     // Sweep mode is no longer exposed in the UI.
@@ -905,9 +910,52 @@ export function ChatInput({
       ? { provider_id: defaultModelOption.provider_id, model_id: defaultModelOption.model_id }
       : null
   )
-  const selectedModelLabel = effectiveSelectedModel
+  const selectedModelFullLabel = effectiveSelectedModel
     ? `${effectiveSelectedModel.provider_id} > ${effectiveSelectedModel.model_id}`
     : 'Model'
+  const selectedModelCompactLabel = effectiveSelectedModel?.model_id || 'Model'
+  const selectedModelLabel = modelLabelMode === 'full'
+    ? selectedModelFullLabel
+    : selectedModelCompactLabel
+
+  useEffect(() => {
+    const updateModelLabelMode = () => {
+      const button = modelButtonRef.current
+      const container = modelLabelContainerRef.current
+      const fullMeasure = modelLabelMeasureRef.current
+      const compactMeasure = modelCompactMeasureRef.current
+      if (!button || !container || !fullMeasure || !compactMeasure) return
+
+      const iconOnlyThreshold = 74
+      if (button.clientWidth <= iconOnlyThreshold) {
+        setModelLabelMode('icon')
+        return
+      }
+
+      if (fullMeasure.offsetWidth <= container.clientWidth) {
+        setModelLabelMode('full')
+      } else if (compactMeasure.offsetWidth <= container.clientWidth) {
+        setModelLabelMode('model')
+      } else {
+        setModelLabelMode('icon')
+      }
+    }
+
+    updateModelLabelMode()
+    if (typeof ResizeObserver !== 'undefined') {
+      const resizeObserver = new ResizeObserver(updateModelLabelMode)
+      if (modelButtonRef.current) {
+        resizeObserver.observe(modelButtonRef.current)
+      }
+      if (modelLabelContainerRef.current) {
+        resizeObserver.observe(modelLabelContainerRef.current)
+      }
+      return () => resizeObserver.disconnect()
+    }
+
+    window.addEventListener('resize', updateModelLabelMode)
+    return () => window.removeEventListener('resize', updateModelLabelMode)
+  }, [selectedModelCompactLabel, selectedModelFullLabel])
 
   const modelOptionsByProvider = useMemo(() => {
     const groups = new Map<string, ChatModelOption[]>()
@@ -1252,8 +1300,8 @@ export function ChatInput({
       </div>
 
       {/* Action buttons - bottom row */}
-      <div className="flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-0.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
           {/* Mode toggle */}
           <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
             <PopoverTrigger asChild>
@@ -1352,14 +1400,34 @@ export function ChatInput({
             <Popover open={isModelOpen} onOpenChange={setIsModelOpen}>
               <PopoverTrigger asChild>
                 <button
+                  ref={modelButtonRef}
                   type="button"
                   disabled={isModelUpdating}
-                  className="chat-toolbar-pill flex max-w-[190px] items-center gap-1 rounded-lg border border-border/60 bg-secondary px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="chat-toolbar-pill flex max-w-[190px] min-w-9 items-center gap-1 rounded-lg border border-border/60 bg-secondary px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-60"
                   title="Select model"
                 >
                   <Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{selectedModelLabel}</span>
-                  <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span
+                    ref={modelLabelContainerRef}
+                    className={`relative min-w-0 flex-1 truncate ${modelLabelMode === 'icon' ? 'hidden' : ''}`}
+                  >
+                    <span className="block truncate">{selectedModelLabel}</span>
+                    <span
+                      ref={modelLabelMeasureRef}
+                      aria-hidden="true"
+                      className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap"
+                    >
+                      {selectedModelFullLabel}
+                    </span>
+                    <span
+                      ref={modelCompactMeasureRef}
+                      aria-hidden="true"
+                      className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap"
+                    >
+                      {selectedModelCompactLabel}
+                    </span>
+                  </span>
+                  <ChevronDown className={`h-3 w-3 shrink-0 text-muted-foreground ${modelLabelMode === 'icon' ? 'hidden' : ''}`} />
                 </button>
               </PopoverTrigger>
               <PopoverContent side="top" align="start" className="w-72 p-1.5">
@@ -1519,7 +1587,7 @@ export function ChatInput({
         </div>
 
         {/* Stop + Send/Queue buttons */}
-        <div className="flex items-center gap-1.5">
+        <div className="ml-auto flex min-w-0 items-center gap-1.5">
           {/* Context token count - circular indicator */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1639,11 +1707,11 @@ export function ChatInput({
             </Popover>
           )}
 
-          <Button
+        <Button
             onClick={handleSubmit}
             disabled={!message.trim() && attachments.length === 0 && !replyExcerpt}
             size="icon"
-            className={`chat-toolbar-icon rounded-lg disabled:opacity-30 relative ${
+            className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${
               isStreaming && onQueue
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
                 : isWildLoopActive && onSteer
@@ -1669,7 +1737,7 @@ export function ChatInput({
             <span className="sr-only">
               {isStreaming && onQueue ? 'Queue message' : isWildLoopActive && onSteer ? 'Steer agent' : 'Send message'}
             </span>
-          </Button>
+        </Button>
         </div>
       </div>
 

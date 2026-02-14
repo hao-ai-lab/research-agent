@@ -11,7 +11,6 @@ import {
   Clock3,
   ChevronsUpDown,
   Ellipsis,
-  FlaskConical,
   Loader2,
   PanelLeftClose,
   Pencil,
@@ -124,36 +123,36 @@ export function DesktopSidebar({
   const getRunStatusMeta = useCallback((status: ExperimentRun['status']) => {
     switch (status) {
       case 'running':
-        return { label: 'Running', className: 'text-blue-500', icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> }
+        return { label: 'Running', className: 'text-blue-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" /> }
       case 'failed':
-        return { label: 'Failed', className: 'text-destructive', icon: <AlertCircle className="h-3.5 w-3.5" /> }
+        return { label: 'Failed', className: 'text-destructive', icon: <span className="h-2.5 w-2.5 rounded-full bg-destructive" /> }
       case 'completed':
-        return { label: 'Completed', className: 'text-emerald-500', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
+        return { label: 'Completed', className: 'text-emerald-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> }
       case 'canceled':
-        return { label: 'Canceled', className: 'text-muted-foreground', icon: <XCircle className="h-3.5 w-3.5" /> }
+        return { label: 'Canceled', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" /> }
       case 'queued':
-        return { label: 'Queued', className: 'text-amber-500', icon: <Clock3 className="h-3.5 w-3.5" /> }
+        return { label: 'Queued', className: 'text-amber-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> }
       case 'ready':
       default:
-        return { label: 'Ready', className: 'text-muted-foreground', icon: <Clock3 className="h-3.5 w-3.5" /> }
+        return { label: 'Ready', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/90" /> }
     }
   }, [])
 
   const getSweepStatusMeta = useCallback((status: Sweep['status']) => {
     switch (status) {
       case 'running':
-        return { label: 'Running', className: 'text-blue-500', icon: <Loader2 className="h-3.5 w-3.5 animate-spin" /> }
+        return { label: 'Running', className: 'text-blue-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse" /> }
       case 'completed':
-        return { label: 'Completed', className: 'text-emerald-500', icon: <CheckCircle2 className="h-3.5 w-3.5" /> }
+        return { label: 'Completed', className: 'text-emerald-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> }
       case 'failed':
-        return { label: 'Failed', className: 'text-destructive', icon: <XCircle className="h-3.5 w-3.5" /> }
+        return { label: 'Failed', className: 'text-destructive', icon: <span className="h-2.5 w-2.5 rounded-full bg-destructive" /> }
       case 'pending':
-        return { label: 'Pending', className: 'text-amber-500', icon: <Clock3 className="h-3.5 w-3.5" /> }
+        return { label: 'Pending', className: 'text-amber-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> }
       case 'draft':
-        return { label: 'Draft', className: 'text-violet-500', icon: <FlaskConical className="h-3.5 w-3.5" /> }
+        return { label: 'Draft', className: 'text-violet-500', icon: <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> }
       case 'canceled':
       default:
-        return { label: 'Canceled', className: 'text-muted-foreground', icon: <XCircle className="h-3.5 w-3.5" /> }
+        return { label: 'Canceled', className: 'text-muted-foreground', icon: <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" /> }
     }
   }, [])
 
