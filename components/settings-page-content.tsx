@@ -294,7 +294,7 @@ export function SettingsPageContent({
           description: 'On mobile, Enter inserts newline instead of sending (Shift+Enter to send)',
           icon: Type,
           type: 'toggle' as const,
-          value: settings.appearance.mobileEnterToNewline !== false,
+          value: settings.appearance.mobileEnterToNewline ?? false,
         },
         {
           id: 'appearanceAdvanced',

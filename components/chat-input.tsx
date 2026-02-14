@@ -164,7 +164,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const { settings } = useAppSettings()
   const isMobile = useIsMobile()
-  
+
   const referenceMentionRegex = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
   const genericMentionRegex = /(?<!\S)@[A-Za-z0-9:._-]*/g
 
@@ -729,7 +729,7 @@ export function ChatInput({
     }
 
     // Determine if we should reverse Enter/Shift+Enter behavior on mobile
-    const shouldReverseEnterBehavior = isMobile && settings.appearance.mobileEnterToNewline
+    const shouldReverseEnterBehavior = isMobile && (settings.appearance.mobileEnterToNewline ?? false)
 
     if (shouldReverseEnterBehavior) {
       // When enabled on mobile: Enter adds newline, Shift+Enter sends
