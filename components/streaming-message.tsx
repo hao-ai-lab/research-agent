@@ -5,6 +5,7 @@ import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight }
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { CodeOutputBox } from '@/components/code-output-box'
+import { PermissionRequestPanel, TodoChecklistPanel } from '@/components/opencode-special-panels'
 
 interface StreamingMessageProps {
     streamingState: StreamingState
@@ -100,6 +101,10 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
                 <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
             </div>
         )
+    }
+
+    if (part.type === 'permission') {
+        return <StreamingPermissionPart part={part} />
     }
 
     return null
@@ -207,6 +212,11 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                             <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
                         </div>
                     )}
+                    <TodoChecklistPanel
+                        toolName={part.toolName}
+                        toolInput={part.toolInput}
+                        toolOutput={part.toolOutput}
+                    />
                     {(part.toolStartedAt || part.toolEndedAt) && (
                         <div className="text-muted-foreground/80">
                             {part.toolStartedAt && <div>Start: {formatTimestamp(part.toolStartedAt)}</div>}
@@ -214,6 +224,52 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                         </div>
                     )}
                 </div>
+            </CollapsibleContent>
+        </Collapsible>
+    )
+}
+
+function StreamingPermissionPart({ part }: { part: StreamingPart }) {
+    const [isOpen, setIsOpen] = useState(true)
+    const normalizedStatus = (part.permissionStatus || 'pending').toLowerCase()
+    const isResolved = (
+        normalizedStatus.includes('approved')
+        || normalizedStatus.includes('allow')
+        || normalizedStatus.includes('granted')
+        || normalizedStatus.includes('denied')
+        || normalizedStatus.includes('rejected')
+    )
+
+    useEffect(() => {
+        if (!isResolved) return
+        const timer = setTimeout(() => setIsOpen(false), 300)
+        return () => clearTimeout(timer)
+    }, [isResolved])
+
+    return (
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+            <CollapsibleTrigger className="flex w-full items-center justify-start gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                <AlertCircle className="h-3 w-3 text-amber-500" />
+                <span>{part.permissionTitle || 'Permission request'}</span>
+                <span className="text-muted-foreground/60">•</span>
+                <span className={isResolved ? 'text-emerald-500' : 'text-amber-500'}>
+                    {part.permissionStatus || 'pending'}
+                </span>
+                {!isOpen && part.permissionAction && (
+                    <span className="ml-1 truncate text-muted-foreground/50 max-w-[220px]" title={part.permissionAction}>
+                        — {part.permissionAction}
+                    </span>
+                )}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+                <PermissionRequestPanel
+                    title={part.permissionTitle}
+                    description={part.permissionDescription}
+                    action={part.permissionAction}
+                    resource={part.permissionResource}
+                    status={part.permissionStatus}
+                />
             </CollapsibleContent>
         </Collapsible>
     )

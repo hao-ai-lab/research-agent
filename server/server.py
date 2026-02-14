@@ -2106,7 +2106,7 @@ def _coerce_tool_text(value: Any) -> Optional[str]:
         return str(value)
 
 
-def _extract_tool_data(part: dict) -> dict[str, Any]:
+def _extract_tool_data(part: dict, props: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Extract normalized tool fields used for streaming and persistence."""
     state = part.get("state")
     if not isinstance(state, dict):
@@ -2133,6 +2133,11 @@ def _extract_tool_data(part: dict) -> dict[str, Any]:
     if output_value is None:
         output_value = metadata.get("output")
     tool_output = _coerce_tool_text(output_value)
+    tool_output_delta = None
+    if isinstance(props, dict):
+        delta_value = props.get("delta")
+        if isinstance(delta_value, str) and delta_value != "":
+            tool_output_delta = delta_value
 
     started_at = time_data.get("start") if isinstance(time_data.get("start"), (int, float)) else None
     ended_at = time_data.get("end") if isinstance(time_data.get("end"), (int, float)) else None
@@ -2144,9 +2149,139 @@ def _extract_tool_data(part: dict) -> dict[str, Any]:
         "tool_status": status,
         "tool_input": tool_input,
         "tool_output": tool_output,
+        "tool_output_delta": tool_output_delta,
         "tool_started_at": started_at,
         "tool_ended_at": ended_at,
         "tool_duration_ms": duration_ms,
+    }
+
+
+def _first_non_empty_string(*values: Any) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+    return None
+
+
+def _extract_permission_data(etype: Any, props: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Extract permission/approval events into a normalized stream part."""
+    event_type = etype if isinstance(etype, str) else ""
+    event_type_lower = event_type.lower()
+    if "permission" not in event_type_lower and "approval" not in event_type_lower:
+        return None
+
+    status_obj = props.get("status")
+    if not isinstance(status_obj, dict):
+        status_obj = {}
+
+    permission_obj = props.get("permission")
+    if not isinstance(permission_obj, dict):
+        permission_obj = {}
+
+    request_obj = props.get("request")
+    if not isinstance(request_obj, dict):
+        request_obj = {}
+
+    approval_obj = props.get("approval")
+    if not isinstance(approval_obj, dict):
+        approval_obj = {}
+
+    request_id = _first_non_empty_string(
+        permission_obj.get("id"),
+        request_obj.get("id"),
+        approval_obj.get("id"),
+        props.get("id"),
+        status_obj.get("id"),
+    )
+
+    title = _first_non_empty_string(
+        permission_obj.get("title"),
+        request_obj.get("title"),
+        approval_obj.get("title"),
+        props.get("title"),
+        props.get("prompt"),
+        props.get("message"),
+        status_obj.get("message"),
+    ) or "Permission request"
+
+    description = _first_non_empty_string(
+        permission_obj.get("description"),
+        permission_obj.get("reason"),
+        request_obj.get("description"),
+        request_obj.get("reason"),
+        approval_obj.get("description"),
+        approval_obj.get("reason"),
+        props.get("description"),
+        props.get("reason"),
+        props.get("hint"),
+    )
+
+    action = _first_non_empty_string(
+        permission_obj.get("action"),
+        permission_obj.get("tool"),
+        permission_obj.get("command"),
+        request_obj.get("action"),
+        request_obj.get("tool"),
+        request_obj.get("command"),
+        props.get("action"),
+        props.get("tool"),
+        props.get("toolName"),
+        props.get("command"),
+    )
+
+    resource = _first_non_empty_string(
+        permission_obj.get("resource"),
+        permission_obj.get("path"),
+        permission_obj.get("url"),
+        request_obj.get("resource"),
+        request_obj.get("path"),
+        request_obj.get("url"),
+        props.get("resource"),
+        props.get("path"),
+        props.get("url"),
+    )
+
+    status = _first_non_empty_string(
+        permission_obj.get("status"),
+        request_obj.get("status"),
+        approval_obj.get("status"),
+        status_obj.get("type"),
+        props.get("state"),
+        props.get("status"),
+    ) or "pending"
+
+    raw_state = {
+        "event_type": event_type,
+        "permission": permission_obj or None,
+        "request": request_obj or None,
+        "approval": approval_obj or None,
+        "status": status_obj or None,
+        "properties": props or None,
+    }
+
+    if request_id:
+        permission_id = request_id
+    else:
+        stable_seed = "|".join([
+            event_type,
+            title,
+            description or "",
+            action or "",
+            resource or "",
+        ])
+        permission_id = f"permission-{uuid.uuid5(uuid.NAMESPACE_URL, stable_seed).hex[:12]}"
+    return {
+        "type": "part_update",
+        "id": permission_id,
+        "ptype": "permission",
+        "permission_title": title,
+        "permission_description": description,
+        "permission_action": action,
+        "permission_resource": resource,
+        "permission_status": status,
+        "permission_state_raw": raw_state,
     }
 
 
@@ -2163,6 +2298,7 @@ class StreamPartsAccumulator:
         self._parts: list[dict[str, Any]] = []
         self._text_buffer: Optional[dict[str, Any]] = None
         self._tool_index_by_id: dict[str, int] = {}
+        self._permission_index_by_id: dict[str, int] = {}
         self._text_segment_counts: dict[str, int] = {}
 
     def consume(self, event: dict):
@@ -2173,6 +2309,10 @@ class StreamPartsAccumulator:
         if ptype == "tool":
             self._flush_text_buffer()
             self._consume_tool_update(event)
+            return
+        if ptype == "permission":
+            self._flush_text_buffer()
+            self._consume_permission_update(event)
             return
         if event.get("type") == "session_status":
             self._flush_text_buffer()
@@ -2217,6 +2357,14 @@ class StreamPartsAccumulator:
 
         existing_index = self._tool_index_by_id.get(part_id)
         tool_name = event.get("name")
+        tool_output = event.get("tool_output")
+        tool_output_delta = event.get("tool_output_delta")
+        if not isinstance(tool_output, str):
+            tool_output = None
+        if not isinstance(tool_output_delta, str):
+            tool_output_delta = None
+        if tool_output is None and tool_output_delta is not None:
+            tool_output = tool_output_delta
         if existing_index is None:
             self._parts.append(
                 {
@@ -2227,7 +2375,7 @@ class StreamPartsAccumulator:
                     "tool_state": event.get("tool_status"),
                     "tool_state_raw": event.get("state"),
                     "tool_input": event.get("tool_input"),
-                    "tool_output": event.get("tool_output"),
+                    "tool_output": tool_output,
                     "tool_started_at": event.get("tool_started_at"),
                     "tool_ended_at": event.get("tool_ended_at"),
                     "tool_duration_ms": event.get("tool_duration_ms"),
@@ -2240,12 +2388,50 @@ class StreamPartsAccumulator:
         existing_part["tool_state"] = event.get("tool_status")
         existing_part["tool_state_raw"] = event.get("state")
         existing_part["tool_input"] = event.get("tool_input")
-        existing_part["tool_output"] = event.get("tool_output")
+        if tool_output is not None:
+            existing_part["tool_output"] = tool_output
+        elif tool_output_delta is not None:
+            previous_output = existing_part.get("tool_output")
+            if isinstance(previous_output, str):
+                existing_part["tool_output"] = previous_output + tool_output_delta
+            else:
+                existing_part["tool_output"] = tool_output_delta
         existing_part["tool_started_at"] = event.get("tool_started_at")
         existing_part["tool_ended_at"] = event.get("tool_ended_at")
         existing_part["tool_duration_ms"] = event.get("tool_duration_ms")
         if tool_name:
             existing_part["tool_name"] = tool_name
+
+    def _consume_permission_update(self, event: dict):
+        part_id = event.get("id")
+        if not isinstance(part_id, str) or not part_id:
+            return
+
+        existing_index = self._permission_index_by_id.get(part_id)
+        if existing_index is None:
+            self._parts.append(
+                {
+                    "id": part_id,
+                    "type": "permission",
+                    "content": "",
+                    "permission_title": event.get("permission_title"),
+                    "permission_description": event.get("permission_description"),
+                    "permission_action": event.get("permission_action"),
+                    "permission_resource": event.get("permission_resource"),
+                    "permission_status": event.get("permission_status"),
+                    "permission_state_raw": event.get("permission_state_raw"),
+                }
+            )
+            self._permission_index_by_id[part_id] = len(self._parts) - 1
+            return
+
+        existing_part = self._parts[existing_index]
+        existing_part["permission_title"] = event.get("permission_title")
+        existing_part["permission_description"] = event.get("permission_description")
+        existing_part["permission_action"] = event.get("permission_action")
+        existing_part["permission_resource"] = event.get("permission_resource")
+        existing_part["permission_status"] = event.get("permission_status")
+        existing_part["permission_state_raw"] = event.get("permission_state_raw")
 
     def _flush_text_buffer(self):
         if not self._text_buffer:
@@ -2486,12 +2672,34 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
     part = props.get("part", {})
     if not isinstance(part, dict):
         part = {}
+
+    permission_props = props.get("permission")
+    if not isinstance(permission_props, dict):
+        permission_props = {}
+    request_props = props.get("request")
+    if not isinstance(request_props, dict):
+        request_props = {}
+    approval_props = props.get("approval")
+    if not isinstance(approval_props, dict):
+        approval_props = {}
     
     session_props = props.get("session")
     if not isinstance(session_props, dict):
         session_props = {}
 
-    event_sid = props.get("sessionID") or part.get("sessionID") or session_props.get("id")
+    event_sid = (
+        props.get("sessionID")
+        or props.get("sessionId")
+        or part.get("sessionID")
+        or part.get("sessionId")
+        or permission_props.get("sessionID")
+        or permission_props.get("sessionId")
+        or request_props.get("sessionID")
+        or request_props.get("sessionId")
+        or approval_props.get("sessionID")
+        or approval_props.get("sessionId")
+        or session_props.get("id")
+    )
     if event_sid != target_session_id:
         return None
     
@@ -2510,7 +2718,7 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
                 return None
             return {"type": "part_delta", "id": part_id, "ptype": "reasoning", "delta": delta}
         elif ptype == "tool":
-            tool_data = _extract_tool_data(part)
+            tool_data = _extract_tool_data(part, props)
             return {
                 "type": "part_update",
                 "id": part_id,
@@ -2523,7 +2731,11 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
     elif etype == "session.status":
         if props.get("status", {}).get("type") == "idle":
             return {"type": "session_status", "status": "idle", "_done": True}
-    
+
+    permission_data = _extract_permission_data(etype, props)
+    if permission_data:
+        return permission_data
+
     return None
 
 

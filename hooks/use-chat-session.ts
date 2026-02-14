@@ -40,7 +40,7 @@ export interface ToolCallState {
 export interface StreamingPart {
     id: string
     sourceId?: string
-    type: 'thinking' | 'tool' | 'text'
+    type: 'thinking' | 'tool' | 'text' | 'permission'
     content: string
     toolName?: string
     toolDescription?: string
@@ -51,6 +51,12 @@ export interface StreamingPart {
     toolStartedAt?: number
     toolEndedAt?: number
     toolDurationMs?: number
+    permissionTitle?: string
+    permissionDescription?: string
+    permissionAction?: string
+    permissionResource?: string
+    permissionStatus?: string
+    permissionStateRaw?: unknown
 }
 
 export interface StreamingState {
@@ -190,6 +196,12 @@ function normalizeToolStatus(value: unknown): ToolStatus {
     return 'pending'
 }
 
+function normalizePermissionStatus(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined
+    const normalized = value.trim().toLowerCase()
+    return normalized || undefined
+}
+
 function stringifyToolPayload(value: unknown): string | undefined {
     if (value == null) return undefined
     if (typeof value === 'string') return value
@@ -203,6 +215,28 @@ function stringifyToolPayload(value: unknown): string | undefined {
 function normalizeTimestamp(value: unknown): number | undefined {
     if (typeof value !== 'number' || Number.isNaN(value)) return undefined
     return value
+}
+
+function mergeToolOutput(
+    previous: string | undefined,
+    snapshot: string | undefined,
+    delta: string | undefined
+): string | undefined {
+    if (!delta) {
+        return snapshot ?? previous
+    }
+
+    if (snapshot && previous && snapshot.length >= previous.length && snapshot.startsWith(previous)) {
+        return snapshot
+    }
+    if (snapshot && !previous) {
+        return snapshot
+    }
+
+    const base = previous ?? snapshot ?? ''
+    if (!base) return delta
+    if (base.endsWith(delta)) return base
+    return `${base}${delta}`
 }
 
 function extractToolDetails(source: {
@@ -281,16 +315,30 @@ function normalizeToolPart(part: MessagePartData, index: number): MessagePartDat
     }
 }
 
+function normalizePermissionPart(part: MessagePartData, index: number): MessagePartData {
+    const id = typeof part.id === 'string' && part.id ? part.id : `permission-${index}`
+    return {
+        ...part,
+        id,
+        content: part.content ?? '',
+        permission_status: normalizePermissionStatus(part.permission_status),
+    }
+}
+
 function normalizeMessage(message: ChatMessageData): ChatMessageData {
     if (!message.parts || message.parts.length === 0) return message
 
     const seenIds = new Map<string, number>()
     const normalizedParts = message.parts.map((part: MessagePartData, index) => {
-        const basePart = part.type === 'tool' ? normalizeToolPart(part, index) : {
-            ...part,
-            id: typeof part.id === 'string' && part.id ? part.id : `${part.type}-${index}`,
-            content: part.content ?? '',
-        }
+        const basePart = part.type === 'tool'
+            ? normalizeToolPart(part, index)
+            : part.type === 'permission'
+            ? normalizePermissionPart(part, index)
+            : {
+                ...part,
+                id: typeof part.id === 'string' && part.id ? part.id : `${part.type}-${index}`,
+                content: part.content ?? '',
+            }
         const count = seenIds.get(basePart.id) ?? 0
         seenIds.set(basePart.id, count + 1)
         if (count === 0) {
@@ -372,6 +420,21 @@ function messagePartToStreamingPart(part: MessagePartData): StreamingPart {
             toolEndedAt: details.toolEndedAt,
             toolDurationMs: details.toolDurationMs,
             toolDescription: details.description,
+        }
+    }
+
+    if (part.type === 'permission') {
+        return {
+            id: part.id,
+            sourceId,
+            type: 'permission',
+            content: part.content || '',
+            permissionTitle: part.permission_title,
+            permissionDescription: part.permission_description,
+            permissionAction: part.permission_action,
+            permissionResource: part.permission_resource,
+            permissionStatus: normalizePermissionStatus(part.permission_status),
+            permissionStateRaw: part.permission_state_raw,
         }
     }
 
@@ -512,17 +575,20 @@ export function useChatSession(): UseChatSessionResult {
                 toolEndedAt: event.tool_ended_at,
                 toolDurationMs: event.tool_duration_ms,
             })
+            const outputDelta = typeof event.tool_output_delta === 'string' ? event.tool_output_delta : undefined
 
             setStreamingState(prev => {
                 const toolId = event.id || `tool-${prev.toolCalls.length}`
                 const existingToolIndex = prev.toolCalls.findIndex(t => t.id === toolId)
+                const currentToolOutput = existingToolIndex >= 0 ? prev.toolCalls[existingToolIndex]?.output : undefined
+                const mergedToolOutput = mergeToolOutput(currentToolOutput, details.toolOutput, outputDelta)
                 const toolState: ToolCallState = {
                     id: toolId,
                     name: event.name,
                     description: details.description,
                     state: stateValue,
                     input: details.toolInput,
-                    output: details.toolOutput,
+                    output: mergedToolOutput,
                     startedAt: details.toolStartedAt,
                     endedAt: details.toolEndedAt,
                     durationMs: details.toolDurationMs,
@@ -535,6 +601,8 @@ export function useChatSession(): UseChatSessionResult {
                 const existingPartIndex = prev.parts.findIndex(p => p.type === 'tool' && (p.sourceId ?? p.id) === sourceId)
                 if (existingPartIndex >= 0) {
                     const updatedParts = [...prev.parts]
+                    const currentPartOutput = updatedParts[existingPartIndex].toolOutput
+                    const mergedPartOutput = mergeToolOutput(currentPartOutput, details.toolOutput, outputDelta)
                     updatedParts[existingPartIndex] = {
                         ...updatedParts[existingPartIndex],
                         toolState: stateValue,
@@ -542,7 +610,7 @@ export function useChatSession(): UseChatSessionResult {
                         toolName: event.name || updatedParts[existingPartIndex].toolName,
                         toolDescription: details.description || updatedParts[existingPartIndex].toolDescription,
                         toolInput: details.toolInput,
-                        toolOutput: details.toolOutput,
+                        toolOutput: mergedPartOutput,
                         toolStartedAt: details.toolStartedAt,
                         toolEndedAt: details.toolEndedAt,
                         toolDurationMs: details.toolDurationMs,
@@ -565,11 +633,61 @@ export function useChatSession(): UseChatSessionResult {
                         toolState: stateValue,
                         toolStateRaw: event.state,
                         toolInput: details.toolInput,
-                        toolOutput: details.toolOutput,
+                        toolOutput: mergedToolOutput,
                         toolStartedAt: details.toolStartedAt,
                         toolEndedAt: details.toolEndedAt,
                         toolDurationMs: details.toolDurationMs,
                     }],
+                }
+            })
+
+            return { textDelta: '', thinkingDelta: '', sawToolPart: true, done: false }
+        }
+
+        if (event.type === 'part_update' && event.ptype === 'permission') {
+            const permissionStatus = normalizePermissionStatus(event.permission_status)
+            setStreamingState(prev => {
+                const permissionId = event.id || `permission-${prev.parts.length}`
+                const sourceId = partId || permissionId
+                const existingPartIndex = prev.parts.findIndex(
+                    (p) => p.type === 'permission' && (p.sourceId ?? p.id) === sourceId
+                )
+
+                if (existingPartIndex >= 0) {
+                    const updatedParts = [...prev.parts]
+                    updatedParts[existingPartIndex] = {
+                        ...updatedParts[existingPartIndex],
+                        permissionTitle: event.permission_title ?? updatedParts[existingPartIndex].permissionTitle,
+                        permissionDescription: event.permission_description ?? updatedParts[existingPartIndex].permissionDescription,
+                        permissionAction: event.permission_action ?? updatedParts[existingPartIndex].permissionAction,
+                        permissionResource: event.permission_resource ?? updatedParts[existingPartIndex].permissionResource,
+                        permissionStatus: permissionStatus ?? updatedParts[existingPartIndex].permissionStatus,
+                        permissionStateRaw: event.permission_state_raw ?? updatedParts[existingPartIndex].permissionStateRaw,
+                    }
+                    return { ...prev, parts: updatedParts }
+                }
+
+                const segmentCount = prev.parts.filter(
+                    (p) => (p.sourceId ?? p.id) === sourceId && p.type === 'permission'
+                ).length
+                const partSegmentId = segmentCount === 0 ? sourceId : `${sourceId}#${segmentCount}`
+                return {
+                    ...prev,
+                    parts: [
+                        ...prev.parts,
+                        {
+                            id: partSegmentId,
+                            sourceId,
+                            type: 'permission' as const,
+                            content: '',
+                            permissionTitle: event.permission_title,
+                            permissionDescription: event.permission_description,
+                            permissionAction: event.permission_action,
+                            permissionResource: event.permission_resource,
+                            permissionStatus,
+                            permissionStateRaw: event.permission_state_raw,
+                        },
+                    ],
                 }
             })
 

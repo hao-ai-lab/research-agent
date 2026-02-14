@@ -158,7 +158,7 @@ export interface RunEvent {
 }
 
 // Message parts for ordered rendering of thinking, tools, and text
-export type MessagePartType = "thinking" | "tool" | "text";
+export type MessagePartType = "thinking" | "tool" | "text" | "permission";
 
 export type ToolState = "pending" | "running" | "completed" | "error";
 
@@ -172,9 +172,17 @@ export interface MessagePart {
   toolStateRaw?: unknown;
   toolInput?: string; // Tool arguments/input
   toolOutput?: string; // Tool result/output
+  toolOutputDelta?: string;
   toolStartedAt?: number;
   toolEndedAt?: number;
   toolDurationMs?: number;
+  // For permission parts
+  permissionTitle?: string;
+  permissionDescription?: string;
+  permissionAction?: string;
+  permissionResource?: string;
+  permissionStatus?: string;
+  permissionStateRaw?: unknown;
 }
 
 // Wild Loop types

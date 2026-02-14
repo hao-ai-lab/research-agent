@@ -19,6 +19,7 @@ import type { ChatMessage as ChatMessageType, Sweep, SweepConfig, MessagePart } 
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
 import { CodeOutputBox } from './code-output-box'
+import { PermissionRequestPanel, TodoChecklistPanel } from './opencode-special-panels'
 import type { ExperimentRun } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import {
@@ -732,7 +733,7 @@ function SavedPartRenderer({
   part: MessagePart
   renderMarkdown: (content: string) => React.ReactNode
 }) {
-  const [isOpen, setIsOpen] = useState(false) // Default collapsed per user preference
+  const [isOpen, setIsOpen] = useState(part.type === 'permission')
 
   if (part.type === 'thinking') {
     return (
@@ -824,6 +825,11 @@ function SavedPartRenderer({
                   <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
                 </div>
               )}
+              <TodoChecklistPanel
+                toolName={part.toolName}
+                toolInput={part.toolInput}
+                toolOutput={part.toolOutput}
+              />
               {part.content && !part.toolInput && !part.toolOutput && (
                 <pre className="whitespace-pre-wrap break-all overflow-hidden">{part.content}</pre>
               )}
@@ -845,6 +851,43 @@ function SavedPartRenderer({
       <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
         {renderMarkdown(part.content)}
       </div>
+    )
+  }
+
+  if (part.type === 'permission') {
+    const status = (part.permissionStatus || 'pending').toLowerCase()
+    const resolved = (
+      status.includes('approved')
+      || status.includes('allow')
+      || status.includes('granted')
+      || status.includes('denied')
+      || status.includes('rejected')
+    )
+
+    return (
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleTrigger className="flex w-full items-center justify-start gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+          {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          <AlertCircle className="h-3 w-3 text-amber-500" />
+          <span>{part.permissionTitle || 'Permission request'}</span>
+          <span className="text-muted-foreground/60">•</span>
+          <span className={resolved ? 'text-emerald-500' : 'text-amber-500'}>{status}</span>
+          {!isOpen && part.permissionAction && (
+            <span className="ml-1 truncate text-muted-foreground/50 max-w-[240px]" title={part.permissionAction}>
+              — {part.permissionAction}
+            </span>
+          )}
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2">
+          <PermissionRequestPanel
+            title={part.permissionTitle}
+            description={part.permissionDescription}
+            action={part.permissionAction}
+            resource={part.permissionResource}
+            status={part.permissionStatus}
+          />
+        </CollapsibleContent>
+      </Collapsible>
     )
   }
 

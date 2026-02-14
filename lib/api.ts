@@ -75,16 +75,23 @@ export interface ActiveSessionStream {
 
 export interface MessagePartData {
     id: string
-    type: 'thinking' | 'tool' | 'text'
+    type: 'thinking' | 'tool' | 'text' | 'permission'
     content: string
     tool_name?: string
     tool_state?: 'pending' | 'running' | 'completed' | 'error' | string
     tool_state_raw?: unknown
     tool_input?: string
     tool_output?: string
+    tool_output_delta?: string
     tool_started_at?: number
     tool_ended_at?: number
     tool_duration_ms?: number
+    permission_title?: string
+    permission_description?: string
+    permission_action?: string
+    permission_resource?: string
+    permission_status?: string
+    permission_state_raw?: unknown
 }
 
 export interface SessionWithMessages extends ChatSession {
@@ -99,16 +106,23 @@ export interface StreamEvent {
     type: StreamEventType
     seq?: number
     id?: string
-    ptype?: 'text' | 'reasoning' | 'tool'
+    ptype?: 'text' | 'reasoning' | 'tool' | 'permission'
     delta?: string
     state?: unknown
     name?: string
     tool_status?: 'pending' | 'running' | 'completed' | 'error' | string
     tool_input?: string
     tool_output?: string
+    tool_output_delta?: string
     tool_started_at?: number
     tool_ended_at?: number
     tool_duration_ms?: number
+    permission_title?: string
+    permission_description?: string
+    permission_action?: string
+    permission_resource?: string
+    permission_status?: string
+    permission_state_raw?: unknown
     status?: string
     message?: string
     // Provenance event fields (type === 'provenance')
