@@ -293,6 +293,11 @@ export function ChartsView({
     primary: true,
     secondary: true,
   })
+  const [sectionPage, setSectionPage] = useState<Record<MetricSectionId, number>>({
+    pinned: 1,
+    primary: 1,
+    secondary: 1,
+  })
 
   const [chartSettings, setChartSettings] = useState({
     xAxisFontSize: 10,
@@ -300,6 +305,10 @@ export function ChartsView({
     xAxisTickCount: 5,
     yAxisTickCount: 5,
     yAxisWidth: 34,
+    paginateSections: false,
+    rowsPerPage: 2,
+    enableGridView: false,
+    chartsPerRow: 2,
   })
   const [draftSettings, setDraftSettings] = useState({ ...chartSettings })
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -780,6 +789,15 @@ export function ChartsView({
     }
 
     const open = sectionOpen[id]
+    const gridColumns = Math.max(1, Number(chartSettings.chartsPerRow) || 1)
+    const rowsPerPage = Math.max(1, Number(chartSettings.rowsPerPage) || 1)
+    const pageSize = rowsPerPage * (chartSettings.enableGridView ? gridColumns : 1)
+    const totalPages = chartSettings.paginateSections ? Math.max(1, Math.ceil(sectionMetrics.length / pageSize)) : 1
+    const currentPage = Math.min(Math.max(sectionPage[id] || 1, 1), totalPages)
+    const startIndex = chartSettings.paginateSections ? (currentPage - 1) * pageSize : 0
+    const visibleMetrics = chartSettings.paginateSections
+      ? sectionMetrics.slice(startIndex, startIndex + pageSize)
+      : sectionMetrics
 
     return (
       <Collapsible key={id} open={open} onOpenChange={(next) => setSectionOpen((prev) => ({ ...prev, [id]: next }))}>
@@ -808,8 +826,44 @@ export function ChartsView({
             </button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="space-y-3 pt-1">
-              {sectionMetrics.map(renderMetricChart)}
+            <div className="space-y-2 pt-1">
+              {chartSettings.paginateSections && (
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[11px] text-muted-foreground">
+                    Page {currentPage}/{totalPages}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setSectionPage((prev) => ({ ...prev, [id]: Math.max(1, currentPage - 1) }))}
+                      disabled={currentPage <= 1}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setSectionPage((prev) => ({ ...prev, [id]: Math.min(totalPages, currentPage + 1) }))}
+                      disabled={currentPage >= totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div
+                className={cn(chartSettings.enableGridView ? 'grid gap-3' : 'space-y-3')}
+                style={
+                  chartSettings.enableGridView
+                    ? { gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }
+                    : undefined
+                }
+              >
+                {visibleMetrics.map(renderMetricChart)}
+              </div>
             </div>
           </CollapsibleContent>
         </div>
@@ -843,7 +897,7 @@ export function ChartsView({
                 variant="outline"
                 size="icon-sm"
                 onClick={onDesktopSidebarToggle}
-                className="hidden h-8 w-8 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+                className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
                 title="Show sidebar"
               >
                 <PanelLeftOpen className="h-4 w-4" />
@@ -851,7 +905,7 @@ export function ChartsView({
               </Button>
             )}
             <Select value={activeSection} onValueChange={(value) => setActiveSection(value as 'standard' | 'custom' | 'videoCompare')}>
-              <SelectTrigger className="h-8 w-[180px] text-xs">
+              <SelectTrigger className="h-10 w-[220px] text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -875,15 +929,16 @@ export function ChartsView({
                 </SelectItem>
               </SelectContent>
             </Select>
+            <div className="flex-1" />
 
             {activeSection === 'standard' && (
               <>
                 <Popover open={isMetricFilterOpen} onOpenChange={setIsMetricFilterOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 text-xs">
-                      <Search className="h-3.5 w-3.5" />
+                    <Button variant="outline" size="sm" className="h-10 gap-2 px-3 text-sm">
+                      <Search className="h-4 w-4" />
                       <span>Filter metrics</span>
-                      <Badge variant="secondary" className="h-5 rounded px-1.5 text-[10px]">
+                      <Badge variant="secondary" className="h-5 rounded px-1.5 text-[11px]">
                         {selectedMetricCount}/{totalMetricCount}
                       </Badge>
                     </Button>
@@ -938,7 +993,7 @@ export function ChartsView({
             )}
             <Popover open={settingsOpen} onOpenChange={handleOpenSettings}>
               <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="ml-auto h-8 w-8">
+                <Button variant="ghost" size="icon" className="h-9 w-9">
                   <Settings className="h-4 w-4" />
                 </Button>
               </PopoverTrigger>
@@ -1030,6 +1085,52 @@ export function ChartsView({
                         min={0}
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-3 border-t border-border pt-3">
+                    <p className="text-xs font-medium text-muted-foreground">Layout</p>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Paginate sections</Label>
+                      <Switch
+                        checked={draftSettings.paginateSections}
+                        onCheckedChange={(checked) => setDraftSettings((prev) => ({ ...prev, paginateSections: checked }))}
+                      />
+                    </div>
+
+                    {draftSettings.paginateSections && (
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-xs">Rows per page</Label>
+                        <Input
+                          type="number"
+                          value={draftSettings.rowsPerPage}
+                          onChange={(e) => setDraftSettings((prev) => ({ ...prev, rowsPerPage: Math.max(1, Number(e.target.value) || 1) }))}
+                          className="h-7 w-16 text-xs"
+                          min={1}
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Enable grid view</Label>
+                      <Switch
+                        checked={draftSettings.enableGridView}
+                        onCheckedChange={(checked) => setDraftSettings((prev) => ({ ...prev, enableGridView: checked }))}
+                      />
+                    </div>
+
+                    {draftSettings.enableGridView && (
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-xs">Charts per row</Label>
+                        <Input
+                          type="number"
+                          value={draftSettings.chartsPerRow}
+                          onChange={(e) => setDraftSettings((prev) => ({ ...prev, chartsPerRow: Math.max(1, Number(e.target.value) || 1) }))}
+                          className="h-7 w-16 text-xs"
+                          min={1}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <Button size="sm" className="h-8 w-full text-xs" onClick={handleSaveSettings}>

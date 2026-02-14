@@ -18,6 +18,7 @@ import {
   Filter,
   Ban,
   Square,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +46,8 @@ interface EventsViewProps {
   onResolveByChat: (event: RunEvent) => void
   onUpdateEventStatus: (eventId: string, status: EventStatus) => void
   onRespondToAlert?: (event: RunEvent, choice: string) => void
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
 }
 
 export function EventsView({ 
@@ -53,6 +56,8 @@ export function EventsView({
   onResolveByChat,
   onUpdateEventStatus,
   onRespondToAlert,
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
 }: EventsViewProps) {
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [filterTypes, setFilterTypes] = useState<Set<'error' | 'warning' | 'info'>>(
@@ -192,9 +197,9 @@ export function EventsView({
 
     return (
       <Collapsible key={event.id} open={isExpanded} onOpenChange={() => toggleExpanded(event.id)}>
-        <div className={`rounded-lg border ${getPriorityStyle(event.priority)} overflow-hidden`}>
+        <div className={`relative rounded-lg border ${getPriorityStyle(event.priority)} overflow-hidden`}>
           {/* Event Header — includes action icons */}
-          <div className="flex items-start gap-3 p-3">
+          <div className="flex items-start gap-3 p-3 pb-8">
             {/* Clickable left side (expand/collapse) */}
             <CollapsibleTrigger asChild>
               <button
@@ -228,7 +233,6 @@ export function EventsView({
                     </span>
                   </div>
                 </div>
-                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
               </button>
             </CollapsibleTrigger>
 
@@ -288,6 +292,16 @@ export function EventsView({
               )}
             </div>
           </div>
+
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+              aria-label={isExpanded ? 'Collapse event details' : 'Expand event details'}
+            >
+              <ChevronRight className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+            </button>
+          </CollapsibleTrigger>
 
           {/* Expanded Content */}
           <CollapsibleContent>
@@ -386,11 +400,25 @@ export function EventsView({
       {/* Header */}
       <div className="shrink-0 border-b border-border px-4 py-3">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex items-center gap-2">
+            {showDesktopSidebarToggle && onDesktopSidebarToggle && (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={onDesktopSidebarToggle}
+                className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+                title="Show sidebar"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+                <span className="sr-only">Show sidebar</span>
+              </Button>
+            )}
+            <div>
             <h2 className="text-lg font-semibold text-foreground">Events</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               {filteredEvents.length} event{filteredEvents.length !== 1 ? 's' : ''} requiring attention
             </p>
+            </div>
           </div>
           
           {/* Filters */}

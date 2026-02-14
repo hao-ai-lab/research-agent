@@ -10,6 +10,7 @@ import {
   Folder,
   FolderOpen,
   Loader2,
+  PanelLeftOpen,
   RefreshCcw,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -66,7 +67,15 @@ function getFileName(path: string | null): string {
   return parts[parts.length - 1] || path
 }
 
-export function FileExplorerView() {
+interface FileExplorerViewProps {
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
+}
+
+export function FileExplorerView({
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
+}: FileExplorerViewProps) {
   const [treeByPath, setTreeByPath] = useState<Record<string, ExplorerNode[]>>({})
   const treeByPathRef = useRef<Record<string, ExplorerNode[]>>({})
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set())
@@ -294,9 +303,24 @@ export function FileExplorerView() {
   const treePane = (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b border-border/70 px-3 py-2.5">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          {showDesktopSidebarToggle && onDesktopSidebarToggle && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              onClick={onDesktopSidebarToggle}
+              className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+              title="Show sidebar"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+              <span className="sr-only">Show sidebar</span>
+            </Button>
+          )}
+          <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">File Explorer</p>
           <p className="text-[11px] text-muted-foreground">Hidden files included</p>
+        </div>
         </div>
         <Button
           type="button"

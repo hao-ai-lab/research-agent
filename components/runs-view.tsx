@@ -32,6 +32,7 @@ import {
   Terminal,
   Pencil,
   Check,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -132,6 +133,8 @@ interface RunsViewProps {
   onUpdateCluster?: (request: ClusterUpdateRequest) => Promise<void>
   onNavigateToCharts?: () => void
   onRespondToAlert?: (alertId: string, choice: string) => Promise<void>
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
 }
 
 export function RunsView({
@@ -160,6 +163,8 @@ export function RunsView({
   onUpdateCluster,
   onNavigateToCharts,
   onRespondToAlert,
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
 }: RunsViewProps) {
   const { settings } = useAppSettings()
   const interactionMode = settings.appearance.runItemInteractionMode || 'detail-page'
@@ -1765,7 +1770,21 @@ export function RunsView({
     <div className="flex flex-col h-full overflow-hidden">
       {/* Top Nav Bar */}
       <div className="flex items-center justify-between border-b border-border bg-card/80 px-3 py-1.5 backdrop-blur-sm shrink-0">
-        <h2 className="text-xs font-medium text-foreground">Runs</h2>
+        <div className="flex items-center gap-2">
+          {showDesktopSidebarToggle && onDesktopSidebarToggle && (
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={onDesktopSidebarToggle}
+              className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+              title="Show sidebar"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+              <span className="sr-only">Show sidebar</span>
+            </Button>
+          )}
+          <h2 className="text-xs font-medium text-foreground">Runs</h2>
+        </div>
         <div className="flex items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger asChild>

@@ -699,7 +699,7 @@ export default function ResearchChat() {
           <FloatingNav
             activeTab={activeTab}
             onMenuClick={() => setLeftPanelOpen(true)}
-            showDesktopSidebarToggle={desktopSidebarHidden && activeTab !== 'charts'}
+            showDesktopSidebarToggle={desktopSidebarHidden && (activeTab === 'chat' || activeTab === 'report')}
             onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
@@ -761,6 +761,8 @@ export default function ResearchChat() {
               <RunsView
                 runs={runs}
                 sweeps={sweeps}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
                 onRunClick={handleRunClick}
                 onUpdateRun={handleUpdateRun}
                 pendingAlertsByRun={pendingAlertsByRun}
@@ -789,6 +791,8 @@ export default function ResearchChat() {
             {activeTab === 'events' && (
               <EventsView
                 events={events}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
                 onNavigateToRun={handleNavigateToRun}
                 onResolveByChat={handleResolveByChat}
                 onUpdateEventStatus={handleUpdateEventStatus}
@@ -810,21 +814,32 @@ export default function ResearchChat() {
             {activeTab === 'memory' && (
               <InsightsView
                 rules={memoryRules}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
                 onToggleRule={handleToggleRule}
                 onAddRule={handleAddRule}
               />
             )}
             {activeTab === 'skills' && (
-              <SkillsBrowserView />
+              <SkillsBrowserView
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
+              />
             )}
             {activeTab === 'plans' && settings.developer?.showPlanPanel && (
-              <PlanPanel />
+              <PlanPanel
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
+              />
             )}
             {activeTab === 'report' && (
               <ReportView runs={runs} onToolbarChange={setReportToolbar} />
             )}
             {activeTab === 'explorer' && (
-              <FileExplorerView />
+              <FileExplorerView
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
+              />
             )}
             {activeTab === 'journey' && (
               <JourneyView

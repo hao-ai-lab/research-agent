@@ -6,6 +6,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Plus,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,12 +17,16 @@ interface InsightsViewProps {
   rules: MemoryRule[]
   onToggleRule?: (ruleId: string) => void
   onAddRule?: () => void
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
 }
 
 export function InsightsView({
   rules,
   onToggleRule,
   onAddRule,
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
 }: InsightsViewProps) {
   const formatDate = (date: Date) => {
     const now = new Date()
@@ -42,6 +47,18 @@ export function InsightsView({
             {/* Header with Add button */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
+                {showDesktopSidebarToggle && onDesktopSidebarToggle && (
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={onDesktopSidebarToggle}
+                    className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+                    title="Show sidebar"
+                  >
+                    <PanelLeftOpen className="h-4 w-4" />
+                    <span className="sr-only">Show sidebar</span>
+                  </Button>
+                )}
                 <Lightbulb className="h-4 w-4 text-accent" />
                 <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Active Rules ({rules.filter(r => r.isActive).length})
