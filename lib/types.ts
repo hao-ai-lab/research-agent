@@ -104,6 +104,7 @@ export interface AppSettings {
     starterCardFlavor?: "novice" | "expert";
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
+    mobileEnterToNewline?: boolean;
   };
   integrations: {
     slack?: {

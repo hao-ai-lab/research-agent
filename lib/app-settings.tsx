@@ -53,6 +53,7 @@ export const defaultAppSettings: AppSettings = {
     showStarterCards: false,
     starterCardFlavor: "expert",
     showSidebarNewChatButton: false,
+    mobileEnterToNewline: false,
   },
   integrations: {},
   notifications: {
@@ -396,6 +397,9 @@ function readStoredSettings(): AppSettings {
           customAccentColorFromBlob ??
           defaultAppSettings.appearance.customAccentColor,
         starterCardTemplates: parsed?.appearance?.starterCardTemplates ?? {},
+        mobileEnterToNewline:
+          parsed?.appearance?.mobileEnterToNewline ??
+          defaultAppSettings.appearance.mobileEnterToNewline,
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,
       notifications: {
