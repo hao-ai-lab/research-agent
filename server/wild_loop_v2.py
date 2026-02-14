@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -262,6 +263,9 @@ class WildV2Engine:
         sid = self._session.session_id
         session_dir = self._session_dir(sid)
         d["session_dir"] = session_dir
+        d["workdir"] = self._get_workdir()
+        d["opencode_pwd"] = None
+        d["opencode_pwd_note"] = "OpenCode does not expose a direct cwd endpoint; prompt assumes cd to workdir each iteration."
 
         # Read iteration_log.md
         log_path = os.path.join(session_dir, "iteration_log.md")
@@ -282,6 +286,31 @@ class WildV2Engine:
                 pass
 
         return d
+
+    def _current_step_goal(self, session: "WildV2Session") -> str:
+        """Best-effort next-step goal from tasks.md."""
+        tasks_path = os.path.join(self._session_dir(session.session_id), "tasks.md")
+        lines: list[str] = []
+        if os.path.exists(tasks_path):
+            try:
+                with open(tasks_path) as f:
+                    lines = f.read().splitlines()
+            except Exception:
+                lines = []
+
+        # Prefer explicitly in-progress checkbox task.
+        for line in lines:
+            m = re.match(r"^\s*(?:[-*+]|\d+[.)])\s+\[(/)\]\s+(.*)$", line)
+            if m and m.group(2).strip():
+                return m.group(2).strip()
+
+        # Fallback to first unchecked task.
+        for line in lines:
+            m = re.match(r"^\s*(?:[-*+]|\d+[.)])\s+\[( )\]\s+(.*)$", line)
+            if m and m.group(2).strip():
+                return m.group(2).strip()
+
+        return "Make measurable progress toward the session goal and update tasks.md + iteration_log.md."
 
     # Events are now API-driven — the agent curls /wild/v2/events/{session_id}
     # Event storage/resolution is managed by the server, not the engine.
@@ -383,7 +412,11 @@ class WildV2Engine:
 
             ctx = self._build_context(session)
             planning_prompt = build_planning_prompt(ctx, render_fn=self._render_fn)
-            display_msg = "[Wild V2 — Planning]"
+            display_msg = (
+                "[Wild V2 — Step #0]\n"
+                "Role: plan\n"
+                "Goal: Explore the codebase and write a concrete task checklist in tasks.md."
+            )
             logger.debug("[wild-v2] Planning prompt built, length=%d chars", len(planning_prompt))
 
             try:
@@ -451,7 +484,12 @@ class WildV2Engine:
                 # 1. Build the prompt
                 ctx = self._build_context(session)
                 prompt = build_iteration_prompt(ctx, render_fn=self._render_fn)
-                display_msg = f"[Wild V2 — Iteration {session.iteration}/{session.max_iterations}]"
+                step_goal = self._current_step_goal(session)
+                display_msg = (
+                    f"[Wild V2 — Step #{session.iteration}/{session.max_iterations}]\n"
+                    "Role: run\n"
+                    f"Goal: {step_goal}"
+                )
                 logger.debug("[wild-v2] Prompt built, length=%d chars", len(prompt))
                 logger.debug("[wild-v2] Display message: %s", display_msg)
 

@@ -1110,6 +1110,9 @@ export interface WildV2Status {
     plan?: string
     iteration_log?: string
     session_dir?: string
+    workdir?: string
+    opencode_pwd?: string | null
+    opencode_pwd_note?: string
     history?: WildV2IterationHistory[]
     started_at?: number
     finished_at?: number | null

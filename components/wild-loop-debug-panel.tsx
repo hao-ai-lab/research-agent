@@ -499,6 +499,27 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                     </div>
                                 )}
 
+                                {/* Workdir */}
+                                {v2Status.workdir && (
+                                    <div>
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Workdir</div>
+                                        <code className="text-[10px] text-blue-400 break-all">{v2Status.workdir}</code>
+                                    </div>
+                                )}
+
+                                {/* OpenCode cwd (best-effort) */}
+                                <div>
+                                    <div className="text-[10px] text-muted-foreground mb-1 font-medium">OpenCode pwd</div>
+                                    {v2Status.opencode_pwd ? (
+                                        <code className="text-[10px] text-blue-400 break-all">{v2Status.opencode_pwd}</code>
+                                    ) : (
+                                        <div className="text-[10px] text-muted-foreground">
+                                            unavailable
+                                            {v2Status.opencode_pwd_note ? ` — ${v2Status.opencode_pwd_note}` : ''}
+                                        </div>
+                                    )}
+                                </div>
+
                                 {/* 📄 tasks.md */}
                                 {v2Status.plan && (
                                     <Collapsible open={v2TasksOpen} onOpenChange={setV2TasksOpen}>
