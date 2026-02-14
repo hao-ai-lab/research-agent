@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sys
 import time
 import math
@@ -217,28 +218,6 @@ def seen_recent_signature(state: dict, namespace: str, signature: str, ttl_secon
 # ===========================================================================
 # WandB directory detection
 # ===========================================================================
-
-def check_wandb_in_pane(pane_id: str, workdir: str = None) -> str | None:
-    """Detect WandB run directory from tmux pane output."""
-    try:
-        res = subprocess.run(
-            ["tmux", "capture-pane", "-pt", pane_id, "-J"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        content = res.stdout
-
-        if "WANDB_RUN_DIR:" in content:
-            match = re.search(r"WANDB_RUN_DIR: (\S+)", content)
-            if match:
-                found_path = match.group(1).strip()
-                if workdir and not os.path.isabs(found_path):
-                    return os.path.normpath(os.path.join(workdir, found_path))
-                return os.path.abspath(found_path)
-    except Exception as e:
-        logger.warning(f"Error checking pane for WandB: {e}")
-    return None
 
 
 def scan_wandb_dir(workdir: str) -> str | None:
@@ -925,6 +904,12 @@ def monitor_job(
     except Exception as e:
         logger.error(f"Failed to setup pipe-pane: {e}")
 
+    # Set WANDB_DIR so wandb writes to a known location under run_dir
+    wandb_parent = os.path.join(run_dir, "wandb_data")
+    os.makedirs(wandb_parent, exist_ok=True)
+    job_pane.send_keys(f"export WANDB_DIR={shlex.quote(wandb_parent)}")
+    time.sleep(0.1)
+
     # Execute command with exit code capture
     wrapped_command = f"({effective_command}); echo $? > {completion_file}"
     logger.info(f"Executing: {wrapped_command}")
@@ -949,11 +934,9 @@ def monitor_job(
                 report_status(server_url, job_id, "failed", {"error": "Pane disappeared"}, auth_token=auth_token)
                 return
 
-            # --- WandB detection (try pane output first, then directory scan) ---
+            # --- WandB detection (scan known location, then workdir) ---
             if not found_wandb_dir:
-                found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
-                if not found_wandb_dir:
-                    found_wandb_dir = scan_wandb_dir(workdir)
+                found_wandb_dir = scan_wandb_dir(wandb_parent) or scan_wandb_dir(workdir)
                 if found_wandb_dir:
                     logger.info(f"Detected WandB dir: {found_wandb_dir}")
                     report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
