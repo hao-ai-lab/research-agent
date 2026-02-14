@@ -66,7 +66,14 @@ export default function ResearchChat() {
   const sidebarRafRef = useRef<number | null>(null)
 
   // Use real API data via useRuns hook
-  const { runs, updateRun: apiUpdateRun, refetch: refetchRuns, startExistingRun, stopExistingRun } = useRuns()
+  const {
+    runs,
+    updateRun: apiUpdateRun,
+    refetch: refetchRuns,
+    createNewRun,
+    startExistingRun,
+    stopExistingRun,
+  } = useRuns()
   const {
     sweeps,
     refetch: refetchSweeps,
@@ -369,13 +376,28 @@ export default function ResearchChat() {
     handleTabChange('runs')
   }, [handleTabChange])
 
+  const setRunsHash = useCallback((hashValue: string) => {
+    if (typeof window === 'undefined') return
+    const nextHash = `#${encodeURIComponent(hashValue)}`
+    if (window.location.hash === nextHash) {
+      window.dispatchEvent(new Event('hashchange'))
+      return
+    }
+    window.location.hash = nextHash
+  }, [])
+
   const handleNavigateToRun = useCallback((runId: string) => {
     const run = runs.find(r => r.id === runId)
-    if (run) {
-      handleTabChange('runs')
-      setSelectedRun(run)
-    }
-  }, [runs, handleTabChange])
+    handleTabChange('runs')
+    setSelectedRun(run ?? null)
+    setRunsHash(runId)
+  }, [runs, handleTabChange, setRunsHash])
+
+  const handleNavigateToSweep = useCallback((sweepId: string) => {
+    handleTabChange('runs')
+    setSelectedRun(null)
+    setRunsHash(`sweep:${sweepId}`)
+  }, [handleTabChange, setRunsHash])
 
   const handleNavigateToEvents = useCallback(() => {
     handleTabChange('events')
@@ -545,6 +567,12 @@ export default function ResearchChat() {
     await Promise.all([refetchRuns(), refetchSweeps(), refetchCluster()])
   }, [refetchRuns, refetchSweeps, refetchCluster])
 
+  const handleCreateRun = useCallback(async (request: Parameters<typeof createNewRun>[0]) => {
+    const created = await createNewRun(request)
+    setSelectedRun(created)
+    await Promise.all([refetchRuns(), refetchSweeps()])
+  }, [createNewRun, refetchRuns, refetchSweeps])
+
   const handleChatModeChange = useCallback(async (mode: ChatMode) => {
     setChatMode(mode)
     try {
@@ -659,6 +687,7 @@ export default function ResearchChat() {
             await renameSession(sessionId, title)
           }}
           onNavigateToRun={handleNavigateToRun}
+          onNavigateToSweep={handleNavigateToSweep}
           onInsertReference={handleInsertChatReference}
           onSettingsClick={() => handleTabChange('settings')}
           onToggleCollapse={() => setDesktopSidebarHidden(true)}
@@ -670,7 +699,7 @@ export default function ResearchChat() {
           <FloatingNav
             activeTab={activeTab}
             onMenuClick={() => setLeftPanelOpen(true)}
-            showDesktopSidebarToggle={desktopSidebarHidden}
+            showDesktopSidebarToggle={desktopSidebarHidden && (activeTab === 'chat' || activeTab === 'report')}
             onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
@@ -732,6 +761,8 @@ export default function ResearchChat() {
               <RunsView
                 runs={runs}
                 sweeps={sweeps}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
                 onRunClick={handleRunClick}
                 onUpdateRun={handleUpdateRun}
                 pendingAlertsByRun={pendingAlertsByRun}
@@ -741,6 +772,7 @@ export default function ResearchChat() {
                 onSelectedRunChange={setSelectedRun}
                 onShowVisibilityManageChange={setShowVisibilityManage}
                 onRefresh={handleRefreshExperimentState}
+                onCreateRun={handleCreateRun}
                 onStartRun={startExistingRun}
                 onStopRun={stopExistingRun}
                 onSaveSweep={handleSaveSweep}
@@ -759,6 +791,8 @@ export default function ResearchChat() {
             {activeTab === 'events' && (
               <EventsView
                 events={events}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
                 onNavigateToRun={handleNavigateToRun}
                 onResolveByChat={handleResolveByChat}
                 onUpdateEventStatus={handleUpdateEventStatus}
@@ -773,26 +807,39 @@ export default function ResearchChat() {
                 onToggleOverview={handleToggleChartOverview}
                 onUpdateRun={handleUpdateRun}
                 onShowVisibilityManageChange={setShowVisibilityManage}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
               />
             )}
             {activeTab === 'memory' && (
               <InsightsView
                 rules={memoryRules}
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
                 onToggleRule={handleToggleRule}
                 onAddRule={handleAddRule}
               />
             )}
             {activeTab === 'skills' && (
-              <SkillsBrowserView />
+              <SkillsBrowserView
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
+              />
             )}
             {activeTab === 'plans' && settings.developer?.showPlanPanel && (
-              <PlanPanel />
+              <PlanPanel
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
+              />
             )}
             {activeTab === 'report' && (
               <ReportView runs={runs} onToolbarChange={setReportToolbar} />
             )}
             {activeTab === 'explorer' && (
-              <FileExplorerView />
+              <FileExplorerView
+                showDesktopSidebarToggle={desktopSidebarHidden}
+                onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
+              />
             )}
             {activeTab === 'journey' && (
               <JourneyView

@@ -364,6 +364,12 @@ class RunStatusUpdate(BaseModel):
     wandb_dir: Optional[str] = None
 
 
+class RunUpdate(BaseModel):
+    name: Optional[str] = None
+    command: Optional[str] = None
+    workdir: Optional[str] = None
+
+
 class SweepCreate(BaseModel):
     name: str
     base_command: str
@@ -3544,6 +3550,42 @@ async def get_run(run_id: str):
     return _run_response_payload(run_id, runs[run_id])
 
 
+@app.put("/runs/{run_id}")
+async def update_run(run_id: str, req: RunUpdate):
+    """Update mutable run fields."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    current_status = str(run.get("status", "")).strip().lower()
+
+    if req.command is not None:
+        next_command = req.command.strip()
+        if not next_command:
+            raise HTTPException(status_code=400, detail="Run command cannot be empty")
+        if current_status in {"launching", "running"} and next_command != str(run.get("command", "")).strip():
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot edit command while run is active. Stop the run first.",
+            )
+        run["command"] = next_command
+
+    if req.name is not None:
+        next_name = req.name.strip()
+        if not next_name:
+            raise HTTPException(status_code=400, detail="Run name cannot be empty")
+        run["name"] = next_name
+
+    if req.workdir is not None:
+        next_workdir = req.workdir.strip()
+        if not next_workdir:
+            raise HTTPException(status_code=400, detail="Run workdir cannot be empty")
+        run["workdir"] = next_workdir
+
+    save_runs_state()
+    return _run_response_payload(run_id, run)
+
+
 @app.post("/runs/{run_id}/queue")
 async def queue_run(run_id: str):
     """Queue a ready run for execution."""
@@ -4441,7 +4483,7 @@ def build_command_with_params(base_command: str, params: dict) -> str:
     """Insert parameters into command string."""
     # Simple approach: append as CLI args
     param_str = " ".join([f"--{k}={v}" for k, v in params.items()])
-    return f"{base_command} {param_str}"
+    return f"{base_command} {param_str}".strip()
 
 
 @app.get("/sweeps")
@@ -4646,10 +4688,12 @@ async def update_sweep(sweep_id: str, req: SweepUpdate):
 
     sweep = sweeps[sweep_id]
     current_status = _normalize_sweep_status(sweep.get("status"))
-    structural_update_requested = any(
+    base_command_update_requested = req.base_command is not None
+    non_command_structural_update_requested = any(
         field is not None
-        for field in [req.base_command, req.parameters, req.max_runs]
+        for field in [req.parameters, req.max_runs]
     )
+    structural_update_requested = base_command_update_requested or non_command_structural_update_requested
 
     # Keep running sweeps immutable to avoid mutating active experiments in place.
     if current_status == "running" and structural_update_requested:
@@ -4661,7 +4705,7 @@ async def update_sweep(sweep_id: str, req: SweepUpdate):
             ),
         )
 
-    if sweep.get("run_ids") and structural_update_requested:
+    if sweep.get("run_ids") and non_command_structural_update_requested:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -4682,7 +4726,29 @@ async def update_sweep(sweep_id: str, req: SweepUpdate):
     if req.name is not None:
         sweep["name"] = req.name
     if req.base_command is not None:
-        sweep["base_command"] = req.base_command
+        next_base_command = req.base_command.strip()
+        if not next_base_command:
+            raise HTTPException(status_code=400, detail="Sweep base command cannot be empty")
+        sweep["base_command"] = next_base_command
+
+        ui_config = sweep.get("ui_config")
+        if isinstance(ui_config, dict):
+            ui_config["command"] = next_base_command
+            ui_config["updatedAt"] = int(time.time())
+
+        creation_context = sweep.get("creation_context")
+        if isinstance(creation_context, dict):
+            creation_context["command"] = next_base_command
+
+        run_ids = sweep.get("run_ids") or []
+        for run_id in run_ids:
+            run = runs.get(run_id)
+            if not run:
+                continue
+            params = run.get("sweep_params")
+            if not isinstance(params, dict):
+                params = {}
+            run["command"] = build_command_with_params(next_base_command, params)
     if req.workdir is not None:
         sweep["workdir"] = req.workdir
     if req.parameters is not None:

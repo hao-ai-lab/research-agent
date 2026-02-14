@@ -3,15 +3,17 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   BarChart3,
+  CheckSquare,
   ChevronDown,
   ChevronRight,
   Eye,
   GripVertical,
   Layers,
+  PanelLeftOpen,
   Pin,
   Search,
   Settings,
-  SlidersHorizontal,
+  Square,
   Star,
   TrendingUp,
 } from 'lucide-react'
@@ -63,6 +65,8 @@ interface ChartsViewProps {
   onToggleOverview?: (id: string) => void
   onUpdateRun?: (run: ExperimentRun) => void
   onShowVisibilityManageChange?: (show: boolean) => void
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
 }
 
 type MetricSectionId = 'pinned' | 'primary' | 'secondary'
@@ -264,18 +268,35 @@ function buildMetricData(
   return Array.from(stepRows.values()).sort((a, b) => a.step - b.step)
 }
 
-export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, onUpdateRun, onShowVisibilityManageChange }: ChartsViewProps) {
+export function ChartsView({
+  runs,
+  customCharts,
+  onTogglePin,
+  onToggleOverview,
+  onUpdateRun,
+  onShowVisibilityManageChange,
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
+}: ChartsViewProps) {
   const [activeSection, setActiveSection] = useState<'standard' | 'custom' | 'videoCompare'>('standard')
   const [metrics, setMetrics] = useState<MetricVisualization[]>(defaultMetricVisualizations)
   const [selectedLayer, setSelectedLayer] = useState<Record<string, number>>({})
   const [showVisibilityManage, setShowVisibilityManageInternal] = useState(false)
   const [showVisibilitySection, setShowVisibilitySection] = useState(false)
-  const [metricFilter, setMetricFilter] = useState('')
+  const [metricSearchQuery, setMetricSearchQuery] = useState('')
+  const [isMetricFilterOpen, setIsMetricFilterOpen] = useState(false)
+  const [selectedMetricIds, setSelectedMetricIds] = useState<Set<string>>(new Set())
+  const [metricSelectionInitialized, setMetricSelectionInitialized] = useState(false)
   const [smoothing, setSmoothing] = useState('0.50')
   const [sectionOpen, setSectionOpen] = useState<Record<MetricSectionId, boolean>>({
     pinned: true,
     primary: true,
     secondary: true,
+  })
+  const [sectionPage, setSectionPage] = useState<Record<MetricSectionId, number>>({
+    pinned: 1,
+    primary: 1,
+    secondary: 1,
   })
 
   const [chartSettings, setChartSettings] = useState({
@@ -284,6 +305,10 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     xAxisTickCount: 5,
     yAxisTickCount: 5,
     yAxisWidth: 34,
+    paginateSections: false,
+    rowsPerPage: 2,
+    enableGridView: false,
+    chartsPerRow: 2,
   })
   const [draftSettings, setDraftSettings] = useState({ ...chartSettings })
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -385,6 +410,32 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
   }, [dynamicMetricVisualizations])
 
   useEffect(() => {
+    if (metrics.length === 0) return
+
+    setSelectedMetricIds((prev) => {
+      if (!metricSelectionInitialized || prev.size === 0) {
+        return new Set(metrics.map((metric) => metric.id))
+      }
+
+      const validIds = new Set(metrics.map((metric) => metric.id))
+      const next = new Set<string>()
+      prev.forEach((id) => {
+        if (validIds.has(id)) next.add(id)
+      })
+      metrics.forEach((metric) => {
+        if (!next.has(metric.id)) {
+          next.add(metric.id)
+        }
+      })
+      return next
+    })
+
+    if (!metricSelectionInitialized) {
+      setMetricSelectionInitialized(true)
+    }
+  }, [metricSelectionInitialized, metrics])
+
+  useEffect(() => {
     const activeIdSet = new Set(activeRuns.map((r) => r.id))
     setVisibleRunIds((prev) => {
       const filtered = new Set(Array.from(prev).filter((id) => activeIdSet.has(id)))
@@ -400,10 +451,43 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     [runs, visibleRunIds]
   )
 
-  const filterQuery = metricFilter.trim().toLowerCase()
+  const filterQuery = metricSearchQuery.trim().toLowerCase()
   const matchesFilter = (m: MetricVisualization) => {
-    if (!filterQuery) return true
-    return m.name.toLowerCase().includes(filterQuery) || m.path.toLowerCase().includes(filterQuery)
+    return selectedMetricIds.has(m.id)
+  }
+
+  const metricFilterOptions = useMemo(
+    () => metrics
+      .filter((metric) => (
+        !filterQuery
+        || metric.name.toLowerCase().includes(filterQuery)
+        || metric.path.toLowerCase().includes(filterQuery)
+      ))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [filterQuery, metrics]
+  )
+
+  const selectedMetricCount = selectedMetricIds.size
+  const totalMetricCount = metrics.length
+
+  const toggleMetricSelection = (metricId: string) => {
+    setSelectedMetricIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(metricId)) {
+        next.delete(metricId)
+      } else {
+        next.add(metricId)
+      }
+      return next
+    })
+  }
+
+  const selectAllMetrics = () => {
+    setSelectedMetricIds(new Set(metrics.map((metric) => metric.id)))
+  }
+
+  const clearMetricSelection = () => {
+    setSelectedMetricIds(new Set())
   }
 
   const primaryMetrics = metrics.filter((m) => m.category === 'primary' && matchesFilter(m))
@@ -461,7 +545,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     const isArea = metric.type === 'area'
 
     return (
-      <div key={metric.id} className="rounded-lg border border-border/80 bg-card/70 p-2.5">
+      <div key={metric.id} className="rounded-lg bg-card/40 px-1 py-2 sm:px-2">
         <div className="mb-2 flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
@@ -513,7 +597,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
           </div>
         </div>
 
-        <div className="h-44 rounded-md border border-border/70 bg-background/70 p-1.5">
+        <div className="h-44 w-full rounded-md bg-background/50 p-0.5">
           <ResponsiveContainer width="100%" height="100%">
             {isArea ? (
               <AreaChart data={data}>
@@ -679,7 +763,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     }
 
     return (
-      <div key={chart.id} className="rounded-lg border border-border/80 bg-card/70 p-3">
+      <div key={chart.id} className="rounded-lg bg-card/40 p-2 sm:p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
             <h4 className="truncate text-sm font-semibold text-foreground">{chart.title}</h4>
@@ -694,7 +778,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
             </Button>
           </div>
         </div>
-        <div className="rounded-md border border-border/70 bg-background/70 p-1.5">{chartElement}</div>
+        <div className="rounded-md bg-background/50 p-0.5">{chartElement}</div>
       </div>
     )
   }
@@ -705,10 +789,19 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     }
 
     const open = sectionOpen[id]
+    const gridColumns = Math.max(1, Number(chartSettings.chartsPerRow) || 1)
+    const rowsPerPage = Math.max(1, Number(chartSettings.rowsPerPage) || 1)
+    const pageSize = rowsPerPage * (chartSettings.enableGridView ? gridColumns : 1)
+    const totalPages = chartSettings.paginateSections ? Math.max(1, Math.ceil(sectionMetrics.length / pageSize)) : 1
+    const currentPage = Math.min(Math.max(sectionPage[id] || 1, 1), totalPages)
+    const startIndex = chartSettings.paginateSections ? (currentPage - 1) * pageSize : 0
+    const visibleMetrics = chartSettings.paginateSections
+      ? sectionMetrics.slice(startIndex, startIndex + pageSize)
+      : sectionMetrics
 
     return (
       <Collapsible key={id} open={open} onOpenChange={(next) => setSectionOpen((prev) => ({ ...prev, [id]: next }))}>
-        <div className="rounded-lg border border-border/80 bg-card/50">
+        <div className="rounded-lg bg-transparent">
           <CollapsibleTrigger asChild>
             <button
               type="button"
@@ -733,8 +826,44 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
             </button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="space-y-3 border-t border-border/70 p-3">
-              {sectionMetrics.map(renderMetricChart)}
+            <div className="space-y-2 pt-1">
+              {chartSettings.paginateSections && (
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[11px] text-muted-foreground">
+                    Page {currentPage}/{totalPages}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setSectionPage((prev) => ({ ...prev, [id]: Math.max(1, currentPage - 1) }))}
+                      disabled={currentPage <= 1}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setSectionPage((prev) => ({ ...prev, [id]: Math.min(totalPages, currentPage + 1) }))}
+                      disabled={currentPage >= totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div
+                className={cn(chartSettings.enableGridView ? 'grid gap-3' : 'space-y-3')}
+                style={
+                  chartSettings.enableGridView
+                    ? { gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }
+                    : undefined
+                }
+              >
+                {visibleMetrics.map(renderMetricChart)}
+              </div>
             </div>
           </CollapsibleContent>
         </div>
@@ -761,165 +890,262 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 border-b border-border px-3 py-3">
-        <div className="flex items-center gap-2">
-          <div className="flex flex-1 min-w-0 rounded-md bg-secondary p-1">
-            <button
-              type="button"
-              onClick={() => setActiveSection('standard')}
-              className={cn(
-                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
-                activeSection === 'standard' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Layers className="h-3.5 w-3.5" />
-              <span className="truncate">Workspace</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSection('custom')}
-              className={cn(
-                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
-                activeSection === 'custom' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <BarChart3 className="h-3.5 w-3.5" />
-              <span className="truncate">Custom</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSection('videoCompare')}
-              className={cn(
-                'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition-colors',
-                activeSection === 'videoCompare' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              <span className="truncate">Video Compare</span>
-            </button>
-          </div>
-
-          <Popover open={settingsOpen} onOpenChange={handleOpenSettings}>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Settings className="h-4 w-4" />
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {showDesktopSidebarToggle && onDesktopSidebarToggle && (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={onDesktopSidebarToggle}
+                className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+                title="Show sidebar"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+                <span className="sr-only">Show sidebar</span>
               </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-64">
-              <div className="space-y-4">
-                <h4 className="text-sm font-medium">Chart Settings</h4>
+            )}
+            <Select value={activeSection} onValueChange={(value) => setActiveSection(value as 'standard' | 'custom' | 'videoCompare')}>
+              <SelectTrigger className="h-10 w-[220px] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">
+                  <span className="inline-flex items-center gap-2">
+                    <Layers className="h-3.5 w-3.5" />
+                    Workspace
+                  </span>
+                </SelectItem>
+                <SelectItem value="custom">
+                  <span className="inline-flex items-center gap-2">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Custom
+                  </span>
+                </SelectItem>
+                <SelectItem value="videoCompare">
+                  <span className="inline-flex items-center gap-2">
+                    <Eye className="h-3.5 w-3.5" />
+                    Video Compare
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex-1" />
 
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="show-visibility" className="text-xs">
-                    Show visibility toggle
-                  </Label>
-                  <Switch
-                    id="show-visibility"
-                    checked={showVisibilitySection}
-                    onCheckedChange={setShowVisibilitySection}
-                  />
-                </div>
-
-                <div className="space-y-3 border-t border-border pt-3">
-                  <p className="text-xs font-medium text-muted-foreground">Axis Settings</p>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs">X-Axis Font</Label>
-                    <Input
-                      type="number"
-                      value={draftSettings.xAxisFontSize}
-                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, xAxisFontSize: Number(e.target.value) }))}
-                      className="h-7 w-16 text-xs"
-                      min={0}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs">Y-Axis Font</Label>
-                    <Input
-                      type="number"
-                      value={draftSettings.yAxisFontSize}
-                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisFontSize: Number(e.target.value) }))}
-                      className="h-7 w-16 text-xs"
-                      min={0}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs">X-Axis Ticks</Label>
-                    <Input
-                      type="number"
-                      value={draftSettings.xAxisTickCount}
-                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, xAxisTickCount: Number(e.target.value) }))}
-                      className="h-7 w-16 text-xs"
-                      min={0}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs">Y-Axis Ticks</Label>
-                    <Input
-                      type="number"
-                      value={draftSettings.yAxisTickCount}
-                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisTickCount: Number(e.target.value) }))}
-                      className="h-7 w-16 text-xs"
-                      min={0}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs">Y-Axis Width</Label>
-                    <Input
-                      type="number"
-                      value={draftSettings.yAxisWidth}
-                      onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisWidth: Number(e.target.value) }))}
-                      className="h-7 w-16 text-xs"
-                      min={0}
-                    />
-                  </div>
-                </div>
-
-                <Button size="sm" className="h-8 w-full text-xs" onClick={handleSaveSettings}>
-                  Save Settings
+            {activeSection === 'standard' && (
+              <>
+                <Popover open={isMetricFilterOpen} onOpenChange={setIsMetricFilterOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-10 gap-2 px-3 text-sm">
+                      <Search className="h-4 w-4" />
+                      <span>Filter metrics</span>
+                      <Badge variant="secondary" className="h-5 rounded px-1.5 text-[11px]">
+                        {selectedMetricCount}/{totalMetricCount}
+                      </Badge>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-[min(92vw,320px)] p-2">
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                        <Input
+                          value={metricSearchQuery}
+                          onChange={(e) => setMetricSearchQuery(e.target.value)}
+                          placeholder="Search metrics"
+                          className="h-8 pl-7 text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={selectAllMetrics}>
+                          Select all
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={clearMetricSelection}>
+                          Clear
+                        </Button>
+                      </div>
+                      <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border/70 p-1">
+                        {metricFilterOptions.length > 0 ? (
+                          metricFilterOptions.map((metric) => {
+                            const selected = selectedMetricIds.has(metric.id)
+                            return (
+                              <button
+                                key={metric.id}
+                                type="button"
+                                onClick={() => toggleMetricSelection(metric.id)}
+                                className={cn(
+                                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                                  selected ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50'
+                                )}
+                              >
+                                {selected ? <CheckSquare className="h-3.5 w-3.5 shrink-0" /> : <Square className="h-3.5 w-3.5 shrink-0" />}
+                                <span className="min-w-0 flex-1 truncate">{metric.name}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground">{metric.path}</span>
+                              </button>
+                            )
+                          })
+                        ) : (
+                          <p className="px-2 py-2 text-xs text-muted-foreground">No metrics found.</p>
+                        )}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </>
+            )}
+            <Popover open={settingsOpen} onOpenChange={handleOpenSettings}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-9 w-9">
+                  <Settings className="h-4 w-4" />
                 </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64">
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium">Chart Settings</h4>
 
-        {activeSection === 'standard' && (
-          <div className="mt-2 space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  value={metricFilter}
-                  onChange={(e) => setMetricFilter(e.target.value)}
-                  placeholder="Filter metrics"
-                  className="h-8 pl-7 text-xs"
-                />
-              </div>
-              <div className="inline-flex h-8 items-center gap-1 rounded border border-border/80 bg-card px-2 text-xs text-muted-foreground">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                <span>Smooth</span>
-                <Select value={smoothing} onValueChange={setSmoothing}>
-                  <SelectTrigger className="h-6 w-16 border-0 bg-transparent p-0 text-xs shadow-none focus:ring-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {smoothingOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="show-visibility" className="text-xs">
+                      Show visibility toggle
+                    </Label>
+                    <Switch
+                      id="show-visibility"
+                      checked={showVisibilitySection}
+                      onCheckedChange={setShowVisibilitySection}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Smoothness</Label>
+                    <Select value={smoothing} onValueChange={setSmoothing}>
+                      <SelectTrigger className="h-7 w-24 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {smoothingOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-3 border-t border-border pt-3">
+                    <p className="text-xs font-medium text-muted-foreground">Axis Settings</p>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">X-Axis Font</Label>
+                      <Input
+                        type="number"
+                        value={draftSettings.xAxisFontSize}
+                        onChange={(e) => setDraftSettings((prev) => ({ ...prev, xAxisFontSize: Number(e.target.value) }))}
+                        className="h-7 w-16 text-xs"
+                        min={0}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Y-Axis Font</Label>
+                      <Input
+                        type="number"
+                        value={draftSettings.yAxisFontSize}
+                        onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisFontSize: Number(e.target.value) }))}
+                        className="h-7 w-16 text-xs"
+                        min={0}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">X-Axis Ticks</Label>
+                      <Input
+                        type="number"
+                        value={draftSettings.xAxisTickCount}
+                        onChange={(e) => setDraftSettings((prev) => ({ ...prev, xAxisTickCount: Number(e.target.value) }))}
+                        className="h-7 w-16 text-xs"
+                        min={0}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Y-Axis Ticks</Label>
+                      <Input
+                        type="number"
+                        value={draftSettings.yAxisTickCount}
+                        onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisTickCount: Number(e.target.value) }))}
+                        className="h-7 w-16 text-xs"
+                        min={0}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Y-Axis Width</Label>
+                      <Input
+                        type="number"
+                        value={draftSettings.yAxisWidth}
+                        onChange={(e) => setDraftSettings((prev) => ({ ...prev, yAxisWidth: Number(e.target.value) }))}
+                        className="h-7 w-16 text-xs"
+                        min={0}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 border-t border-border pt-3">
+                    <p className="text-xs font-medium text-muted-foreground">Layout</p>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Paginate sections</Label>
+                      <Switch
+                        checked={draftSettings.paginateSections}
+                        onCheckedChange={(checked) => setDraftSettings((prev) => ({ ...prev, paginateSections: checked }))}
+                      />
+                    </div>
+
+                    {draftSettings.paginateSections && (
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-xs">Rows per page</Label>
+                        <Input
+                          type="number"
+                          value={draftSettings.rowsPerPage}
+                          onChange={(e) => setDraftSettings((prev) => ({ ...prev, rowsPerPage: Math.max(1, Number(e.target.value) || 1) }))}
+                          className="h-7 w-16 text-xs"
+                          min={1}
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Enable grid view</Label>
+                      <Switch
+                        checked={draftSettings.enableGridView}
+                        onCheckedChange={(checked) => setDraftSettings((prev) => ({ ...prev, enableGridView: checked }))}
+                      />
+                    </div>
+
+                    {draftSettings.enableGridView && (
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-xs">Charts per row</Label>
+                        <Input
+                          type="number"
+                          value={draftSettings.chartsPerRow}
+                          onChange={(e) => setDraftSettings((prev) => ({ ...prev, chartsPerRow: Math.max(1, Number(e.target.value) || 1) }))}
+                          className="h-7 w-16 text-xs"
+                          min={1}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <Button size="sm" className="h-8 w-full text-xs" onClick={handleSaveSettings}>
+                    Save Settings
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+          {activeSection === 'standard' && (
             <div className="text-[11px] text-muted-foreground">
               {visibleRuns.length} visible run{visibleRuns.length !== 1 ? 's' : ''} in workspace
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {showVisibilitySection && (
@@ -939,7 +1165,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
       {activeSection !== 'videoCompare' && (
       <div className="min-h-0 flex-1 overflow-hidden">
         <ScrollArea className="h-full">
-          <div className="space-y-4 p-3">
+          <div className="space-y-3 px-1 py-2 sm:px-3">
             {activeSection === 'standard' ? (
               <>
                 {renderMetricSection('pinned', 'Pinned', pinnedMetrics, 'Pinned')}

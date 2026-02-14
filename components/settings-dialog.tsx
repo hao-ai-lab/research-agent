@@ -285,6 +285,15 @@ export function SettingsDialog({
           value: settings.appearance.showStarterCards !== false,
         },
         {
+          id: 'starterCardFlavor',
+          label: 'Starter Card Flavor',
+          description: 'Choose between expert context cards and novice quick-start prompts',
+          icon: LayoutGrid,
+          type: 'select' as const,
+          options: ['expert', 'novice'],
+          value: settings.appearance.starterCardFlavor || 'expert',
+        },
+        {
           id: 'appearanceAdvanced',
           label: 'Advanced Appearance',
           description: 'Set exact numeric sizes',
@@ -800,6 +809,7 @@ export function SettingsDialog({
                       if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
+                      if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
                       ? 'bg-accent text-accent-foreground'

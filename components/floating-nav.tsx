@@ -116,6 +116,8 @@ export function FloatingNav({
 }: FloatingNavProps) {
   const isChat = activeTab === 'chat'
   const isReport = activeTab === 'report'
+  const isSparseDesktopNav = !isChat && !isReport
+  const hideDesktopHeader = isSparseDesktopNav && !showDesktopSidebarToggle
   const { useMock: isDemoMode } = useApiConfig()
   const wl = wildLoop
 
@@ -125,7 +127,7 @@ export function FloatingNav({
   }
 
   return (
-    <header className="shrink-0 h-14 flex items-center gap-3 px-3 border-b border-border/80 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+    <header className={`shrink-0 h-14 flex items-center gap-3 px-3 border-b border-border/80 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75 ${hideDesktopHeader ? 'lg:hidden' : ''}`}>
       <div className="relative">
         <Button
           variant="ghost"
@@ -148,13 +150,13 @@ export function FloatingNav({
 
       {showDesktopSidebarToggle && (
         <Button
-          variant="ghost"
-          size="icon"
+          variant="outline"
+          size="icon-sm"
           onClick={onDesktopSidebarToggle}
-          className="hidden h-9 w-9 shrink-0 lg:inline-flex"
+          className="hidden h-8 w-8 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
           title="Show sidebar"
         >
-          <PanelLeftOpen className="h-5 w-5" />
+          <PanelLeftOpen className="h-4 w-4" />
           <span className="sr-only">Show sidebar</span>
         </Button>
       )}

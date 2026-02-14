@@ -26,6 +26,7 @@ export type {
     Run,
     CreateRunRequest,
     RunRerunRequest,
+    RunUpdateRequest,
     LogResponse,
     Artifact,
     Alert,
@@ -107,6 +108,9 @@ export const createRun = (...args: Parameters<typeof realApi.createRun>) =>
 
 export const getRun = (...args: Parameters<typeof realApi.getRun>) =>
     getApi().getRun(...args)
+
+export const updateRun = (...args: Parameters<typeof realApi.updateRun>) =>
+    getApi().updateRun(...args)
 
 export const startRun = (...args: Parameters<typeof realApi.startRun>) =>
     getApi().startRun(...args)

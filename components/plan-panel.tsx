@@ -7,8 +7,9 @@ import {
     ChevronRight,
     ClipboardList,
     Clock,
-    Loader2,
-    Play,
+	Loader2,
+	PanelLeftOpen,
+	Play,
     Plus,
     Trash2,
 } from 'lucide-react'
@@ -166,7 +167,15 @@ function PlanCard({ plan, onApprove, onExecute, onDelete, onComplete }: PlanCard
 // PlanPanel (main export)
 // ---------------------------------------------------------------------------
 
-export function PlanPanel() {
+interface PlanPanelProps {
+	showDesktopSidebarToggle?: boolean
+	onDesktopSidebarToggle?: () => void
+}
+
+export function PlanPanel({
+	showDesktopSidebarToggle = false,
+	onDesktopSidebarToggle,
+}: PlanPanelProps) {
     const [plans, setPlans] = useState<Plan[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -243,14 +252,26 @@ export function PlanPanel() {
         )
     }
 
-    return (
-        <div className="flex h-full flex-col">
-            {/* Header */}
-            <div className="shrink-0 border-b border-border px-4 py-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <ClipboardList className="h-5 w-5 text-accent" />
-                        <h2 className="text-sm font-semibold text-foreground">Plans</h2>
+		return (
+			<div className="flex h-full flex-col">
+				{/* Header */}
+				<div className="shrink-0 border-b border-border px-4 py-3">
+					<div className="flex items-center justify-between">
+						<div className="flex items-center gap-2">
+							{showDesktopSidebarToggle && onDesktopSidebarToggle && (
+								<Button
+									variant="outline"
+									size="icon-sm"
+									onClick={onDesktopSidebarToggle}
+									className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+									title="Show sidebar"
+								>
+									<PanelLeftOpen className="h-4 w-4" />
+									<span className="sr-only">Show sidebar</span>
+								</Button>
+							)}
+							<ClipboardList className="h-5 w-5 text-accent" />
+							<h2 className="text-sm font-semibold text-foreground">Plans</h2>
                         <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                             {plans.length}
                         </Badge>

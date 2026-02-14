@@ -18,6 +18,7 @@ import {
   Filter,
   Ban,
   Square,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +46,8 @@ interface EventsViewProps {
   onResolveByChat: (event: RunEvent) => void
   onUpdateEventStatus: (eventId: string, status: EventStatus) => void
   onRespondToAlert?: (event: RunEvent, choice: string) => void
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
 }
 
 export function EventsView({ 
@@ -53,6 +56,8 @@ export function EventsView({
   onResolveByChat,
   onUpdateEventStatus,
   onRespondToAlert,
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
 }: EventsViewProps) {
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [filterTypes, setFilterTypes] = useState<Set<'error' | 'warning' | 'info'>>(
@@ -228,7 +233,6 @@ export function EventsView({
                     </span>
                   </div>
                 </div>
-                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
               </button>
             </CollapsibleTrigger>
 
@@ -386,11 +390,25 @@ export function EventsView({
       {/* Header */}
       <div className="shrink-0 border-b border-border px-4 py-3">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex items-center gap-2">
+            {showDesktopSidebarToggle && onDesktopSidebarToggle && (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={onDesktopSidebarToggle}
+                className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+                title="Show sidebar"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+                <span className="sr-only">Show sidebar</span>
+              </Button>
+            )}
+            <div>
             <h2 className="text-lg font-semibold text-foreground">Events</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               {filteredEvents.length} event{filteredEvents.length !== 1 ? 's' : ''} requiring attention
             </p>
+            </div>
           </div>
           
           {/* Filters */}

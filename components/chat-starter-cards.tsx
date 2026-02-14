@@ -48,6 +48,7 @@ interface ChatStarterCardsProps {
   sweeps: Sweep[]
   alerts: Alert[]
   onPromptSelect: (prompt: string) => void
+  flavor?: 'novice' | 'expert'
   customTemplates?: Record<string, string>
   onEditTemplate?: (cardId: string, template: string | null) => void
 }
@@ -107,6 +108,62 @@ export const DEFAULT_PROMPT_TEMPLATES: Record<string, string> = {
   'cluster-setup':
     'My cluster setup is {{clusterLabel}}. Give me an onboarding checklist for runs/sweeps, command templates, scheduler assumptions, and failure checks.',
 }
+
+const NOVICE_STARTER_PROMPTS: Array<{
+  id: string
+  title: string
+  hint: string
+  prompt: string
+  icon: ComponentType<{ className?: string }>
+  toneClass: string
+  preview: string
+}> = [
+  {
+    id: 'novice-mnist-mlp',
+    title: 'Train MNIST with MLP',
+    hint: 'Fast baseline for first experiment.',
+    prompt: 'Train MNIST with a 2-layer MLP baseline using Adam (lr=1e-3, batch_size=128) for 10 epochs. Log train/val loss and accuracy each epoch, then summarize results.',
+    icon: FlaskConical,
+    toneClass: 'from-sky-500/12 to-cyan-500/5 border-sky-500/25',
+    preview: '2-layer MLP · Adam · 10 epochs',
+  },
+  {
+    id: 'novice-rlvr-gsm8k',
+    title: 'Kick off RLVR run',
+    hint: 'Reasoning-style training starter.',
+    prompt: 'Start an RLVR training run on GSM8K with a small model. Use conservative reward shaping and log reward, KL, and completion rate over time.',
+    icon: Sparkles,
+    toneClass: 'from-indigo-500/12 to-violet-500/5 border-indigo-500/25',
+    preview: 'GSM8K · reward/KL tracking',
+  },
+  {
+    id: 'novice-lora-sft',
+    title: 'LoRA fine-tune (7B)',
+    hint: 'Practical SFT starter recipe.',
+    prompt: 'Fine-tune a 7B model with LoRA on a summarization dataset. Start with rank=16, alpha=32, lr=2e-4, 3 epochs, and report validation metrics.',
+    icon: Play,
+    toneClass: 'from-emerald-500/10 to-teal-500/5 border-emerald-500/25',
+    preview: 'LoRA r16 a32 · 3 epochs',
+  },
+  {
+    id: 'novice-sweep-hparams',
+    title: 'Hyperparameter sweep',
+    hint: 'Find good lr/batch quickly.',
+    prompt: 'Launch a hyperparameter sweep on the current training script for learning rate [1e-4, 3e-4, 1e-3] and batch size [32, 64, 128]. Rank runs by validation metric and suggest the next 3 configs.',
+    icon: BarChart3,
+    toneClass: 'from-rose-500/10 to-pink-500/5 border-rose-500/25',
+    preview: 'Grid: lr × batch size',
+  },
+  {
+    id: 'novice-cifar-resnet',
+    title: 'Train CIFAR-10 ResNet',
+    hint: 'Common vision baseline.',
+    prompt: 'Train a CIFAR-10 ResNet-18 baseline for 20 epochs with standard augmentation. Track train/val accuracy and loss, and report the best validation checkpoint.',
+    icon: Server,
+    toneClass: 'from-violet-500/12 to-fuchsia-500/5 border-violet-500/25',
+    preview: 'ResNet-18 · 20 epochs',
+  },
+]
 
 function resolveTemplate(
   cardId: string,
@@ -400,9 +457,9 @@ function StarterInteractiveCard({
           onActivate()
         }
       }}
-      className={`h-full w-full cursor-pointer overflow-hidden border bg-gradient-to-br ${toneClass} ${className || ''} transition-[border-color,box-shadow,transform] hover:border-foreground/30 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.995]`}
+      className={`w-full cursor-pointer overflow-hidden border bg-gradient-to-br ${toneClass} ${className || ''} transition-[border-color,box-shadow,transform] hover:border-foreground/30 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-[0.995]`}
     >
-      <CardHeader className="space-y-1.5 px-3.5 py-3 pb-2">
+      <CardHeader className="space-y-1 px-3.5 py-2.5 pb-1.5">
         <CardTitle className="flex min-w-0 items-center gap-2 text-base leading-tight">
           <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-background/85 text-foreground">
             <Icon className="h-3.5 w-3.5" />
@@ -432,7 +489,7 @@ function StarterInteractiveCard({
         )}
       </CardHeader>
 
-      <CardContent className="space-y-2 px-3.5 pb-3.5 pt-0">
+      <CardContent className="space-y-1.5 px-3.5 pb-2.5 pt-0">
         {previewNode}
         {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
       </CardContent>
@@ -467,6 +524,7 @@ export function ChatStarterCards({
   sweeps,
   alerts,
   onPromptSelect,
+  flavor = 'expert',
   customTemplates,
   onEditTemplate,
 }: ChatStarterCardsProps) {
@@ -616,6 +674,7 @@ export function ChatStarterCards({
     selectedSweep && selectedSweep.progress.total > 0
       ? Math.round((selectedSweep.progress.completed / selectedSweep.progress.total) * 100)
       : 0
+  const isNovice = flavor === 'novice'
 
   return (
     <div className="space-y-2.5">
@@ -625,7 +684,27 @@ export function ChatStarterCards({
       </div>
 
       <div className="w-full">
-        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1.5 pb-2 [scrollbar-width:thin]">
+        <div className="flex items-start snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1.5 pb-2 [scrollbar-width:thin]">
+          {isNovice && NOVICE_STARTER_PROMPTS.map((card) => (
+            <StarterCardSlide key={card.id}>
+              <StarterInteractiveCard
+                title={card.title}
+                icon={card.icon}
+                toneClass={card.toneClass}
+                hint={card.hint}
+                previewNode={
+                  <div className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2.5">
+                    <p className="text-sm font-medium text-foreground">{card.preview}</p>
+                    <p className="mt-1.5 text-[11px] text-muted-foreground line-clamp-2">{card.prompt}</p>
+                  </div>
+                }
+                onActivate={() => onPromptSelect(card.prompt)}
+              />
+            </StarterCardSlide>
+          ))}
+
+          {!isNovice && (
+            <>
           <StarterCardSlide>
             <StarterInteractiveCard
               title="Observe latest run"
@@ -952,6 +1031,8 @@ export function ChatStarterCards({
               }}
             />
           </StarterCardSlide>
+            </>
+          )}
         </div>
       </div>
 

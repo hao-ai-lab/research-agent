@@ -469,6 +469,12 @@ export interface RunRerunRequest {
     origin_alert_id?: string
 }
 
+export interface RunUpdateRequest {
+    name?: string
+    command?: string
+    workdir?: string
+}
+
 export interface WildModeState {
     enabled: boolean
 }
@@ -598,6 +604,22 @@ export async function getRun(runId: string): Promise<Run> {
     })
     if (!response.ok) {
         throw new Error(`Failed to get run: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Update mutable run fields
+ */
+export async function updateRun(runId: string, request: RunUpdateRequest): Promise<Run> {
+    const response = await fetch(`${API_URL()}/runs/${runId}`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Failed to update run: ${error}`)
     }
     return response.json()
 }

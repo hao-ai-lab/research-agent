@@ -1,10 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  Clock,
   Terminal,
-  Settings,
   FileText,
   ImageIcon,
   Package,
@@ -13,19 +11,11 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Star,
-  Palette,
-  Archive,
   Plus,
-  MoreHorizontal,
   Pencil,
   X,
-  RefreshCw,
-  Play,
-  Square,
   BarChart3,
   AlertTriangle,
-  Sparkles,
   Bell,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -42,11 +32,6 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
   LineChart,
   Line,
   XAxis,
@@ -61,24 +46,18 @@ import {
 import { TagsDialog } from './tags-dialog'
 import { LogViewer } from './log-viewer'
 import { TmuxTerminalPanel } from './tmux-terminal-panel'
-import { SweepArtifact } from './sweep-artifact'
-import { SweepStatus } from './sweep-status'
 import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
-import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
+import { defaultMetricVisualizations } from '@/lib/mock-data'
 import { getSweep, type Alert } from '@/lib/api-client'
 import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
 
 interface RunDetailViewProps {
   run: ExperimentRun
   alerts?: Alert[]
-  runs?: ExperimentRun[]
-  onRunSelect?: (run: ExperimentRun) => void
+  onSweepSelect?: (sweep: Sweep) => void
   onUpdateRun?: (run: ExperimentRun) => void
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
-  onRefresh?: () => void
-  onStartRun?: (runId: string) => Promise<void>
-  onStopRun?: (runId: string) => Promise<void>
   sweeps?: Sweep[]
 }
 
@@ -202,21 +181,19 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpdateRun, allTags, onCreateTag, onRefresh, onStartRun, onStopRun, sweeps = [] }: RunDetailViewProps) {
+export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, allTags, onCreateTag, sweeps = [] }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [copiedRunId, setCopiedRunId] = useState(false)
   const [copiedSweepId, setCopiedSweepId] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
-  const [configOpen, setConfigOpen] = useState(false)
+  const [commandEditing, setCommandEditing] = useState(false)
+  const [editedCommand, setEditedCommand] = useState(run.command)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
   const [aliasEditing, setAliasEditing] = useState(false)
   const [editedAlias, setEditedAlias] = useState(run.alias || '')
   const [notesOpen, setNotesOpen] = useState(false)
   const [editedNotes, setEditedNotes] = useState(run.notes || '')
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [isStarting, setIsStarting] = useState(false)
-  const [isStopping, setIsStopping] = useState(false)
 
   // Charts state
   const [primaryChartsOpen, setPrimaryChartsOpen] = useState(false)
@@ -225,12 +202,10 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const [layerSelections, setLayerSelections] = useState<Record<string, number>>({})
 
   // Logs and Terminal state
-  const [logsOpen, setLogsOpen] = useState(false)
+  const [logsOpen, setLogsOpen] = useState(true)
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [logsFullPage, setLogsFullPage] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(true)
-  const [sweepObjectOpen, setSweepObjectOpen] = useState(true)
-  const alertsSectionRef = useRef<HTMLDivElement | null>(null)
 
   const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
   const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
@@ -272,8 +247,13 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
 
   const linkedSweep = linkedSweepFromList || linkedSweepFromApi
 
+  useEffect(() => {
+    setEditedCommand(run.command)
+    setCommandEditing(false)
+  }, [run.id, run.command])
+
   const copyCommand = () => {
-    navigator.clipboard.writeText(run.command)
+    navigator.clipboard.writeText(commandEditing ? editedCommand : run.command)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -310,50 +290,6 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     }
   }
 
-  const handleToggleFavorite = () => {
-    onUpdateRun?.({ ...run, isFavorite: !run.isFavorite })
-  }
-
-  const handleColorChange = (color: string) => {
-    onUpdateRun?.({ ...run, color })
-  }
-
-  const handleArchive = () => {
-    onUpdateRun?.({ ...run, isArchived: !run.isArchived })
-  }
-
-  const handleRefresh = async () => {
-    if (!onRefresh) return
-    setIsRefreshing(true)
-    try {
-      await onRefresh()
-    } finally {
-      setIsRefreshing(false)
-    }
-  }
-
-  const handleStartRun = async () => {
-    if (!onStartRun) return
-    setIsStarting(true)
-    try {
-      await onStartRun(run.id)
-      onRefresh?.()
-    } finally {
-      setIsStarting(false)
-    }
-  }
-
-  const handleStopRun = async () => {
-    if (!onStopRun) return
-    setIsStopping(true)
-    try {
-      await onStopRun(run.id)
-      onRefresh?.()
-    } finally {
-      setIsStopping(false)
-    }
-  }
-
   const handleSaveNotes = () => {
     onUpdateRun?.({ ...run, notes: editedNotes })
     setNotesOpen(false)
@@ -362,6 +298,18 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const handleSaveAlias = () => {
     onUpdateRun?.({ ...run, alias: editedAlias.trim() || undefined })
     setAliasEditing(false)
+  }
+
+  const handleSaveCommand = () => {
+    const nextCommand = editedCommand.trim()
+    if (!nextCommand) return
+    onUpdateRun?.({ ...run, command: nextCommand })
+    setCommandEditing(false)
+  }
+
+  const handleCancelCommand = () => {
+    setEditedCommand(run.command)
+    setCommandEditing(false)
   }
 
   const handleCancelAlias = () => {
@@ -399,7 +347,6 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const allSecondaryExpanded = secondaryMetrics.every(m => expandedCharts.has(m.id))
 
   const runAlerts = alerts
-  const pendingAlertCount = runAlerts.filter((alert) => alert.status === 'pending').length
 
   const formatTimestamp = (value?: Date) => {
     if (!value) return '--'
@@ -457,42 +404,11 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
 
   const terminalOutcome = getTerminalOutcome()
 
-  const handleCheckAlerts = () => {
-    setAlertsOpen(true)
-    requestAnimationFrame(() => {
-      alertsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
-  }
-
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="p-3 space-y-3">
-            <div className="rounded-lg border border-border bg-card p-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Status</span>
-                  <Badge variant="outline" className={`${getStatusBadgeClass(run.status)}`}>
-                    <span className="text-[10px]">{getStatusText(run.status)}</span>
-                  </Badge>
-                </div>
-                {run.endTime && (
-                  <span className="text-[10px] text-muted-foreground">
-                    Ended: {formatTimestamp(run.endTime)}
-                  </span>
-                )}
-              </div>
-              {terminalOutcome.state && (
-                <div className={`mt-2 rounded-md border px-2 py-1.5 text-[11px] ${terminalOutcome.className}`}>
-                  <p className="font-medium">Outcome: {terminalOutcome.summary}</p>
-                  {terminalOutcome.detail && (
-                    <p className="mt-0.5 break-words">{terminalOutcome.detail}</p>
-                  )}
-                </div>
-              )}
-            </div>
-
             {/* Alias */}
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">Alias</span>
@@ -535,73 +451,106 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
               )}
             </div>
 
+            {/* Tags */}
+            <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto rounded-lg border border-border bg-card px-2 py-1.5">
+              {run.tags && run.tags.length > 0 ? (
+                run.tags.map((tagName) => {
+                  const tag = allTags.find((t) => t.name === tagName)
+                  return (
+                    <span
+                      key={tagName}
+                      className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                      style={{
+                        backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
+                        color: tag?.color || '#4ade80',
+                      }}
+                    >
+                      {tagName}
+                    </span>
+                  )
+                })
+              ) : (
+                <span className="text-[10px] text-muted-foreground">No tags</span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 shrink-0"
+                onClick={() => setTagsDialogOpen(true)}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            </div>
+
             {/* IDs */}
             <div className="rounded-lg border border-border bg-card p-2 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Run ID</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Run ID</p>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0"
+                      onClick={() => copyValue(run.id, setCopiedRunId)}
+                    >
+                      {copiedRunId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
                   <p className="text-xs font-mono text-foreground truncate">{run.id}</p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 shrink-0"
-                  onClick={() => copyValue(run.id, setCopiedRunId)}
-                >
-                  {copiedRunId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                </Button>
-              </div>
 
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
-                  {(() => {
-                    const sweep = linkedSweep
-                    if (sweep) {
-                      return (
-                        <div className="mt-1 space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-foreground truncate">{sweep.config.name}</span>
-                            <Badge variant="outline" className={`text-[9px] h-4 ${
-                              sweep.status === 'draft' ? 'border-violet-500/50 bg-violet-500/10 text-violet-500' :
-                              sweep.status === 'running' ? 'border-blue-400/50 bg-blue-400/10 text-blue-400' :
-                              sweep.status === 'completed' ? 'border-green-400/50 bg-green-400/10 text-green-400' :
-                              sweep.status === 'failed' ? 'border-destructive/50 bg-destructive/10 text-destructive' :
-                              'border-muted-foreground/50 bg-muted/10 text-muted-foreground'
-                            }`}>{sweep.status}</Badge>
-                          </div>
-                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                            <span>{sweep.progress.completed}/{sweep.progress.total} runs</span>
-                            {sweep.progress.failed > 0 && <span className="text-destructive">{sweep.progress.failed} failed</span>}
-                            {sweep.bestMetricValue !== undefined && (
-                              <span>Best: {sweep.bestMetricValue.toFixed(4)}</span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-muted-foreground line-clamp-1">
-                            Goal: {(sweep.creationContext.goal || sweep.config.goal || '').trim() || 'Not provided'}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground line-clamp-1">
-                            Description: {(sweep.creationContext.description || sweep.config.description || '').trim() || 'Not provided'}
-                          </p>
-                        </div>
-                      )
-                    }
-                    return <p className="text-xs font-mono text-foreground truncate">{run.sweepId || 'No sweep'}</p>
-                  })()}
+                <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
+                    {run.sweepId && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => copyValue(run.sweepId!, setCopiedSweepId)}
+                      >
+                        {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      </Button>
+                    )}
+                  </div>
+                  {linkedSweep ? (
+                    <button
+                      type="button"
+                      onClick={() => onSweepSelect?.(linkedSweep)}
+                      className="mt-1 flex w-full items-center justify-between rounded-md border border-border/50 bg-secondary/35 px-2 py-1.5 text-left transition-colors hover:bg-secondary/60 disabled:cursor-default disabled:hover:bg-secondary/35"
+                      disabled={!onSweepSelect}
+                    >
+                      <span className="truncate text-xs font-medium text-foreground">
+                        {linkedSweep.config.name || linkedSweep.id}
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    </button>
+                  ) : (
+                    <p className="mt-1 text-xs font-mono text-foreground truncate">
+                      {run.sweepId
+                        ? (isLoadingLinkedSweep ? `Loading ${run.sweepId}...` : run.sweepId)
+                        : 'No sweep'}
+                    </p>
+                  )}
+                  {linkedSweep && (
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="truncate text-[10px] font-mono text-muted-foreground">{linkedSweep.id}</span>
+                      <Badge variant="outline" className="h-4 text-[9px] capitalize">
+                        {linkedSweep.status}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
-                {run.sweepId && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 shrink-0"
-                    onClick={() => copyValue(run.sweepId!, setCopiedSweepId)}
-                  >
-                    {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                  </Button>
-                )}
               </div>
 
-              <div className="grid grid-cols-1 gap-1 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-5">
+                <div>
+                  <p className="uppercase tracking-wide">Status</p>
+                  <Badge variant="outline" className={`mt-1 h-5 text-[9px] ${getStatusBadgeClass(run.status)}`}>
+                    {getStatusText(run.status)}
+                  </Badge>
+                </div>
                 <div>
                   <p className="uppercase tracking-wide">Start</p>
                   <p className="text-foreground">
@@ -631,177 +580,14 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
               </div>
             </div>
 
-            {/* Sweep Object */}
-            <Collapsible open={sweepObjectOpen} onOpenChange={setSweepObjectOpen}>
-              <div className={`rounded-lg border overflow-hidden ${linkedSweep ? 'border-border bg-card' : 'border-border border-dashed bg-card'}`}>
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-violet-500" />
-                      <span className={`text-xs font-medium ${linkedSweep ? 'text-foreground' : 'text-muted-foreground'}`}>
-                        Sweep Object
-                      </span>
-                    </div>
-                    {sweepObjectOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-2 pb-2">
-                    {linkedSweep ? (
-                      <div className="pt-2">
-                        {linkedSweep.status === 'draft' ? (
-                          <SweepArtifact config={linkedSweep.config} sweep={linkedSweep} isCollapsed={false} />
-                        ) : (
-                          <SweepStatus sweep={linkedSweep} runs={runs} onRunClick={onRunSelect} isCollapsed={false} />
-                        )}
-                      </div>
-                    ) : (
-                      <div className="px-3 py-5 text-center">
-                        <p className="text-xs text-muted-foreground">
-                          {run.sweepId
-                            ? (isLoadingLinkedSweep
-                              ? `Loading sweep ${run.sweepId}...`
-                              : `Sweep ${run.sweepId} was not found.`)
-                            : 'This run is not attached to a sweep object.'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </CollapsibleContent>
+            {terminalOutcome.state && (
+              <div className={`rounded-md border px-2 py-1.5 text-[11px] ${terminalOutcome.className}`}>
+                <p className="font-medium">Outcome: {terminalOutcome.summary}</p>
+                {terminalOutcome.detail && (
+                  <p className="mt-0.5 break-words">{terminalOutcome.detail}</p>
+                )}
               </div>
-            </Collapsible>
-
-            {/* Tags + Quick Actions Row */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto">
-                {run.tags && run.tags.length > 0 ? (
-                  run.tags.map((tagName) => {
-                    const tag = allTags.find((t) => t.name === tagName)
-                    return (
-                      <span
-                        key={tagName}
-                        className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                        style={{
-                          backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
-                          color: tag?.color || '#4ade80',
-                        }}
-                      >
-                        {tagName}
-                      </span>
-                    )
-                  })
-                ) : (
-                  <span className="text-[10px] text-muted-foreground">No tags</span>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5 shrink-0"
-                  onClick={() => setTagsDialogOpen(true)}
-                >
-                  <Plus className="h-3 w-3" />
-                </Button>
-              </div>
-
-              <div className="flex items-center gap-1 shrink-0">
-                {/* Job Control Buttons */}
-                {(run.status === 'ready' || run.status === 'queued') && onStartRun && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleStartRun}
-                    disabled={isStarting}
-                    className="h-7 w-7 text-green-500 hover:text-green-400"
-                    title="Start Run"
-                  >
-                    <Play className={`h-4 w-4 ${isStarting ? 'animate-pulse' : ''}`} />
-                  </Button>
-                )}
-                {run.status === 'running' && onStopRun && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleStopRun}
-                    disabled={isStopping}
-                    className="h-7 w-7 text-destructive hover:text-destructive/80"
-                    title="Stop Run"
-                  >
-                    <Square className={`h-4 w-4 ${isStopping ? 'animate-pulse' : ''}`} />
-                  </Button>
-                )}
-
-                {/* Refresh Button */}
-                {onRefresh && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleRefresh}
-                    disabled={isRefreshing}
-                    className="h-7 w-7 text-muted-foreground"
-                    title="Refresh"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                  </Button>
-                )}
-
-                <Button
-                  variant={pendingAlertCount > 0 ? 'default' : 'ghost'}
-                  size="icon"
-                  onClick={handleCheckAlerts}
-                  className={`h-7 w-7 ${pendingAlertCount > 0 ? '' : 'text-muted-foreground'}`}
-                  title={pendingAlertCount > 0 ? `Check alerts (${pendingAlertCount} pending)` : 'Check alerts'}
-                >
-                  <Bell className="h-4 w-4" />
-                </Button>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleToggleFavorite}
-                  className={`h-7 w-7 ${run.isFavorite ? 'text-yellow-500' : 'text-muted-foreground'}`}
-                >
-                  <Star className={`h-4 w-4 ${run.isFavorite ? 'fill-yellow-500' : ''}`} />
-                </Button>
-
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <div
-                        className="h-4 w-4 rounded-full border border-border"
-                        style={{ backgroundColor: run.color || '#4ade80' }}
-                      />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-40 p-2" align="end">
-                    <div className="grid grid-cols-5 gap-1.5">
-                      {DEFAULT_RUN_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          onClick={() => handleColorChange(color)}
-                          className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${run.color === color ? 'border-foreground' : 'border-transparent'
-                            }`}
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleArchive}
-                  className={`h-7 w-7 ${run.isArchived ? 'text-muted-foreground' : ''}`}
-                >
-                  <Archive className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+            )}
 
             {/* Notes Preview/Edit */}
             {notesOpen ? (
@@ -881,7 +667,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
             </Collapsible>
 
             {/* Alerts */}
-            <div ref={alertsSectionRef}>
+            <div id={`run-alerts-${run.id}`}>
               <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
                 <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
                 <CollapsibleTrigger asChild>
@@ -1105,6 +891,8 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                       runId={run.id}
                       isFullPage={logsFullPage}
                       onExpand={() => setLogsFullPage(true)}
+                      showHeader={false}
+                      className="rounded-none border-0 bg-transparent"
                     />
                   </div>
                 </CollapsibleContent>
@@ -1138,6 +926,8 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                       runId={run.id}
                       tmuxWindow={(run as any).tmux_window}
                       tmuxPane={(run as any).tmux_pane}
+                      showHeader={false}
+                      className="rounded-none border-0 bg-transparent"
                     />
                   </div>
                 </CollapsibleContent>
@@ -1162,61 +952,70 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="border-t border-border px-3 pb-3">
-                    <div className="mt-2 relative">
-                      <code className="text-[11px] font-mono text-green-400 bg-black/30 rounded overflow-hidden text-ellipsis ">
-                        {/* {run.command} */}
-                        {run.command}
-                      </code>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={copyCommand}
-                        className="absolute right-1 top-1 h-6 w-6"
-                      >
-                        {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                      </Button>
-                    </div>
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-
-            {/* Hyperparameters */}
-            <Collapsible open={configOpen} onOpenChange={setConfigOpen}>
-              <div className={`rounded-lg border bg-card overflow-hidden ${run.config ? 'border-border' : 'border-border border-dashed'}`}>
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <Settings className="h-4 w-4 text-muted-foreground" />
-                      <span className={`text-xs font-medium ${run.config ? 'text-foreground' : 'text-muted-foreground'}`}>Hyperparameters</span>
-                    </div>
-                    {configOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-3 pb-3">
-                    {run.config ? (
-                      <div className="mt-2 space-y-1">
-                        {Object.entries(run.config).map(([key, value]) => (
-                          <div key={key} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
-                            <span className="text-[10px] text-muted-foreground capitalize">
-                              {key.replace(/([A-Z])/g, ' $1').trim()}
-                            </span>
-                            <span className="text-[10px] font-mono text-foreground">
-                              {typeof value === 'number' && value < 0.01 ? value.toExponential(1) : String(value)}
-                            </span>
+                    <div className="mt-2 space-y-2">
+                      {commandEditing ? (
+                        <>
+                          <Textarea
+                            value={editedCommand}
+                            onChange={(e) => setEditedCommand(e.target.value)}
+                            className="min-h-[96px] resize-y font-mono text-xs"
+                            placeholder="Enter run command..."
+                          />
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={handleCancelCommand}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={handleSaveCommand}
+                              disabled={!editedCommand.trim()}
+                            >
+                              Save
+                            </Button>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="mt-2 py-4 text-center">
-                        <p className="text-xs text-muted-foreground">No hyperparameters configured</p>
-                      </div>
-                    )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="rounded bg-black/30 px-2 py-1.5">
+                            <code className="whitespace-pre-wrap break-all text-[11px] font-mono text-green-400">
+                              {run.command}
+                            </code>
+                          </div>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 gap-1.5 text-xs"
+                              onClick={copyCommand}
+                            >
+                              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                              Copy
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1.5 text-xs"
+                              onClick={() => setCommandEditing(true)}
+                              disabled={!onUpdateRun || run.status === 'running'}
+                            >
+                              <Pencil className="h-3 w-3" />
+                              Edit
+                            </Button>
+                          </div>
+                          {run.status === 'running' && (
+                            <p className="text-[11px] text-muted-foreground">
+                              Stop the run before editing its command.
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </CollapsibleContent>
               </div>

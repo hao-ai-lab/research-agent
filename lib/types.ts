@@ -101,6 +101,7 @@ export interface AppSettings {
     wildLoopTasksBoxHeightPx?: number | null;
     wildLoopHistoryBoxHeightPx?: number | null;
     showStarterCards?: boolean;
+    starterCardFlavor?: "novice" | "expert";
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
   };

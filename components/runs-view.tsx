@@ -29,6 +29,10 @@ import {
   RefreshCw,
   Server,
   Bell,
+  Terminal,
+  Pencil,
+  Check,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,11 +65,15 @@ import type {
   ClusterStatusResponse,
   ClusterType,
   ClusterUpdateRequest,
+  CreateRunRequest,
 } from '@/lib/api-client'
-import { startSweep as apiStartSweep } from '@/lib/api-client'
+import { startSweep as apiStartSweep, updateSweep as apiUpdateSweep } from '@/lib/api-client'
 import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
 import { Progress } from '@/components/ui/progress'
+import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { SweepArtifact } from '@/components/sweep-artifact'
 import { SweepStatus } from '@/components/sweep-status'
 import { useAppSettings } from '@/lib/app-settings'
@@ -116,6 +124,7 @@ interface RunsViewProps {
   onSaveSweep?: (config: SweepConfig) => Promise<void> | void
   onCreateSweep?: (config: SweepConfig) => Promise<void> | void
   onLaunchSweep?: (config: SweepConfig) => Promise<void> | void
+  onCreateRun?: (request: CreateRunRequest) => Promise<void> | void
   cluster?: ClusterState | null
   clusterRunSummary?: ClusterStatusResponse['run_summary'] | null
   clusterLoading?: boolean
@@ -124,6 +133,8 @@ interface RunsViewProps {
   onUpdateCluster?: (request: ClusterUpdateRequest) => Promise<void>
   onNavigateToCharts?: () => void
   onRespondToAlert?: (alertId: string, choice: string) => Promise<void>
+  showDesktopSidebarToggle?: boolean
+  onDesktopSidebarToggle?: () => void
 }
 
 export function RunsView({
@@ -143,6 +154,7 @@ export function RunsView({
   onSaveSweep,
   onCreateSweep,
   onLaunchSweep,
+  onCreateRun,
   cluster = null,
   clusterRunSummary = null,
   clusterLoading = false,
@@ -151,6 +163,8 @@ export function RunsView({
   onUpdateCluster,
   onNavigateToCharts,
   onRespondToAlert,
+  showDesktopSidebarToggle = false,
+  onDesktopSidebarToggle,
 }: RunsViewProps) {
   const { settings } = useAppSettings()
   const interactionMode = settings.appearance.runItemInteractionMode || 'detail-page'
@@ -172,6 +186,7 @@ export function RunsView({
   const [selectedManageRunIds, setSelectedManageRunIds] = useState<Set<string>>(new Set())
   const [groupByMode, setGroupByMode] = useState<GroupByMode>('sweep')
   const [sweepFilter, setSweepFilter] = useState<string>('all')
+  const [includeArchived, setIncludeArchived] = useState(false)
   const [statusFilter, setStatusFilter] = useState<Set<ExperimentRun['status']>>(
     () => new Set(RUN_STATUS_OPTIONS)
   )
@@ -182,6 +197,18 @@ export function RunsView({
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
   const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
+  const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runCreateName, setRunCreateName] = useState('')
+  const [runCreateCommand, setRunCreateCommand] = useState('')
+  const [runCreateWorkdir, setRunCreateWorkdir] = useState('')
+  const [runCreateSweepId, setRunCreateSweepId] = useState<string>('none')
+  const [runCreateAutoStart, setRunCreateAutoStart] = useState(true)
+  const [runCreateError, setRunCreateError] = useState<string | null>(null)
+  const [runCreateSubmitting, setRunCreateSubmitting] = useState(false)
+  const [isSelectedRunRefreshing, setIsSelectedRunRefreshing] = useState(false)
+  const [isEditingSweepCommand, setIsEditingSweepCommand] = useState(false)
+  const [sweepCommandDraft, setSweepCommandDraft] = useState('')
+  const [isSavingSweepCommand, setIsSavingSweepCommand] = useState(false)
   const [chartsPage, setChartsPage] = useState(1)
   const [sweepsPage, setSweepsPage] = useState(1)
   const [runsPage, setRunsPage] = useState(1)
@@ -218,10 +245,65 @@ export function RunsView({
   )
 
   useEffect(() => {
+    if (!selectedSweep) {
+      setSweepCommandDraft('')
+      setIsEditingSweepCommand(false)
+      return
+    }
+
+    setSweepCommandDraft(
+      selectedSweep.config.command
+      || selectedSweep.creationContext.command
+      || ''
+    )
+    setIsEditingSweepCommand(false)
+  }, [selectedSweep?.id, selectedSweep?.config.command, selectedSweep?.creationContext.command])
+
+  useEffect(() => {
     if (!useInlineDetails) return
     setSelectedRunId(null)
     setSelectedSweepId(null)
   }, [useInlineDetails])
+
+  const applyHashSelection = useCallback(() => {
+    if (typeof window === 'undefined' || useInlineDetails) return
+
+    const rawHash = window.location.hash.startsWith('#')
+      ? window.location.hash.slice(1)
+      : ''
+    if (!rawHash) return
+
+    let target = rawHash
+    try {
+      target = decodeURIComponent(rawHash)
+    } catch {
+      target = rawHash
+    }
+    target = target.trim()
+    if (!target) return
+
+    if (target.startsWith('sweep:')) {
+      const sweepId = target.slice('sweep:'.length)
+      if (sweepId && sweeps.some((sweep) => sweep.id === sweepId)) {
+        setSelectedSweepId(sweepId)
+        setSelectedRunId(null)
+      }
+      return
+    }
+
+    if (runs.some((run) => run.id === target)) {
+      setSelectedRunId(target)
+      setSelectedSweepId(null)
+    }
+  }, [runs, sweeps, useInlineDetails])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    applyHashSelection()
+    window.addEventListener('hashchange', applyHashSelection)
+    return () => window.removeEventListener('hashchange', applyHashSelection)
+  }, [applyHashSelection])
 
   useEffect(() => {
     setClusterDraftType(cluster?.type || 'unknown')
@@ -280,28 +362,19 @@ export function RunsView({
 
   const filteredRuns = useMemo(() => {
     return runs.filter((run) => {
+      if (!includeArchived && run.isArchived) return false
       if (!statusFilter.has(run.status)) return false
       if (sweepFilter === 'all') return true
       if (sweepFilter === 'none') return !run.sweepId
       return run.sweepId === sweepFilter
     })
-  }, [runs, statusFilter, sweepFilter])
+  }, [runs, includeArchived, statusFilter, sweepFilter])
 
-  const filteredActiveRuns = useMemo(
-    () => filteredRuns.filter((run) => !run.isArchived),
-    [filteredRuns]
-  )
-
-  const filteredArchivedRuns = useMemo(
-    () => filteredRuns.filter((run) => run.isArchived),
-    [filteredRuns]
-  )
-
-  const totalRunsPages = Math.max(1, Math.ceil(filteredActiveRuns.length / RUNS_PAGE_SIZE))
-  const pagedFilteredActiveRuns = useMemo(() => {
+  const totalRunsPages = Math.max(1, Math.ceil(filteredRuns.length / RUNS_PAGE_SIZE))
+  const pagedFilteredRuns = useMemo(() => {
     const start = (runsPage - 1) * RUNS_PAGE_SIZE
-    return filteredActiveRuns.slice(start, start + RUNS_PAGE_SIZE)
-  }, [filteredActiveRuns, runsPage])
+    return filteredRuns.slice(start, start + RUNS_PAGE_SIZE)
+  }, [filteredRuns, runsPage])
 
   const chartRunsWithHistory = useMemo(
     () => allActiveRuns.filter((run) => run.lossHistory && run.lossHistory.length > 0),
@@ -321,7 +394,7 @@ export function RunsView({
 
   useEffect(() => {
     setRunsPage(1)
-  }, [detailsView, groupByMode, sweepFilter, statusFilter])
+  }, [detailsView, groupByMode, sweepFilter, includeArchived, statusFilter])
 
   useEffect(() => {
     setRunsPage((prev) => Math.min(prev, totalRunsPages))
@@ -343,11 +416,11 @@ export function RunsView({
   // Sort runs for details view
   const sortedRuns = useMemo(() => {
     if (detailsView === 'time') {
-      return [...pagedFilteredActiveRuns].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+      return [...pagedFilteredRuns].sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
     }
     // Priority view - group by category
-    return pagedFilteredActiveRuns
-  }, [pagedFilteredActiveRuns, detailsView])
+    return pagedFilteredRuns
+  }, [pagedFilteredRuns, detailsView])
 
   const groupedRunsBySweep = useMemo(() => {
     const groups = new Map<string, ExperimentRun[]>()
@@ -651,6 +724,64 @@ export function RunsView({
       }
     })
   }
+
+  const resetCreateRunForm = useCallback(() => {
+    setRunCreateName('')
+    setRunCreateCommand('')
+    setRunCreateWorkdir('')
+    setRunCreateSweepId('none')
+    setRunCreateAutoStart(true)
+    setRunCreateError(null)
+    setRunCreateSubmitting(false)
+  }, [])
+
+  const handleSubmitCreateRun = useCallback(async () => {
+    if (!onCreateRun || runCreateSubmitting) return
+
+    const name = runCreateName.trim()
+    const command = runCreateCommand.trim()
+    const workdir = runCreateWorkdir.trim()
+
+    if (!name) {
+      setRunCreateError('Run name is required.')
+      return
+    }
+    if (!command) {
+      setRunCreateError('Command is required.')
+      return
+    }
+
+    const request: CreateRunRequest = {
+      name,
+      command,
+      auto_start: runCreateAutoStart,
+      sweep_id: runCreateSweepId !== 'none' ? runCreateSweepId : undefined,
+      workdir: workdir || undefined,
+    }
+
+    setRunCreateSubmitting(true)
+    setRunCreateError(null)
+    try {
+      await onCreateRun(request)
+      setRunDialogOpen(false)
+      resetCreateRunForm()
+      await onRefresh?.()
+    } catch (error) {
+      setRunCreateError(error instanceof Error ? error.message : 'Failed to create run.')
+    } finally {
+      setRunCreateSubmitting(false)
+    }
+  }, [
+    onCreateRun,
+    onRefresh,
+    resetCreateRunForm,
+    runCreateAutoStart,
+    runCreateCommand,
+    runCreateName,
+    runCreateSubmitting,
+    runCreateSweepId,
+    runCreateWorkdir,
+  ])
 
   const handleShowVisibilityManage = (show: boolean) => {
     setShowVisibilityManage(show)
@@ -1121,16 +1252,56 @@ export function RunsView({
 
   // If a run is selected, show the detail view with slide animation
   if (!useInlineDetails && selectedRun) {
+    const selectedRunBusyState = runActionBusy[selectedRun.id]
+    const selectedRunPendingAlerts = selectedRunAlerts.filter((alert) => alert.status === 'pending').length
+
+    const handleStartSelectedRun = async () => {
+      if (!onStartRun) return
+      setRunActionBusy((prev) => ({ ...prev, [selectedRun.id]: 'starting' }))
+      try {
+        await onStartRun(selectedRun.id)
+        await onRefresh?.()
+      } finally {
+        setRunActionBusy((prev) => ({ ...prev, [selectedRun.id]: undefined }))
+      }
+    }
+
+    const handleStopSelectedRun = async () => {
+      if (!onStopRun) return
+      setRunActionBusy((prev) => ({ ...prev, [selectedRun.id]: 'stopping' }))
+      try {
+        await onStopRun(selectedRun.id)
+        await onRefresh?.()
+      } finally {
+        setRunActionBusy((prev) => ({ ...prev, [selectedRun.id]: undefined }))
+      }
+    }
+
+    const handleRefreshSelectedRun = async () => {
+      if (!onRefresh) return
+      setIsSelectedRunRefreshing(true)
+      try {
+        await onRefresh()
+      } finally {
+        setIsSelectedRunRefreshing(false)
+      }
+    }
+
+    const handleScrollToRunAlerts = () => {
+      const alertsNode = document.getElementById(`run-alerts-${selectedRun.id}`)
+      alertsNode?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+
     return (
       <div className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-5 duration-200">
-        <div className="shrink-0 flex items-center gap-3 border-b border-border px-4 py-3">
+        <div className="shrink-0 flex items-center gap-2 px-3 py-2">
           <Button
             variant="ghost"
             size="icon"
             onClick={handleBack}
-            className="h-9 w-9 shrink-0"
+            className="h-8 w-8 shrink-0 sm:hidden"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="flex-1 min-w-0">
             <Select
@@ -1178,22 +1349,107 @@ export function RunsView({
               </SelectContent>
             </Select>
           </div>
-          <Badge variant="outline" className={getStatusBadgeClass(selectedRun.status)}>
-            {getStatusText(selectedRun.status)}
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {(selectedRun.status === 'ready' || selectedRun.status === 'queued') && onStartRun && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { void handleStartSelectedRun() }}
+                disabled={selectedRunBusyState === 'starting'}
+                className="h-7 w-7 text-green-500 hover:text-green-400"
+                title="Start Run"
+              >
+                {selectedRunBusyState === 'starting'
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Play className="h-4 w-4" />}
+              </Button>
+            )}
+            {selectedRun.status === 'running' && onStopRun && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { void handleStopSelectedRun() }}
+                disabled={selectedRunBusyState === 'stopping'}
+                className="h-7 w-7 text-destructive hover:text-destructive/80"
+                title="Stop Run"
+              >
+                {selectedRunBusyState === 'stopping'
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Square className="h-4 w-4" />}
+              </Button>
+            )}
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { void handleRefreshSelectedRun() }}
+                disabled={isSelectedRunRefreshing}
+                className="h-7 w-7 text-muted-foreground"
+                title="Refresh"
+              >
+                <RefreshCw className={`h-4 w-4 ${isSelectedRunRefreshing ? 'animate-spin' : ''}`} />
+              </Button>
+            )}
+            <Button
+              variant={selectedRunPendingAlerts > 0 ? 'default' : 'ghost'}
+              size="icon"
+              onClick={handleScrollToRunAlerts}
+              className={`h-7 w-7 ${selectedRunPendingAlerts > 0 ? '' : 'text-muted-foreground'}`}
+              title={selectedRunPendingAlerts > 0 ? `Check alerts (${selectedRunPendingAlerts} pending)` : 'Check alerts'}
+            >
+              <Bell className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onUpdateRun?.({ ...selectedRun, isFavorite: !selectedRun.isFavorite })}
+              className={`h-7 w-7 ${selectedRun.isFavorite ? 'text-yellow-500' : 'text-muted-foreground'}`}
+            >
+              <Star className={`h-4 w-4 ${selectedRun.isFavorite ? 'fill-yellow-500' : ''}`} />
+            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <div
+                    className="h-4 w-4 rounded-full border border-border"
+                    style={{ backgroundColor: selectedRun.color || '#4ade80' }}
+                  />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-40 p-2" align="end">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {DEFAULT_RUN_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => onUpdateRun?.({ ...selectedRun, color })}
+                      className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${
+                        selectedRun.color === color ? 'border-foreground' : 'border-transparent'
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onUpdateRun?.({ ...selectedRun, isArchived: !selectedRun.isArchived })}
+              className={`h-7 w-7 ${selectedRun.isArchived ? 'text-muted-foreground' : ''}`}
+            >
+              <Archive className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <div className="flex-1 min-h-0 overflow-hidden">
           <RunDetailView
             run={selectedRun}
             alerts={selectedRunAlerts}
-            runs={runs}
-            onRunSelect={(r) => handleRunClick(r)}
+            onSweepSelect={(sweep) => handleSweepClick(sweep)}
             onUpdateRun={onUpdateRun}
             allTags={allTags}
             onCreateTag={onCreateTag}
-            onRefresh={onRefresh}
-            onStartRun={onStartRun}
-            onStopRun={onStopRun}
             sweeps={sweeps}
           />
         </div>
@@ -1207,6 +1463,7 @@ export function RunsView({
     const pendingSweepAlerts = sweepAlerts.filter((alert) => alert.status === 'pending')
     const canStartSweep = selectedSweep.status === 'draft' || selectedSweep.status === 'pending'
     const canStopSweep = selectedSweep.status === 'running'
+    const canEditSweepCommand = selectedSweep.status !== 'running'
     const runningInSweep = sweepRuns.filter((r) => r.status === 'running')
     const isSweepBusy = sweepActionBusy === selectedSweep.id
 
@@ -1236,21 +1493,44 @@ export function RunsView({
       }
     }
 
+    const handleSaveSweepCommand = async () => {
+      const nextCommand = sweepCommandDraft.trim()
+      if (!nextCommand || !canEditSweepCommand) return
+
+      setIsSavingSweepCommand(true)
+      try {
+        await apiUpdateSweep(selectedSweep.id, {
+          base_command: nextCommand,
+          ui_config: {
+            ...selectedSweep.config,
+            command: nextCommand,
+            updatedAt: new Date().toISOString(),
+          },
+        })
+        setIsEditingSweepCommand(false)
+        await onRefresh?.()
+      } catch (e) {
+        console.error('Failed to update sweep command:', e)
+      } finally {
+        setIsSavingSweepCommand(false)
+      }
+    }
+
     return (
       <div className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-5 duration-200">
-        <div className="shrink-0 flex items-center gap-3 border-b border-border px-4 py-3">
+        <div className="shrink-0 flex items-center gap-2 px-3 py-2">
           <Button
             variant="ghost"
             size="icon"
             onClick={handleBack}
-            className="h-9 w-9 shrink-0"
+            className="h-8 w-8 shrink-0 sm:hidden"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-foreground">{selectedSweep.config.name || selectedSweep.id}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {selectedSweep.id} • {selectedSweep.progress.completed}/{selectedSweep.progress.total} runs
+              {selectedSweep.id}
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -1287,6 +1567,73 @@ export function RunsView({
         <div className="flex-1 min-h-0 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="p-4 space-y-3">
+              <div className="rounded-xl border border-border bg-card p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Terminal className="h-4 w-4 text-muted-foreground" />
+                    <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Sweep Command
+                    </h4>
+                  </div>
+                  {!isEditingSweepCommand ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1.5 text-xs"
+                      onClick={() => setIsEditingSweepCommand(true)}
+                      disabled={!canEditSweepCommand}
+                    >
+                      <Pencil className="h-3 w-3" />
+                      Edit
+                    </Button>
+                  ) : null}
+                </div>
+
+                {isEditingSweepCommand ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={sweepCommandDraft}
+                      onChange={(e) => setSweepCommandDraft(e.target.value)}
+                      className="min-h-[92px] resize-y font-mono text-xs"
+                      placeholder="python train.py ..."
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setSweepCommandDraft(selectedSweep.config.command || selectedSweep.creationContext.command || '')
+                          setIsEditingSweepCommand(false)
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-7 gap-1.5 text-xs"
+                        onClick={() => { void handleSaveSweepCommand() }}
+                        disabled={!sweepCommandDraft.trim() || isSavingSweepCommand}
+                      >
+                        {isSavingSweepCommand ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="rounded-md bg-secondary/30 px-2 py-1.5 font-mono text-xs text-foreground break-all whitespace-pre-wrap">
+                      {selectedSweep.config.command || selectedSweep.creationContext.command || 'No command provided'}
+                    </p>
+                    {!canEditSweepCommand && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Stop the sweep before editing its command.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+
               {/* Aggregated Alerts */}
               {sweepAlerts.length > 0 && (
                 <div className="rounded-xl border border-border bg-card p-3">
@@ -1396,14 +1743,14 @@ export function RunsView({
     )
   }
 
-  const favoriteRuns = pagedFilteredActiveRuns.filter(r => r.isFavorite)
-  const alertRuns = pagedFilteredActiveRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
-  const runningRuns = pagedFilteredActiveRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const readyRuns = pagedFilteredActiveRuns.filter(r => r.status === 'ready' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const queuedRuns = pagedFilteredActiveRuns.filter(r => r.status === 'queued' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const failedRuns = pagedFilteredActiveRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
-  const completedRuns = pagedFilteredActiveRuns.filter(r => r.status === 'completed' && !r.isFavorite)
-  const canceledRuns = pagedFilteredActiveRuns.filter(r => r.status === 'canceled' && !r.isFavorite)
+  const favoriteRuns = pagedFilteredRuns.filter(r => r.isFavorite)
+  const alertRuns = pagedFilteredRuns.filter(r => (pendingAlertsByRun[r.id] || 0) > 0 && !r.isFavorite)
+  const runningRuns = pagedFilteredRuns.filter(r => r.status === 'running' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const readyRuns = pagedFilteredRuns.filter(r => r.status === 'ready' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const queuedRuns = pagedFilteredRuns.filter(r => r.status === 'queued' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const failedRuns = pagedFilteredRuns.filter(r => r.status === 'failed' && !r.isFavorite && (pendingAlertsByRun[r.id] || 0) === 0)
+  const completedRuns = pagedFilteredRuns.filter(r => r.status === 'completed' && !r.isFavorite)
+  const canceledRuns = pagedFilteredRuns.filter(r => r.status === 'canceled' && !r.isFavorite)
   const isAllStatusSelected = statusFilter.size === RUN_STATUS_OPTIONS.length
   const canArchiveSelection = selectedManageRuns.some((run) => !run.isArchived)
   const canUnarchiveSelection = selectedManageRuns.some((run) => run.isArchived)
@@ -1423,21 +1770,54 @@ export function RunsView({
     <div className="flex flex-col h-full overflow-hidden">
       {/* Top Nav Bar */}
       <div className="flex items-center justify-between border-b border-border bg-card/80 px-3 py-1.5 backdrop-blur-sm shrink-0">
-        <h2 className="text-xs font-medium text-foreground">Runs</h2>
-        <Tooltip>
-          <TooltipTrigger asChild>
+        <div className="flex items-center gap-2">
+          {showDesktopSidebarToggle && onDesktopSidebarToggle && (
             <Button
               variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[11px] gap-1"
-              onClick={() => setSweepDialogOpen(true)}
+              size="icon-sm"
+              onClick={onDesktopSidebarToggle}
+              className="hidden h-9 w-9 shrink-0 border-border/70 bg-card text-muted-foreground hover:bg-secondary lg:inline-flex"
+              title="Show sidebar"
             >
-              <Plus className="h-3 w-3" />
-              Create Sweep
+              <PanelLeftOpen className="h-4 w-4" />
+              <span className="sr-only">Show sidebar</span>
             </Button>
-          </TooltipTrigger>
-          <TooltipContent>Create a new sweep</TooltipContent>
-        </Tooltip>
+          )}
+          <h2 className="text-xs font-medium text-foreground">Runs</h2>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] gap-1"
+                onClick={() => {
+                  setRunDialogOpen(true)
+                  setRunCreateError(null)
+                }}
+              >
+                <Play className="h-3 w-3" />
+                Create Run
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Create a new run</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px] gap-1"
+                onClick={() => setSweepDialogOpen(true)}
+              >
+                <Plus className="h-3 w-3" />
+                Create Sweep
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Create a new sweep</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -1749,7 +2129,7 @@ export function RunsView({
                   <div className="flex items-center gap-2">
                     <div className="hidden min-w-0 flex-1 sm:block">
                       <p className="truncate text-[11px] text-muted-foreground">
-                        Time: {detailsView === 'time' ? 'Time' : 'Priority'} · Group: {groupByMode === 'sweep' ? 'Sweep' : 'None'} · Sweep: {sweepFilter === 'all' ? 'All' : sweepFilter === 'none' ? 'No Sweep' : sweepFilter} · Status: {isAllStatusSelected ? 'All' : `${statusFilter.size} selected`}
+                        Time: {detailsView === 'time' ? 'Time' : 'Priority'} · Group: {groupByMode === 'sweep' ? 'Sweep' : 'None'} · Sweep: {sweepFilter === 'all' ? 'All' : sweepFilter === 'none' ? 'No Sweep' : sweepFilter} · Status: {isAllStatusSelected ? 'All' : `${statusFilter.size} selected`} · Archived: {includeArchived ? 'Show' : 'Hide'}
                       </p>
                     </div>
 
@@ -1809,6 +2189,19 @@ export function RunsView({
                                   ))}
                                 </SelectContent>
                               </Select>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                              <p className="text-[11px] font-medium text-muted-foreground">Archived</p>
+                              <Button
+                                type="button"
+                                variant={includeArchived ? 'default' : 'outline'}
+                                size="sm"
+                                className="h-8 justify-start text-xs"
+                                onClick={() => setIncludeArchived((prev) => !prev)}
+                              >
+                                {includeArchived ? 'Showing archived runs' : 'Hiding archived runs'}
+                              </Button>
                             </div>
 
                             <div className="border-t border-border pt-3">
@@ -1971,7 +2364,6 @@ export function RunsView({
                       {renderRunSubsection('priority:failed', 'Failed', <AlertCircle className="h-4 w-4 text-destructive" />, failedRuns)}
                       {renderRunSubsection('priority:finished', 'Finished', <CheckCircle2 className="h-4 w-4 text-green-400" />, completedRuns)}
                       {renderRunSubsection('priority:canceled', 'Canceled', <XCircle className="h-4 w-4 text-muted-foreground" />, canceledRuns)}
-                      {renderRunSubsection('priority:archived', 'Archived', <Archive className="h-4 w-4 text-muted-foreground" />, filteredArchivedRuns, { dimmed: true })}
                       {filteredRuns.length === 0 && (
                         <div className="py-10 text-center text-sm text-muted-foreground">
                           No runs match the current filters.
@@ -1996,18 +2388,20 @@ export function RunsView({
                               No runs match the current filters.
                             </div>
                           )}
-
-                          {renderRunSubsection('time:archived', 'Archived', <Archive className="h-4 w-4 text-muted-foreground" />, filteredArchivedRuns, { dimmed: true })}
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          {renderRunSubsection('time:all-active', 'All Active Runs', <Layers className="h-4 w-4 text-muted-foreground" />, sortedRuns)}
+                          {renderRunSubsection(
+                            'time:all-active',
+                            includeArchived ? 'All Runs' : 'All Active Runs',
+                            <Layers className="h-4 w-4 text-muted-foreground" />,
+                            sortedRuns
+                          )}
                           {sortedRuns.length === 0 && (
                             <div className="py-10 text-center text-sm text-muted-foreground">
                               No runs match the current filters.
                             </div>
                           )}
-                          {renderRunSubsection('time:archived', 'Archived', <Archive className="h-4 w-4 text-muted-foreground" />, filteredArchivedRuns, { dimmed: true })}
                         </div>
                       )}
                     </>
@@ -2030,6 +2424,91 @@ export function RunsView({
             onCancel={() => setSweepDialogOpen(false)}
             onLaunch={async (config) => { await onLaunchSweep?.(config); setSweepDialogOpen(false); await onRefresh?.() }}
           />
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={runDialogOpen}
+        onOpenChange={(open) => {
+          setRunDialogOpen(open)
+          if (!open) resetCreateRunForm()
+        }}
+      >
+        <DialogContent className="max-w-xl p-0 overflow-hidden">
+          <div className="border-b border-border px-5 py-4">
+            <h3 className="text-sm font-semibold text-foreground">Create Run</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Create a single run and optionally attach it to an existing sweep.
+            </p>
+          </div>
+          <div className="space-y-4 px-5 py-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Run Name</label>
+              <Input
+                value={runCreateName}
+                onChange={(event) => setRunCreateName(event.target.value)}
+                placeholder="mnist-baseline-run"
+                className="h-9 text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Command</label>
+              <Textarea
+                value={runCreateCommand}
+                onChange={(event) => setRunCreateCommand(event.target.value)}
+                placeholder="python train.py --model ... --lr ..."
+                className="min-h-24 text-xs font-mono"
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground">Working Directory (Optional)</label>
+                <Input
+                  value={runCreateWorkdir}
+                  onChange={(event) => setRunCreateWorkdir(event.target.value)}
+                  placeholder="/workspace/project"
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground">Attach To Sweep</label>
+                <Select value={runCreateSweepId} onValueChange={setRunCreateSweepId}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Sweep</SelectItem>
+                    {sortedSweeps.map((sweep) => (
+                      <SelectItem key={sweep.id} value={sweep.id}>
+                        {sweep.config.name || sweep.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border/70 bg-secondary/20 px-3 py-2">
+              <div>
+                <p className="text-xs font-medium text-foreground">Auto Start</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Start in queue immediately after creation
+                </p>
+              </div>
+              <Switch checked={runCreateAutoStart} onCheckedChange={setRunCreateAutoStart} />
+            </div>
+            {runCreateError && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {runCreateError}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+            <Button variant="outline" size="sm" onClick={() => setRunDialogOpen(false)} disabled={runCreateSubmitting}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => { void handleSubmitCreateRun() }} disabled={runCreateSubmitting}>
+              {runCreateSubmitting ? 'Creating...' : 'Create Run'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </>

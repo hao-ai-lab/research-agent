@@ -51,6 +51,7 @@ export const defaultAppSettings: AppSettings = {
     wildLoopTasksBoxHeightPx: null,
     wildLoopHistoryBoxHeightPx: null,
     showStarterCards: false,
+    starterCardFlavor: "expert",
     showSidebarNewChatButton: false,
   },
   integrations: {},
@@ -98,6 +99,12 @@ function isValidRunItemInteractionMode(
   value: unknown,
 ): value is NonNullable<AppSettings["appearance"]["runItemInteractionMode"]> {
   return value === "detail-page" || value === "inline-expand";
+}
+
+function isValidStarterCardFlavor(
+  value: unknown,
+): value is NonNullable<AppSettings["appearance"]["starterCardFlavor"]> {
+  return value === "novice" || value === "expert";
 }
 
 function parseStoredNumber(value: string | null): number | null {
@@ -235,6 +242,7 @@ function readStoredSettings(): AppSettings {
     const buttonSizeFromBlob = parsed?.appearance?.buttonSize;
     const runItemInteractionModeFromBlob =
       parsed?.appearance?.runItemInteractionMode;
+    const starterCardFlavorFromBlob = parsed?.appearance?.starterCardFlavor;
     const customFontSizePxFromBlob = sanitizePositiveNumber(
       parsed?.appearance?.customFontSizePx,
     );
@@ -327,6 +335,10 @@ function readStoredSettings(): AppSettings {
         ? runItemInteractionModeFromBlob
         : defaultAppSettings.appearance.runItemInteractionMode;
 
+    const resolvedStarterCardFlavor = isValidStarterCardFlavor(starterCardFlavorFromBlob)
+      ? starterCardFlavorFromBlob
+      : defaultAppSettings.appearance.starterCardFlavor;
+
     return {
       appearance: {
         theme: resolvedTheme,
@@ -367,6 +379,7 @@ function readStoredSettings(): AppSettings {
         showStarterCards:
           parsed?.appearance?.showStarterCards ??
           defaultAppSettings.appearance.showStarterCards,
+        starterCardFlavor: resolvedStarterCardFlavor,
         showSidebarNewChatButton:
           parsed?.appearance?.showSidebarNewChatButton ??
           defaultAppSettings.appearance.showSidebarNewChatButton,
