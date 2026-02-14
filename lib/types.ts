@@ -99,6 +99,7 @@ export interface AppSettings {
     wildLoopTasksFontSizePx?: number | null;
     wildLoopHistoryFontSizePx?: number | null;
     showStarterCards?: boolean;
+    starterCardFlavor?: "novice" | "expert";
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
   };

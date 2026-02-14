@@ -104,6 +104,7 @@ export function ConnectedChatView({
     const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
     const { settings, setSettings } = useAppSettings()
     const showStarterCards = settings.appearance.showStarterCards !== false
+    const starterCardFlavor = settings.appearance.starterCardFlavor || 'expert'
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
     const handleEditTemplate = useCallback((cardId: string, template: string | null) => {
         setSettings({
@@ -562,12 +563,13 @@ export function ConnectedChatView({
                             </div>
                             {showStarterCards && mode !== 'wild' && (
                                 <div className="mt-4 lg:mt-5 w-full max-w-6xl">
-                                    <ChatStarterCards
-                                        runs={runs}
-                                        sweeps={sweeps}
-                                        alerts={alerts}
-                                        customTemplates={customTemplates}
-                                        onEditTemplate={handleEditTemplate}
+                                <ChatStarterCards
+                                    runs={runs}
+                                    sweeps={sweeps}
+                                    alerts={alerts}
+                                    flavor={starterCardFlavor}
+                                    customTemplates={customTemplates}
+                                    onEditTemplate={handleEditTemplate}
                                         onPromptSelect={(prompt) => {
                                             setStarterDraftInsert({
                                                 id: Date.now(),
