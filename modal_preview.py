@@ -66,6 +66,12 @@ image = (
 app = modal.App("research-agent-preview")
 
 OPENCODE_BIN = "/usr/local/bin/opencode"
+OPENCODE_PORT = "4096"
+MODAL_PREVIEW_OPENCODE_URL = os.environ.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
+
+_FUNCTION_ENV = {}
+if MODAL_PREVIEW_OPENCODE_URL:
+    _FUNCTION_ENV["MODAL_PREVIEW_OPENCODE_URL"] = MODAL_PREVIEW_OPENCODE_URL
 
 
 @app.function(
@@ -74,6 +80,7 @@ OPENCODE_BIN = "/usr/local/bin/opencode"
     timeout=7200,  # 2 hours max
     cpu=8.0,
     memory=8 * 1024,  # 8GB
+    env=_FUNCTION_ENV,
 )
 @modal.concurrent(max_inputs=100)
 @modal.web_server(port=10000, startup_timeout=120)
@@ -95,23 +102,35 @@ def preview_server():
     except Exception as e:
         print(f"WARNING: tmux failed to start: {e}")
 
-    # Start opencode in background (best-effort, non-fatal)
+    # Route backend OpenCode traffic to external endpoint when configured.
+    external_opencode_url = env.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
+    if external_opencode_url:
+        env["OPENCODE_URL"] = external_opencode_url
+        print(f"Using external OpenCode endpoint: {external_opencode_url}")
+
+    # Fallback: start local OpenCode only when external endpoint is not configured.
     opencode_config = "/app/server/opencode.json"
     if os.path.isfile(opencode_config):
         env["OPENCODE_CONFIG"] = opencode_config
-    try:
-        if os.path.isfile(OPENCODE_BIN):
-            subprocess.Popen(
-                [OPENCODE_BIN, "serve"],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            print("opencode server started")
-        else:
-            print(f"WARNING: opencode binary not found at {OPENCODE_BIN}, skipping")
-    except Exception as e:
-        print(f"WARNING: opencode failed to start: {e}")
+    if not external_opencode_url:
+        try:
+            if os.path.isfile(OPENCODE_BIN):
+                env["OPENCODE_URL"] = f"http://127.0.0.1:{OPENCODE_PORT}"
+                subprocess.Popen(
+                    [
+                        OPENCODE_BIN, "serve",
+                        "--hostname", "127.0.0.1",
+                        "--port", OPENCODE_PORT,
+                    ],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print(f"local opencode server started at {env['OPENCODE_URL']}")
+            else:
+                print(f"WARNING: opencode binary not found at {OPENCODE_BIN}, skipping")
+        except Exception as e:
+            print(f"WARNING: opencode failed to start: {e}")
 
     # Start the FastAPI backend on port 10000 (internal, not exposed)
     print("Starting backend on port 10000...")
@@ -158,3 +177,36 @@ def preview_app():
         cwd="/app",
     )
 
+
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name("research-agent-preview-secrets")],
+    timeout=7200,  # 2 hours max
+    cpu=2.0,
+    memory=2 * 1024,  # 2GB
+    env=_FUNCTION_ENV,
+)
+@modal.concurrent(max_inputs=100)
+@modal.web_server(port=4096, startup_timeout=120)
+def preview_opencode():
+    """Expose OpenCode as a standalone preview endpoint."""
+    os.chdir("/app")
+
+    env = {**os.environ}
+    opencode_config = "/app/server/opencode.json"
+    if os.path.isfile(opencode_config):
+        env["OPENCODE_CONFIG"] = opencode_config
+
+    if not os.path.isfile(OPENCODE_BIN):
+        raise RuntimeError(f"opencode binary not found at {OPENCODE_BIN}")
+
+    print(f"Starting OpenCode server on port {OPENCODE_PORT}...")
+    subprocess.Popen(
+        [
+            OPENCODE_BIN, "serve",
+            "--hostname", "0.0.0.0",
+            "--port", OPENCODE_PORT,
+        ],
+        env=env,
+        cwd="/app",
+    )

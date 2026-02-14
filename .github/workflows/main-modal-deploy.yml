@@ -37,6 +37,7 @@ jobs:
         run: |
           SERVER_URL="https://${{ github.repository_owner }}--${MODAL_APP_NAME}-preview-server.modal.run"
           APP_URL="https://${{ github.repository_owner }}--${MODAL_APP_NAME}-preview-app.modal.run"
+          OPENCODE_URL="https://${{ github.repository_owner }}--${MODAL_APP_NAME}-preview-opencode.modal.run"
           {
             echo "NEXT_PUBLIC_DEFAULT_SERVER_URL=${SERVER_URL}"
             echo "BACKEND_URL=${SERVER_URL}"
@@ -48,6 +49,7 @@ jobs:
 
           echo "SERVER_URL=${SERVER_URL}" >> "$GITHUB_ENV"
           echo "APP_URL=${APP_URL}" >> "$GITHUB_ENV"
+          echo "OPENCODE_URL=${OPENCODE_URL}" >> "$GITHUB_ENV"
 
       - name: Deploy main app to Modal
         run: |
@@ -55,6 +57,7 @@ jobs:
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_PREVIEW_OPENCODE_URL: ${{ format('https://{0}--{1}-preview-opencode.modal.run', github.repository_owner, env.MODAL_APP_NAME) }}
 
       - name: Publish deployment summary
         run: |
@@ -65,6 +68,7 @@ jobs:
             echo "- Deploy file: \`${MODAL_DEPLOY_FILE}\`"
             echo "- Backend endpoint: ${SERVER_URL}"
             echo "- Frontend endpoint: ${APP_URL}"
+            echo "- OpenCode endpoint: ${OPENCODE_URL}"
           } >> "$GITHUB_STEP_SUMMARY"
     env:
       MAIN_DEFAULT_AUTH_TOKEN: ${{ secrets.MODAL_MAIN_DEFAULT_AUTH_TOKEN }}
