@@ -26,17 +26,17 @@ export const defaultTags: TagDefinition[] = [
 ]
 
 export const defaultMetricVisualizations: MetricVisualization[] = [
-  { id: 'train-loss', name: 'Training Loss', path: 'train/loss', category: 'primary', type: 'line', isPinned: true, isInOverview: true },
-  { id: 'val-loss', name: 'Validation Loss', path: 'val/loss', category: 'primary', type: 'line', isPinned: true, isInOverview: true },
-  { id: 'reward', name: 'Reward', path: 'train/reward', category: 'primary', type: 'line', isPinned: false, isInOverview: false },
-  { id: 'loss-ema', name: 'Loss EMA', path: 'train/loss_ema', category: 'secondary', type: 'line' },
-  { id: 'loss-slope', name: 'Loss Slope', path: 'train/loss_slope', category: 'secondary', type: 'area' },
-  { id: 'gen-gap', name: 'Generalization Gap', path: 'val/generalization_gap', category: 'secondary', type: 'area' },
-  { id: 'grad-norm', name: 'Gradient Norm', path: 'grad/global_norm', category: 'secondary', type: 'line' },
-  { id: 'grad-norm-ema', name: 'Gradient Norm EMA', path: 'grad/global_norm_ema', category: 'secondary', type: 'line' },
-  { id: 'grad-attn', name: 'Attention Grad Norm', path: 'grad/norm/attn', category: 'secondary', type: 'line', layerSelector: true },
-  { id: 'grad-ratio', name: 'Grad/Param Norm Ratio', path: 'grad/norm_ratio', category: 'secondary', type: 'line' },
-  { id: 'act-mean', name: 'Activation Mean', path: 'act/mean', category: 'secondary', type: 'line', layerSelector: true },
+  { id: 'train-loss', name: 'Training Loss', path: 'train/loss', type: 'line', isPinned: true, isInOverview: true },
+  { id: 'val-loss', name: 'Validation Loss', path: 'val/loss', type: 'line', isPinned: true, isInOverview: true },
+  { id: 'reward', name: 'Reward', path: 'train/reward', type: 'line', isPinned: false, isInOverview: false },
+  { id: 'loss-ema', name: 'Loss EMA', path: 'train/loss_ema', type: 'line' },
+  { id: 'loss-slope', name: 'Loss Slope', path: 'train/loss_slope', type: 'area' },
+  { id: 'gen-gap', name: 'Generalization Gap', path: 'val/generalization_gap', type: 'area' },
+  { id: 'grad-norm', name: 'Gradient Norm', path: 'grad/global_norm', type: 'line' },
+  { id: 'grad-norm-ema', name: 'Gradient Norm EMA', path: 'grad/global_norm_ema', type: 'line' },
+  { id: 'grad-attn', name: 'Attention Grad Norm', path: 'grad/norm/attn', type: 'line', layerSelector: true },
+  { id: 'grad-ratio', name: 'Grad/Param Norm Ratio', path: 'grad/norm_ratio', type: 'line' },
+  { id: 'act-mean', name: 'Activation Mean', path: 'act/mean', type: 'line', layerSelector: true },
 ]
 
 const generateRunLossHistory = (
@@ -522,7 +522,7 @@ export const getAllAlerts = (runs: ExperimentRun[]) => {
         })
       })
     }
-    
+
     // Add synthetic alerts for abnormal conditions
     if (run.lossHistory && run.lossHistory.length > 2) {
       const lastTwo = run.lossHistory.slice(-2)
@@ -559,7 +559,7 @@ export const getRunEvents = (runs: ExperimentRun[]): RunEvent[] => {
           status: 'new',
           title: isError ? 'Runtime Error' : alert.type === 'warning' ? 'Warning' : 'Info',
           summary: alert.message,
-          description: isError 
+          description: isError
             ? `A critical error occurred during training. The process was terminated due to: ${alert.message}. This typically indicates insufficient GPU memory or a configuration issue.`
             : `${alert.message}. This may require attention to prevent degradation of model performance.`,
           timestamp: alert.timestamp || run.startTime,
@@ -588,7 +588,7 @@ export const getRunEvents = (runs: ExperimentRun[]): RunEvent[] => {
         })
       })
     }
-    
+
     // Add synthetic events for abnormal conditions
     if (run.lossHistory && run.lossHistory.length > 2) {
       const lastTwo = run.lossHistory.slice(-2)

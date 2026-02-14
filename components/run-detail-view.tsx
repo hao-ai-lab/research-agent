@@ -64,7 +64,7 @@ import { TmuxTerminalPanel } from './tmux-terminal-panel'
 import { SweepArtifact } from './sweep-artifact'
 import { SweepStatus } from './sweep-status'
 import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
-import { DEFAULT_RUN_COLORS, defaultMetricVisualizations } from '@/lib/mock-data'
+import { DEFAULT_RUN_COLORS } from '@/lib/mock-data'
 import { getSweep, type Alert } from '@/lib/api-client'
 import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
 
@@ -82,55 +82,77 @@ interface RunDetailViewProps {
   sweeps?: Sweep[]
 }
 
-// Generate mock metric data based on run's loss history
-function generateMetricData(run: ExperimentRun, metricPath: string, layer?: number) {
+// Build metric chart data from real metricSeries or fallback to lossHistory
+function getMetricChartData(run: ExperimentRun, metricPath: string): { step: number; value: number }[] {
+  // Try real metricSeries first
+  const series = run.metricSeries?.[metricPath]
+  if (series && series.length > 0) {
+    return series
+  }
+
+  // Fallback: derive from lossHistory for known paths
   if (!run.lossHistory || run.lossHistory.length === 0) return []
 
-  return run.lossHistory.map((point, i) => {
-    let value = 0
-    const noise = (Math.random() - 0.5) * 0.1
-
+  return run.lossHistory.map((point) => {
+    let value: number
     switch (metricPath) {
       case 'train/loss':
+      case 'loss':
         value = point.trainLoss
         break
       case 'val/loss':
-        value = point.valLoss || point.trainLoss * 1.1
-        break
-      case 'train/reward':
-        value = 1 - point.trainLoss + noise
-        break
-      case 'train/loss_ema':
-        value = point.trainLoss * 0.95 + noise * 0.1
-        break
-      case 'train/loss_slope':
-        const prevLoss = i > 0 ? run.lossHistory![i - 1].trainLoss : point.trainLoss
-        value = (point.trainLoss - prevLoss) * 10 + noise
-        break
-      case 'val/generalization_gap':
-        value = (point.valLoss || point.trainLoss * 1.1) - point.trainLoss
-        break
-      case 'grad/global_norm':
-        value = 0.5 + Math.sin(i * 0.2) * 0.3 + noise
-        break
-      case 'grad/global_norm_ema':
-        value = 0.5 + Math.sin(i * 0.2) * 0.2 + noise * 0.5
-        break
-      case 'grad/norm/attn':
-        value = 0.3 + (layer || 0) * 0.05 + Math.sin(i * 0.15) * 0.1 + noise
-        break
-      case 'grad/norm_ratio':
-        value = 0.01 + noise * 0.005
-        break
-      case 'act/mean':
-        value = (layer || 0) * 0.1 + Math.cos(i * 0.1) * 0.2 + noise
+      case 'validation/loss':
+        value = point.valLoss ?? point.trainLoss * 1.1
         break
       default:
-        value = point.trainLoss + noise
+        return null
     }
-
     return { step: point.step, value: Math.max(0, value) }
+  }).filter((p): p is { step: number; value: number } => p !== null)
+}
+
+// Build dynamic MetricVisualization list from run data
+function buildDynamicMetrics(run: ExperimentRun): MetricVisualization[] {
+  const metrics: MetricVisualization[] = []
+  const seen = new Set<string>()
+
+  // From real metricSeries
+  if (run.metricSeries) {
+    for (const [key, points] of Object.entries(run.metricSeries)) {
+      if (points && points.length > 0 && !seen.has(key)) {
+        seen.add(key)
+        const isArea = key.includes('slope') || key.includes('gap') || key.includes('delta')
+        metrics.push({
+          id: `metric:${key.replace(/[^a-zA-Z0-9]+/g, '-')}`,
+          name: key.split('/').map(s => s.charAt(0).toUpperCase() + s.slice(1).replace(/[_-]/g, ' ')).join(' '),
+          path: key,
+          type: isArea ? 'area' : 'line',
+          isPinned: key.includes('loss') || key.includes('accuracy') || key.includes('reward'),
+        })
+      }
+    }
+  }
+
+  // Fallback: if no metricSeries, derive from lossHistory
+  if (metrics.length === 0 && run.lossHistory && run.lossHistory.length > 0) {
+    metrics.push(
+      { id: 'fallback-train-loss', name: 'Training Loss', path: 'train/loss', type: 'line', isPinned: true },
+    )
+    if (run.lossHistory.some(p => p.valLoss != null)) {
+      metrics.push(
+        { id: 'fallback-val-loss', name: 'Validation Loss', path: 'val/loss', type: 'line', isPinned: true },
+      )
+    }
+  }
+
+  // Sort: loss metrics first
+  metrics.sort((a, b) => {
+    const aWeight = a.path.includes('loss') ? 0 : a.path.includes('accuracy') ? 1 : 2
+    const bWeight = b.path.includes('loss') ? 0 : b.path.includes('accuracy') ? 1 : 2
+    return aWeight - bWeight || a.path.localeCompare(b.path)
   })
+
+  return metrics
 }
 
 // Single metric chart component with lazy loading
@@ -149,8 +171,8 @@ function MetricChart({
 }) {
   const data = useMemo(() => {
     if (!isExpanded) return []
-    return generateMetricData(run, metric.path, selectedLayer)
-  }, [run, metric.path, isExpanded, selectedLayer])
+    return getMetricChartData(run, metric.path)
+  }, [run, metric.path, isExpanded])
 
   const chartColor = run.color || '#4ade80'
 
@@ -219,10 +241,8 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const [isStopping, setIsStopping] = useState(false)
 
   // Charts state
-  const [primaryChartsOpen, setPrimaryChartsOpen] = useState(false)
-  const [secondaryChartsOpen, setSecondaryChartsOpen] = useState(false)
+  const [chartsOpen, setChartsOpen] = useState(false)
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
-  const [layerSelections, setLayerSelections] = useState<Record<string, number>>({})
 
   // Logs and Terminal state
   const [logsOpen, setLogsOpen] = useState(false)
@@ -232,8 +252,8 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
   const [sweepObjectOpen, setSweepObjectOpen] = useState(true)
   const alertsSectionRef = useRef<HTMLDivElement | null>(null)
 
-  const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
-  const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
+  const dynamicMetrics = useMemo(() => buildDynamicMetrics(run), [run])
+  const hasChartData = dynamicMetrics.length > 0
   const linkedSweepFromList = useMemo(
     () => sweeps.find((sweep) => sweep.id === run.sweepId),
     [run.sweepId, sweeps]
@@ -395,8 +415,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
     })
   }
 
-  const allPrimaryExpanded = primaryMetrics.every(m => expandedCharts.has(m.id))
-  const allSecondaryExpanded = secondaryMetrics.every(m => expandedCharts.has(m.id))
+  const allChartsExpanded = dynamicMetrics.length > 0 && dynamicMetrics.every(m => expandedCharts.has(m.id))
 
   const runAlerts = alerts
   const pendingAlertCount = runAlerts.filter((alert) => alert.status === 'pending').length
@@ -562,13 +581,12 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                         <div className="mt-1 space-y-1.5">
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-medium text-foreground truncate">{sweep.config.name}</span>
-                            <Badge variant="outline" className={`text-[9px] h-4 ${
-                              sweep.status === 'draft' ? 'border-violet-500/50 bg-violet-500/10 text-violet-500' :
+                            <Badge variant="outline" className={`text-[9px] h-4 ${sweep.status === 'draft' ? 'border-violet-500/50 bg-violet-500/10 text-violet-500' :
                               sweep.status === 'running' ? 'border-blue-400/50 bg-blue-400/10 text-blue-400' :
-                              sweep.status === 'completed' ? 'border-green-400/50 bg-green-400/10 text-green-400' :
-                              sweep.status === 'failed' ? 'border-destructive/50 bg-destructive/10 text-destructive' :
-                              'border-muted-foreground/50 bg-muted/10 text-muted-foreground'
-                            }`}>{sweep.status}</Badge>
+                                sweep.status === 'completed' ? 'border-green-400/50 bg-green-400/10 text-green-400' :
+                                  sweep.status === 'failed' ? 'border-destructive/50 bg-destructive/10 text-destructive' :
+                                    'border-muted-foreground/50 bg-muted/10 text-muted-foreground'
+                              }`}>{sweep.status}</Badge>
                           </div>
                           <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
                             <span>{sweep.progress.completed}/{sweep.progress.total} runs</span>
@@ -884,93 +902,99 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
             <div ref={alertsSectionRef}>
               <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
                 <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-warning" />
-                      <span className={`text-xs font-medium ${runAlerts.length > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
-                        Alerts {runAlerts.length > 0 && `(${runAlerts.length})`}
-                      </span>
-                    </div>
-                    {alertsOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-3 pb-3">
-                    {runAlerts.length > 0 ? (
-                      <div className="mt-2 space-y-2">
-                        {runAlerts.map((alert) => {
-                          const severity = alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info'
-                          const badgeClass =
-                            severity === 'error'
-                              ? 'border-destructive/50 bg-destructive/10 text-destructive'
-                              : severity === 'warning'
-                              ? 'border-warning/50 bg-warning/10 text-warning'
-                              : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
-                          return (
-                            <div key={alert.id} className="rounded border border-border bg-secondary/40 p-2">
-                              <div className="flex items-start gap-2">
-                                <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 ${severity === 'error' ? 'text-destructive' : severity === 'warning' ? 'text-warning' : 'text-blue-400'}`} />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className={`text-[9px] h-4 ${badgeClass}`}>
-                                      {alert.severity}
-                                    </Badge>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {formatAlertTime(alert.timestamp)}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-foreground mt-1 leading-relaxed">
-                                    {alert.message}
-                                  </p>
-                                  {alert.response && (
-                                    <p className="text-[10px] text-muted-foreground mt-1">
-                                      Response: {alert.response}
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-warning" />
+                        <span className={`text-xs font-medium ${runAlerts.length > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+                          Alerts {runAlerts.length > 0 && `(${runAlerts.length})`}
+                        </span>
+                      </div>
+                      {alertsOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border px-3 pb-3">
+                      {runAlerts.length > 0 ? (
+                        <div className="mt-2 space-y-2">
+                          {runAlerts.map((alert) => {
+                            const severity = alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info'
+                            const badgeClass =
+                              severity === 'error'
+                                ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                                : severity === 'warning'
+                                  ? 'border-warning/50 bg-warning/10 text-warning'
+                                  : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
+                            return (
+                              <div key={alert.id} className="rounded border border-border bg-secondary/40 p-2">
+                                <div className="flex items-start gap-2">
+                                  <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 ${severity === 'error' ? 'text-destructive' : severity === 'warning' ? 'text-warning' : 'text-blue-400'}`} />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className={`text-[9px] h-4 ${badgeClass}`}>
+                                        {alert.severity}
+                                      </Badge>
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {formatAlertTime(alert.timestamp)}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-foreground mt-1 leading-relaxed">
+                                      {alert.message}
                                     </p>
-                                  )}
+                                    {alert.response && (
+                                      <p className="text-[10px] text-muted-foreground mt-1">
+                                        Response: {alert.response}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div className="mt-2 py-4 text-center">
-                        <p className="text-xs text-muted-foreground">No alerts for this run</p>
-                      </div>
-                    )}
-                  </div>
-                </CollapsibleContent>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mt-2 py-4 text-center">
+                          <p className="text-xs text-muted-foreground">No alerts for this run</p>
+                        </div>
+                      )}
+                    </div>
+                  </CollapsibleContent>
                 </div>
               </Collapsible>
             </div>
 
-            {/* Charts Section - Primary */}
-            {run.lossHistory && run.lossHistory.length > 0 && (
-              <Collapsible open={primaryChartsOpen} onOpenChange={setPrimaryChartsOpen}>
+            {/* Charts Section */}
+            {hasChartData ? (
+              <Collapsible open={chartsOpen} onOpenChange={setChartsOpen}>
                 <div className="rounded-lg border border-border bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
                     <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Primary Metrics</span>
                       <div className="flex items-center gap-2">
-                        {primaryChartsOpen && (
+                        <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium text-foreground">Metrics</span>
+                        <Badge variant="outline" className="h-5 rounded px-1.5 text-[10px] text-muted-foreground">
+                          {dynamicMetrics.length}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {chartsOpen && (
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-5 px-2 text-[10px]"
                             onClick={(e) => {
                               e.stopPropagation()
-                              toggleAllInCategory(primaryMetrics, !allPrimaryExpanded)
+                              toggleAllInCategory(dynamicMetrics, !allChartsExpanded)
                             }}
                           >
-                            {allPrimaryExpanded ? 'Collapse All' : 'Expand All'}
+                            {allChartsExpanded ? 'Collapse All' : 'Expand All'}
                           </Button>
                         )}
-                        {primaryChartsOpen ? (
+                        {chartsOpen ? (
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                         ) : (
                           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -980,7 +1004,7 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="border-t border-border px-2 pb-2">
-                      {primaryMetrics.map((metric) => (
+                      {dynamicMetrics.map((metric) => (
                         <MetricChart
                           key={metric.id}
                           metric={metric}
@@ -993,86 +1017,23 @@ export function RunDetailView({ run, alerts = [], runs = [], onRunSelect, onUpda
                   </CollapsibleContent>
                 </div>
               </Collapsible>
-            )}
-
-            {/* Charts Section - Secondary */}
-            {run.lossHistory && run.lossHistory.length > 0 && (
-              <Collapsible open={secondaryChartsOpen} onOpenChange={setSecondaryChartsOpen}>
-                <div className="rounded-lg border border-border bg-card overflow-hidden">
-                  <CollapsibleTrigger asChild>
-                    <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Secondary Metrics</span>
-                      <div className="flex items-center gap-2">
-                        {secondaryChartsOpen && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 px-2 text-[10px]"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleAllInCategory(secondaryMetrics, !allSecondaryExpanded)
-                            }}
-                          >
-                            {allSecondaryExpanded ? 'Collapse All' : 'Expand All'}
-                          </Button>
-                        )}
-                        {secondaryChartsOpen ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                      </div>
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border px-2 pb-2">
-                      {secondaryMetrics.map((metric) => (
-                        <div key={metric.id}>
-                          {metric.layerSelector && (
-                            <div className="flex items-center gap-2 px-3 pt-2">
-                              <span className="text-[10px] text-muted-foreground">Layer:</span>
-                              <select
-                                className="text-[10px] bg-secondary border-0 rounded px-1.5 py-0.5 text-foreground"
-                                value={layerSelections[metric.id] || 0}
-                                onChange={(e) => setLayerSelections(prev => ({ ...prev, [metric.id]: Number(e.target.value) }))}
-                              >
-                                {Array.from({ length: 12 }, (_, i) => (
-                                  <option key={i} value={i}>Layer {i}</option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                          <MetricChart
-                            metric={metric}
-                            run={run}
-                            isExpanded={expandedCharts.has(metric.id)}
-                            onToggle={() => toggleChart(metric.id)}
-                            selectedLayer={layerSelections[metric.id]}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
-            )}
-
-            {/* Charts Section - Empty State */}
-            {(!run.lossHistory || run.lossHistory.length === 0) && (
+            ) : (
               <Collapsible>
                 <div className="rounded-lg border border-border border-dashed bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
                     <button type="button" className="flex w-full items-center justify-between p-3">
                       <div className="flex items-center gap-2">
                         <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-xs font-medium text-muted-foreground">Charts</span>
+                        <span className="text-xs font-medium text-muted-foreground">Metrics</span>
                       </div>
                       <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="border-t border-border px-3 py-6 text-center">
-                      <p className="text-xs text-muted-foreground">No chart data available</p>
+                      <p className="text-xs text-muted-foreground">
+                        {run.status === 'running' ? 'Waiting for metrics data...' : 'No metric data available'}
+                      </p>
                     </div>
                   </CollapsibleContent>
                 </div>

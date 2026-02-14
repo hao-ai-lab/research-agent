@@ -297,7 +297,6 @@ export interface MetricVisualization {
   id: string;
   name: string;
   path: string;
-  category: "primary" | "secondary";
   type: "line" | "bar" | "area";
   isFavorite?: boolean;
   isPinned?: boolean;

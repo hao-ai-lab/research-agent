@@ -67,7 +67,7 @@ interface ChartsViewProps {
   onShowVisibilityManageChange?: (show: boolean) => void
 }
 
-type MetricSectionId = 'pinned' | 'primary' | 'secondary'
+type MetricSectionId = 'pinned' | 'all'
 type MetricSeriesPoint = { step: number; value: number }
 
 const chartStrokeFallback = '#8fd0ff'
@@ -121,34 +121,7 @@ function metricDisplayName(path: string): string {
     .join(' ')
 }
 
-function metricCategoryFromPath(path: string): 'primary' | 'secondary' {
-  const key = path.toLowerCase()
 
-  // Keyword-based primary metrics
-  if (
-    key.includes('loss') ||
-    key.includes('accuracy') ||
-    key.includes('reward') ||
-    key.includes('score') ||
-    key.includes('f1') ||
-    key.includes('bleu') ||
-    key.includes('rouge') ||
-    key.includes('perplexity')
-  ) {
-    return 'primary'
-  }
-
-  // Prefix-based: train/* and val/* are primary (unless they're grad/lr/step)
-  if (/^(train|val|validation|eval|test|final)\//.test(key)) {
-    // These specific sub-metrics are secondary even under train/val
-    if (key.includes('grad') || key.includes('lr') || key.includes('learning_rate') || key.includes('/step')) {
-      return 'secondary'
-    }
-    return 'primary'
-  }
-
-  return 'secondary'
-}
 
 function metricTypeFromPath(path: string): 'line' | 'area' | 'bar' {
   const key = path.toLowerCase()
@@ -213,11 +186,11 @@ function metricValueAt(metricPath: string, history: { step: number; trainLoss: n
 
 function fallbackMetricData(metricPath: string, runs: ExperimentRun[], visibleRunIds: Set<string>) {
   const visibleRuns = runs.filter((r) => visibleRunIds.has(r.id))
-  const data: { step: number; [key: string]: number }[] = []
+  const data: { step: number;[key: string]: number }[] = []
 
   for (let i = 0; i <= 100; i += 5) {
     const step = i * 100
-    const point: { step: number; [key: string]: number } = { step }
+    const point: { step: number;[key: string]: number } = { step }
     visibleRuns.forEach((run, runIdx) => {
       const seed = i + runIdx * 7
       const baseValue = metricPath.includes('loss')
@@ -254,8 +227,8 @@ function buildMetricData(
   runs: ExperimentRun[],
   visibleRunIds: Set<string>,
   smoothing: number
-): { step: number; [key: string]: number }[] {
-  const stepRows = new Map<number, { step: number; [key: string]: number }>()
+): { step: number;[key: string]: number }[] {
+  const stepRows = new Map<number, { step: number;[key: string]: number }>()
 
   runs.forEach((run) => {
     if (!visibleRunIds.has(run.id) || run.isArchived) {
@@ -294,8 +267,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
   const [smoothing, setSmoothing] = useState('0.50')
   const [sectionOpen, setSectionOpen] = useState<Record<MetricSectionId, boolean>>({
     pinned: true,
-    primary: true,
-    secondary: true,
+    all: true,
   })
 
   const [chartSettings, setChartSettings] = useState({
@@ -372,7 +344,7 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
           id: toMetricId(metricPath),
           name: metricDisplayName(metricPath),
           path: metricPath,
-          category: metricCategoryFromPath(metricPath),
+
           type: metricTypeFromPath(metricPath),
           isPinned: defaultPinned,
           isInOverview: defaultPinned,
@@ -461,9 +433,9 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
     return m.name.toLowerCase().includes(filterQuery) || m.path.toLowerCase().includes(filterQuery)
   }
 
-  const primaryMetrics = metrics.filter((m) => m.category === 'primary' && matchesFilter(m))
-  const secondaryMetrics = metrics.filter((m) => m.category === 'secondary' && matchesFilter(m))
+  const allMetrics = metrics.filter((m) => matchesFilter(m))
   const pinnedMetrics = metrics.filter((m) => m.isPinned && matchesFilter(m))
+  const unpinnedMetrics = allMetrics.filter((m) => !m.isPinned)
 
   const toggleRunVisibility = (runId: string) => {
     setVisibleRunIds((prev) => {
@@ -1008,56 +980,51 @@ export function ChartsView({ runs, customCharts, onTogglePin, onToggleOverview, 
       )}
 
       {activeSection !== 'videoCompare' && (
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="space-y-4 p-3">
-            {activeSection === 'standard' ? (
-              <>
-                {renderMetricSection('pinned', 'Pinned', pinnedMetrics, 'Pinned')}
-                {renderMetricSection('primary', 'Primary Metrics', primaryMetrics.filter((m) => !m.isPinned))}
-                {renderMetricSection('secondary', 'Secondary Metrics', secondaryMetrics.filter((m) => !m.isPinned))}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <ScrollArea className="h-full">
+            <div className="space-y-4 p-3">
+              {activeSection === 'standard' ? (
+                <>
+                  {renderMetricSection('pinned', 'Pinned', pinnedMetrics, 'Pinned')}
+                  {renderMetricSection('all', 'All Metrics', unpinnedMetrics)}
 
-                {pinnedMetrics.length === 0 && primaryMetrics.length === 0 && secondaryMetrics.length === 0 && (
-                  isWaitingForMetrics ? (
-                    <div className="rounded-lg border border-dashed border-border p-8 text-center">
-                      <Loader2 className="mx-auto mb-3 h-6 w-6 animate-spin text-muted-foreground/60" />
-                      <p className="text-sm font-medium text-foreground">Waiting for metrics...</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {hasWandbSource
-                          ? 'Connected to wandb — metrics will appear as training progresses.'
-                          : 'Metrics will appear once the training script starts logging.'}
-                      </p>
+                  {allMetrics.length === 0 && (
+                    isWaitingForMetrics ? (
+                      <div className="rounded-lg border border-dashed border-border p-8 text-center">
+                        <Loader2 className="mx-auto mb-3 h-6 w-6 animate-spin text-muted-foreground/60" />
+                        <p className="text-sm font-medium text-foreground">Waiting for metrics...</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {hasWandbSource
+                            ? 'Connected to wandb — metrics will appear as training progresses.'
+                            : 'Metrics will appear once the training script starts logging.'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                        {filterQuery ? 'No metrics match your filter.' : 'No metric data available.'}
+                      </div>
+                    )
+                  )}
+                </>
+              ) : activeSection === 'custom' ? (
+                <div>
+                  <div className="mb-3 flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-accent/30 bg-accent/10">
+                      <TrendingUp className="h-4 w-4 text-accent" />
                     </div>
-                  ) : filterQuery ? (
-                    <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                      No metrics match your filter.
+                    <div>
+                      <h3 className="text-sm font-medium text-foreground">Custom Visualizations</h3>
+                      <p className="text-xs text-muted-foreground">{customCharts.length} saved charts</p>
                     </div>
-                  ) : (
-                    <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                      No metrics match your filter.
-                    </div>
-                  )
-                )}
-              </>
-            ) : activeSection === 'custom' ? (
-              <div>
-                <div className="mb-3 flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-accent/30 bg-accent/10">
-                    <TrendingUp className="h-4 w-4 text-accent" />
                   </div>
-                  <div>
-                    <h3 className="text-sm font-medium text-foreground">Custom Visualizations</h3>
-                    <p className="text-xs text-muted-foreground">{customCharts.length} saved charts</p>
+                  <div className="space-y-3">
+                    {customCharts.map(renderCustomChart)}
                   </div>
                 </div>
-                <div className="space-y-3">
-                  {customCharts.map(renderCustomChart)}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </ScrollArea>
-      </div>
+              ) : null}
+            </div>
+          </ScrollArea>
+        </div>
       )}
 
       {/* Video Compare (full-height, outside ScrollArea) */}
