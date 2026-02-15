@@ -31,12 +31,20 @@ jobs:
       - name: Install Modal CLI
         run: pip install modal
 
+      - name: Generate preview auth token
+        run: |
+          PREVIEW_AUTH_TOKEN="$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )"
+          echo "PREVIEW_AUTH_TOKEN=${PREVIEW_AUTH_TOKEN}" >> "$GITHUB_ENV"
+
       - name: Generate CI frontend config
         run: |
           APP_SLUG="research-agent-preview-pr-${{ github.event.pull_request.number }}"
           SERVER_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-server.modal.run"
           echo "NEXT_PUBLIC_DEFAULT_SERVER_URL=${SERVER_URL}" > .env.local
-          echo "NEXT_PUBLIC_DEFAULT_AUTH_TOKEN=test" >> .env.local
           echo "BACKEND_URL=${SERVER_URL}" >> .env.local
           cat .env.local
 
@@ -48,6 +56,7 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           MODAL_PREVIEW_OPENCODE_URL: ${{ format('https://{0}--research-agent-preview-pr-{1}-preview-opencode.modal.run', github.repository_owner, github.event.pull_request.number) }}
+          RESEARCH_AGENT_USER_AUTH_TOKEN: ${{ env.PREVIEW_AUTH_TOKEN }}
 
       - name: Verify deployed preview health
         run: |
@@ -90,6 +99,29 @@ jobs:
           check_url "Preview app" "${APP_URL}"
           check_url "Preview server" "${SERVER_URL}/health" '"status"[[:space:]]*:[[:space:]]*"ok"'
 
+          check_server_auth() {
+            local url="$1"
+            local token="$2"
+            local unauth_code auth_code
+
+            unauth_code="$(curl -sS -o /dev/null -w '%{http_code}' "${url}/sessions" || true)"
+            auth_code="$(curl -sS -o /dev/null -w '%{http_code}' -H "X-Auth-Token: ${token}" "${url}/sessions" || true)"
+
+            if [[ "${unauth_code}" != "401" ]]; then
+              echo "❌ Expected unauthenticated /sessions to return 401, got ${unauth_code}"
+              return 1
+            fi
+
+            if [[ "${auth_code}" != "200" ]]; then
+              echo "❌ Expected authenticated /sessions to return 200, got ${auth_code}"
+              return 1
+            fi
+
+            echo "✅ Preview server auth checks passed"
+          }
+
+          check_server_auth "${SERVER_URL}" "${PREVIEW_AUTH_TOKEN}"
+
           check_opencode() {
             local url="$1"
             for attempt in $(seq 1 30); do
@@ -111,9 +143,13 @@ jobs:
           }
 
           check_opencode "${OPENCODE_URL}"
+        env:
+          PREVIEW_AUTH_TOKEN: ${{ env.PREVIEW_AUTH_TOKEN }}
 
       - name: Comment preview URL on PR
         uses: actions/github-script@v7
+        env:
+          PREVIEW_AUTH_TOKEN: ${{ env.PREVIEW_AUTH_TOKEN }}
         with:
           script: |
             const prNumber = context.payload.pull_request.number;
@@ -121,6 +157,13 @@ jobs:
             const appSlug = `research-agent-preview-pr-${prNumber}`;
             const previewUrl = `https://${context.repo.owner}--${appSlug}-preview-app.modal.run`;
             const opencodeUrl = `https://${context.repo.owner}--${appSlug}-preview-opencode.modal.run`;
+            const serverUrl = `https://${context.repo.owner}--${appSlug}-preview-server.modal.run`;
+            const previewAuthToken = process.env.PREVIEW_AUTH_TOKEN;
+            const setupPayload = Buffer.from(
+              JSON.stringify({ apiUrl: serverUrl, authToken: previewAuthToken }),
+              'utf8'
+            ).toString('base64url');
+            const setupUrl = `${previewUrl}/#setup=${setupPayload}`;
 
             // Look for an existing preview bot comment to update
             const { data: comments } = await github.rest.issues.listComments({
@@ -138,11 +181,13 @@ jobs:
               '',
               `| | |`,
               `|---|---|`,
-              `| **Preview** | [Open App](${previewUrl}) |`,
+              `| **Preview** | [Open App](${setupUrl}) |`,
               `| **OpenCode** | [Open OpenCode](${opencodeUrl}) |`,
+              `| **Server** | [${serverUrl}](${serverUrl}) |`,
               `| **Commit** | \`${sha}\` |`,
               `| **Status** | ✅ Deployed |`,
               '',
+              '> `Open App` preloads URL + auth token into local settings for this preview.',
               `> Updated at ${new Date().toISOString()}`,
             ].join('\n');
 

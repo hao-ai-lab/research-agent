@@ -68,10 +68,13 @@ app = modal.App("research-agent-preview")
 OPENCODE_BIN = "/usr/local/bin/opencode"
 OPENCODE_PORT = "4096"
 MODAL_PREVIEW_OPENCODE_URL = os.environ.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
+MODAL_PREVIEW_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "").strip()
 
 _FUNCTION_ENV = {}
 if MODAL_PREVIEW_OPENCODE_URL:
     _FUNCTION_ENV["MODAL_PREVIEW_OPENCODE_URL"] = MODAL_PREVIEW_OPENCODE_URL
+if MODAL_PREVIEW_AUTH_TOKEN:
+    _FUNCTION_ENV["RESEARCH_AGENT_USER_AUTH_TOKEN"] = MODAL_PREVIEW_AUTH_TOKEN
 
 
 @app.function(
@@ -152,6 +155,7 @@ def preview_server():
     timeout=7200,  # 2 hours max
     cpu=8.0,
     memory=8 * 1024,  # 8GB
+    env=_FUNCTION_ENV,
 )
 @modal.concurrent(max_inputs=100)
 @modal.web_server(port=8080, startup_timeout=120)
