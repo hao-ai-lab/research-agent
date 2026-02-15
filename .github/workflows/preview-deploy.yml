@@ -182,7 +182,7 @@ jobs:
               `| | |`,
               `|---|---|`,
               `| **Preview (Setup)** | [${setupUrl}](${setupUrl}) |`,
-              `| **Preview (Clean)** | [${previewUrl}](${previewUrl}) |`,
+              `| **Preview (Clean)** | [Open App](${previewUrl}) |`,
               `| **OpenCode** | [${opencodeUrl}](${opencodeUrl}) |`,
               `| **Server** | [${serverUrl}](${serverUrl}) |`,
               `| **Auth Token** | \`${previewAuthToken}\` |`,
