@@ -363,16 +363,73 @@ export function DesktopSidebar({
                 )}
                 {PRIMARY_NAV_ITEMS
                   .filter((item) => item.tab !== 'plans' || settings.developer?.showPlanPanel)
-                  .map((item) => (
-                    <NavTabButton
-                      key={item.tab}
-                      compact={isIconRail}
-                      label={item.label}
-                      icon={item.icon}
-                      active={activeTab === item.tab}
-                      onClick={() => onTabChange(item.tab)}
-                    />
-                  ))}
+                  .map((item) => {
+                    if (item.tab === 'runs') {
+                      return (
+                        <DropdownMenu key={item.tab}>
+                          <DropdownMenuTrigger asChild>
+                            <NavTabButton
+                              compact={isIconRail}
+                              label={item.label}
+                              icon={item.icon}
+                              active={activeTab === item.tab}
+                            />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            side="right"
+                            align="start"
+                            className="w-64 max-h-[400px] overflow-y-auto"
+                          >
+                            <DropdownMenuItem onSelect={() => onTabChange('runs')}>
+                              <span className="font-medium">View All Runs</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {runs.length === 0 ? (
+                              <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                                No runs found
+                              </div>
+                            ) : (
+                              [...runs]
+                                .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+                                .slice(0, 20)
+                                .map((run) => {
+                                  const runStatus = getRunStatusMeta(run.status)
+
+                                  return (
+                                    <DropdownMenuItem
+                                      key={run.id}
+                                      onSelect={() => onNavigateToRun(run.id)}
+                                      className="flex flex-col items-start gap-1 p-2 focus:bg-accent focus:text-accent-foreground"
+                                    >
+                                      <div className="flex w-full items-center gap-2 overflow-hidden">
+                                        <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+                                          {runStatus.icon}
+                                        </div>
+                                        <span className="truncate font-medium">{run.alias || run.name || run.id}</span>
+                                      </div>
+                                      <div className="flex w-full items-center justify-between gap-2 pl-6 text-[10px] text-muted-foreground">
+                                        <span>{runStatus.label}</span>
+                                        <span>{formatRelativeTime(run.startTime)}</span>
+                                      </div>
+                                    </DropdownMenuItem>
+                                  )
+                                })
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )
+                    }
+                    return (
+                      <NavTabButton
+                        key={item.tab}
+                        compact={isIconRail}
+                        label={item.label}
+                        icon={item.icon}
+                        active={activeTab === item.tab}
+                        onClick={() => onTabChange(item.tab)}
+                      />
+                    )
+                  })}
               </div>
             </section>
 
