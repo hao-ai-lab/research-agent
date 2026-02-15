@@ -62,7 +62,7 @@ export function useWebNotification(enabled = true) {
             console.log('[notification] Creating notification...')
             const notification = new Notification(title, {
                 body: body || undefined,
-                icon: '/favicon.ico',
+                icon: '/research-agent-notification-icon.svg',
                 tag: 'bot-response',       // Collapse duplicate notifications
             })
 
