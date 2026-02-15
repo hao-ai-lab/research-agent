@@ -137,6 +137,7 @@ export function ConnectedChatView({
         isLoading,
         error,
         currentSessionId,
+        currentSession,
         messages,
         streamingState,
         availableModels,
@@ -290,16 +291,14 @@ export function ConnectedChatView({
             const msgs = messagesRef.current
             const lastMsg = msgs[msgs.length - 1]
             if (lastMsg?.role === 'assistant') {
-                const preview = lastMsg.content.slice(0, 120).replace(/\n/g, ' ')
-                if (wildLoop?.isActive) {
-                    notify('🚀 Wild Mode Response', preview || 'Bot finished responding')
-                } else {
-                    notify('🔬 Bot Response', preview || 'Bot finished responding')
-                }
+                const chatName = currentSession?.title?.trim() || 'Untitled Chat'
+                const title = `[Research Agent] ${chatName}`
+                const body = lastMsg.content.trim() || 'Bot finished responding'
+                notify(title, body)
             }
         }
         prevStreamingRef.current = streamingState.isStreaming
-    }, [streamingState.isStreaming, wildLoop, notify])
+    }, [streamingState.isStreaming, currentSession?.title, notify])
 
     // Auto-reconnect to the next iteration's stream when wild loop is active.
     // When the V2 backend finishes one iteration, it sends `session_status: idle`,
