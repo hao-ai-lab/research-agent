@@ -13,6 +13,11 @@ const DEFAULT_AUTH_TOKEN = process.env.NEXT_PUBLIC_DEFAULT_AUTH_TOKEN || ''
 const DEFAULT_USE_MOCK = false
 const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
+interface LinkSetupConfig {
+    apiUrl?: string
+    authToken?: string
+}
+
 function resolveEnvApiUrl(): string {
     if (ENV_API_URL === 'auto') {
         if (typeof window === 'undefined') {
@@ -21,6 +26,71 @@ function resolveEnvApiUrl(): string {
         return window.location.origin
     }
     return ENV_API_URL
+}
+
+function decodeBase64Url(value: string): string | null {
+    try {
+        const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+        const paddingLength = (4 - (normalized.length % 4)) % 4
+        const padded = normalized + '='.repeat(paddingLength)
+        return atob(padded)
+    } catch {
+        return null
+    }
+}
+
+function parseLinkSetupConfig(): LinkSetupConfig | null {
+    if (typeof window === 'undefined') {
+        return null
+    }
+
+    const hash = window.location.hash?.startsWith('#')
+        ? window.location.hash.slice(1)
+        : window.location.hash
+    if (!hash) {
+        return null
+    }
+
+    const params = new URLSearchParams(hash)
+    const encodedSetup = params.get('setup')
+    if (!encodedSetup) {
+        return null
+    }
+
+    const decoded = decodeBase64Url(encodedSetup)
+    if (!decoded) {
+        return null
+    }
+
+    try {
+        const parsed = JSON.parse(decoded)
+        if (!parsed || typeof parsed !== 'object') {
+            return null
+        }
+
+        const nextConfig: LinkSetupConfig = {}
+        if (typeof parsed.apiUrl === 'string' && parsed.apiUrl.length <= 2048) {
+            nextConfig.apiUrl = parsed.apiUrl.trim()
+        }
+        if (typeof parsed.authToken === 'string' && parsed.authToken.length <= 512) {
+            nextConfig.authToken = parsed.authToken.trim()
+        }
+
+        return (nextConfig.apiUrl || nextConfig.authToken) ? nextConfig : null
+    } catch {
+        return null
+    }
+}
+
+function clearLinkSetupHash(): void {
+    if (typeof window === 'undefined') {
+        return
+    }
+    if (!window.location.hash) {
+        return
+    }
+    const cleanUrl = `${window.location.pathname}${window.location.search}`
+    window.history.replaceState(window.history.state, '', cleanUrl)
 }
 
 interface ApiConfig {
@@ -88,8 +158,12 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         const storedUrl = localStorage.getItem(STORAGE_KEY_API_URL)
         const storedMock = localStorage.getItem(STORAGE_KEY_USE_MOCK)
         const storedToken = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
+        const setupConfig = parseLinkSetupConfig()
 
-        if (storedUrl) {
+        if (setupConfig?.apiUrl) {
+            setApiUrlState(setupConfig.apiUrl)
+            localStorage.setItem(STORAGE_KEY_API_URL, setupConfig.apiUrl)
+        } else if (storedUrl) {
             setApiUrlState(storedUrl)
         } else if (process.env.NEXT_PUBLIC_DEFAULT_SERVER_URL) {
             // CI: persist the explicit default so auto-resolve doesn't override it
@@ -108,11 +182,22 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         }
         // If no stored value, keep the default (false - demo mode off)
 
-        if (storedToken) {
+        if (typeof setupConfig?.authToken === 'string') {
+            setAuthTokenState(setupConfig.authToken)
+            if (setupConfig.authToken) {
+                localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, setupConfig.authToken)
+            } else {
+                localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN)
+            }
+        } else if (storedToken) {
             setAuthTokenState(storedToken)
         } else if (DEFAULT_AUTH_TOKEN) {
             setAuthTokenState(DEFAULT_AUTH_TOKEN)
             localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, DEFAULT_AUTH_TOKEN)
+        }
+
+        if (setupConfig) {
+            clearLinkSetupHash()
         }
 
         setIsHydrated(true)
