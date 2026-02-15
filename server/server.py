@@ -916,6 +916,18 @@ active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
 STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS = 0.75
 STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS = 20
 STREAM_RUNTIME_RETENTION_SECONDS = 120.0
+STREAM_KEEPALIVE_SECONDS = 5.0
+
+
+def stream_response_headers() -> dict[str, str]:
+    """
+    Headers to reduce buffering by reverse proxies/CDNs (e.g. cloud deployments).
+    """
+    return {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
 
 _wandb_metrics_cache: Dict[str, dict] = {}
 
@@ -2616,7 +2628,12 @@ async def _stream_runtime_events(
             return
 
         while True:
-            item = await queue.get()
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=STREAM_KEEPALIVE_SECONDS)
+            except asyncio.TimeoutError:
+                # Keep-alive chunk helps some cloud proxies flush streaming responses.
+                yield json.dumps({"type": "keepalive", "ts": time.time()}) + "\n"
+                continue
             if item is None:
                 break
             if int(item.get("seq", 0)) < from_seq:
@@ -3609,6 +3626,7 @@ async def stream_session(session_id: str, from_seq: int = Query(1, ge=1), run_id
     return StreamingResponse(
         _stream_runtime_events(session_id, from_seq=from_seq, run_id=run_id),
         media_type="application/x-ndjson",
+        headers=stream_response_headers(),
     )
 
 
@@ -3653,6 +3671,7 @@ async def chat_endpoint(req: ChatRequest):
     return StreamingResponse(
         _stream_runtime_events(session_id, from_seq=1, run_id=runtime.run_id),
         media_type="application/x-ndjson",
+        headers=stream_response_headers(),
     )
 
 
