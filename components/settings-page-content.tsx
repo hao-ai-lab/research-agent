@@ -290,8 +290,8 @@ export function SettingsPageContent({
         },
         {
           id: 'mobileEnterToNewline',
-          label: 'Mobile Enter Key Behavior',
-          description: 'On mobile, Enter inserts newline instead of sending (Shift+Enter to send)',
+          label: 'Mobile Enter Key Insert New Line',
+          description: 'On mobile, Enter inserts newline instead of sending (send button to send)',
           icon: Type,
           type: 'toggle' as const,
           value: settings.appearance.mobileEnterToNewline ?? false,
