@@ -289,6 +289,14 @@ export function SettingsPageContent({
           value: settings.appearance.starterCardFlavor || 'expert',
         },
         {
+          id: 'mobileEnterToNewline',
+          label: 'Mobile Enter Key Insert New Line',
+          description: 'On mobile, Enter inserts newline instead of sending (send button to send)',
+          icon: Type,
+          type: 'toggle' as const,
+          value: settings.appearance.mobileEnterToNewline ?? false,
+        },
+        {
           id: 'appearanceAdvanced',
           label: 'Advanced Appearance',
           description: 'Set exact numeric sizes',
@@ -819,6 +827,7 @@ export function SettingsPageContent({
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'mobileEnterToNewline') updateAppearanceSettings({ mobileEnterToNewline: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
                     ...settings,

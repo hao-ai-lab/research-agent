@@ -48,6 +48,8 @@ import {
   REFERENCE_TYPE_COLOR_MAP,
   type ReferenceTokenType,
 } from '@/lib/reference-token-colors'
+import { useAppSettings } from '@/lib/app-settings'
+import { useIsMobile } from '@/components/ui/use-mobile'
 
 export type ChatMode = 'agent' | 'wild' | 'sweep' | 'plan'
 
@@ -160,6 +162,9 @@ export function ChatInput({
   isModelUpdating = false,
   onModelChange,
 }: ChatInputProps) {
+  const { settings } = useAppSettings()
+  const isMobile = useIsMobile()
+
   const referenceMentionRegex = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
   const genericMentionRegex = /(?<!\S)@[A-Za-z0-9:._-]*/g
 
@@ -723,9 +728,23 @@ export function ChatInput({
       }
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
+    // Determine if we should reverse Enter/Shift+Enter behavior on mobile
+    const shouldReverseEnterBehavior = isMobile && (settings.appearance.mobileEnterToNewline ?? false)
+
+    if (shouldReverseEnterBehavior) {
+      // When enabled on mobile: Enter adds newline, Shift+Enter sends
+      if (e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault()
+        handleSubmit()
+      }
+      // Let Enter without shift insert newline (browser default)
+    } else {
+      // Default behavior: Enter sends, Shift+Enter adds newline
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        handleSubmit()
+      }
+      // Let Shift+Enter insert newline (browser default)
     }
   }
 
