@@ -76,6 +76,11 @@ export OPENCODE_URL="http://localhost:4096"
 
 # Optional: HTTP Basic Auth for OpenCode (if configured)
 export OPENCODE_PASSWORD="your-password"
+
+# Optional: request telemetry sink (non-blocking, fail-open)
+export RESEARCH_AGENT_TELEMETRY_URL="https://<workspace>--research-agent-telemetry-telemetry-asgi.modal.run/ingest"
+export RESEARCH_AGENT_TELEMETRY_TOKEN="shared-telemetry-token"
+export RESEARCH_AGENT_TELEMETRY_SAMPLE_RATE="0.2"
 ```
 
 ### 3. Start OpenCode
@@ -189,3 +194,20 @@ Make sure to use the full path:
 ```bash
 OPENCODE_CONFIG=/absolute/path/to/opencode.json opencode serve
 ```
+
+### Telemetry sink setup (Modal)
+
+Deploy the telemetry app:
+
+```bash
+modal deploy modal_telemetry.py --name research-agent-telemetry
+```
+
+Store `TELEMETRY_AUTH_TOKEN` in Modal secret `research-agent-telemetry-secrets`, then set matching
+`RESEARCH_AGENT_TELEMETRY_URL` and `RESEARCH_AGENT_TELEMETRY_TOKEN` for the server.
+
+Design notes:
+
+- Server send path is async with bounded queue and drop-on-overflow.
+- Ingest app appends to Volume spool files, then commits quickly.
+- Scheduled flush runs every minute and writes spool batches into SQLite.

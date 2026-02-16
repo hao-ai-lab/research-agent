@@ -11,10 +11,13 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
+import atexit
 from dataclasses import dataclass
 import json
 import math
 import os
+import queue
+import random
 import re
 import shlex
 import sys
@@ -25,7 +28,9 @@ import asyncio
 import shutil
 import socket
 import subprocess
+import threading
 from typing import Any, Callable, Dict, Optional, AsyncIterator, List
+from urllib.parse import parse_qsl, urlencode
 
 from wild_loop import (
     WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest,
@@ -128,6 +133,32 @@ TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agen
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
 
+
+def _get_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _get_float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+# Optional telemetry sink. Keep disabled unless URL is provided.
+RESEARCH_AGENT_TELEMETRY_URL = os.environ.get("RESEARCH_AGENT_TELEMETRY_URL", "").strip()
+RESEARCH_AGENT_TELEMETRY_TOKEN = os.environ.get("RESEARCH_AGENT_TELEMETRY_TOKEN", "").strip()
+RESEARCH_AGENT_TELEMETRY_QUEUE_SIZE = _get_int_env("RESEARCH_AGENT_TELEMETRY_QUEUE_SIZE", 5000)
+RESEARCH_AGENT_TELEMETRY_BATCH_SIZE = _get_int_env("RESEARCH_AGENT_TELEMETRY_BATCH_SIZE", 50)
+RESEARCH_AGENT_TELEMETRY_FLUSH_SECONDS = _get_float_env("RESEARCH_AGENT_TELEMETRY_FLUSH_SECONDS", 0.25)
+RESEARCH_AGENT_TELEMETRY_TIMEOUT_SECONDS = _get_float_env("RESEARCH_AGENT_TELEMETRY_TIMEOUT_SECONDS", 0.20)
+RESEARCH_AGENT_TELEMETRY_SAMPLE_RATE = _get_float_env("RESEARCH_AGENT_TELEMETRY_SAMPLE_RATE", 0.20)
+
 AUTH_PROTECTED_PREFIXES = (
     "/sessions",
     "/models",
@@ -148,6 +179,154 @@ def requires_api_auth(path: str) -> bool:
         if path == prefix or path.startswith(prefix + "/"):
             return True
     return False
+
+
+def _clamp_float(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _redact_query_string(raw_query: str) -> str:
+    if not raw_query:
+        return ""
+    redacted_pairs: list[tuple[str, str]] = []
+    for key, value in parse_qsl(raw_query, keep_blank_values=True):
+        lower = key.lower()
+        if any(secret in lower for secret in ("token", "key", "secret", "password", "auth")):
+            redacted_pairs.append((key, "[REDACTED]"))
+        else:
+            redacted_pairs.append((key, value[:256]))
+    return urlencode(redacted_pairs)
+
+
+def _truncate_text(value: Optional[str], max_len: int = 512) -> str:
+    if not value:
+        return ""
+    if len(value) <= max_len:
+        return value
+    return value[:max_len]
+
+
+class TelemetryEmitter:
+    """Bounded, fail-open telemetry sender for request metadata."""
+
+    def __init__(
+        self,
+        endpoint_url: str,
+        token: str = "",
+        queue_size: int = 5000,
+        batch_size: int = 50,
+        flush_seconds: float = 0.25,
+        timeout_seconds: float = 0.2,
+    ):
+        self._endpoint_url = endpoint_url.strip()
+        self._token = token.strip()
+        self._enabled = bool(self._endpoint_url)
+        self._queue: "queue.Queue[dict]" = queue.Queue(maxsize=max(1, queue_size))
+        self._batch_size = max(1, batch_size)
+        self._flush_seconds = max(0.05, flush_seconds)
+        self._timeout_seconds = max(0.05, timeout_seconds)
+        self._stop_event = threading.Event()
+        self._worker: Optional[threading.Thread] = None
+        self._dropped_total = 0
+        self._failed_batches = 0
+        self._sent_events = 0
+        self._lock = threading.Lock()
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def start(self) -> None:
+        if not self._enabled:
+            return
+        if self._worker and self._worker.is_alive():
+            return
+        self._worker = threading.Thread(target=self._run, name="telemetry-emitter", daemon=True)
+        self._worker.start()
+        logger.info("Telemetry emitter enabled: %s", self._endpoint_url)
+
+    def stop(self) -> None:
+        if not self._enabled:
+            return
+        self._stop_event.set()
+        if self._worker and self._worker.is_alive():
+            self._worker.join(timeout=1.0)
+
+    def enqueue(self, event: dict[str, Any]) -> None:
+        if not self._enabled:
+            return
+        try:
+            self._queue.put_nowait(event)
+        except queue.Full:
+            with self._lock:
+                self._dropped_total += 1
+                dropped = self._dropped_total
+            if dropped % 200 == 0:
+                logger.warning("Telemetry queue full; dropped events=%d", dropped)
+
+    def _post_batch(self, events: list[dict[str, Any]]) -> None:
+        import requests
+
+        headers = {"Content-Type": "application/json"}
+        if self._token:
+            headers["X-Telemetry-Token"] = self._token
+        payload = {
+            "source": "research-agent-server",
+            "sent_at": time.time(),
+            "events": events,
+        }
+        try:
+            response = requests.post(
+                self._endpoint_url,
+                headers=headers,
+                json=payload,
+                timeout=(self._timeout_seconds, self._timeout_seconds),
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(f"{response.status_code}: {response.text[:120]}")
+            with self._lock:
+                self._sent_events += len(events)
+        except Exception as exc:
+            with self._lock:
+                self._failed_batches += 1
+                failures = self._failed_batches
+            if failures % 50 == 0:
+                logger.warning("Telemetry send failures=%d last_error=%s", failures, exc)
+
+    def _run(self) -> None:
+        pending: list[dict[str, Any]] = []
+        next_flush = time.monotonic() + self._flush_seconds
+        while not self._stop_event.is_set():
+            timeout = max(0.01, next_flush - time.monotonic())
+            try:
+                item = self._queue.get(timeout=timeout)
+                pending.append(item)
+            except queue.Empty:
+                pass
+
+            now = time.monotonic()
+            if pending and (len(pending) >= self._batch_size or now >= next_flush):
+                batch = pending
+                pending = []
+                self._post_batch(batch)
+                next_flush = now + self._flush_seconds
+            elif now >= next_flush:
+                next_flush = now + self._flush_seconds
+
+        if pending:
+            self._post_batch(pending)
+
+
+TELEMETRY_EMITTER = TelemetryEmitter(
+    endpoint_url=RESEARCH_AGENT_TELEMETRY_URL,
+    token=RESEARCH_AGENT_TELEMETRY_TOKEN,
+    queue_size=RESEARCH_AGENT_TELEMETRY_QUEUE_SIZE,
+    batch_size=RESEARCH_AGENT_TELEMETRY_BATCH_SIZE,
+    flush_seconds=RESEARCH_AGENT_TELEMETRY_FLUSH_SECONDS,
+    timeout_seconds=RESEARCH_AGENT_TELEMETRY_TIMEOUT_SECONDS,
+)
+TELEMETRY_EMITTER.start()
+atexit.register(TELEMETRY_EMITTER.stop)
 
 
 def init_paths(workdir: str):
@@ -269,31 +448,101 @@ app.add_middleware(
 )
 
 
+def _should_log_telemetry(path: str, status_code: int) -> bool:
+    if not TELEMETRY_EMITTER.enabled:
+        return False
+    if path.startswith("/_next/") or path.startswith("/static/"):
+        return False
+    if status_code >= 500 or status_code == 401:
+        return True
+    sample_rate = _clamp_float(RESEARCH_AGENT_TELEMETRY_SAMPLE_RATE, 0.0, 1.0)
+    return random.random() <= sample_rate
+
+
+def _emit_request_telemetry(
+    request: Request,
+    status_code: int,
+    started_at_perf: float,
+    response_bytes: Optional[int] = None,
+) -> None:
+    path = request.url.path
+    if not _should_log_telemetry(path, status_code):
+        return
+
+    elapsed_ms = round((time.perf_counter() - started_at_perf) * 1000.0, 2)
+    request_bytes = request.headers.get("content-length")
+    try:
+        request_bytes_int = int(request_bytes) if request_bytes else None
+    except ValueError:
+        request_bytes_int = None
+
+    client_host = request.client.host if request.client else ""
+    event = {
+        "ts": time.time(),
+        "method": request.method,
+        "path": path,
+        "query": _truncate_text(_redact_query_string(request.url.query), max_len=512),
+        "status": status_code,
+        "latency_ms": elapsed_ms,
+        "client_ip": _truncate_text(client_host, max_len=128),
+        "user_agent": _truncate_text(request.headers.get("user-agent"), max_len=512),
+        "referer": _truncate_text(request.headers.get("referer"), max_len=512),
+        "content_type": _truncate_text(request.headers.get("content-type"), max_len=128),
+        "request_bytes": request_bytes_int,
+        "response_bytes": response_bytes,
+    }
+    TELEMETRY_EMITTER.enqueue(event)
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Validate X-Auth-Token header if USER_AUTH_TOKEN is configured."""
-    # Skip auth for CORS preflight
-    if request.method == "OPTIONS":
-        return await call_next(request)
-    
-    # If no auth token configured, allow all requests
-    if not USER_AUTH_TOKEN:
-        return await call_next(request)
+    started_at_perf = time.perf_counter()
+    status_code = 500
+    response_bytes: Optional[int] = None
 
-    # Static frontend routes should be public
-    if not requires_api_auth(request.url.path):
-        return await call_next(request)
-    
-    # Validate token
-    provided_token = request.headers.get("X-Auth-Token")
-    if provided_token != USER_AUTH_TOKEN:
-        logger.warning(f"Unauthorized request to {request.url.path}")
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Unauthorized - invalid or missing X-Auth-Token"}
+    try:
+        # Skip auth for CORS preflight
+        if request.method == "OPTIONS":
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+
+        # If no auth token configured, allow all requests
+        if not USER_AUTH_TOKEN:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+
+        # Static frontend routes should be public
+        if not requires_api_auth(request.url.path):
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+
+        # Validate token
+        provided_token = request.headers.get("X-Auth-Token")
+        if provided_token != USER_AUTH_TOKEN:
+            logger.warning(f"Unauthorized request to {request.url.path}")
+            status_code = 401
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized - invalid or missing X-Auth-Token"}
+            )
+
+        response = await call_next(request)
+        status_code = response.status_code
+        content_len = response.headers.get("content-length")
+        if content_len and content_len.isdigit():
+            response_bytes = int(content_len)
+        return response
+    finally:
+        _emit_request_telemetry(
+            request=request,
+            status_code=status_code,
+            started_at_perf=started_at_perf,
+            response_bytes=response_bytes,
         )
-    
-    return await call_next(request)
 
 # =============================================================================
 # Models
@@ -5222,6 +5471,14 @@ def main():
         logger.warning("   For secure remote access, generate a token with:")
         logger.warning("     ./generate_auth_token.sh")
         logger.warning("   Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>")
+
+    if RESEARCH_AGENT_TELEMETRY_URL:
+        logger.info(
+            "Request telemetry enabled: url=%s sample_rate=%.2f queue=%d",
+            RESEARCH_AGENT_TELEMETRY_URL,
+            _clamp_float(RESEARCH_AGENT_TELEMETRY_SAMPLE_RATE, 0.0, 1.0),
+            RESEARCH_AGENT_TELEMETRY_QUEUE_SIZE,
+        )
     
     # Start OpenCode server subprocess
     # start_opencode_server_subprocess(args)
