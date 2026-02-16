@@ -15,7 +15,7 @@ export interface Artifact {
   timestamp: Date;
 }
 
-export type LeftPanelItemId = "chat" | "runs" | "charts" | "insights";
+export type LeftPanelItemId = "chat" | "runs" | "charts" | "insights" | "terminal";
 
 export interface LeftPanelItemConfig {
   id: LeftPanelItemId;

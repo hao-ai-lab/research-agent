@@ -11,6 +11,7 @@ export type HomeTab =
   | 'journey'
   | 'report'
   | 'explorer'
+  | 'terminal'
   | 'settings'
 
 export type AppTab = HomeTab | 'contextual'
@@ -29,6 +30,7 @@ const HOME_TABS: readonly HomeTab[] = [
   'journey',
   'report',
   'explorer',
+  'terminal',
   'settings',
 ]
 

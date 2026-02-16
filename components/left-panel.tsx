@@ -10,6 +10,7 @@ import {
   Plus,
   LayoutDashboard,
   Sparkles,
+  Terminal,
 } from 'lucide-react'
 import {
   Sheet,
@@ -46,6 +47,10 @@ const NAV_ITEM_CONFIG = {
   insights: {
     icon: Lightbulb,
     label: 'Insights',
+  },
+  terminal: {
+    icon: Terminal,
+    label: 'Terminal',
   },
 } as const
 

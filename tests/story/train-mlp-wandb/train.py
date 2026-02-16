@@ -20,7 +20,7 @@ def main():
     # Hyperparameters exposed in args
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate (default: 0.001)")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size for training (default: 32)")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs (default: 10)")
+    parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs (default: 10)")
     parser.add_argument("--hidden-size", type=int, default=64, help="Size of hidden layer (default: 64)")
     parser.add_argument("--input-size", type=int, default=10, help="Dimension of input features (default: 10)")
     parser.add_argument("--output-size", type=int, default=1, help="Dimension of output (default: 1)")
@@ -31,8 +31,7 @@ def main():
     
     args = parser.parse_args()
 
-    # Force CPU
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     print(f"Hyperparameters: {vars(args)}")
 
