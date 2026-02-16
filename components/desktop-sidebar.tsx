@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DropdownMenu,
@@ -115,6 +116,7 @@ export function DesktopSidebar({
   onResizeEnd,
 }: DesktopSidebarProps) {
   const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null)
+  const [isRunsMenuOpen, setIsRunsMenuOpen] = useState(false)
 
   const getRunStatusMeta = useCallback((status: ExperimentRun['status']) => {
     switch (status) {
@@ -373,19 +375,27 @@ export function DesktopSidebar({
                   .map((item) => {
                     if (item.tab === 'runs') {
                       return (
-                        <DropdownMenu key={item.tab}>
+                        <DropdownMenu key={item.tab} open={isRunsMenuOpen} onOpenChange={setIsRunsMenuOpen}>
                           <DropdownMenuTrigger asChild>
-                            <NavTabButton
-                              compact={isIconRail}
-                              label={item.label}
-                              icon={item.icon}
-                              active={activeTab === item.tab}
-                            />
+                            <div
+                              onMouseEnter={() => setIsRunsMenuOpen(true)}
+                              onMouseLeave={() => setIsRunsMenuOpen(false)}
+                            >
+                              <NavTabButton
+                                compact={isIconRail}
+                                label={item.label}
+                                icon={item.icon}
+                                active={activeTab === item.tab}
+                                onClick={() => onTabChange('runs')}
+                              />
+                            </div>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             side="right"
                             align="start"
                             className="w-64 max-h-[400px] overflow-y-auto"
+                            onMouseEnter={() => setIsRunsMenuOpen(true)}
+                            onMouseLeave={() => setIsRunsMenuOpen(false)}
                           >
                             <DropdownMenuItem onSelect={() => onTabChange('runs')}>
                               <span className="font-medium">View All Runs</span>
@@ -654,15 +664,13 @@ export function DesktopSidebar({
                         key={run.id}
                         className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                       >
-                        <Popover
-                          open={activePreviewKey === `run:${run.id}`}
-                          onOpenChange={(open) => setActivePreviewKey(open ? `run:${run.id}` : null)}
-                        >
-                          <PopoverTrigger asChild>
+                        <HoverCard openDelay={200} closeDelay={100}>
+                          <HoverCardTrigger asChild>
                             <button
                               type="button"
                               title={runTitle}
                               className="min-w-0 flex-1 text-left"
+                              onClick={() => onNavigateToRun(run.id)}
                             >
                               <div className="flex items-center gap-1.5">
                                 <Tooltip>
@@ -694,8 +702,8 @@ export function DesktopSidebar({
                                 )}
                               </div>
                             </button>
-                          </PopoverTrigger>
-                          <PopoverContent side="right" align="start" className="w-80 p-3">
+                          </HoverCardTrigger>
+                          <HoverCardContent side="right" align="start" className="w-80 p-3">
                             <div className="space-y-2">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
@@ -710,21 +718,9 @@ export function DesktopSidebar({
                               <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
                                 {run.command}
                               </p>
-                              <div className="flex justify-end">
-                                <Button
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  onClick={() => {
-                                    setActivePreviewKey(null)
-                                    onNavigateToRun(run.id)
-                                  }}
-                                >
-                                  Detail
-                                </Button>
-                              </div>
                             </div>
-                          </PopoverContent>
-                        </Popover>
+                          </HoverCardContent>
+                        </HoverCard>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -762,15 +758,13 @@ export function DesktopSidebar({
                         key={sweep.id}
                         className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
                       >
-                        <Popover
-                          open={activePreviewKey === `sweep:${sweep.id}`}
-                          onOpenChange={(open) => setActivePreviewKey(open ? `sweep:${sweep.id}` : null)}
-                        >
-                          <PopoverTrigger asChild>
+                        <HoverCard openDelay={200} closeDelay={100}>
+                          <HoverCardTrigger asChild>
                             <button
                               type="button"
                               title={sweepTitle}
                               className="min-w-0 flex-1 text-left"
+                              onClick={() => void onNavigateToSweep?.(sweep.id)}
                             >
                               <div className="flex items-center gap-1.5">
                                 <Tooltip>
@@ -790,8 +784,8 @@ export function DesktopSidebar({
                               </div>
                               <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
                             </button>
-                          </PopoverTrigger>
-                          <PopoverContent side="right" align="start" className="w-80 p-3">
+                          </HoverCardTrigger>
+                          <HoverCardContent side="right" align="start" className="w-80 p-3">
                             <div className="space-y-2">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
@@ -806,30 +800,12 @@ export function DesktopSidebar({
                               <p className="text-[11px] text-muted-foreground">
                                 {sweep.progress.completed}/{sweep.progress.total} runs completed
                               </p>
-                              {sweepCommand && (
-                                <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
-                                  {sweepCommand}
-                                </p>
-                              )}
-                              <div className="flex justify-end">
-                                <Button
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  onClick={() => {
-                                    setActivePreviewKey(null)
-                                    if (onNavigateToSweep) {
-                                      onNavigateToSweep(sweep.id)
-                                    } else {
-                                      onTabChange('runs')
-                                    }
-                                  }}
-                                >
-                                  Detail
-                                </Button>
-                              </div>
+                              <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
+                                {sweepCommand}
+                              </p>
                             </div>
-                          </PopoverContent>
-                        </Popover>
+                          </HoverCardContent>
+                        </HoverCard>
                         <Button
                           variant="ghost"
                           size="sm"
