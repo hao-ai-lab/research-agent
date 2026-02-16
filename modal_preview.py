@@ -11,6 +11,8 @@ Required Modal Secret "research-agent-preview-secrets":
     RESEARCH_AGENT_USER_AUTH_TOKEN  – auth token for the preview instance
     ANTHROPIC_API_KEY               – (optional) for agent/chat features
     RESEARCH_AGENT_KEY              – (optional) gateway key
+    RESEARCH_AGENT_TELEMETRY_URL    – (optional) telemetry ingest endpoint
+    RESEARCH_AGENT_TELEMETRY_TOKEN  – (optional) shared token for telemetry ingest
 """
 
 import modal
@@ -68,11 +70,17 @@ app = modal.App("research-agent-preview")
 OPENCODE_BIN = "/usr/local/bin/opencode"
 OPENCODE_PORT = "4096"
 MODAL_PREVIEW_OPENCODE_URL = os.environ.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
+RESEARCH_AGENT_TELEMETRY_URL = os.environ.get("RESEARCH_AGENT_TELEMETRY_URL", "").strip()
+RESEARCH_AGENT_TELEMETRY_TOKEN = os.environ.get("RESEARCH_AGENT_TELEMETRY_TOKEN", "").strip()
 MODAL_PREVIEW_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "").strip()
 
 _FUNCTION_ENV = {}
 if MODAL_PREVIEW_OPENCODE_URL:
     _FUNCTION_ENV["MODAL_PREVIEW_OPENCODE_URL"] = MODAL_PREVIEW_OPENCODE_URL
+if RESEARCH_AGENT_TELEMETRY_URL:
+    _FUNCTION_ENV["RESEARCH_AGENT_TELEMETRY_URL"] = RESEARCH_AGENT_TELEMETRY_URL
+if RESEARCH_AGENT_TELEMETRY_TOKEN:
+    _FUNCTION_ENV["RESEARCH_AGENT_TELEMETRY_TOKEN"] = RESEARCH_AGENT_TELEMETRY_TOKEN
 if MODAL_PREVIEW_AUTH_TOKEN:
     _FUNCTION_ENV["RESEARCH_AGENT_USER_AUTH_TOKEN"] = MODAL_PREVIEW_AUTH_TOKEN
 
