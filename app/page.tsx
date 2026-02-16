@@ -16,6 +16,7 @@ import { SettingsPageContent } from '@/components/settings-page-content'
 import { SkillsBrowserView } from '@/components/skills-browser-view'
 import { PlanPanel } from '@/components/plan-panel'
 import { DesktopSidebar } from '@/components/desktop-sidebar'
+import { TerminalView } from '@/components/terminal-view'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
 import type { ChatMode } from '@/components/chat-input'
@@ -857,6 +858,9 @@ export default function ResearchChat() {
                   handleTabChange('journey')
                 }}
               />
+            )}
+            {activeTab === 'terminal' && (
+              <TerminalView />
             )}
           </div>
 

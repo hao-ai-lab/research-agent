@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Orbit,
   Wand2,
+  Terminal,
   type LucideIcon,
 } from 'lucide-react'
 import type { HomeTab } from '@/lib/navigation'
@@ -66,6 +67,11 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     tab: 'explorer',
     label: 'Explorer',
     icon: FolderTree,
+  },
+  {
+    tab: 'terminal',
+    label: 'Terminal',
+    icon: Terminal,
   },
   {
     tab: 'contextual',

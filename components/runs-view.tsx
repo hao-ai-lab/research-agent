@@ -60,6 +60,7 @@ import { RunDetailView } from './run-detail-view'
 import { VisibilityManageView } from './visibility-manage-view'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup, Sweep, SweepConfig } from '@/lib/types'
+import { createRun, startRun } from '@/lib/api'
 import type {
   Alert,
   ClusterState,
@@ -67,7 +68,8 @@ import type {
   ClusterType,
   ClusterUpdateRequest,
   CreateRunRequest,
-} from '@/lib/api-client'
+  Run,
+} from '@/lib/api'
 import { startSweep as apiStartSweep, updateSweep as apiUpdateSweep } from '@/lib/api-client'
 import { DEFAULT_RUN_COLORS, getRunsOverview } from '@/lib/mock-data'
 import { getStatusText, getStatusBadgeClass as getStatusBadgeClassUtil, getStatusDotColor } from '@/lib/status-utils'
@@ -690,6 +692,25 @@ export function RunsView({
     }
   }
 
+  const handleRetryRun = async (run: ExperimentRun) => {
+    if (!onCreateRun) return
+    setRunActionBusy((prev) => ({ ...prev, [run.id]: 'starting' }))
+    try {
+      const request: CreateRunRequest = {
+        name: run.name,
+        command: run.command,
+        sweep_id: run.sweepId,
+        auto_start: true,
+      }
+      await onCreateRun(request)
+      await onRefresh?.()
+    } catch (e) {
+      console.error('Failed to retry run:', e)
+    } finally {
+      setRunActionBusy((prev) => ({ ...prev, [run.id]: undefined }))
+    }
+  }
+
   const handleRunClick = (run: ExperimentRun) => {
     if (useInlineDetails) {
       toggleRunExpansion(run.id)
@@ -1010,6 +1031,21 @@ export function RunsView({
                     </span>
                   )}
                 </Button>
+                {run.status === 'failed' && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void handleRetryRun(run)
+                    }}
+                    disabled={busyState === 'starting'}
+                    title="Retry Run"
+                  >
+                    {busyState === 'starting' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  </Button>
+                )}
               </div>
             )}
             <Badge variant="outline" className={`${getStatusBadgeClass(run.status)}`}>
@@ -1298,7 +1334,7 @@ export function RunsView({
             variant="ghost"
             size="icon"
             onClick={handleBack}
-            className="h-8 w-8 shrink-0 sm:hidden"
+            className="h-8 w-8 shrink-0"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -1375,6 +1411,20 @@ export function RunsView({
                 {selectedRunBusyState === 'stopping'
                   ? <Loader2 className="h-4 w-4 animate-spin" />
                   : <Square className="h-4 w-4" />}
+              </Button>
+            )}
+            {selectedRun.status === 'failed' && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { void handleRetryRun(selectedRun) }}
+                disabled={selectedRunBusyState === 'starting'}
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                title="Retry Run"
+              >
+                {selectedRunBusyState === 'starting'
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <RefreshCw className="h-4 w-4" />}
               </Button>
             )}
             {onRefresh && (
@@ -1521,7 +1571,7 @@ export function RunsView({
             variant="ghost"
             size="icon"
             onClick={handleBack}
-            className="h-8 w-8 shrink-0 sm:hidden"
+            className="h-8 w-8 shrink-0"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
