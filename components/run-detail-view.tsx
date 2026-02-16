@@ -83,16 +83,8 @@ function generateMetricData(run: ExperimentRun, metricPath: string, _layer?: num
 }
 
 // Helper functions for dynamic metric detection
-function metricCategoryFromPath(path: string): 'primary' | 'secondary' {
-  const key = path.toLowerCase()
-  if (
-    key.includes('loss') || key.includes('accuracy') || key.includes('reward') ||
-    key.includes('score') || key.includes('f1') || key.includes('bleu') ||
-    key.includes('rouge') || key.includes('perplexity')
-  ) {
-    return 'primary'
-  }
-  return 'secondary'
+function metricCategoryFromPath(_path: string): 'primary' | 'secondary' {
+  return 'primary'
 }
 
 function metricTypeFromPath(path: string): 'line' | 'area' | 'bar' {
@@ -231,8 +223,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
 
   // Charts state
-  const [primaryChartsOpen, setPrimaryChartsOpen] = useState(false)
-  const [secondaryChartsOpen, setSecondaryChartsOpen] = useState(false)
+  const [chartsOpen, setChartsOpen] = useState(false)
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
   const [layerSelections, setLayerSelections] = useState<Record<string, number>>({})
 
@@ -244,8 +235,6 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   const [alertsOpen, setAlertsOpen] = useState(true)
 
   const allMetrics = useMemo(() => buildMetricVisualizations(run), [run])
-  const primaryMetrics = allMetrics.filter(m => m.category === 'primary')
-  const secondaryMetrics = allMetrics.filter(m => m.category === 'secondary')
   const linkedSweepFromList = useMemo(
     () => sweeps.find((sweep) => sweep.id === run.sweepId),
     [run.sweepId, sweeps]
@@ -380,8 +369,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
     })
   }
 
-  const allPrimaryExpanded = primaryMetrics.every(m => expandedCharts.has(m.id))
-  const allSecondaryExpanded = secondaryMetrics.every(m => expandedCharts.has(m.id))
+  const allChartsExpanded = allMetrics.every(m => expandedCharts.has(m.id))
 
   const runAlerts = alerts
 
@@ -680,20 +668,17 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
               <div className="grid grid-cols-3 gap-2">
                 {run.metrics ? (
                   <>
-                    <div className="text-center p-2 rounded-lg bg-card border border-border">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Loss</p>
-                      <p className="text-sm font-semibold text-foreground">{run.metrics.loss.toFixed(3)}</p>
-                    </div>
-                    <div className="text-center p-2 rounded-lg bg-card border border-border">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Accuracy</p>
-                      <p className="text-sm font-semibold text-foreground">{run.metrics.accuracy.toFixed(1)}%</p>
-                    </div>
-                    <div className="text-center p-2 rounded-lg bg-card border border-border">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Epoch</p>
-                      <p className="text-sm font-semibold text-foreground">
-                        {run.metrics.epoch}{run.config?.maxEpochs && `/${run.config.maxEpochs}`}
-                      </p>
-                    </div>
+                    {Object.entries(run.metrics)
+                      .filter(([key, val]) => typeof val === 'number' && !key.startsWith('_'))
+                      .slice(0, 6)
+                      .map(([key, val]) => (
+                        <div key={key} className="text-center p-2 rounded-lg bg-card border border-border">
+                          <p className="text-[10px] text-muted-foreground mb-0.5 truncate" title={key}>{key}</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            {typeof val === 'number' ? (Number.isInteger(val) ? val : val.toFixed(4)) : String(val)}
+                          </p>
+                        </div>
+                      ))}
                   </>
                 ) : (
                   <div className="col-span-3 text-center p-3 rounded-lg bg-card border border-border border-dashed">
@@ -772,28 +757,28 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
               </Collapsible>
             </div>
 
-            {/* Charts Section - Primary */}
-            {hasChartData(run) && primaryMetrics.length > 0 && (
-              <Collapsible open={primaryChartsOpen} onOpenChange={setPrimaryChartsOpen}>
+            {/* Charts Section */}
+            {hasChartData(run) && allMetrics.length > 0 && (
+              <Collapsible open={chartsOpen} onOpenChange={setChartsOpen}>
                 <div className="rounded-lg border border-border bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
                     <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Primary Metrics</span>
+                      <span className="text-xs font-medium text-foreground">Charts</span>
                       <div className="flex items-center gap-2">
-                        {primaryChartsOpen && (
+                        {chartsOpen && (
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-5 px-2 text-[10px]"
                             onClick={(e) => {
                               e.stopPropagation()
-                              toggleAllInCategory(primaryMetrics, !allPrimaryExpanded)
+                              toggleAllInCategory(allMetrics, !allChartsExpanded)
                             }}
                           >
-                            {allPrimaryExpanded ? 'Collapse All' : 'Expand All'}
+                            {allChartsExpanded ? 'Collapse All' : 'Expand All'}
                           </Button>
                         )}
-                        {primaryChartsOpen ? (
+                        {chartsOpen ? (
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                         ) : (
                           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -803,53 +788,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="border-t border-border px-2 pb-2">
-                      {primaryMetrics.map((metric) => (
-                        <MetricChart
-                          key={metric.id}
-                          metric={metric}
-                          run={run}
-                          isExpanded={expandedCharts.has(metric.id)}
-                          onToggle={() => toggleChart(metric.id)}
-                        />
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
-            )}
-
-            {/* Charts Section - Secondary */}
-            {hasChartData(run) && secondaryMetrics.length > 0 && (
-              <Collapsible open={secondaryChartsOpen} onOpenChange={setSecondaryChartsOpen}>
-                <div className="rounded-lg border border-border bg-card overflow-hidden">
-                  <CollapsibleTrigger asChild>
-                    <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Secondary Metrics</span>
-                      <div className="flex items-center gap-2">
-                        {secondaryChartsOpen && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 px-2 text-[10px]"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleAllInCategory(secondaryMetrics, !allSecondaryExpanded)
-                            }}
-                          >
-                            {allSecondaryExpanded ? 'Collapse All' : 'Expand All'}
-                          </Button>
-                        )}
-                        {secondaryChartsOpen ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                      </div>
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border px-2 pb-2">
-                      {secondaryMetrics.map((metric) => (
+                      {allMetrics.map((metric) => (
                         <div key={metric.id}>
                           {metric.layerSelector && (
                             <div className="flex items-center gap-2 px-3 pt-2">
