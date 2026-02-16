@@ -14,10 +14,18 @@ Required Modal Secret "research-agent-preview-secrets":
 """
 
 import modal
+import logging
 import os
 import subprocess
 import signal
 import sys
+
+import httpx
+import uvicorn
+from starlette.applications import Starlette
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import StreamingResponse as StarletteStreamingResponse, Response as StarletteResponse
+from starlette.routing import Route
 
 # ---------------------------------------------------------------------------
 # Image: Node 18 + Python 3.11 + tmux + opencode
@@ -67,6 +75,7 @@ app = modal.App("research-agent-preview")
 
 OPENCODE_BIN = "/usr/local/bin/opencode"
 OPENCODE_PORT = "4096"
+BACKEND_INTERNAL_PORT = 10001  # Backend listens here; proxy on 10000
 MODAL_PREVIEW_OPENCODE_URL = os.environ.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
 MODAL_PREVIEW_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "").strip()
 
@@ -75,6 +84,102 @@ if MODAL_PREVIEW_OPENCODE_URL:
     _FUNCTION_ENV["MODAL_PREVIEW_OPENCODE_URL"] = MODAL_PREVIEW_OPENCODE_URL
 if MODAL_PREVIEW_AUTH_TOKEN:
     _FUNCTION_ENV["RESEARCH_AGENT_USER_AUTH_TOKEN"] = MODAL_PREVIEW_AUTH_TOKEN
+
+_proxy_logger = logging.getLogger("ip-tracker")
+_proxy_logger.setLevel(logging.INFO)
+_proxy_logger.addHandler(logging.StreamHandler())
+
+
+def _get_client_ip(request: StarletteRequest) -> str:
+    """Extract the real client IP from proxy headers."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip", "")
+    if real_ip:
+        return real_ip.strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _start_ip_tracking_proxy(
+    host: str = "0.0.0.0", port: int = 10000, backend_port: int = BACKEND_INTERNAL_PORT,
+) -> None:
+    """Run a lightweight reverse-proxy that logs every request's IP address.
+
+    This blocks the calling thread, which is fine because
+    ``@modal.web_server`` expects the decorated function to stay alive.
+    """
+    backend_url = f"http://127.0.0.1:{backend_port}"
+    # Long-lived client so connections are reused across requests.
+    _http_client = httpx.AsyncClient(base_url=backend_url, timeout=httpx.Timeout(30.0, read=300.0))
+
+    async def _proxy(request: StarletteRequest) -> StarletteResponse:
+        client_ip = _get_client_ip(request)
+        path = request.url.path
+        if request.url.query:
+            path = f"{path}?{request.url.query}"
+
+        _proxy_logger.info("REQUEST %s %s %s", client_ip, request.method, path)
+
+        # Build outgoing headers (drop hop-by-hop)
+        headers = dict(request.headers)
+        for h in ("host", "transfer-encoding"):
+            headers.pop(h, None)
+
+        body = await request.body()
+
+        # Use streaming to support SSE / chunked responses (e.g. /chat).
+        backend_req = _http_client.build_request(
+            method=request.method, url=path, headers=headers, content=body,
+        )
+        backend_resp = await _http_client.send(backend_req, stream=True)
+
+        content_type = backend_resp.headers.get("content-type", "")
+        is_streaming = "text/event-stream" in content_type or "chunked" in backend_resp.headers.get("transfer-encoding", "")
+
+        _proxy_logger.info(
+            "RESPONSE %s %s %s -> %d%s",
+            client_ip, request.method, request.url.path, backend_resp.status_code,
+            " (streaming)" if is_streaming else "",
+        )
+
+        # Strip hop-by-hop headers from the response.
+        resp_headers = dict(backend_resp.headers)
+        for h in ("transfer-encoding", "content-length", "connection"):
+            resp_headers.pop(h, None)
+
+        if is_streaming:
+            async def _stream():
+                try:
+                    async for chunk in backend_resp.aiter_bytes():
+                        yield chunk
+                finally:
+                    await backend_resp.aclose()
+
+            return StarletteStreamingResponse(
+                content=_stream(),
+                status_code=backend_resp.status_code,
+                headers=resp_headers,
+                media_type=content_type.split(";")[0].strip() if content_type else None,
+            )
+
+        # Non-streaming: read full body and close.
+        resp_body = await backend_resp.aread()
+        await backend_resp.aclose()
+        return StarletteResponse(
+            content=resp_body,
+            status_code=backend_resp.status_code,
+            headers=resp_headers,
+        )
+
+    proxy_app = Starlette(
+        routes=[Route("/{path:path}", _proxy, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])],
+    )
+
+    _proxy_logger.info("IP-tracking proxy listening on %s:%d -> %s", host, port, backend_url)
+    uvicorn.run(proxy_app, host=host, port=port, log_level="warning")
 
 
 @app.function(
@@ -135,19 +240,23 @@ def preview_server():
         except Exception as e:
             print(f"WARNING: opencode failed to start: {e}")
 
-    # Start the FastAPI backend on port 10000 (internal, not exposed)
-    print("Starting backend on port 10000...")
+    # Start the FastAPI backend on the internal port (not directly exposed)
+    print(f"Starting backend on port {BACKEND_INTERNAL_PORT}...")
     subprocess.Popen(
         [
             sys.executable, "/app/server/server.py",
             "--workdir", workdir,
             "--host", "0.0.0.0",
-            "--port", "10000",
+            "--port", str(BACKEND_INTERNAL_PORT),
             "--tmux-session", "research-agent",
         ],
         env=env,
         cwd="/app/server",
     )
+
+    # IP-logging reverse proxy on the Modal-exposed port (10000).
+    # This call blocks, which keeps the web_server process alive.
+    _start_ip_tracking_proxy(host="0.0.0.0", port=10000, backend_port=BACKEND_INTERNAL_PORT)
 
 @app.function(
     image=image,
