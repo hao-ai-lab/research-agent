@@ -35,6 +35,24 @@ def parse_summary(text: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def parse_reflection(text: str) -> Optional[str]:
+    """Parse <reflection>...</reflection> from agent output."""
+    m = re.search(r"<reflection>([\s\S]*?)</reflection>", text)
+    return m.group(1).strip() if m else None
+
+
+def parse_replan(text: str) -> Optional[str]:
+    """Parse <replan>...</replan> from agent output."""
+    m = re.search(r"<replan>([\s\S]*?)</replan>", text)
+    return m.group(1).strip() if m else None
+
+
+def parse_analysis(text: str) -> Optional[str]:
+    """Parse <analysis>...</analysis> from agent output."""
+    m = re.search(r"<analysis>([\s\S]*?)</analysis>", text)
+    return m.group(1).strip() if m else None
+
+
 # ---------------------------------------------------------------------------
 # Prompt context — plain data, no behaviour
 # ---------------------------------------------------------------------------
@@ -60,6 +78,11 @@ class PromptContext:
     # Struggle indicators
     no_progress_streak: int = 0
     short_iteration_count: int = 0
+
+    # Reflection & analysis state
+    reflections: list = field(default_factory=list)
+    reflection_interval: int = 5
+    analyses: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -227,5 +250,122 @@ def build_iteration_prompt(
         raise RuntimeError(
             "Failed to render 'wild_v2_iteration' skill template. "
             "Ensure prompt_skills/wild_v2_iteration/SKILL.md exists and is valid."
+        )
+    return rendered
+
+
+# ---------------------------------------------------------------------------
+# Reflection prompt
+# ---------------------------------------------------------------------------
+
+def _iteration_history_section(ctx: PromptContext) -> str:
+    """Format iteration history as a compact markdown table."""
+    if not ctx.history:
+        return "*No iteration history yet.*"
+    lines = [
+        "| Iter | Duration | Promise | Files Changed | Errors | Summary |",
+        "|------|----------|---------|---------------|--------|---------|"]
+    for h in ctx.history:
+        summary = (h.get("summary", "") or "")[:80].replace("|", "/")
+        files = len(h.get("files_modified", []))
+        lines.append(
+            f"| {h.get('iteration', '?')} "
+            f"| {h.get('duration_s', '?')}s "
+            f"| {h.get('promise', '-')} "
+            f"| {files} "
+            f"| {h.get('error_count', 0)} "
+            f"| {summary} |"
+        )
+    return "\n".join(lines)
+
+
+def build_reflection_prompt(
+    ctx: PromptContext,
+    render_fn: Callable,
+    reflection_reason: str = "Scheduled periodic reflection",
+) -> str:
+    """Build the reflection prompt.
+
+    The prompt is resolved from the ``wild_v2_reflection`` SKILL.md template.
+    Raises RuntimeError if the template cannot be rendered.
+    """
+    auth_header_val = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
+    variables = {
+        "goal": ctx.goal,
+        "workdir": ctx.workdir,
+        "iteration": str(ctx.iteration),
+        "max_iterations": str(ctx.max_iterations),
+        "tasks_path": ctx.tasks_path,
+        "log_path": ctx.log_path,
+        "server_url": ctx.server_url,
+        "session_id": ctx.session_id,
+        "auth_header": auth_header_val,
+        "iteration_history": _iteration_history_section(ctx),
+        "reflection_reason": reflection_reason,
+        "api_catalog": _api_catalog(ctx),
+    }
+
+    rendered = render_fn("wild_v2_reflection", variables)
+    if not rendered:
+        raise RuntimeError(
+            "Failed to render 'wild_v2_reflection' skill template. "
+            "Ensure prompt_skills/wild_v2_reflection/SKILL.md exists and is valid."
+        )
+    return rendered
+
+
+# ---------------------------------------------------------------------------
+# Analysis prompt
+# ---------------------------------------------------------------------------
+
+def _metrics_section(metrics_data: dict) -> str:
+    """Format collected metrics data as markdown."""
+    if not metrics_data:
+        return "*No metrics data collected yet. Scan for results files during analysis.*"
+    lines = ["### Discovered Metrics\n"]
+    for source, data in metrics_data.items():
+        lines.append(f"**{source}:**")
+        if isinstance(data, dict):
+            for k, v in data.items():
+                lines.append(f"- {k}: {v}")
+        elif isinstance(data, list):
+            for item in data[:20]:
+                lines.append(f"- {item}")
+        else:
+            lines.append(f"  {data}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def build_analysis_prompt(
+    ctx: PromptContext,
+    metrics_data: dict,
+    render_fn: Callable,
+) -> str:
+    """Build the auto data analysis prompt.
+
+    The prompt is resolved from the ``wild_v2_analysis`` SKILL.md template.
+    Raises RuntimeError if the template cannot be rendered.
+    """
+    auth_header_val = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
+    variables = {
+        "goal": ctx.goal,
+        "workdir": ctx.workdir,
+        "iteration": str(ctx.iteration),
+        "max_iterations": str(ctx.max_iterations),
+        "tasks_path": ctx.tasks_path,
+        "log_path": ctx.log_path,
+        "server_url": ctx.server_url,
+        "session_id": ctx.session_id,
+        "auth_header": auth_header_val,
+        "metrics_data": _metrics_section(metrics_data),
+        "api_catalog": _api_catalog(ctx),
+    }
+
+    rendered = render_fn("wild_v2_analysis", variables)
+    if not rendered:
+        raise RuntimeError(
+            "Failed to render 'wild_v2_analysis' skill template. "
+            "Ensure prompt_skills/wild_v2_analysis/SKILL.md exists and is valid."
         )
     return rendered

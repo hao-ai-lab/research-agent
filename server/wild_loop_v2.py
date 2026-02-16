@@ -26,19 +26,29 @@ import httpx
 try:
     from server.v2_prompts import (
         PromptContext,
+        build_analysis_prompt,
         build_iteration_prompt,
         build_planning_prompt,
+        build_reflection_prompt,
+        parse_analysis,
         parse_plan,
         parse_promise,
+        parse_reflection,
+        parse_replan,
         parse_summary,
     )
 except ImportError:
     from v2_prompts import (  # type: ignore[no-redef]
         PromptContext,
+        build_analysis_prompt,
         build_iteration_prompt,
         build_planning_prompt,
+        build_reflection_prompt,
+        parse_analysis,
         parse_plan,
         parse_promise,
+        parse_reflection,
+        parse_replan,
         parse_summary,
     )
 
@@ -73,6 +83,12 @@ class WildV2Session:
     no_progress_streak: int = 0      # consecutive iterations with no file changes
     short_iteration_count: int = 0   # iterations < 30s
 
+    # Reflection & analysis
+    reflections: list = field(default_factory=list)
+    reflection_interval: int = 5     # reflect every N iterations
+    analyses: list = field(default_factory=list)
+    auto_analysis: bool = True       # run auto analysis after WAITING transitions
+
     def to_dict(self) -> dict:
         return {
             "session_id": self.session_id,
@@ -89,6 +105,10 @@ class WildV2Session:
             "opencode_sessions": self.opencode_sessions,
             "no_progress_streak": self.no_progress_streak,
             "short_iteration_count": self.short_iteration_count,
+            "reflections": self.reflections,
+            "reflection_interval": self.reflection_interval,
+            "analyses": self.analyses,
+            "auto_analysis": self.auto_analysis,
         }
 
 
@@ -151,6 +171,8 @@ class WildV2Engine:
         chat_session_id: Optional[str] = None,
         max_iterations: int = 25,
         wait_seconds: float = 30.0,
+        reflection_interval: int = 5,
+        auto_analysis: bool = True,
     ) -> dict:
         """Start a new V2 wild session."""
         logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d", goal[:80], chat_session_id, max_iterations)
@@ -167,6 +189,8 @@ class WildV2Engine:
             started_at=time.time(),
             chat_session_id=chat_session_id,
             wait_seconds=wait_seconds,
+            reflection_interval=reflection_interval,
+            auto_analysis=auto_analysis,
         )
 
         # Create session storage dir
@@ -360,6 +384,9 @@ class WildV2Engine:
             history=session.history,
             no_progress_streak=session.no_progress_streak,
             short_iteration_count=session.short_iteration_count,
+            reflections=session.reflections,
+            reflection_interval=session.reflection_interval,
+            analyses=session.analyses,
         )
 
     async def _send_prompt(self, session: "WildV2Session", prompt: str, display_msg: str) -> str:
@@ -580,16 +607,36 @@ class WildV2Engine:
                     session.finished_at = time.time()
                     break
 
+                # 12. Reflection gate (periodic)
+                if (
+                    session.reflection_interval > 0
+                    and session.iteration > 0
+                    and session.iteration % session.reflection_interval == 0
+                    and session.status == "running"
+                ):
+                    await self._run_reflection(
+                        session,
+                        reason=f"Scheduled reflection at iteration {session.iteration} (every {session.reflection_interval} iterations)",
+                    )
+
                 if promise == "WAITING":
                     logger.info(
                         "[wild-v2] Agent signaled WAITING, sleeping %ds",
                         int(session.wait_seconds),
                     )
                     await asyncio.sleep(session.wait_seconds)
+
+                    # Auto analysis after WAITING (runs likely completed)
+                    if session.auto_analysis and session.status == "running":
+                        await self._run_auto_analysis(session)
                 else:
                     # Brief pause between iterations to avoid hammering
                     logger.debug("[wild-v2] Sleeping 2s before next iteration")
                     await asyncio.sleep(2)
+
+            # Final reflection before ending
+            if session.status in ("done", "running") and session.history:
+                await self._run_reflection(session, reason="Final reflection — loop completing")
 
             # Max iterations reached
             if session.status == "running":
@@ -605,6 +652,146 @@ class WildV2Engine:
         finally:
             self._save_state(session.session_id)
             logger.info("[wild-v2] Loop ended for session %s (status=%s)", session.session_id, session.status)
+
+    # -- Reflection & Analysis --
+
+    async def _run_reflection(self, session: "WildV2Session", reason: str = "Scheduled periodic reflection"):
+        """Run a reflection pass: review progress, optionally replan."""
+        logger.info("[wild-v2] ========== REFLECTION at iteration %d ==========", session.iteration)
+
+        try:
+            ctx = self._build_context(session)
+            reflection_prompt = build_reflection_prompt(ctx, render_fn=self._render_fn, reflection_reason=reason)
+            display_msg = (
+                f"[Wild V2 — Reflection at iteration {session.iteration}]\n"
+                f"Role: reflect\n"
+                f"Reason: {reason}"
+            )
+
+            ref_text = await self._send_prompt(session, reflection_prompt, display_msg)
+
+            # Parse reflection
+            reflection = parse_reflection(ref_text)
+            if reflection:
+                ref_record = {
+                    "iteration": session.iteration,
+                    "reason": reason,
+                    "content": reflection,
+                    "timestamp": time.time(),
+                }
+                session.reflections.append(ref_record)
+
+                # Write to reflections.md
+                ref_path = os.path.join(self._session_dir(session.session_id), "reflections.md")
+                with open(ref_path, "a") as f:
+                    f.write(f"\n## Reflection at iteration {session.iteration}\n\n")
+                    f.write(f"Reason: {reason}\n\n")
+                    f.write(reflection)
+                    f.write("\n\n---\n\n")
+
+                logger.info("[wild-v2] Reflection recorded: %d chars", len(reflection))
+            else:
+                logger.warning("[wild-v2] No <reflection> tag found in response")
+
+            # Check for replan
+            replan = parse_replan(ref_text)
+            if replan:
+                session.plan = replan
+                tasks_path = os.path.join(self._session_dir(session.session_id), "tasks.md")
+                with open(tasks_path, "w") as f:
+                    f.write(replan)
+                logger.info("[wild-v2] Replan: tasks.md rewritten (%d chars)", len(replan))
+
+            self._save_state(session.session_id)
+
+        except Exception as err:
+            logger.warning("[wild-v2] Reflection failed (non-fatal): %s", err)
+
+        logger.info("[wild-v2] ========== REFLECTION END ==========")
+
+    async def _run_auto_analysis(self, session: "WildV2Session"):
+        """Run automatic data analysis on collected metrics."""
+        logger.info("[wild-v2] ========== AUTO ANALYSIS at iteration %d ==========", session.iteration)
+
+        try:
+            metrics_data = self._collect_metrics(session)
+            ctx = self._build_context(session)
+            analysis_prompt = build_analysis_prompt(ctx, metrics_data=metrics_data, render_fn=self._render_fn)
+            display_msg = (
+                f"[Wild V2 — Data Analysis at iteration {session.iteration}]\n"
+                f"Role: analyze\n"
+                f"Goal: Analyze experiment results and metrics"
+            )
+
+            analysis_text = await self._send_prompt(session, analysis_prompt, display_msg)
+
+            # Parse analysis
+            analysis = parse_analysis(analysis_text)
+            if analysis:
+                analysis_record = {
+                    "iteration": session.iteration,
+                    "content": analysis,
+                    "metrics_sources": list(metrics_data.keys()),
+                    "timestamp": time.time(),
+                }
+                session.analyses.append(analysis_record)
+
+                # Write analysis artifact
+                analysis_path = os.path.join(
+                    self._session_dir(session.session_id),
+                    f"analysis_{session.iteration}.md",
+                )
+                with open(analysis_path, "w") as f:
+                    f.write(f"# Analysis at iteration {session.iteration}\n\n")
+                    f.write(analysis)
+
+                logger.info("[wild-v2] Analysis recorded: %d chars, sources=%s",
+                           len(analysis), list(metrics_data.keys()))
+            else:
+                logger.warning("[wild-v2] No <analysis> tag found in response")
+
+            self._save_state(session.session_id)
+
+        except Exception as err:
+            logger.warning("[wild-v2] Auto analysis failed (non-fatal): %s", err)
+
+        logger.info("[wild-v2] ========== AUTO ANALYSIS END ==========")
+
+    def _collect_metrics(self, session: "WildV2Session") -> dict:
+        """Scan workdir for metrics/results files and return their contents."""
+        metrics: dict = {}
+        workdir = self._get_workdir()
+
+        # Scan for results JSON files
+        for root, _dirs, files in os.walk(workdir):
+            # Skip hidden dirs and common noise
+            rel_root = os.path.relpath(root, workdir)
+            if any(part.startswith(".") for part in rel_root.split(os.sep)):
+                continue
+            if "node_modules" in rel_root or "__pycache__" in rel_root:
+                continue
+
+            for fname in files:
+                if not fname.endswith(".json"):
+                    continue
+                # Look for files that likely contain metrics
+                lower = fname.lower()
+                if any(kw in lower for kw in ("metric", "result", "benchmark", "score")):
+                    fpath = os.path.join(root, fname)
+                    try:
+                        with open(fpath) as f:
+                            data = json.load(f)
+                        rel_path = os.path.relpath(fpath, workdir)
+                        metrics[rel_path] = data
+                        logger.debug("[wild-v2] Found metrics file: %s", rel_path)
+                    except Exception:
+                        pass
+
+            # Limit scan depth
+            if len(metrics) >= 20:
+                break
+
+        return metrics
 
     # -- OpenCode interaction --
 

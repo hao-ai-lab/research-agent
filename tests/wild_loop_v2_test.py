@@ -15,11 +15,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 from wild_loop_v2 import (
     WildV2Engine,
     WildV2Session,
+    parse_analysis,
     parse_plan,
     parse_promise,
+    parse_reflection,
+    parse_replan,
     parse_summary,
 )
-from v2_prompts import PromptContext, build_planning_prompt, build_iteration_prompt
+from v2_prompts import (
+    PromptContext,
+    build_analysis_prompt,
+    build_iteration_prompt,
+    build_planning_prompt,
+    build_reflection_prompt,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -204,20 +213,24 @@ class TestWildV2Engine:
         engine.stop()
 
     def test_prompt_fallback_without_render_fn(self):
-        """Verify prompts fall back to inline templates without render_fn."""
+        """Verify prompts raise TypeError without render_fn."""
         self.engine.start(goal="Fallback test")
         ctx = self.engine._build_context(self.engine.session)
-        prompt = build_planning_prompt(ctx)  # no render_fn
-        assert "Fallback test" in prompt
-        assert "iteration 0" in prompt.lower() or "planning" in prompt.lower()
+        with pytest.raises(TypeError):
+            build_planning_prompt(ctx, render_fn=None)
         self.engine.stop()
 
     def test_api_catalog_in_prompt(self):
         """Verify the API catalog appears in iteration prompts."""
+
+        def pass_through_render(skill_id, variables):
+            # Return the api_catalog variable so we can test its content
+            return variables.get("api_catalog", "")
+
         self.engine.start(goal="API catalog test")
         ctx = self.engine._build_context(self.engine.session)
         ctx.iteration = 1
-        prompt = build_iteration_prompt(ctx)  # fallback
+        prompt = build_iteration_prompt(ctx, render_fn=pass_through_render)
         assert "/sweeps/wild" in prompt
         assert "/runs" in prompt
         assert "/wild/v2/events" in prompt
@@ -244,12 +257,24 @@ class TestWildV2Engine:
 # Async loop tests  (mock OpenCode)
 # ---------------------------------------------------------------------------
 
+def _make_mock_render():
+    """Create a mock render_fn that returns skill_id + key variables."""
+    def mock_render(skill_id, variables):
+        goal = variables.get('goal', '')
+        return f"RENDERED:{skill_id}:{goal}"
+    return mock_render
+
+
 def test_loop_done_signal():
     """Agent returns DONE after one iteration — loop should complete."""
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=_make_mock_render(),
+        )
 
         call_count = 0
 
@@ -320,7 +345,11 @@ def test_loop_max_iterations():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=_make_mock_render(),
+        )
 
         call_count = 0
 
@@ -359,7 +388,11 @@ def test_loop_waiting_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=_make_mock_render(),
+        )
 
         call_count = 0
 
@@ -394,5 +427,331 @@ def test_loop_waiting_signal():
         assert engine.session.history[0]["iteration"] == 0  # planning
         assert engine.session.history[1]["promise"] == "WAITING"
         assert engine.session.history[2]["promise"] == "DONE"
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# New signal parsers
+# ---------------------------------------------------------------------------
+
+class TestParseReflection:
+    def test_extracts_reflection(self):
+        text = "reviewing\n<reflection>\n## Progress: 5/10\n## Trend: IMPROVING\n</reflection>\nend"
+        result = parse_reflection(text)
+        assert "## Progress: 5/10" in result
+        assert "IMPROVING" in result
+
+    def test_none(self):
+        assert parse_reflection("no reflection here") is None
+
+
+class TestParseReplan:
+    def test_extracts_replan(self):
+        text = "<replan>\n# New Tasks\n- [ ] New task 1\n- [ ] New task 2\n</replan>"
+        result = parse_replan(text)
+        assert "New task 1" in result
+        assert "New task 2" in result
+
+    def test_none(self):
+        assert parse_replan("no replan") is None
+
+
+class TestParseAnalysis:
+    def test_extracts_analysis(self):
+        text = "analyzing results\n<analysis>\n## Run Summary\n| Run | Speedup |\n| 1 | 1.2x |\n</analysis>\nfin"
+        result = parse_analysis(text)
+        assert "Run Summary" in result
+        assert "1.2x" in result
+
+    def test_none(self):
+        assert parse_analysis("no analysis") is None
+
+
+# ---------------------------------------------------------------------------
+# Session reflection & analysis fields
+# ---------------------------------------------------------------------------
+
+class TestSessionReflectionFields:
+    def test_defaults(self):
+        s = WildV2Session(session_id="test-r", goal="Test")
+        assert s.reflections == []
+        assert s.reflection_interval == 5
+        assert s.analyses == []
+        assert s.auto_analysis is True
+
+    def test_custom_interval(self):
+        s = WildV2Session(session_id="test-r2", goal="Test", reflection_interval=3)
+        assert s.reflection_interval == 3
+
+    def test_to_dict_includes_fields(self):
+        s = WildV2Session(session_id="s1", goal="Test")
+        s.reflections.append({"content": "looks good"})
+        s.analyses.append({"content": "metrics summary"})
+        d = s.to_dict()
+        assert "reflections" in d
+        assert len(d["reflections"]) == 1
+        assert "analyses" in d
+        assert len(d["analyses"]) == 1
+        assert d["reflection_interval"] == 5
+        assert d["auto_analysis"] is True
+
+    def test_serialization_roundtrip(self):
+        s = WildV2Session(session_id="s1", goal="Test", reflection_interval=3, auto_analysis=False)
+        d = s.to_dict()
+        j = json.dumps(d)
+        loaded = json.loads(j)
+        assert loaded["reflection_interval"] == 3
+        assert loaded["auto_analysis"] is False
+
+
+# ---------------------------------------------------------------------------
+# Reflection & Analysis prompt building
+# ---------------------------------------------------------------------------
+
+class TestReflectionPrompt:
+    def test_build_with_render_fn(self):
+        def mock_render(skill_id, variables):
+            return f"RENDERED:{skill_id}:iter={variables['iteration']}"
+
+        ctx = PromptContext(
+            goal="Optimize kernel",
+            iteration=5,
+            max_iterations=25,
+            workdir="/tmp/test",
+            tasks_path="/tmp/test/tasks.md",
+            log_path="/tmp/test/log.md",
+            server_url="http://localhost:10000",
+            session_id="test-1",
+            auth_token="tok",
+            history=[{"iteration": 1, "duration_s": 60, "promise": None, "files_modified": ["a.py"], "error_count": 0, "summary": "Did stuff"}],
+        )
+        prompt = build_reflection_prompt(ctx, render_fn=mock_render, reflection_reason="periodic")
+        assert prompt == "RENDERED:wild_v2_reflection:iter=5"
+
+
+class TestAnalysisPrompt:
+    def test_build_with_render_fn(self):
+        def mock_render(skill_id, variables):
+            return f"RENDERED:{skill_id}:metrics={variables['metrics_data'][:20]}"
+
+        ctx = PromptContext(
+            goal="Optimize kernel",
+            iteration=5,
+            max_iterations=25,
+            workdir="/tmp/test",
+            tasks_path="/tmp/test/tasks.md",
+            log_path="/tmp/test/log.md",
+            server_url="http://localhost:10000",
+            session_id="test-1",
+            auth_token="tok",
+        )
+        metrics = {"results/metrics.json": {"speedup": 1.2}}
+        prompt = build_analysis_prompt(ctx, metrics_data=metrics, render_fn=mock_render)
+        assert "RENDERED:wild_v2_analysis" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Async loop tests — reflection integration
+# ---------------------------------------------------------------------------
+
+def test_loop_with_reflection():
+    """Reflection fires at configured interval (every 3 iterations) and at end."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+
+        def render_fn(skill_id, variables):
+            # Include skill_id so tests can detect reflection/analysis prompts
+            return f"RENDERED:{skill_id}:{variables.get('goal', '')}"
+
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=render_fn,
+        )
+
+        call_count = 0
+        reflection_prompts = []
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Planning
+                return "Explored.\n<plan># Tasks\n- [ ] Task 1\n- [ ] Task 2\n- [ ] Task 3\n</plan>\n<summary>Planned.</summary>"
+
+            # Check if this is a reflection prompt
+            if "wild_v2_reflection" in prompt or "reflect" in prompt.lower():
+                reflection_prompts.append(call_count)
+                return (
+                    "Reflecting...\n"
+                    "<reflection>\n## Progress: 3/3 tasks\n## Trend: IMPROVING\n## Recommendation: CONTINUE\n</reflection>\n"
+                    "<summary>Reflected on progress.</summary>"
+                )
+
+            # Regular execution — never says DONE so we hit max_iterations
+            return "Working.\n<summary>Made progress.</summary>\n<plan># Tasks\n- [ ] Continue</plan>"
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+
+        # reflection_interval=3 with max_iterations=4
+        engine.start(goal="Test reflection", max_iterations=4, reflection_interval=3)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert engine.session.status == "done"
+        # Should have reflections: at iter 3 (periodic) + final
+        assert len(engine.session.reflections) >= 1
+        # Check reflections.md file exists
+        ref_path = os.path.join(
+            tmpdir, ".agents", "wild", engine.session.session_id, "reflections.md"
+        )
+        assert os.path.isfile(ref_path)
+        with open(ref_path) as f:
+            content = f.read()
+        assert "IMPROVING" in content
+
+    asyncio.run(_run())
+
+
+def test_loop_with_auto_analysis():
+    """Auto analysis fires after WAITING transition."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+
+        def render_fn(skill_id, variables):
+            return f"RENDERED:{skill_id}:{variables.get('goal', '')}"
+
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=render_fn,
+        )
+
+        call_count = 0
+        analysis_prompts = []
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Planning
+                return "Explored.\n<plan># Tasks\n- [ ] Run benchmark\n</plan>\n<summary>Planned.</summary>"
+
+            # Check if this is an analysis prompt
+            if "wild_v2_analysis" in prompt or "analyze" in prompt.lower():
+                analysis_prompts.append(call_count)
+                return (
+                    "Analyzing...\n"
+                    "<analysis>\n## Run Summary\n| Run | Speedup |\n| 1 | 1.2x |\n## Best: 1.2x\n</analysis>\n"
+                    "<summary>Analyzed results.</summary>"
+                )
+
+            # Check if this is a reflection prompt
+            if "wild_v2_reflection" in prompt or "reflect" in prompt.lower():
+                return (
+                    "<reflection>\n## Progress: ok\n## Trend: IMPROVING\n</reflection>\n"
+                    "<summary>Reflected.</summary>"
+                )
+
+            if call_count == 2:
+                # Execution iter 1: WAITING
+                return "Started runs.\n<summary>Waiting for benchmark.</summary>\n<promise>WAITING</promise>"
+            # Execution iter 2: DONE
+            return "Done.\n<summary>Finished.</summary>\n<promise>DONE</promise>"
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+
+        # auto_analysis=True, wait_seconds=0.1 to speed up test
+        engine.start(goal="Test analysis", max_iterations=5, wait_seconds=0.1, auto_analysis=True, reflection_interval=0)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert engine.session.status == "done"
+        # Auto analysis should have fired (after WAITING)
+        assert len(analysis_prompts) >= 1
+        assert len(engine.session.analyses) >= 1
+
+    asyncio.run(_run())
+
+
+def test_reflection_replan():
+    """Reflection with <replan> tag updates tasks.md."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+
+        def render_fn(skill_id, variables):
+            return f"RENDERED:{skill_id}:{variables.get('goal', '')}"
+
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=render_fn,
+        )
+
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "Explored.\n<plan># Tasks\n- [ ] Original task\n</plan>\n<summary>Planned.</summary>"
+
+            # Reflection prompt
+            if "wild_v2_reflection" in prompt or "reflect" in prompt.lower():
+                return (
+                    "Need to replan.\n"
+                    "<reflection>\n## Progress: 1/3\n## Trend: STAGNATING\n## Recommendation: REPLAN\n</reflection>\n"
+                    "<replan>\n# Revised Tasks\n- [ ] New approach task 1\n- [ ] New approach task 2\n</replan>\n"
+                    "<summary>Replanned.</summary>"
+                )
+
+            # Regular execution — keep going
+            return "Working.\n<summary>Made progress.</summary>"
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+
+        # reflection_interval=1 so it fires immediately
+        engine.start(goal="Test replan", max_iterations=2, reflection_interval=1)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        # tasks.md should have been rewritten with the new plan
+        tasks_path = os.path.join(
+            tmpdir, ".agents", "wild", engine.session.session_id, "tasks.md"
+        )
+        with open(tasks_path) as f:
+            content = f.read()
+        assert "New approach task 1" in content
+        assert "New approach task 2" in content
+        # Original task should be gone (overwritten)
+        assert "Original task" not in content
 
     asyncio.run(_run())
