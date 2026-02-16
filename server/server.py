@@ -11,6 +11,7 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
+import glob
 from dataclasses import dataclass
 import json
 import math
@@ -1240,6 +1241,17 @@ def _is_metric_key(key: object) -> bool:
     return True
 
 
+def _find_wandb_dir_from_run_dir(run_dir: Optional[str]) -> Optional[str]:
+    """Scan the predictable wandb_data/ path inside run_dir for a WandB run directory."""
+    if not run_dir:
+        return None
+    wandb_base = os.path.join(run_dir, "wandb_data", "wandb")
+    if not os.path.isdir(wandb_base):
+        return None
+    matches = sorted(glob.glob(os.path.join(wandb_base, "run-*")))
+    return matches[-1] if matches else None
+
+
 def _resolve_metrics_file(wandb_dir: Optional[str]) -> Optional[str]:
     """Resolve likely metrics file paths from a wandb run directory."""
     if not wandb_dir:
@@ -1388,21 +1400,52 @@ def _get_wandb_curve_data(wandb_dir: Optional[str]) -> Optional[dict]:
     return payload
 
 
+def _load_run_metrics(run_dir: Optional[str]) -> dict:
+    """Load stored metrics from agent_metrics.jsonl in the run directory."""
+    if not run_dir:
+        return {}
+    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
+    if not os.path.isfile(metrics_file):
+        return {}
+    return _parse_metrics_history(metrics_file)
+
+
 def _run_response_payload(run_id: str, run: dict) -> dict:
-    """Build run response payload enriched with metrics from wandb (if available)."""
+    """Build run response payload enriched with metrics.
+
+    Metrics come from two sources, in priority order:
+    1. Stored metrics POSTed by the sidecar (agent_metrics.jsonl)
+    2. WandB files discovered via wandb_dir or run_dir
+    """
     payload = {"id": run_id, **run}
-    parsed = _get_wandb_curve_data(run.get("wandb_dir"))
+
+    # Source 1: stored metrics from sidecar POSTs
+    parsed = _load_run_metrics(run.get("run_dir"))
+
+    # Source 2: wandb files (fallback)
+    if not parsed or not parsed.get("metricSeries"):
+        wandb_dir = run.get("wandb_dir")
+        if not wandb_dir:
+            wandb_dir = _find_wandb_dir_from_run_dir(run.get("run_dir"))
+            if wandb_dir:
+                run["wandb_dir"] = wandb_dir
+                payload["wandb_dir"] = wandb_dir
+        wandb_parsed = _get_wandb_curve_data(wandb_dir)
+        if wandb_parsed:
+            parsed = wandb_parsed
+
     if not parsed:
         return payload
-
-    parsed_history = parsed.get("lossHistory")
-    if parsed_history:
-        payload["lossHistory"] = parsed_history
 
     parsed_metric_series = parsed.get("metricSeries")
     if parsed_metric_series:
         payload["metricSeries"] = parsed_metric_series
         payload["metricKeys"] = parsed.get("metricKeys", list(parsed_metric_series.keys()))
+
+    # Also provide lossHistory for backward compat with components that still use it
+    parsed_history = parsed.get("lossHistory")
+    if parsed_history:
+        payload["lossHistory"] = parsed_history
 
     parsed_metrics = parsed.get("metrics") if isinstance(parsed.get("metrics"), dict) else {}
     existing_metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
@@ -1411,11 +1454,9 @@ def _run_response_payload(run_id: str, run: dict) -> dict:
         "accuracy": parsed_metrics.get("accuracy", existing_metrics.get("accuracy")),
         "epoch": parsed_metrics.get("epoch", existing_metrics.get("epoch")),
     }
-    if all(isinstance(merged_metrics.get(key), (int, float)) for key in ("loss", "accuracy", "epoch")):
+    if any(isinstance(merged_metrics.get(key), (int, float)) for key in ("loss", "accuracy", "epoch")):
         payload["metrics"] = {
-            "loss": float(merged_metrics["loss"]),
-            "accuracy": float(merged_metrics["accuracy"]),
-            "epoch": float(merged_metrics["epoch"]),
+            k: float(v) for k, v in merged_metrics.items() if isinstance(v, (int, float))
         }
 
     return payload
@@ -3905,6 +3946,64 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
     return {"alert_id": alert_id}
 
 
+# ---- Metrics Endpoints (sidecar-pushed) ----
+
+@app.post("/runs/{run_id}/metrics")
+async def post_run_metrics(run_id: str, request: Request):
+    """Accept metrics rows from the sidecar and append to stored metrics file.
+
+    Body should be JSON with a 'rows' array of metric dictionaries, e.g.:
+    {"rows": [{"step": 1, "train/loss": 0.5, "accuracy": 0.6}, ...]}
+    """
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    body = await request.json()
+    rows = body.get("rows", [])
+    if not isinstance(rows, list) or len(rows) == 0:
+        raise HTTPException(status_code=400, detail="'rows' must be a non-empty array")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
+
+    try:
+        with open(metrics_file, "a") as f:
+            for row in rows:
+                if isinstance(row, dict):
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.error(f"Failed to write metrics for run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write metrics")
+
+    # Invalidate cache for this file
+    _wandb_metrics_cache.pop(metrics_file, None)
+
+    logger.debug(f"Received {len(rows)} metric rows for run {run_id}")
+    return {"appended": len(rows)}
+
+
+@app.get("/runs/{run_id}/metrics")
+async def get_run_metrics(run_id: str):
+    """Return parsed metrics for a run from stored metrics file."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    parsed = _load_run_metrics(run_dir)
+
+    # Fallback to wandb files if no stored metrics
+    if not parsed or not parsed.get("metricSeries"):
+        wandb_dir = run.get("wandb_dir") or _find_wandb_dir_from_run_dir(run_dir)
+        wandb_parsed = _get_wandb_curve_data(wandb_dir)
+        if wandb_parsed:
+            parsed = wandb_parsed
+
+    return parsed or {}
+
+
 @app.get("/alerts")
 async def list_alerts():
     """List alerts ordered by newest first."""
@@ -5009,6 +5108,106 @@ async def stream_run_logs(run_id: str):
                         last_size = current_size
                         yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
     
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+
+@app.get("/runs/{run_id}/sidecar-logs")
+async def get_sidecar_logs(
+    run_id: str,
+    offset: int = Query(-10000, description="Byte offset. Negative = from end."),
+    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
+):
+    """Get sidecar logs with byte-offset pagination."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+
+    if not run_dir:
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+    log_file = os.path.join(run_dir, "sidecar.log")
+    if not os.path.exists(log_file):
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+    limit = min(limit, 100 * 1024)
+
+    try:
+        total_size = os.path.getsize(log_file)
+
+        if offset < 0:
+            actual_offset = max(0, total_size + offset)
+        else:
+            actual_offset = min(offset, total_size)
+
+        with open(log_file, "r", errors="replace") as f:
+            f.seek(actual_offset)
+            content = f.read(limit)
+
+        bytes_read = len(content.encode('utf-8'))
+        end_offset = actual_offset + bytes_read
+
+        return {
+            "content": content,
+            "offset": actual_offset,
+            "total_size": total_size,
+            "has_more_before": actual_offset > 0,
+            "has_more_after": end_offset < total_size
+        }
+    except Exception as e:
+        logger.error(f"Error reading sidecar logs for {run_id}: {e}")
+        return {"content": f"Error reading logs: {e}", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+
+@app.get("/runs/{run_id}/sidecar-logs/stream")
+async def stream_sidecar_logs(run_id: str):
+    """Stream sidecar logs via SSE."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+
+    async def log_generator():
+        if not run_dir:
+            yield f"data: {json.dumps({'error': 'No run directory'})}\n\n"
+            return
+
+        log_file = os.path.join(run_dir, "sidecar.log")
+        last_size = 0
+
+        # Send initial content
+        if os.path.exists(log_file):
+            with open(log_file, "r", errors="replace") as f:
+                content = f.read()
+                last_size = len(content.encode('utf-8'))
+                yield f"data: {json.dumps({'type': 'initial', 'content': content})}\n\n"
+
+        # Stream updates
+        while True:
+            await asyncio.sleep(0.5)
+
+            current_run = runs.get(run_id, {})
+            if current_run.get("status") in ["finished", "failed", "stopped"]:
+                if os.path.exists(log_file):
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        if new_content:
+                            yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'status': current_run.get('status')})}\n\n"
+                break
+
+            if os.path.exists(log_file):
+                current_size = os.path.getsize(log_file)
+                if current_size > last_size:
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        last_size = current_size
+                        yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 

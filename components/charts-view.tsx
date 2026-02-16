@@ -55,7 +55,6 @@ import { RunVisibilitySelector } from './run-visibility-selector'
 import { VisibilityManageView } from './visibility-manage-view'
 import { cn } from '@/lib/utils'
 import type { InsightChart, MetricVisualization, ExperimentRun, VisibilityGroup } from '@/lib/types'
-import { defaultMetricVisualizations } from '@/lib/mock-data'
 import { VisualComparisonGrid } from '@/components/visual-comparison-grid'
 
 interface ChartsViewProps {
@@ -279,7 +278,7 @@ export function ChartsView({
   onDesktopSidebarToggle,
 }: ChartsViewProps) {
   const [activeSection, setActiveSection] = useState<'standard' | 'custom' | 'videoCompare'>('standard')
-  const [metrics, setMetrics] = useState<MetricVisualization[]>(defaultMetricVisualizations)
+  const [metrics, setMetrics] = useState<MetricVisualization[]>([])
   const [selectedLayer, setSelectedLayer] = useState<Record<string, number>>({})
   const [showVisibilityManage, setShowVisibilityManageInternal] = useState(false)
   const [showVisibilitySection, setShowVisibilitySection] = useState(false)
@@ -387,7 +386,7 @@ export function ChartsView({
     if (dynamicMetricVisualizations.length === 0) {
       setMetrics((prev) => {
         const hasDynamicMetrics = prev.some((metric) => metric.id.startsWith('metric:'))
-        return hasDynamicMetrics ? defaultMetricVisualizations : prev
+        return hasDynamicMetrics ? [] : prev
       })
       return
     }

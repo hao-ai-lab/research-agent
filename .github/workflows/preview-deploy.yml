@@ -35,7 +35,7 @@ jobs:
         run: |
           PREVIEW_AUTH_TOKEN="$(python - <<'PY'
           import secrets
-          print(secrets.token_urlsafe(32))
+          print(secrets.token_hex(32))
           PY
           )"
           echo "PREVIEW_AUTH_TOKEN=${PREVIEW_AUTH_TOKEN}" >> "$GITHUB_ENV"
