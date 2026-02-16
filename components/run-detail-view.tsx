@@ -48,7 +48,6 @@ import { TagsDialog } from './tags-dialog'
 import { LogViewer } from './log-viewer'
 import { TmuxTerminalPanel } from './tmux-terminal-panel'
 import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
-import { defaultMetricVisualizations } from '@/lib/mock-data'
 import { getSweep, type Alert } from '@/lib/api-client'
 import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
 
@@ -62,55 +61,90 @@ interface RunDetailViewProps {
   sweeps?: Sweep[]
 }
 
-// Generate mock metric data based on run's loss history
-function generateMetricData(run: ExperimentRun, metricPath: string, layer?: number) {
+// Generate chart data from metricSeries (real data) with lossHistory fallback
+function generateMetricData(run: ExperimentRun, metricPath: string, _layer?: number) {
+  // Priority 1: real metricSeries data from the server
+  const series = run.metricSeries?.[metricPath]
+  if (series && series.length > 0) {
+    return series.map((point) => ({ step: point.step, value: point.value }))
+  }
+
+  // Priority 2: derive from lossHistory for backward compat
   if (!run.lossHistory || run.lossHistory.length === 0) return []
 
-  return run.lossHistory.map((point, i) => {
-    let value = 0
-    const noise = (Math.random() - 0.5) * 0.1
+  if (metricPath === 'train/loss') {
+    return run.lossHistory.map((point) => ({ step: point.step, value: point.trainLoss }))
+  }
+  if (metricPath === 'val/loss') {
+    return run.lossHistory.map((point) => ({ step: point.step, value: point.valLoss ?? point.trainLoss * 1.1 }))
+  }
 
-    switch (metricPath) {
-      case 'train/loss':
-        value = point.trainLoss
-        break
-      case 'val/loss':
-        value = point.valLoss || point.trainLoss * 1.1
-        break
-      case 'train/reward':
-        value = 1 - point.trainLoss + noise
-        break
-      case 'train/loss_ema':
-        value = point.trainLoss * 0.95 + noise * 0.1
-        break
-      case 'train/loss_slope':
-        const prevLoss = i > 0 ? run.lossHistory![i - 1].trainLoss : point.trainLoss
-        value = (point.trainLoss - prevLoss) * 10 + noise
-        break
-      case 'val/generalization_gap':
-        value = (point.valLoss || point.trainLoss * 1.1) - point.trainLoss
-        break
-      case 'grad/global_norm':
-        value = 0.5 + Math.sin(i * 0.2) * 0.3 + noise
-        break
-      case 'grad/global_norm_ema':
-        value = 0.5 + Math.sin(i * 0.2) * 0.2 + noise * 0.5
-        break
-      case 'grad/norm/attn':
-        value = 0.3 + (layer || 0) * 0.05 + Math.sin(i * 0.15) * 0.1 + noise
-        break
-      case 'grad/norm_ratio':
-        value = 0.01 + noise * 0.005
-        break
-      case 'act/mean':
-        value = (layer || 0) * 0.1 + Math.cos(i * 0.1) * 0.2 + noise
-        break
-      default:
-        value = point.trainLoss + noise
+  return []
+}
+
+// Helper functions for dynamic metric detection
+function metricCategoryFromPath(path: string): 'primary' | 'secondary' {
+  const key = path.toLowerCase()
+  if (
+    key.includes('loss') || key.includes('accuracy') || key.includes('reward') ||
+    key.includes('score') || key.includes('f1') || key.includes('bleu') ||
+    key.includes('rouge') || key.includes('perplexity')
+  ) {
+    return 'primary'
+  }
+  return 'secondary'
+}
+
+function metricTypeFromPath(path: string): 'line' | 'area' | 'bar' {
+  const key = path.toLowerCase()
+  if (key.includes('slope') || key.includes('gap') || key.includes('delta')) return 'area'
+  return 'line'
+}
+
+function metricDisplayName(path: string): string {
+  const clean = path.replace(/^metrics\//, '')
+  const parts = clean.split('/').filter(Boolean)
+  const last = parts.length > 0 ? parts[parts.length - 1] : clean
+  const name = last.replace(/[_\-]+/g, ' ').trim()
+  return name.charAt(0).toUpperCase() + name.slice(1) || clean
+}
+
+function hasChartData(run: ExperimentRun): boolean {
+  const hasLossHistory = !!(run.lossHistory && run.lossHistory.length > 0)
+  const hasMetricSeries = !!(
+    run.metricSeries &&
+    Object.values(run.metricSeries).some((points) => points && points.length > 0)
+  )
+  return hasLossHistory || hasMetricSeries
+}
+
+function buildMetricVisualizations(run: ExperimentRun): MetricVisualization[] {
+  const metricKeys = new Set<string>()
+
+  // Collect from metricSeries
+  if (run.metricSeries) {
+    Object.entries(run.metricSeries).forEach(([key, points]) => {
+      if (points && points.length > 0) metricKeys.add(key)
+    })
+  }
+
+  // Collect from lossHistory as fallback
+  if (metricKeys.size === 0 && run.lossHistory && run.lossHistory.length > 0) {
+    metricKeys.add('train/loss')
+    if (run.lossHistory.some((p) => p.valLoss !== undefined)) {
+      metricKeys.add('val/loss')
     }
+  }
 
-    return { step: point.step, value: Math.max(0, value) }
-  })
+  return Array.from(metricKeys)
+    .sort((a, b) => a.localeCompare(b))
+    .map((metricPath) => ({
+      id: `metric:${metricPath.replace(/[^a-zA-Z0-9]+/g, '-')}`,
+      name: metricDisplayName(metricPath),
+      path: metricPath,
+      category: metricCategoryFromPath(metricPath),
+      type: metricTypeFromPath(metricPath),
+    }))
 }
 
 // Single metric chart component with lazy loading
@@ -209,8 +243,9 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   const [logsFullPage, setLogsFullPage] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(true)
 
-  const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
-  const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
+  const allMetrics = useMemo(() => buildMetricVisualizations(run), [run])
+  const primaryMetrics = allMetrics.filter(m => m.category === 'primary')
+  const secondaryMetrics = allMetrics.filter(m => m.category === 'secondary')
   const linkedSweepFromList = useMemo(
     () => sweeps.find((sweep) => sweep.id === run.sweepId),
     [run.sweepId, sweeps]
@@ -738,7 +773,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
             </div>
 
             {/* Charts Section - Primary */}
-            {run.lossHistory && run.lossHistory.length > 0 && (
+            {hasChartData(run) && primaryMetrics.length > 0 && (
               <Collapsible open={primaryChartsOpen} onOpenChange={setPrimaryChartsOpen}>
                 <div className="rounded-lg border border-border bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
@@ -784,7 +819,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
             )}
 
             {/* Charts Section - Secondary */}
-            {run.lossHistory && run.lossHistory.length > 0 && (
+            {hasChartData(run) && secondaryMetrics.length > 0 && (
               <Collapsible open={secondaryChartsOpen} onOpenChange={setSecondaryChartsOpen}>
                 <div className="rounded-lg border border-border bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
@@ -846,7 +881,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
             )}
 
             {/* Charts Section - Empty State */}
-            {(!run.lossHistory || run.lossHistory.length === 0) && (
+            {!hasChartData(run) && (
               <Collapsible>
                 <div className="rounded-lg border border-border border-dashed bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>

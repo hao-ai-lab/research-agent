@@ -1400,28 +1400,52 @@ def _get_wandb_curve_data(wandb_dir: Optional[str]) -> Optional[dict]:
     return payload
 
 
+def _load_run_metrics(run_dir: Optional[str]) -> dict:
+    """Load stored metrics from agent_metrics.jsonl in the run directory."""
+    if not run_dir:
+        return {}
+    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
+    if not os.path.isfile(metrics_file):
+        return {}
+    return _parse_metrics_history(metrics_file)
+
+
 def _run_response_payload(run_id: str, run: dict) -> dict:
-    """Build run response payload enriched with metrics from wandb (if available)."""
+    """Build run response payload enriched with metrics.
+
+    Metrics come from two sources, in priority order:
+    1. Stored metrics POSTed by the sidecar (agent_metrics.jsonl)
+    2. WandB files discovered via wandb_dir or run_dir
+    """
     payload = {"id": run_id, **run}
-    wandb_dir = run.get("wandb_dir")
-    # Fallback: scan run_dir for wandb data if not explicitly reported by sidecar.
-    if not wandb_dir:
-        wandb_dir = _find_wandb_dir_from_run_dir(run.get("run_dir"))
-        if wandb_dir:
-            run["wandb_dir"] = wandb_dir
-            payload["wandb_dir"] = wandb_dir
-    parsed = _get_wandb_curve_data(wandb_dir)
+
+    # Source 1: stored metrics from sidecar POSTs
+    parsed = _load_run_metrics(run.get("run_dir"))
+
+    # Source 2: wandb files (fallback)
+    if not parsed or not parsed.get("metricSeries"):
+        wandb_dir = run.get("wandb_dir")
+        if not wandb_dir:
+            wandb_dir = _find_wandb_dir_from_run_dir(run.get("run_dir"))
+            if wandb_dir:
+                run["wandb_dir"] = wandb_dir
+                payload["wandb_dir"] = wandb_dir
+        wandb_parsed = _get_wandb_curve_data(wandb_dir)
+        if wandb_parsed:
+            parsed = wandb_parsed
+
     if not parsed:
         return payload
-
-    parsed_history = parsed.get("lossHistory")
-    if parsed_history:
-        payload["lossHistory"] = parsed_history
 
     parsed_metric_series = parsed.get("metricSeries")
     if parsed_metric_series:
         payload["metricSeries"] = parsed_metric_series
         payload["metricKeys"] = parsed.get("metricKeys", list(parsed_metric_series.keys()))
+
+    # Also provide lossHistory for backward compat with components that still use it
+    parsed_history = parsed.get("lossHistory")
+    if parsed_history:
+        payload["lossHistory"] = parsed_history
 
     parsed_metrics = parsed.get("metrics") if isinstance(parsed.get("metrics"), dict) else {}
     existing_metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
@@ -1430,11 +1454,9 @@ def _run_response_payload(run_id: str, run: dict) -> dict:
         "accuracy": parsed_metrics.get("accuracy", existing_metrics.get("accuracy")),
         "epoch": parsed_metrics.get("epoch", existing_metrics.get("epoch")),
     }
-    if all(isinstance(merged_metrics.get(key), (int, float)) for key in ("loss", "accuracy", "epoch")):
+    if any(isinstance(merged_metrics.get(key), (int, float)) for key in ("loss", "accuracy", "epoch")):
         payload["metrics"] = {
-            "loss": float(merged_metrics["loss"]),
-            "accuracy": float(merged_metrics["accuracy"]),
-            "epoch": float(merged_metrics["epoch"]),
+            k: float(v) for k, v in merged_metrics.items() if isinstance(v, (int, float))
         }
 
     return payload
@@ -3910,6 +3932,64 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
     save_alerts_state()
     logger.info(f"Created alert {alert_id} for run {run_id}: {req.message}")
     return {"alert_id": alert_id}
+
+
+# ---- Metrics Endpoints (sidecar-pushed) ----
+
+@app.post("/runs/{run_id}/metrics")
+async def post_run_metrics(run_id: str, request: Request):
+    """Accept metrics rows from the sidecar and append to stored metrics file.
+
+    Body should be JSON with a 'rows' array of metric dictionaries, e.g.:
+    {"rows": [{"step": 1, "train/loss": 0.5, "accuracy": 0.6}, ...]}
+    """
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    body = await request.json()
+    rows = body.get("rows", [])
+    if not isinstance(rows, list) or len(rows) == 0:
+        raise HTTPException(status_code=400, detail="'rows' must be a non-empty array")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
+
+    try:
+        with open(metrics_file, "a") as f:
+            for row in rows:
+                if isinstance(row, dict):
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.error(f"Failed to write metrics for run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write metrics")
+
+    # Invalidate cache for this file
+    _wandb_metrics_cache.pop(metrics_file, None)
+
+    logger.debug(f"Received {len(rows)} metric rows for run {run_id}")
+    return {"appended": len(rows)}
+
+
+@app.get("/runs/{run_id}/metrics")
+async def get_run_metrics(run_id: str):
+    """Return parsed metrics for a run from stored metrics file."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    parsed = _load_run_metrics(run_dir)
+
+    # Fallback to wandb files if no stored metrics
+    if not parsed or not parsed.get("metricSeries"):
+        wandb_dir = run.get("wandb_dir") or _find_wandb_dir_from_run_dir(run_dir)
+        wandb_parsed = _get_wandb_curve_data(wandb_dir)
+        if wandb_parsed:
+            parsed = wandb_parsed
+
+    return parsed or {}
 
 
 @app.get("/alerts")

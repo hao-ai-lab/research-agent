@@ -467,6 +467,75 @@ def find_wandb_dir_in_rundir(run_dir: str, job_id: str) -> str | None:
     return None
 
 
+def _resolve_wandb_metrics_file(wandb_dir: str) -> str | None:
+    """Find the metrics JSONL file inside a wandb run directory."""
+    candidates = [
+        os.path.join(wandb_dir, "metrics.jsonl"),
+        os.path.join(wandb_dir, "files", "metrics.jsonl"),
+        os.path.join(wandb_dir, "wandb-history.jsonl"),
+        os.path.join(wandb_dir, "files", "wandb-history.jsonl"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def post_metrics_delta(
+    server_url: str,
+    job_id: str,
+    wandb_dir: str,
+    lines_posted: int,
+    auth_token: str | None = None,
+) -> int:
+    """Read new metrics rows from wandb files and POST them to the server.
+
+    Returns the updated lines_posted count.
+    """
+    metrics_file = _resolve_wandb_metrics_file(wandb_dir)
+    if not metrics_file:
+        return lines_posted
+
+    try:
+        with open(metrics_file, "r") as f:
+            all_lines = f.readlines()
+    except OSError:
+        return lines_posted
+
+    new_lines = all_lines[lines_posted:]
+    if not new_lines:
+        return lines_posted
+
+    rows: list[dict] = []
+    for line in new_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if not rows:
+        return lines_posted
+
+    url = f"{server_url}/runs/{job_id}/metrics"
+    headers = {"Content-Type": "application/json"}
+    if auth_token:
+        headers["X-Auth-Token"] = auth_token
+    try:
+        resp = requests.post(url, json={"rows": rows}, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            lines_posted = len(all_lines)
+            logger.info(f"Posted {len(rows)} metric rows to server")
+        else:
+            logger.warning(f"Failed to POST metrics: {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"Failed to POST metrics to server: {e}")
+
+    return lines_posted
+
+
 def check_wandb_in_pane(pane_id: str, workdir: str = None) -> str | None:
     """Detect WandB run directory from tmux pane output."""
     try:
@@ -568,6 +637,7 @@ def monitor_job(
     found_wandb_dir = None
     check_interval = 2
     alert_state: dict = {}
+    metrics_lines_posted = 0
 
     while not os.path.exists(completion_file):
         try:
@@ -612,6 +682,11 @@ def monitor_job(
                     report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
                     return
 
+                # POST new metric rows to server
+                metrics_lines_posted = post_metrics_delta(
+                    server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token
+                )
+
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
         
@@ -632,6 +707,10 @@ def monitor_job(
     else:
         logger.error(f"Job failed with exit code: {exit_code}")
         report_status(server_url, job_id, "failed", {"exit_code": exit_code}, auth_token=auth_token)
+
+    # Final metrics flush
+    if found_wandb_dir:
+        post_metrics_delta(server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token)
     
     logger.info("Sidecar exiting")
 
