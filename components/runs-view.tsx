@@ -1815,7 +1815,7 @@ export function RunsView({
     <>
       <div className="flex flex-col h-full overflow-hidden">
         {/* Top Nav Bar */}
-        <div className="flex items-center justify-between border-b border-border bg-card/80 px-3 py-1.5 backdrop-blur-sm shrink-0">
+        <div className="flex items-center justify-between border-b border-border bg-card/80 px-4 py-3 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-2">
             {showDesktopSidebarToggle && onDesktopSidebarToggle && (
               <Button
@@ -1829,7 +1829,12 @@ export function RunsView({
                 <span className="sr-only">Show sidebar</span>
               </Button>
             )}
-            <h2 className="text-xs font-medium text-foreground">Runs</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Runs</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {overview.total} run{overview.total !== 1 ? 's' : ''} total
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-1.5">
             <Tooltip>

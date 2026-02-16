@@ -3538,7 +3538,19 @@ async def create_run(req: RunCreate):
     
     record_created_entity("run", run_id)
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
-    return {"id": run_id, **run_data}
+
+    # If auto_start is requested, actually launch the run in tmux
+    if initial_status == "queued":
+        try:
+            launch_run_in_tmux(run_id, run_data)
+            if run_data.get("sweep_id"):
+                recompute_sweep_state(run_data["sweep_id"])
+            save_runs_state()
+        except Exception as e:
+            logger.error(f"Failed to auto-start run {run_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    return _run_response_payload(run_id, run_data)
 
 
 @app.get("/runs/{run_id}")
