@@ -17,6 +17,7 @@ import {
   BarChart3,
   AlertTriangle,
   Bell,
+  ScrollText,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -204,6 +205,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   // Logs and Terminal state
   const [logsOpen, setLogsOpen] = useState(true)
   const [terminalOpen, setTerminalOpen] = useState(false)
+  const [sidecarLogsOpen, setSidecarLogsOpen] = useState(false)
   const [logsFullPage, setLogsFullPage] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(true)
 
@@ -926,6 +928,38 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
                       runId={run.id}
                       tmuxWindow={(run as any).tmux_window}
                       tmuxPane={(run as any).tmux_pane}
+                      showHeader={false}
+                      className="rounded-none border-0 bg-transparent"
+                    />
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+
+            {/* Sidecar Logs Section */}
+            <Collapsible open={sidecarLogsOpen} onOpenChange={setSidecarLogsOpen}>
+              <div className="rounded-lg border border-border bg-card overflow-hidden">
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <ScrollText className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-medium text-foreground">Sidecar Logs</span>
+                      {run.status === 'running' && (
+                        <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                      )}
+                    </div>
+                    {sidecarLogsOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border">
+                    <LogViewer
+                      runId={run.id}
+                      logSource="sidecar"
                       showHeader={false}
                       className="rounded-none border-0 bg-transparent"
                     />

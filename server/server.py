@@ -5000,6 +5000,106 @@ async def stream_run_logs(run_id: str):
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 
+@app.get("/runs/{run_id}/sidecar-logs")
+async def get_sidecar_logs(
+    run_id: str,
+    offset: int = Query(-10000, description="Byte offset. Negative = from end."),
+    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
+):
+    """Get sidecar logs with byte-offset pagination."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+
+    if not run_dir:
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+    log_file = os.path.join(run_dir, "sidecar.log")
+    if not os.path.exists(log_file):
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+    limit = min(limit, 100 * 1024)
+
+    try:
+        total_size = os.path.getsize(log_file)
+
+        if offset < 0:
+            actual_offset = max(0, total_size + offset)
+        else:
+            actual_offset = min(offset, total_size)
+
+        with open(log_file, "r", errors="replace") as f:
+            f.seek(actual_offset)
+            content = f.read(limit)
+
+        bytes_read = len(content.encode('utf-8'))
+        end_offset = actual_offset + bytes_read
+
+        return {
+            "content": content,
+            "offset": actual_offset,
+            "total_size": total_size,
+            "has_more_before": actual_offset > 0,
+            "has_more_after": end_offset < total_size
+        }
+    except Exception as e:
+        logger.error(f"Error reading sidecar logs for {run_id}: {e}")
+        return {"content": f"Error reading logs: {e}", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+
+@app.get("/runs/{run_id}/sidecar-logs/stream")
+async def stream_sidecar_logs(run_id: str):
+    """Stream sidecar logs via SSE."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+
+    async def log_generator():
+        if not run_dir:
+            yield f"data: {json.dumps({'error': 'No run directory'})}\n\n"
+            return
+
+        log_file = os.path.join(run_dir, "sidecar.log")
+        last_size = 0
+
+        # Send initial content
+        if os.path.exists(log_file):
+            with open(log_file, "r", errors="replace") as f:
+                content = f.read()
+                last_size = len(content.encode('utf-8'))
+                yield f"data: {json.dumps({'type': 'initial', 'content': content})}\n\n"
+
+        # Stream updates
+        while True:
+            await asyncio.sleep(0.5)
+
+            current_run = runs.get(run_id, {})
+            if current_run.get("status") in ["finished", "failed", "stopped"]:
+                if os.path.exists(log_file):
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        if new_content:
+                            yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'status': current_run.get('status')})}\n\n"
+                break
+
+            if os.path.exists(log_file):
+                current_size = os.path.getsize(log_file)
+                if current_size > last_size:
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        last_size = current_size
+                        yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+
 # =============================================================================
 # Artifact Endpoints
 # =============================================================================

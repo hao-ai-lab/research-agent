@@ -148,6 +148,12 @@ export const getRunLogs = (...args: Parameters<typeof realApi.getRunLogs>) =>
 export const streamRunLogs = (...args: Parameters<typeof realApi.streamRunLogs>) =>
     getApi().streamRunLogs(...args)
 
+export const getSidecarLogs = (...args: Parameters<typeof realApi.getSidecarLogs>) =>
+    getApi().getSidecarLogs(...args)
+
+export const streamSidecarLogs = (...args: Parameters<typeof realApi.streamSidecarLogs>) =>
+    getApi().streamSidecarLogs(...args)
+
 export const getRunArtifacts = (...args: Parameters<typeof realApi.getRunArtifacts>) =>
     getApi().getRunArtifacts(...args)
 

@@ -1527,6 +1527,75 @@ export async function* streamRunLogs(runId: string): AsyncGenerator<{
 }
 
 /**
+ * Get sidecar logs with byte-offset pagination
+ */
+export async function getSidecarLogs(
+    runId: string,
+    offset: number = -10000,
+    limit: number = 10000
+): Promise<LogResponse> {
+    const response = await fetch(
+        `${API_URL()}/runs/${runId}/sidecar-logs?offset=${offset}&limit=${limit}`,
+        { headers: getHeaders() }
+    )
+    if (!response.ok) {
+        throw new Error(`Failed to get sidecar logs: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stream sidecar logs via SSE
+ */
+export async function* streamSidecarLogs(runId: string): AsyncGenerator<{
+    type: 'initial' | 'delta' | 'done' | 'error'
+    content?: string
+    status?: string
+    error?: string
+}> {
+    const response = await fetch(`${API_URL()}/runs/${runId}/sidecar-logs/stream`, {
+        headers: getHeaders()
+    })
+
+    if (!response.ok) {
+        throw new Error(`Failed to stream sidecar logs: ${response.statusText}`)
+    }
+
+    if (!response.body) {
+        throw new Error('Response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+
+            const events = buffer.split('\n\n')
+            buffer = events.pop() || ''
+
+            for (const event of events) {
+                if (event.startsWith('data: ')) {
+                    try {
+                        yield JSON.parse(event.slice(6))
+                    } catch {
+                        console.warn('Failed to parse SSE event:', event)
+                    }
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
+}
+
+/**
  * Get run artifacts
  */
 export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
