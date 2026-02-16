@@ -362,7 +362,14 @@ export function DesktopSidebar({
                   </Button>
                 )}
                 {PRIMARY_NAV_ITEMS
-                  .filter((item) => item.tab !== 'plans' || settings.developer?.showPlanPanel)
+                  .filter((item) => {
+                    if (item.tab === 'plans') return settings.developer?.showPlanPanel
+
+                    const configItem = settings.leftPanel?.items.find((i) => i.id === item.tab)
+                    if (configItem) return configItem.visible
+
+                    return true
+                  })
                   .map((item) => {
                     if (item.tab === 'runs') {
                       return (
