@@ -1,4 +1,5 @@
 import path from 'node:path'
+import type { NextRequest } from 'next/server'
 
 /**
  * Workspace root — the user's project directory.
@@ -6,7 +7,10 @@ import path from 'node:path'
  * Resolution order:
  *  1. RESEARCH_AGENT_WORKDIR env var (set by the launcher script)
  *  2. Fetch from the Python backend's /health endpoint (returns { workdir })
- *  3. Fallback to process.cwd()
+ *
+ * If neither source provides a workdir, an error is thrown — we never
+ * fall back to process.cwd() because that exposes the application
+ * directory instead of the user's project.
  */
 
 let _cachedWorkspaceRoot = ''
@@ -44,9 +48,10 @@ export async function getWorkspaceRoot(): Promise<string> {
     return _cachedWorkspaceRoot
   }
 
-  // 3. Fallback
-  _cachedWorkspaceRoot = path.resolve(process.cwd())
-  return _cachedWorkspaceRoot
+  // No fallback — refuse to serve the app directory by mistake
+  throw new Error(
+    'Cannot determine workspace root. Set RESEARCH_AGENT_WORKDIR or ensure the backend is running.',
+  )
 }
 
 export interface ExplorerTreeEntry {
@@ -94,4 +99,21 @@ export function resolveExplorerPath(relativePath: string, workspaceRoot: string)
 
 export function joinExplorerPath(parentPath: string, childName: string): string {
   return parentPath ? `${parentPath}/${childName}` : childName
+}
+
+/**
+ * Validate the auth token on a file-explorer request.
+ *
+ * Mirrors the Python backend's auth_middleware: if
+ * RESEARCH_AGENT_USER_AUTH_TOKEN is set, the request must carry a
+ * matching X-Auth-Token header.  When no token is configured the
+ * endpoint is open (same as the backend behaviour).
+ */
+export function validateAuthToken(request: NextRequest): boolean {
+  const expected = process.env.RESEARCH_AGENT_USER_AUTH_TOKEN
+  if (!expected) {
+    return true // no token configured — open access
+  }
+  const provided = request.headers.get('X-Auth-Token') ?? ''
+  return provided === expected
 }

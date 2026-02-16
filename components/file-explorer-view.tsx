@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+import { getAuthToken } from '@/lib/api-config'
 
 type ExplorerNodeType = 'file' | 'directory'
 
@@ -109,6 +110,7 @@ export function FileExplorerView({
     try {
       const response = await fetch(`/api/file-explorer/tree?path=${encodeURIComponent(directoryPath)}`, {
         cache: 'no-store',
+        headers: { 'X-Auth-Token': getAuthToken() },
       })
 
       if (!response.ok) {
@@ -148,6 +150,7 @@ export function FileExplorerView({
     try {
       const response = await fetch(`/api/file-explorer/file?path=${encodeURIComponent(filePath)}`, {
         cache: 'no-store',
+        headers: { 'X-Auth-Token': getAuthToken() },
       })
 
       if (!response.ok) {
