@@ -475,9 +475,14 @@ def _resolve_wandb_metrics_file(wandb_dir: str) -> str | None:
         os.path.join(wandb_dir, "wandb-history.jsonl"),
         os.path.join(wandb_dir, "files", "wandb-history.jsonl"),
     ]
+    logger.debug(f"[metrics] Resolving metrics file in wandb_dir={wandb_dir}")
     for path in candidates:
-        if os.path.isfile(path):
+        exists = os.path.isfile(path)
+        logger.debug(f"[metrics]   candidate {path} exists={exists}")
+        if exists:
+            logger.info(f"[metrics] Resolved metrics file: {path}")
             return path
+    logger.warning(f"[metrics] No metrics file found in {wandb_dir}")
     return None
 
 
@@ -492,46 +497,63 @@ def post_metrics_delta(
 
     Returns the updated lines_posted count.
     """
+    logger.info(f"[metrics] post_metrics_delta called: job_id={job_id}, wandb_dir={wandb_dir}, lines_posted={lines_posted}")
+
     metrics_file = _resolve_wandb_metrics_file(wandb_dir)
     if not metrics_file:
+        logger.info(f"[metrics] No metrics file found — skipping POST")
         return lines_posted
 
     try:
         with open(metrics_file, "r") as f:
             all_lines = f.readlines()
-    except OSError:
+        logger.info(f"[metrics] Read {len(all_lines)} total lines from {metrics_file}")
+    except OSError as e:
+        logger.error(f"[metrics] Failed to read metrics file {metrics_file}: {e}")
         return lines_posted
 
     new_lines = all_lines[lines_posted:]
+    logger.info(f"[metrics] {len(new_lines)} new lines since last post (lines_posted={lines_posted}, total={len(all_lines)})")
     if not new_lines:
+        logger.info(f"[metrics] No new lines to post — nothing to do")
         return lines_posted
 
     rows: list[dict] = []
+    parse_errors = 0
     for line in new_lines:
         line = line.strip()
         if not line:
             continue
         try:
             rows.append(json.loads(line))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            parse_errors += 1
+            logger.debug(f"[metrics] JSON parse error on line: {line[:100]!r} — {e}")
             continue
 
+    logger.info(f"[metrics] Parsed {len(rows)} valid rows ({parse_errors} parse errors)")
+    if rows:
+        sample_keys = list(rows[0].keys())[:8]
+        logger.info(f"[metrics] Sample row keys: {sample_keys}")
+
     if not rows:
+        logger.info(f"[metrics] No valid rows after parsing — skipping POST")
         return lines_posted
 
     url = f"{server_url}/runs/{job_id}/metrics"
     headers = {"Content-Type": "application/json"}
     if auth_token:
         headers["X-Auth-Token"] = auth_token
+    logger.info(f"[metrics] POSTing {len(rows)} rows to {url}")
     try:
         resp = requests.post(url, json={"rows": rows}, headers=headers, timeout=10)
         if resp.status_code == 200:
             lines_posted = len(all_lines)
-            logger.info(f"Posted {len(rows)} metric rows to server")
+            logger.info(f"[metrics] ✅ POST succeeded — posted {len(rows)} rows, lines_posted now={lines_posted}")
         else:
-            logger.warning(f"Failed to POST metrics: {resp.status_code} {resp.text[:200]}")
+            logger.warning(f"[metrics] ❌ POST failed: status={resp.status_code} body={resp.text[:300]}")
     except Exception as e:
-        logger.warning(f"Failed to POST metrics to server: {e}")
+        logger.warning(f"[metrics] ❌ POST exception: {e}")
 
     return lines_posted
 
@@ -652,12 +674,15 @@ def monitor_job(
             
             # Detect WandB — filesystem scan first, tmux fallback
             if not found_wandb_dir:
+                logger.debug(f"[metrics-loop] Scanning for wandb dir: run_dir={run_dir}, job_id={job_id}")
                 found_wandb_dir = find_wandb_dir_in_rundir(run_dir, job_id)
                 if not found_wandb_dir:
                     found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
                 if found_wandb_dir:
-                    logger.info(f"Detected WandB dir: {found_wandb_dir}")
+                    logger.info(f"[metrics-loop] ✅ Detected WandB dir: {found_wandb_dir}")
                     report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
+                else:
+                    logger.debug(f"[metrics-loop] WandB dir not found yet")
 
             # Manual alert trigger path (for testing and operations)
             if maybe_trigger_manual_alert(server_url, job_id, workdir, run_dir, auth_token=auth_token):
@@ -683,9 +708,15 @@ def monitor_job(
                     return
 
                 # POST new metric rows to server
+                logger.info(f"[metrics-loop] Calling post_metrics_delta (found_wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted})")
+                prev_lines = metrics_lines_posted
                 metrics_lines_posted = post_metrics_delta(
                     server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token
                 )
+                if metrics_lines_posted != prev_lines:
+                    logger.info(f"[metrics-loop] lines_posted advanced: {prev_lines} → {metrics_lines_posted}")
+            else:
+                logger.debug(f"[metrics-loop] Skipping metrics POST — no wandb_dir found yet")
 
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
@@ -710,7 +741,11 @@ def monitor_job(
 
     # Final metrics flush
     if found_wandb_dir:
-        post_metrics_delta(server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token)
+        logger.info(f"[metrics-final] Final metrics flush: wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted}")
+        final_posted = post_metrics_delta(server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token)
+        logger.info(f"[metrics-final] Final flush done: lines_posted {metrics_lines_posted} → {final_posted}")
+    else:
+        logger.info(f"[metrics-final] No wandb_dir found during entire run — skipping final flush")
     
     logger.info("Sidecar exiting")
 
