@@ -11,6 +11,7 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
+import glob
 from dataclasses import dataclass
 import json
 import math
@@ -1240,6 +1241,17 @@ def _is_metric_key(key: object) -> bool:
     return True
 
 
+def _find_wandb_dir_from_run_dir(run_dir: Optional[str]) -> Optional[str]:
+    """Scan the predictable wandb_data/ path inside run_dir for a WandB run directory."""
+    if not run_dir:
+        return None
+    wandb_base = os.path.join(run_dir, "wandb_data", "wandb")
+    if not os.path.isdir(wandb_base):
+        return None
+    matches = sorted(glob.glob(os.path.join(wandb_base, "run-*")))
+    return matches[-1] if matches else None
+
+
 def _resolve_metrics_file(wandb_dir: Optional[str]) -> Optional[str]:
     """Resolve likely metrics file paths from a wandb run directory."""
     if not wandb_dir:
@@ -1391,7 +1403,14 @@ def _get_wandb_curve_data(wandb_dir: Optional[str]) -> Optional[dict]:
 def _run_response_payload(run_id: str, run: dict) -> dict:
     """Build run response payload enriched with metrics from wandb (if available)."""
     payload = {"id": run_id, **run}
-    parsed = _get_wandb_curve_data(run.get("wandb_dir"))
+    wandb_dir = run.get("wandb_dir")
+    # Fallback: scan run_dir for wandb data if not explicitly reported by sidecar.
+    if not wandb_dir:
+        wandb_dir = _find_wandb_dir_from_run_dir(run.get("run_dir"))
+        if wandb_dir:
+            run["wandb_dir"] = wandb_dir
+            payload["wandb_dir"] = wandb_dir
+    parsed = _get_wandb_curve_data(wandb_dir)
     if not parsed:
         return payload
 

@@ -9,10 +9,12 @@ This script is spawned by the server in a tmux window to:
 """
 
 import argparse
+import glob
 import json
 import logging
 import os
 import re
+import shlex
 import sys
 import time
 import math
@@ -442,6 +444,29 @@ def get_current_pane():
     return None
 
 
+def find_wandb_dir_in_rundir(run_dir: str, job_id: str) -> str | None:
+    """Scan the predictable WANDB_DIR location for a WandB run directory.
+
+    When we set WANDB_DIR={run_dir}/wandb_data before the user command,
+    WandB creates: {run_dir}/wandb_data/wandb/run-{timestamp}-{run_id}/files/
+    The metrics live at the run-* level (or inside files/).
+    """
+    wandb_base = os.path.join(run_dir, "wandb_data", "wandb")
+    if not os.path.isdir(wandb_base):
+        return None
+    # Look for run dirs matching our job_id
+    pattern = os.path.join(wandb_base, f"run-*-{job_id}")
+    matches = sorted(glob.glob(pattern))
+    if matches:
+        return matches[-1]  # latest
+    # Fallback: any run dir at all (single-run case)
+    pattern_any = os.path.join(wandb_base, "run-*")
+    matches_any = sorted(glob.glob(pattern_any))
+    if matches_any:
+        return matches_any[-1]
+    return None
+
+
 def check_wandb_in_pane(pane_id: str, workdir: str = None) -> str | None:
     """Detect WandB run directory from tmux pane output."""
     try:
@@ -522,6 +547,15 @@ def monitor_job(
     except Exception as e:
         logger.error(f"Failed to setup pipe-pane: {e}")
     
+    # Inject WANDB env vars so output goes to a predictable location
+    wandb_data_dir = os.path.join(run_dir, "wandb_data")
+    os.makedirs(wandb_data_dir, exist_ok=True)
+    job_pane.send_keys(f"export WANDB_DIR={shlex.quote(wandb_data_dir)}")
+    time.sleep(0.1)
+    job_pane.send_keys(f"export WANDB_RUN_ID={shlex.quote(job_id)}")
+    time.sleep(0.1)
+    logger.info(f"Set WANDB_DIR={wandb_data_dir}, WANDB_RUN_ID={job_id}")
+    
     # Execute command with exit code capture
     wrapped_command = f"({command}); echo $? > {completion_file}"
     logger.info(f"Executing: {wrapped_command}")
@@ -546,9 +580,11 @@ def monitor_job(
                 report_status(server_url, job_id, "failed", {"error": "Pane disappeared"}, auth_token=auth_token)
                 return
             
-            # Detect WandB
+            # Detect WandB — filesystem scan first, tmux fallback
             if not found_wandb_dir:
-                found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
+                found_wandb_dir = find_wandb_dir_in_rundir(run_dir, job_id)
+                if not found_wandb_dir:
+                    found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
                 if found_wandb_dir:
                     logger.info(f"Detected WandB dir: {found_wandb_dir}")
                     report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
