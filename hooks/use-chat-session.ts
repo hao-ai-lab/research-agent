@@ -74,7 +74,7 @@ export interface UseChatSessionResult {
     currentSessionId: string | null
     currentSession: ChatSession | null
     createNewSession: () => Promise<string | null>
-    startNewChat: () => void  
+    startNewChat: () => void
     selectSession: (sessionId: string) => Promise<void>
     saveSession: (sessionId: string) => Promise<void>
     unsaveSession: (sessionId: string) => Promise<void>
@@ -302,9 +302,37 @@ function normalizeMessage(message: ChatMessageData): ChatMessageData {
         }
     })
 
+    // If "strict interleaving mode" (parts > 0) is active, we must ensure ALL content is represented in parts.
+    // Backend sometimes returns tool parts but leaves text/thinking in top-level fields only.
+
+    const parts = [...normalizedParts]
+
+    // 1. Inject text content if missing from parts
+    const hasTextPart = parts.some(p => p.type === 'text')
+    // Only inject if content exists and looks meaningful
+    if (!hasTextPart && message.content && message.content.trim()) {
+        // We prepend text, assuming it introduces the tools
+        parts.unshift({
+            id: 'synthetic-text-content',
+            type: 'text',
+            content: message.content
+        })
+    }
+
+    // 2. Inject thinking content if missing from parts
+    const hasThinkingPart = parts.some(p => p.type === 'thinking')
+    if (!hasThinkingPart && message.thinking && message.thinking.trim()) {
+        // Thinking always comes first
+        parts.unshift({
+            id: 'synthetic-thinking-content',
+            type: 'thinking',
+            content: message.thinking
+        })
+    }
+
     return {
         ...message,
-        parts: normalizedParts,
+        parts: parts,
     }
 }
 
@@ -476,7 +504,7 @@ export function useChatSession(): UseChatSessionResult {
         if (event.type === 'part_delta') {
             const delta = event.delta || ''
             if (!delta) {
-                return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false }
+                return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false, provenance: undefined }
             }
             const partType = event.ptype === 'reasoning' ? 'thinking' : 'text'
 
@@ -484,8 +512,8 @@ export function useChatSession(): UseChatSessionResult {
                 const legacyUpdate = event.ptype === 'text'
                     ? { textContent: prev.textContent + delta }
                     : event.ptype === 'reasoning'
-                    ? { thinkingContent: prev.thinkingContent + delta }
-                    : {}
+                        ? { thinkingContent: prev.thinkingContent + delta }
+                        : {}
 
                 return {
                     ...prev,
@@ -499,6 +527,7 @@ export function useChatSession(): UseChatSessionResult {
                 thinkingDelta: event.ptype === 'reasoning' ? delta : '',
                 sawToolPart: false,
                 done: false,
+                provenance: undefined,
             }
         }
 
@@ -573,19 +602,32 @@ export function useChatSession(): UseChatSessionResult {
                 }
             })
 
-            return { textDelta: '', thinkingDelta: '', sawToolPart: true, done: false }
+            return { textDelta: '', thinkingDelta: '', sawToolPart: true, done: false, provenance: undefined }
         }
 
         if (event.type === 'error') {
             setError(event.message || 'Stream error')
-            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true }
+            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true, provenance: undefined }
         }
 
         if (event.type === 'session_status' && event.status === 'idle') {
-            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true }
+            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true, provenance: undefined }
         }
 
-        return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false }
+        if (event.type === 'provenance') {
+            const provenance: PromptProvenance = {
+                rendered: event.rendered || '',
+                user_input: event.user_input || '',
+                skill_id: event.skill_id || null,
+                skill_name: event.skill_name || null,
+                template: event.template || null,
+                variables: event.variables || {},
+                prompt_type: event.prompt_type || 'default'
+            }
+            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false, provenance }
+        }
+
+        return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false, provenance: undefined }
     }, [])
 
     // Check API connection on mount
@@ -952,7 +994,7 @@ export function useChatSession(): UseChatSessionResult {
             const streamTimeoutId = setInterval(() => {
                 const elapsed = Date.now() - lastEventTime
                 if (elapsed > 180_000) {
-                    console.warn(`[chat-session] Stream inactivity timeout (${Math.round(elapsed/1000)}s), aborting`)
+                    console.warn(`[chat-session] Stream inactivity timeout (${Math.round(elapsed / 1000)}s), aborting`)
                     streamController?.abort()
                     // Also notify backend to clean up the runtime (prevents 409 on next request)
                     stopSession(targetSessionId).catch(err =>
@@ -962,29 +1004,29 @@ export function useChatSession(): UseChatSessionResult {
             }, 5_000)
 
             try {
-            for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal, promptOverride)) {
-                lastEventTime = Date.now()
+                for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal, promptOverride)) {
+                    lastEventTime = Date.now()
 
-                // Debug logging for stream events
-                if (event.type === 'session_status' || event.type === 'error') {
-                    console.log(`[chat-session] Stream event: ${event.type}`, event)
-                }
+                    // Debug logging for stream events
+                    if (event.type === 'session_status' || event.type === 'error') {
+                        console.log(`[chat-session] Stream event: ${event.type}`, event)
+                    }
 
-                const update = processStreamEvent(event)
-                finalText += update.textDelta
-                finalThinking += update.thinkingDelta
-                if (update.sawToolPart) {
-                    sawToolPart = true
+                    const update = processStreamEvent(event)
+                    finalText += update.textDelta
+                    finalThinking += update.thinkingDelta
+                    if (update.sawToolPart) {
+                        sawToolPart = true
+                    }
+                    // Capture provenance event and store keyed by user_input
+                    if (update.provenance) {
+                        provenanceMapRef.current.set(update.provenance.user_input || content, update.provenance)
+                        setProvenanceVersion(v => v + 1)
+                    }
+                    if (update.done) {
+                        break
+                    }
                 }
-                // Capture provenance event and store keyed by user_input
-                if (update.provenance) {
-                    provenanceMapRef.current.set(update.provenance.user_input || content, update.provenance)
-                    setProvenanceVersion(v => v + 1)
-                }
-                if (update.done) {
-                    break
-                }
-            }
             } finally {
                 clearInterval(streamTimeoutId)
             }
