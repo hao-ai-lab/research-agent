@@ -105,6 +105,11 @@ def preview_server():
     except Exception as e:
         print(f"WARNING: tmux failed to start: {e}")
 
+    # Generate opencode server password for secure local communication
+    import secrets as _secrets
+    oc_password = env.get("OPENCODE_SERVER_PASSWORD") or _secrets.token_hex(16)
+    env["OPENCODE_SERVER_PASSWORD"] = oc_password
+
     # Route backend OpenCode traffic to external endpoint when configured.
     external_opencode_url = env.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
     if external_opencode_url:
@@ -174,7 +179,16 @@ def preview_app():
     # NEXT_PUBLIC_API_URL=auto → resolves to window.location.origin in browser
     # Next.js rewrites in next.config.mjs proxy API calls to backend on 10000
     print("Starting frontend dev server on port 8080...")
-    frontend_env = {**env, "NEXT_PUBLIC_API_URL": "auto", "PORT": "8080"}
+    frontend_env = {
+        **env,
+        "NEXT_PUBLIC_API_URL": "auto",
+        "PORT": "8080",
+        # Server-side API routes need these to resolve the workspace root
+        # and validate auth tokens without depending on the backend.
+        "RESEARCH_AGENT_WORKDIR": workdir,
+        "RESEARCH_AGENT_USER_AUTH_TOKEN": auth_token,
+        "RESEARCH_AGENT_BACKEND_URL": "http://127.0.0.1:10000",
+    }
     subprocess.Popen(
         ["npx", "next", "dev", "-p", "8080"],
         env=frontend_env,

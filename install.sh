@@ -614,19 +614,28 @@ get_http_content_type() {
   '
 }
 
+generate_opencode_password() {
+  openssl rand -hex 16
+}
+
 build_opencode_command() {
+  local oc_password="$1"
   local config_path="${INSTALL_DIR}/server/opencode.json"
   if [ -f "$config_path" ]; then
-    printf 'cd %s && OPENCODE_CONFIG=%s opencode serve' \
+    printf 'cd %s && OPENCODE_CONFIG=%s OPENCODE_SERVER_PASSWORD=%s opencode serve' \
       "$(q "$PROJECT_ROOT")" \
-      "$(q "$config_path")"
+      "$(q "$config_path")" \
+      "$(q "$oc_password")"
   else
-    printf 'cd %s && opencode serve' "$(q "$PROJECT_ROOT")"
+    printf 'cd %s && OPENCODE_SERVER_PASSWORD=%s opencode serve' \
+      "$(q "$PROJECT_ROOT")" \
+      "$(q "$oc_password")"
   fi
 }
 
 build_backend_command() {
   local auth_token="$1"
+  local oc_password="$2"
   local backend_bin
   backend_bin="$(get_backend_binary || true)"
   local frontend_dir
@@ -639,10 +648,11 @@ build_backend_command() {
 
   if [ -n "$backend_bin" ]; then
     BACKEND_BIN="$backend_bin"
-    printf 'cd %s && RESEARCH_AGENT_USER_AUTH_TOKEN=%s OPENCODE_URL=%s%s %s --workdir %s --host 127.0.0.1 --port %s --tmux-session %s' \
+    printf 'cd %s && RESEARCH_AGENT_USER_AUTH_TOKEN=%s OPENCODE_URL=%s OPENCODE_SERVER_PASSWORD=%s%s %s --workdir %s --host 127.0.0.1 --port %s --tmux-session %s' \
       "$(q "${INSTALL_DIR}/server")" \
       "$(q "$auth_token")" \
       "$(q "http://127.0.0.1:${OPENCODE_PORT}")" \
+      "$(q "$oc_password")" \
       "$frontend_env" \
       "$(q "$backend_bin")" \
       "$(q "$PROJECT_ROOT")" \
@@ -652,10 +662,11 @@ build_backend_command() {
   fi
 
   [ -x "$PYTHON_BIN" ] || die "Python runtime missing at ${PYTHON_BIN}"
-  printf 'cd %s && RESEARCH_AGENT_USER_AUTH_TOKEN=%s OPENCODE_URL=%s%s %s server.py --workdir %s --host 127.0.0.1 --port %s --tmux-session %s' \
+  printf 'cd %s && RESEARCH_AGENT_USER_AUTH_TOKEN=%s OPENCODE_URL=%s OPENCODE_SERVER_PASSWORD=%s%s %s server.py --workdir %s --host 127.0.0.1 --port %s --tmux-session %s' \
     "$(q "${INSTALL_DIR}/server")" \
     "$(q "$auth_token")" \
     "$(q "http://127.0.0.1:${OPENCODE_PORT}")" \
+    "$(q "$oc_password")" \
     "$frontend_env" \
     "$(q "$PYTHON_BIN")" \
     "$(q "$PROJECT_ROOT")" \
@@ -665,8 +676,10 @@ build_backend_command() {
 
 build_frontend_command() {
   local api_url="$1"
-  printf 'cd %s && NEXT_PUBLIC_API_URL=%s NEXT_PUBLIC_USE_MOCK=false npm run dev -- --hostname 127.0.0.1 --port %s' \
+  printf 'cd %s && NEXT_PUBLIC_API_URL=%s NEXT_PUBLIC_USE_MOCK=false RESEARCH_AGENT_WORKDIR=%s RESEARCH_AGENT_BACKEND_URL=%s npm run dev -- --hostname 127.0.0.1 --port %s' \
     "$(q "$INSTALL_DIR")" \
+    "$(q "$api_url")" \
+    "$(q "$PROJECT_ROOT")" \
     "$(q "$api_url")" \
     "$(q "$FRONTEND_PORT")"
 }
@@ -684,9 +697,13 @@ start_services() {
   BACKEND_PUBLIC_URL="${BACKEND_PUBLIC_URL:-}"
   FRONTEND_PUBLIC_URL="${FRONTEND_PUBLIC_URL:-}"
 
+  local oc_password
+  oc_password="$(generate_opencode_password)"
+  log "Generated OPENCODE_SERVER_PASSWORD for this session"
+
   ensure_tmux_session
-  tmux_replace_window "$TMUX_SESSION_NAME" "opencode" "$(build_opencode_command)"
-  tmux_replace_window "$TMUX_SESSION_NAME" "backend" "$(build_backend_command "$auth_token")"
+  tmux_replace_window "$TMUX_SESSION_NAME" "opencode" "$(build_opencode_command "$oc_password")"
+  tmux_replace_window "$TMUX_SESSION_NAME" "backend" "$(build_backend_command "$auth_token" "$oc_password")"
 
   if [ -n "$frontend_static_dir" ]; then
     if tmux_window_exists "$TMUX_SESSION_NAME" "frontend"; then
