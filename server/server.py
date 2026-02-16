@@ -260,9 +260,28 @@ def get_session_model(session: dict[str, Any]) -> tuple[str, str]:
 
 app = FastAPI(title="Research Agent Server")
 
+# CORS allowed origins — restrict to localhost by default.
+# Set RESEARCH_AGENT_CORS_ORIGINS to a comma-separated list of additional
+# allowed origins (e.g. your ngrok URL) if cross-origin access is needed.
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost",
+    "http://127.0.0.1",
+]
+
+def _build_cors_origins() -> list[str]:
+    origins = list(_DEFAULT_CORS_ORIGINS)
+    extra = os.environ.get("RESEARCH_AGENT_CORS_ORIGINS", "").strip()
+    if extra:
+        for o in extra.split(","):
+            o = o.strip().rstrip("/")
+            if o:
+                origins.append(o)
+    return origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_build_cors_origins(),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -294,6 +313,17 @@ async def auth_middleware(request: Request, call_next):
         )
     
     return await call_next(request)
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add security headers to every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 # =============================================================================
 # Models
@@ -2586,19 +2616,30 @@ async def stream_opencode_events(
 # =============================================================================
 
 @app.get("/")
-async def health():
+async def health(request: Request):
     """Health check endpoint, or frontend index if static bundle is configured."""
     if FRONTEND_STATIC_DIR:
         index_file = os.path.join(FRONTEND_STATIC_DIR, "index.html")
         if os.path.exists(index_file):
             return FileResponse(index_file)
-    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+    result: dict[str, Any] = {"status": "ok", "service": "research-agent-server"}
+    # Only include workdir if the caller provides a valid auth token
+    if USER_AUTH_TOKEN and request.headers.get("X-Auth-Token") == USER_AUTH_TOKEN:
+        result["workdir"] = WORKDIR
+    elif not USER_AUTH_TOKEN:
+        result["workdir"] = WORKDIR
+    return result
 
 
 @app.get("/health")
-async def health_json():
+async def health_json(request: Request):
     """JSON health endpoint."""
-    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+    result: dict[str, Any] = {"status": "ok", "service": "research-agent-server"}
+    if USER_AUTH_TOKEN and request.headers.get("X-Auth-Token") == USER_AUTH_TOKEN:
+        result["workdir"] = WORKDIR
+    elif not USER_AUTH_TOKEN:
+        result["workdir"] = WORKDIR
+    return result
 
 
 # =============================================================================

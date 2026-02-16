@@ -749,6 +749,7 @@ wait_for_ngrok_url() {
 }
 
 start_tunnels() {
+  local auth_token="${1:-}"
   require_cmd tmux
   require_cmd ngrok
   require_cmd python3
@@ -764,7 +765,14 @@ start_tunnels() {
     die "tmux session ${TMUX_SESSION_NAME} is not running. Start services first."
   fi
 
-  tmux_replace_window "$TMUX_SESSION_NAME" "ngrok-backend" "ngrok http 127.0.0.1:${BACKEND_PORT}"
+  # Build ngrok auth flag — if an auth token is available, require HTTP basic-auth
+  # at the ngrok edge so the public URL is not accessible without credentials.
+  local ngrok_auth_flag=""
+  if [ -n "$auth_token" ]; then
+    ngrok_auth_flag="--basic-auth ra:${auth_token}"
+  fi
+
+  tmux_replace_window "$TMUX_SESSION_NAME" "ngrok-backend" "ngrok http ${ngrok_auth_flag} 127.0.0.1:${BACKEND_PORT}"
   BACKEND_PUBLIC_URL="$(wait_for_ngrok_url "$BACKEND_PORT" 30 || true)"
   if [ -z "$BACKEND_PUBLIC_URL" ]; then
     die "Could not read backend ngrok URL from http://127.0.0.1:4040/api/tunnels"
@@ -785,7 +793,7 @@ start_tunnels() {
     tmux_replace_window "$TMUX_SESSION_NAME" "frontend" "$(build_frontend_command "$FRONTEND_API_URL")"
     wait_for_http_ok "http://127.0.0.1:${FRONTEND_PORT}" 45 "Frontend" || true
 
-    tmux_replace_window "$TMUX_SESSION_NAME" "ngrok-frontend" "ngrok http 127.0.0.1:${FRONTEND_PORT}"
+    tmux_replace_window "$TMUX_SESSION_NAME" "ngrok-frontend" "ngrok http ${ngrok_auth_flag} 127.0.0.1:${FRONTEND_PORT}"
     FRONTEND_PUBLIC_URL="$(wait_for_ngrok_url "$FRONTEND_PORT" 30 || true)"
     if [ -z "$FRONTEND_PUBLIC_URL" ]; then
       die "Could not read frontend ngrok URL from http://127.0.0.1:4040/api/tunnels"
@@ -1185,7 +1193,7 @@ cmd_start() {
   write_runtime_file
 
   if [ "$with_tunnel" -eq 1 ]; then
-    start_tunnels
+    start_tunnels "$auth_token"
     write_runtime_file
   fi
 
@@ -1223,7 +1231,10 @@ cmd_tunnel() {
   init_project_context "$project_root"
   load_runtime_file_if_exists
 
-  start_tunnels
+  ensure_auth_token
+  local auth_token
+  auth_token="$(get_auth_token)"
+  start_tunnels "$auth_token"
   write_runtime_file
 
   cat <<EOF
