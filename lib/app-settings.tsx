@@ -70,6 +70,12 @@ export const defaultAppSettings: AppSettings = {
       { id: "terminal", label: "Terminal", visible: true, order: 4 },
     ],
   },
+  developer: {
+    showWildLoopState: true,
+    showPlanPanel: false,
+    showSidebarRunsSweepsPreview: true,
+    debugRefreshIntervalSeconds: 2,
+  },
 };
 
 interface AppSettingsContextValue {
@@ -414,7 +420,10 @@ function readStoredSettings(): AppSettings {
           parsed?.notifications?.webNotificationsEnabled ??
           defaultAppSettings.notifications.webNotificationsEnabled,
       },
-      developer: parsed?.developer ?? defaultAppSettings.developer,
+      developer: {
+        ...defaultAppSettings.developer,
+        ...(parsed?.developer ?? {}),
+      },
       leftPanel: parsed?.leftPanel ?? defaultAppSettings.leftPanel,
     };
   } catch {

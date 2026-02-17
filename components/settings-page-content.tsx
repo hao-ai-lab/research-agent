@@ -347,6 +347,14 @@ export function SettingsPageContent({
           type: 'toggle' as const,
           value: settings.developer?.showPlanPanel === true,
         },
+        {
+          id: 'showSidebarRunsSweepsPreview',
+          label: 'Sidebar Runs/Sweeps Preview',
+          description: 'Show or hide recent Runs and Sweeps preview blocks in the desktop sidebar',
+          icon: Eye,
+          type: 'toggle' as const,
+          value: settings.developer?.showSidebarRunsSweepsPreview !== false,
+        },
       ],
     },
     {
@@ -838,6 +846,12 @@ export function SettingsPageContent({
                   onSettingsChange({
                     ...settings,
                     developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
+                if (item.id === 'showSidebarRunsSweepsPreview') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showSidebarRunsSweepsPreview: checked },
                   })
                 }
               }}
