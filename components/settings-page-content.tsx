@@ -12,7 +12,6 @@ import {
   LayoutGrid,
   Monitor,
   Moon,
-  Rows3,
   RotateCcw,
   Server,
   Clock,
@@ -255,15 +254,6 @@ export function SettingsPageContent({
           value: settings.appearance.buttonSize,
         },
         {
-          id: 'runItemInteractionMode',
-          label: 'Runs/Sweeps Click Mode',
-          description: 'Open detail page or expand inline details',
-          icon: Rows3,
-          type: 'select' as const,
-          options: ['detail-page', 'inline-expand'],
-          value: settings.appearance.runItemInteractionMode || 'detail-page',
-        },
-        {
           id: 'showRunItemMetadata',
           label: 'Run Item Metadata',
           description: 'Show Start, Created, and Runtime under each run name',
@@ -399,13 +389,6 @@ export function SettingsPageContent({
     onSettingsChange({
       ...settings,
       appearance: { ...settings.appearance, buttonSize },
-    })
-  }
-
-  const handleRunItemInteractionModeChange = (mode: 'detail-page' | 'inline-expand') => {
-    onSettingsChange({
-      ...settings,
-      appearance: { ...settings.appearance, runItemInteractionMode: mode },
     })
   }
 
@@ -802,7 +785,6 @@ export function SettingsPageContent({
                       if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
-                      if (item.id === 'runItemInteractionMode') handleRunItemInteractionModeChange(option as 'detail-page' | 'inline-expand')
                       if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
