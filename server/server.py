@@ -47,6 +47,7 @@ from wild_loop import (
 import wild_loop as wild_loop_mod
 from wild_loop_v2 import WildV2Engine
 from memory_store import MemoryStore
+from slack_handler import slack_notifier
 
 import httpx
 import uvicorn
@@ -141,6 +142,7 @@ AUTH_PROTECTED_PREFIXES = (
     "/cluster",
     "/git",
     "/plans",
+    "/integrations",
 )
 
 
@@ -1179,16 +1181,16 @@ def save_settings_state():
     """Persist settings to disk."""
     try:
         wild_state = get_wild_serializable_state()
+        payload = {
+            **wild_state,
+            "cluster": cluster_state,
+        }
+        # Persist Slack config if enabled
+        slack_cfg = slack_notifier.get_persisted_config()
+        if slack_cfg:
+            payload["slack"] = slack_cfg
         with open(SETTINGS_DATA_FILE, "w") as f:
-            json.dump(
-                {
-                    **wild_state,
-                    "cluster": cluster_state,
-                },
-                f,
-                indent=2,
-                default=str,
-            )
+            json.dump(payload, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving settings state: {e}")
 
@@ -1202,6 +1204,8 @@ def load_settings_state():
                 data = json.load(f)
                 load_wild_from_saved(data)
                 cluster_state = _normalize_cluster_state(data.get("cluster"))
+                # Restore Slack configuration
+                slack_notifier.load_from_saved(data.get("slack"))
         except Exception as e:
             logger.error(f"Error loading settings state: {e}")
 
@@ -3841,6 +3845,14 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
         status=next_status, exit_code=run.get("exit_code"), error=run.get("error"),
     )
 
+    # Slack notifications for terminal run states
+    if slack_notifier.is_enabled and next_status in RUN_STATUS_TERMINAL:
+        run_data = {"id": run_id, **run}
+        if next_status == "finished":
+            slack_notifier.send_run_completed(run_data)
+        elif next_status in ("failed", "stopped"):
+            slack_notifier.send_run_failed(run_data)
+
     if run.get("sweep_id"):
         recompute_sweep_state(run["sweep_id"])
     save_runs_state()
@@ -3879,6 +3891,13 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
         run_name=runs[run_id].get("name", run_id),
         severity=severity, message=req.message, choices=req.choices,
     )
+
+    # Slack notification for alert
+    if slack_notifier.is_enabled:
+        slack_notifier.send_alert(
+            alert=alert_payload,
+            run=runs.get(run_id),
+        )
 
     if wild_loop_mod.wild_mode_enabled:
         session_id = uuid.uuid4().hex[:12]
@@ -4484,6 +4503,62 @@ async def update_cluster_state(req: ClusterUpdateRequest):
     cluster_state = _normalize_cluster_state(next_state)
     save_settings_state()
     return {"cluster": cluster_state, "run_summary": _current_run_summary()}
+
+
+# =============================================================================
+# Slack Integration Endpoints
+# =============================================================================
+
+class SlackConfigRequest(BaseModel):
+    bot_token: str
+    channel: str
+    signing_secret: str = ""
+    notify_on_complete: bool = True
+    notify_on_failed: bool = True
+    notify_on_alert: bool = True
+
+
+@app.post("/integrations/slack/configure")
+async def configure_slack(req: SlackConfigRequest):
+    """Configure Slack integration with bot token and channel."""
+    try:
+        result = slack_notifier.configure(
+            bot_token=req.bot_token,
+            channel=req.channel,
+            signing_secret=req.signing_secret,
+            notify_on_complete=req.notify_on_complete,
+            notify_on_failed=req.notify_on_failed,
+            notify_on_alert=req.notify_on_alert,
+        )
+        save_settings_state()
+        return result
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/integrations/slack/status")
+async def get_slack_status():
+    """Return current Slack integration status."""
+    return slack_notifier.get_status()
+
+
+@app.post("/integrations/slack/test")
+async def test_slack():
+    """Send a test notification to Slack."""
+    if not slack_notifier.is_enabled:
+        raise HTTPException(status_code=400, detail="Slack is not configured")
+    result = slack_notifier.send_test()
+    if not result["ok"]:
+        raise HTTPException(status_code=500, detail=result.get("error", "Send failed"))
+    return result
+
+
+@app.delete("/integrations/slack/configure")
+async def disconnect_slack():
+    """Disconnect Slack integration."""
+    slack_notifier.disconnect()
+    save_settings_state()
+    return {"ok": True, "message": "Slack disconnected"}
 
 
 def _build_experiment_context() -> str:
