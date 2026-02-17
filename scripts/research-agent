@@ -211,12 +211,22 @@ maybe_install_opencode() {
 
   if maybe_cmd npm; then
     warn "opencode not found; attempting npm global install"
-    if npm install -g opencode; then
+    if npm install -g opencode-ai 2>/dev/null; then
+      return
+    fi
+
+    local npm_prefix="${HOME}/.npm-global"
+    warn "Global install failed; falling back to user-local prefix: ${npm_prefix}"
+    mkdir -p "$npm_prefix"
+    if npm install -g opencode-ai --prefix "$npm_prefix" 2>/dev/null; then
+      export PATH="${npm_prefix}/bin:${PATH}"
+      log "opencode installed to ${npm_prefix}/bin/opencode"
+      log "Add to your shell profile: export PATH=\"${npm_prefix}/bin:\$PATH\""
       return
     fi
   fi
 
-  warn "opencode CLI is still missing. Install manually: npm install -g opencode"
+  warn "opencode CLI is still missing. Install manually: npm install -g opencode-ai"
 }
 
 install_cli_links() {

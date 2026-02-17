@@ -18,6 +18,155 @@ die() {
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v bash >/dev/null 2>&1 || die "bash is required"
 
+# ── Prerequisite checks (shared by both full install and --dev mode) ─────────
+
+ensure_node() {
+  local required_major=20
+  if command -v node >/dev/null 2>&1; then
+    local major
+    major="$(node -e 'console.log(process.versions.node.split(".")[0])')"
+    if [ "$major" -ge "$required_major" ] 2>/dev/null; then
+      log "Node.js $(node --version) — OK"
+      return
+    fi
+    log "Node.js $(node --version) found, but ${required_major}+ is required. Upgrading via nvm..."
+  else
+    log "Node.js not found. Installing via nvm..."
+  fi
+
+  export NVM_DIR="${HOME}/.nvm"
+  if [ ! -s "${NVM_DIR}/nvm.sh" ]; then
+    log "Installing nvm..."
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  fi
+  # shellcheck disable=SC1091
+  . "${NVM_DIR}/nvm.sh"
+  nvm install "$required_major"
+  nvm use "$required_major"
+
+  local new_major
+  new_major="$(node -e 'console.log(process.versions.node.split(".")[0])')"
+  if [ "$new_major" -lt "$required_major" ] 2>/dev/null; then
+    die "Failed to install Node.js ${required_major}+. Please install manually: https://nodejs.org/"
+  fi
+  log "Node.js $(node --version) — OK"
+}
+
+check_python() {
+  local py=""
+  if command -v python3 >/dev/null 2>&1; then
+    py="python3"
+  elif command -v python >/dev/null 2>&1; then
+    py="python"
+  else
+    die "Python 3.10+ is required but not found."
+  fi
+
+  local version
+  version="$($py -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  local major="${version%%.*}"
+  local minor="${version#*.}"
+
+  if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 10 ]; }; then
+    die "Python 3.10+ is required (found ${version})."
+  fi
+  log "Python ${version} — OK"
+}
+
+install_opencode() {
+  if command -v opencode >/dev/null 2>&1; then
+    log "OpenCode CLI — OK"
+    return
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    die "npm is required to install opencode-ai."
+  fi
+
+  log "Installing opencode-ai..."
+  if npm install -g opencode-ai 2>/dev/null; then
+    log "OpenCode CLI installed globally — OK"
+    return
+  fi
+
+  local npm_prefix="${HOME}/.npm-global"
+  log "Global install failed (permission denied). Using local prefix: ${npm_prefix}"
+  mkdir -p "$npm_prefix"
+  if npm install -g opencode-ai --prefix "$npm_prefix" 2>/dev/null; then
+    export PATH="${npm_prefix}/bin:${PATH}"
+    local shell_rc=""
+    case "${SHELL:-}" in
+      */zsh)  shell_rc="${HOME}/.zshrc" ;;
+      *)      shell_rc="${HOME}/.bashrc" ;;
+    esac
+    if [ -n "$shell_rc" ] && ! grep -qF '/.npm-global/bin' "$shell_rc" 2>/dev/null; then
+      printf '\n# Added by research-agent install\nexport PATH="%s/bin:$PATH"\n' "$npm_prefix" >> "$shell_rc"
+    fi
+    log "OpenCode CLI installed to ${npm_prefix}/bin/opencode"
+    log "  Added to ${shell_rc}. Run: source ${shell_rc} (or open a new terminal)"
+    return
+  fi
+
+  die "Could not install opencode-ai. Install manually: npm install -g opencode-ai"
+}
+
+run_prereq_checks() {
+  log "Checking prerequisites..."
+  ensure_node
+  check_python
+  install_opencode
+  if command -v tmux >/dev/null 2>&1; then
+    log "tmux — OK"
+  else
+    log "WARN: tmux not found (needed for background job execution)"
+  fi
+}
+
+# ── --dev mode: prereq checks only, skip artifact downloads ──────────────────
+
+if [ "${1:-}" = "--dev" ]; then
+  run_prereq_checks
+  log ""
+  log "============================================================"
+  log "  ACTION REQUIRED: Reload your shell before continuing."
+  log ""
+  log "  Run one of (depending on your shell):"
+  log "    source ~/.bashrc   # bash"
+  log "    source ~/.zshrc    # zsh"
+  log "    # or simply open a new terminal"
+  log ""
+  log "  This is needed because install.sh runs in a subshell,"
+  log "  so nvm (Node 20) and PATH changes do not carry over."
+  log "============================================================"
+  log ""
+  log "After reloading, continue with:"
+  log "  npm install"
+  log "  uv venv .ra-venv"
+  log "  uv pip install --python .ra-venv/bin/python -r server/requirements.txt"
+  log ""
+  log "Generate an auth token (use the same value in every terminal):"
+  log "  export RESEARCH_AGENT_USER_AUTH_TOKEN=\"\$(openssl rand -hex 16)\""
+  log "  echo \$RESEARCH_AGENT_USER_AUTH_TOKEN"
+  log ""
+  log "Then start the services (each in a separate terminal):"
+  log "  # Terminal 1 — OpenCode  (token already set above)"
+  log "  export OPENCODE_CONFIG=\"\$(pwd)/server/opencode.json\""
+  log "  opencode serve"
+  log ""
+  log "  # Terminal 2 — Backend"
+  log "  export RESEARCH_AGENT_USER_AUTH_TOKEN=\"<paste-token-here>\""
+  log "  cd server && ../.ra-venv/bin/python server.py --workdir \$PWD --port 10000"
+  log ""
+  log "  # Terminal 3 — Frontend"
+  log "  export RESEARCH_AGENT_USER_AUTH_TOKEN=\"<paste-token-here>\""
+  log "  NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000"
+  exit 0
+fi
+
+# ── Full install (artifact-based) ────────────────────────────────────────────
+
+run_prereq_checks
+
 mkdir -p "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/server/dist"
 
 LOCAL_SCRIPT=""
@@ -242,12 +391,22 @@ maybe_install_opencode() {
 
   if maybe_cmd npm; then
     warn "opencode not found; attempting npm global install"
-    if npm install -g opencode; then
+    if npm install -g opencode-ai 2>/dev/null; then
+      return
+    fi
+
+    local npm_prefix="${HOME}/.npm-global"
+    warn "Global install failed; falling back to user-local prefix: ${npm_prefix}"
+    mkdir -p "$npm_prefix"
+    if npm install -g opencode-ai --prefix "$npm_prefix" 2>/dev/null; then
+      export PATH="${npm_prefix}/bin:${PATH}"
+      log "opencode installed to ${npm_prefix}/bin/opencode"
+      log "Add to your shell profile: export PATH=\"${npm_prefix}/bin:\$PATH\""
       return
     fi
   fi
 
-  warn "opencode CLI is still missing. Install manually: npm install -g opencode"
+  warn "opencode CLI is still missing. Install manually: npm install -g opencode-ai"
 }
 
 install_cli_links() {

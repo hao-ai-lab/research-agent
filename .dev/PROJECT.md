@@ -189,10 +189,10 @@ Chat uses **NDJSON** (newline-delimited JSON) streaming:
 
 ### Prerequisites
 
-- **Node.js 18+** and **pnpm**
+- **Node.js 20.9+** and **pnpm**
 - **Python 3.10+**
 - **tmux**
-- **OpenCode CLI** (`npm install -g opencode`)
+- **OpenCode CLI** (`npm install -g opencode-ai`)
 
 ### Quick Start
 
