@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "research-agent": {
+      "command": "python3",
+      "args": ["server/research_agent_mcp.py"]
+    },
+    "slurm-cli": {
+      "command": "python3",
+      "args": ["server/slurm_mcp_cli.py"]
+    }
+  }
+}

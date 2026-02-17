@@ -584,13 +584,20 @@ get_http_content_type() {
 }
 
 build_opencode_command() {
+  local auth_token="${1:-}"
   local config_path="${INSTALL_DIR}/server/opencode.json"
+  local backend_url="http://127.0.0.1:${BACKEND_PORT}"
   if [ -f "$config_path" ]; then
-    printf 'cd %s && OPENCODE_CONFIG=%s opencode serve' \
+    printf 'cd %s && RESEARCH_AGENT_SERVER_URL=%s RESEARCH_AGENT_USER_AUTH_TOKEN=%s OPENCODE_CONFIG=%s opencode serve' \
       "$(q "$PROJECT_ROOT")" \
+      "$(q "$backend_url")" \
+      "$(q "$auth_token")" \
       "$(q "$config_path")"
   else
-    printf 'cd %s && opencode serve' "$(q "$PROJECT_ROOT")"
+    printf 'cd %s && RESEARCH_AGENT_SERVER_URL=%s RESEARCH_AGENT_USER_AUTH_TOKEN=%s opencode serve' \
+      "$(q "$PROJECT_ROOT")" \
+      "$(q "$backend_url")" \
+      "$(q "$auth_token")"
   fi
 }
 
@@ -654,7 +661,7 @@ start_services() {
   FRONTEND_PUBLIC_URL="${FRONTEND_PUBLIC_URL:-}"
 
   ensure_tmux_session
-  tmux_replace_window "$TMUX_SESSION_NAME" "opencode" "$(build_opencode_command)"
+  tmux_replace_window "$TMUX_SESSION_NAME" "opencode" "$(build_opencode_command "$auth_token")"
   tmux_replace_window "$TMUX_SESSION_NAME" "backend" "$(build_backend_command "$auth_token")"
 
   if [ -n "$frontend_static_dir" ]; then
