@@ -46,6 +46,7 @@ from wild_loop import (
 )
 import wild_loop as wild_loop_mod
 from wild_loop_v2 import WildV2Engine
+from memory_store import MemoryStore
 
 import httpx
 import uvicorn
@@ -919,6 +920,13 @@ wild_v2_engine = WildV2Engine(
     save_chat_state=lambda: save_chat_state(),
     chat_sessions=chat_sessions,
 )
+
+# Memory store (persistent lessons / context)
+memory_store = MemoryStore(get_workdir=lambda: WORKDIR)
+memory_store.load()
+
+# Inject memory store into V2 engine so reflections can write memories
+wild_v2_engine.memory_store = memory_store
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
 
@@ -4333,6 +4341,68 @@ async def wild_v2_iteration_log(session_id: str):
 async def wild_v2_steer(req: WildV2SteerRequest):
     """Inject user context for the next iteration."""
     return wild_v2_engine.steer(req.context)
+
+
+# =============================================================================
+# Memory Bank Endpoints
+# =============================================================================
+
+class MemoryCreateRequest(BaseModel):
+    title: str
+    content: str
+    source: str = "user"  # "user" | "agent" | "reflection"
+    tags: list = []
+    session_id: str = ""
+
+class MemoryUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    is_active: Optional[bool] = None
+    tags: Optional[list] = None
+
+
+@app.get("/memories")
+async def list_memories(active_only: bool = False, source: Optional[str] = None):
+    """List all memories, optionally filtered."""
+    entries = memory_store.list(active_only=active_only, source=source)
+    return [{"id": m.id, "title": m.title, "content": m.content,
+             "source": m.source, "tags": m.tags, "session_id": m.session_id,
+             "created_at": m.created_at, "is_active": m.is_active}
+            for m in entries]
+
+
+@app.post("/memories")
+async def create_memory(req: MemoryCreateRequest):
+    """Create a new memory entry."""
+    entry = memory_store.add(
+        title=req.title,
+        content=req.content,
+        source=req.source,
+        tags=req.tags,
+        session_id=req.session_id,
+    )
+    return entry.to_dict()
+
+
+@app.patch("/memories/{memory_id}")
+async def update_memory(memory_id: str, req: MemoryUpdateRequest):
+    """Update a memory (toggle, edit title/content)."""
+    updates = {k: v for k, v in req.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    entry = memory_store.update(memory_id, **updates)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return entry.to_dict()
+
+
+@app.delete("/memories/{memory_id}")
+async def delete_memory(memory_id: str):
+    """Delete a memory."""
+    deleted = memory_store.delete(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"deleted": True, "id": memory_id}
 
 
 @app.get("/cluster")

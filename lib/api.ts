@@ -1246,6 +1246,77 @@ export async function steerWildV2(context: string): Promise<{ ok: boolean }> {
 }
 
 // =============================================================================
+// Memory Bank Functions
+// =============================================================================
+
+export interface Memory {
+    id: string
+    title: string
+    content: string
+    source: 'user' | 'agent' | 'reflection'
+    tags: string[]
+    session_id: string
+    created_at: number
+    is_active: boolean
+}
+
+export async function listMemories(activeOnly: boolean = false): Promise<Memory[]> {
+    const params = new URLSearchParams()
+    if (activeOnly) params.set('active_only', 'true')
+    const response = await fetch(`${API_URL()}/memories?${params}`, {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list memories: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function createMemory(memory: {
+    title: string
+    content: string
+    source?: string
+    tags?: string[]
+}): Promise<Memory> {
+    const response = await fetch(`${API_URL()}/memories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getHeaders() },
+        body: JSON.stringify(memory),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create memory: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function updateMemory(memoryId: string, updates: {
+    title?: string
+    content?: string
+    is_active?: boolean
+    tags?: string[]
+}): Promise<Memory> {
+    const response = await fetch(`${API_URL()}/memories/${memoryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getHeaders() },
+        body: JSON.stringify(updates),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to update memory: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function deleteMemory(memoryId: string): Promise<void> {
+    const response = await fetch(`${API_URL()}/memories/${memoryId}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to delete memory: ${response.statusText}`)
+    }
+}
+
+// =============================================================================
 // Prompt Skill Functions  
 // =============================================================================
 
