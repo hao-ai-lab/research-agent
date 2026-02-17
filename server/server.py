@@ -365,6 +365,9 @@ class RunStatusUpdate(BaseModel):
     error: Optional[str] = None
     tmux_pane: Optional[str] = None
     wandb_dir: Optional[str] = None
+    monitor_note: Optional[str] = None
+    monitor_tags: Optional[List[str]] = None
+    monitoring: Optional[dict] = None
 
 
 class RunUpdate(BaseModel):
@@ -409,12 +412,18 @@ class AlertRecord(BaseModel):
     responded_at: Optional[float] = None
     session_id: Optional[str] = None
     auto_session: bool = False
+    source: Optional[str] = None
+    syndrome: Optional[str] = None
+    evidence: Optional[dict] = None
 
 
 class CreateAlertRequest(BaseModel):
     message: str
     choices: List[str]
     severity: str = "warning"
+    source: Optional[str] = None
+    syndrome: Optional[str] = None
+    evidence: Optional[dict] = None
 
 
 class RespondAlertRequest(BaseModel):
@@ -3817,6 +3826,12 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
         run["tmux_pane"] = update.tmux_pane
     if update.wandb_dir:
         run["wandb_dir"] = update.wandb_dir
+    if update.monitor_note is not None:
+        run["monitor_note"] = update.monitor_note[:240]
+    if update.monitor_tags is not None:
+        run["monitor_tags"] = [str(tag)[:40] for tag in update.monitor_tags[:8]]
+    if update.monitoring is not None:
+        run["monitoring"] = update.monitoring
 
     effective_exit_code = _coerce_exit_code(run.get("exit_code"))
     if run.get("exit_code") != effective_exit_code:
@@ -3869,6 +3884,9 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
         message=req.message,
         choices=req.choices,
         status="pending",
+        source=req.source,
+        syndrome=req.syndrome,
+        evidence=req.evidence if isinstance(req.evidence, dict) else None,
     )
 
     alert_payload = alert.model_dump()
@@ -3877,7 +3895,11 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
     auto_enqueue_alert(
         alert_id=alert_id, run_id=run_id,
         run_name=runs[run_id].get("name", run_id),
-        severity=severity, message=req.message, choices=req.choices,
+        severity=severity,
+        message=req.message,
+        choices=req.choices,
+        source=req.source,
+        syndrome=req.syndrome,
     )
 
     if wild_loop_mod.wild_mode_enabled:

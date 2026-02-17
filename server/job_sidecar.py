@@ -19,9 +19,14 @@ import sys
 import time
 import math
 import hashlib
+import shutil
 import subprocess
 import requests
-import libtmux
+
+try:
+    import libtmux
+except ImportError:  # pragma: no cover - exercised in minimal unit-test environments
+    libtmux = None
 
 # Configure logging
 logging.basicConfig(
@@ -38,8 +43,100 @@ AGENT_JUDGE_INTERVAL = 30
 AGENT_JUDGE_MAX_LINES = 5
 AGENT_JUDGE_MAX_BYTES = 8000
 ALERT_SIGNATURE_TTL_SECONDS = 180
+MONITOR_HEARTBEAT_SECONDS = 30
+LOG_TAIL_MAX_LINES = 120
+LOG_TAIL_MAX_BYTES = 32000
+GPU_PREFLIGHT_MAX_WAIT_SECONDS = 180
+GPU_PREFLIGHT_POLL_SECONDS = 10
+GPU_BUSY_UTIL_THRESHOLD = 85.0
+GPU_BUSY_MEM_RATIO_THRESHOLD = 0.85
+BASELINE_HISTORY_FILE = os.path.join(".agents", "sidecar_history.jsonl")
+BASELINE_HISTORY_MAX_ROWS = 400
+MIN_ROWS_FOR_PROFILE_ALERTS = 6
+
+SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
+
+VAL_ACCURACY_KEYS = (
+    "val/accuracy",
+    "val_accuracy",
+    "validation/accuracy",
+    "validation_accuracy",
+    "eval/accuracy",
+    "eval_accuracy",
+    "accuracy/val",
+)
+VAL_LOSS_KEYS = (
+    "val/loss",
+    "val_loss",
+    "validation/loss",
+    "validation_loss",
+    "eval/loss",
+    "eval_loss",
+)
+REWARD_KEYS = (
+    "reward",
+    "train/reward",
+    "episode_reward",
+    "episode/reward",
+    "rollout/ep_rew_mean",
+    "eval/reward",
+    "mean_reward",
+)
+SUCCESS_RATE_KEYS = (
+    "success_rate",
+    "train/success_rate",
+    "eval/success_rate",
+    "success",
+    "win_rate",
+)
+THROUGHPUT_KEYS = (
+    "throughput",
+    "samples_per_second",
+    "tokens_per_second",
+    "steps_per_second",
+    "train/samples_per_second",
+    "train/tokens_per_second",
+    "samples/s",
+    "tokens/s",
+)
+KL_KEYS = (
+    "kl",
+    "train/kl",
+    "policy/kl",
+    "approx_kl",
+    "kl_divergence",
+)
+
+LOG_SYNDROME_PATTERNS = [
+    {
+        "syndrome": "cuda_oom",
+        "severity": "critical",
+        "regex": re.compile(r"cuda out of memory|cublas_status_alloc_failed|out of memory", re.I),
+        "template": "CUDA OOM detected in logs: {snippet}",
+    },
+    {
+        "syndrome": "gpu_busy",
+        "severity": "warning",
+        "regex": re.compile(r"device busy or unavailable|all cuda-capable devices are busy|resource busy", re.I),
+        "template": "GPU appears occupied/unavailable: {snippet}",
+    },
+    {
+        "syndrome": "nccl_failure",
+        "severity": "critical",
+        "regex": re.compile(r"nccl.*(timeout|error|unhandled)|collective operation timeout", re.I),
+        "template": "Distributed backend issue detected: {snippet}",
+    },
+    {
+        "syndrome": "traceback",
+        "severity": "warning",
+        "regex": re.compile(r"traceback \(most recent call last\)", re.I),
+        "template": "Python traceback detected in run logs.",
+    },
+]
+
 _last_metrics_pos: dict[str, int] = {}
 _last_judge_check: dict[str, float] = {}
+_last_log_pos: dict[str, int] = {}
 
 
 def _auth_headers(auth_token: str | None) -> dict:
@@ -78,6 +175,9 @@ def trigger_alert(
     message: str,
     choices: list[str],
     severity: str = "warning",
+    source: str | None = None,
+    syndrome: str | None = None,
+    evidence: dict | None = None,
     auth_token: str | None = None,
 ) -> str | None:
     """Create alert via server and return alert_id."""
@@ -86,6 +186,12 @@ def trigger_alert(
         "choices": choices,
         "severity": severity,
     }
+    if source:
+        payload["source"] = source
+    if syndrome:
+        payload["syndrome"] = syndrome
+    if evidence:
+        payload["evidence"] = evidence
     try:
         logger.info("Triggering alert: %s", message)
         res = requests.post(
@@ -127,6 +233,258 @@ def should_stop_from_choice(choice: str | None) -> bool:
         return False
     lowered = choice.lower()
     return "stop" in lowered or "kill" in lowered or "terminate" in lowered
+
+
+def _safe_float(value) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        val = float(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            val = float(stripped)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not math.isfinite(val):
+        return None
+    return val
+
+
+def _mean(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    sorted_values = sorted(values)
+    mid = len(sorted_values) // 2
+    if len(sorted_values) % 2 == 1:
+        return sorted_values[mid]
+    return (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
+
+
+def _severity_rank(severity: str | None) -> int:
+    if not severity:
+        return 0
+    return SEVERITY_ORDER.get(severity.strip().lower(), 0)
+
+
+def _normalize_severity(severity: str | None) -> str:
+    normalized = (severity or "warning").strip().lower()
+    if normalized not in SEVERITY_ORDER:
+        return "warning"
+    return normalized
+
+
+def extract_metric_value(row: dict, keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        if key not in row:
+            continue
+        value = _safe_float(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def collect_metric_series(rows: list[dict], keys: tuple[str, ...]) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        value = extract_metric_value(row, keys)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def parse_cuda_visible_devices(command: str) -> list[int]:
+    """Extract CUDA_VISIBLE_DEVICES IDs from command text."""
+    match = re.search(r"CUDA_VISIBLE_DEVICES\s*=\s*([0-9,\s]+)", command)
+    if not match:
+        return []
+    parsed: list[int] = []
+    for token in match.group(1).split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if token.isdigit():
+            parsed.append(int(token))
+    # Preserve order and de-duplicate.
+    deduped: list[int] = []
+    for gpu_id in parsed:
+        if gpu_id not in deduped:
+            deduped.append(gpu_id)
+    return deduped
+
+
+def _parse_nvidia_csv_rows(output: str, expected_fields: int) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for raw in output.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < expected_fields:
+            continue
+        rows.append(parts)
+    return rows
+
+
+def query_gpu_snapshot() -> dict[int, dict]:
+    """Return GPU state keyed by GPU index. Empty map if unavailable."""
+    if not shutil.which("nvidia-smi"):
+        return {}
+
+    base_cmd = ["nvidia-smi", "--format=csv,noheader,nounits"]
+    query_gpu_cmd = base_cmd + ["--query-gpu=index,uuid,utilization.gpu,memory.used,memory.total"]
+    query_apps_cmd = base_cmd + ["--query-compute-apps=gpu_uuid,pid,used_memory"]
+
+    try:
+        gpu_res = subprocess.run(query_gpu_cmd, capture_output=True, text=True, timeout=4)
+    except Exception as e:
+        logger.warning("Failed to query nvidia-smi GPU snapshot: %s", e)
+        return {}
+
+    if gpu_res.returncode != 0:
+        return {}
+
+    snapshot: dict[int, dict] = {}
+    uuid_to_idx: dict[str, int] = {}
+    for row in _parse_nvidia_csv_rows(gpu_res.stdout, 5):
+        idx = _safe_float(row[0])
+        util = _safe_float(row[2]) or 0.0
+        mem_used = _safe_float(row[3]) or 0.0
+        mem_total = _safe_float(row[4]) or 0.0
+        if idx is None:
+            continue
+        gpu_idx = int(idx)
+        gpu_uuid = row[1]
+        snapshot[gpu_idx] = {
+            "index": gpu_idx,
+            "uuid": gpu_uuid,
+            "utilization": util,
+            "memory_used": mem_used,
+            "memory_total": mem_total,
+            "processes": [],
+        }
+        uuid_to_idx[gpu_uuid] = gpu_idx
+
+    if not snapshot:
+        return {}
+
+    try:
+        app_res = subprocess.run(query_apps_cmd, capture_output=True, text=True, timeout=4)
+    except Exception as e:
+        logger.warning("Failed to query nvidia-smi compute-apps: %s", e)
+        return snapshot
+
+    if app_res.returncode != 0:
+        return snapshot
+
+    for row in _parse_nvidia_csv_rows(app_res.stdout, 3):
+        gpu_uuid = row[0]
+        if gpu_uuid not in uuid_to_idx:
+            continue
+        pid = int(_safe_float(row[1]) or 0)
+        mem = _safe_float(row[2]) or 0.0
+        idx = uuid_to_idx[gpu_uuid]
+        snapshot[idx]["processes"].append({"pid": pid, "used_memory": mem})
+    return snapshot
+
+
+def _busy_gpu_indices(snapshot: dict[int, dict], requested: list[int]) -> list[int]:
+    busy: list[int] = []
+    for idx in requested:
+        info = snapshot.get(idx)
+        if not info:
+            continue
+        mem_total = float(info.get("memory_total") or 0.0)
+        mem_used = float(info.get("memory_used") or 0.0)
+        util = float(info.get("utilization") or 0.0)
+        mem_ratio = (mem_used / mem_total) if mem_total > 0 else 0.0
+        has_other_processes = any(proc.get("pid") != os.getpid() for proc in info.get("processes", []))
+        if has_other_processes or util >= GPU_BUSY_UTIL_THRESHOLD or mem_ratio >= GPU_BUSY_MEM_RATIO_THRESHOLD:
+            busy.append(idx)
+    return busy
+
+
+def wait_for_requested_gpus(
+    command: str,
+    max_wait_seconds: int = GPU_PREFLIGHT_MAX_WAIT_SECONDS,
+    poll_seconds: int = GPU_PREFLIGHT_POLL_SECONDS,
+) -> dict:
+    requested = parse_cuda_visible_devices(command)
+    result = {
+        "requested_devices": requested,
+        "waited_seconds": 0,
+        "timed_out": False,
+        "busy_devices": [],
+        "available": True,
+        "reason": "",
+    }
+    if not requested:
+        return result
+
+    if not shutil.which("nvidia-smi"):
+        result["reason"] = "nvidia-smi not available; skipping GPU occupancy preflight"
+        return result
+
+    started_at = time.time()
+    while True:
+        snapshot = query_gpu_snapshot()
+        busy_devices = _busy_gpu_indices(snapshot, requested)
+        elapsed = int(time.time() - started_at)
+        result["busy_devices"] = busy_devices
+        result["waited_seconds"] = elapsed
+        if not busy_devices:
+            result["available"] = True
+            return result
+        if elapsed >= max_wait_seconds:
+            result["timed_out"] = True
+            result["available"] = False
+            return result
+        time.sleep(max(1, poll_seconds))
+
+
+def read_new_log_lines(
+    job_id: str,
+    log_path: str,
+    max_lines: int = LOG_TAIL_MAX_LINES,
+    max_bytes: int = LOG_TAIL_MAX_BYTES,
+) -> list[str]:
+    """Read only newly appended log lines since last call."""
+    if not os.path.isfile(log_path):
+        return []
+
+    try:
+        size = os.path.getsize(log_path)
+    except OSError:
+        return []
+
+    start = _last_log_pos.get(job_id, 0)
+    if size < start:
+        start = 0
+    if size - start > max_bytes:
+        start = max(0, size - max_bytes)
+
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            f.seek(start)
+            chunk = f.read()
+    except OSError:
+        return []
+
+    _last_log_pos[job_id] = size
+    lines = [ln.strip() for ln in chunk.splitlines() if ln.strip()]
+    if len(lines) > max_lines:
+        return lines[-max_lines:]
+    return lines
 
 
 def read_recent_metrics(metrics_path: str, max_lines: int = 25, max_bytes: int = 24000) -> list[dict]:
@@ -175,12 +533,416 @@ def seen_recent_signature(state: dict, namespace: str, signature: str, ttl_secon
     recent[key] = now
     return False
 
-def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
+def resolve_monitor_metrics_file(run_dir: str, wandb_dir: str | None) -> str | None:
+    """Prefer sidecar-posted metrics file, fallback to wandb jsonl source."""
+    agent_metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
+    if os.path.isfile(agent_metrics_file):
+        return agent_metrics_file
+    if not wandb_dir:
+        return None
+    metrics_path, kind = _resolve_wandb_metrics_source(wandb_dir)
+    if metrics_path and kind == "jsonl":
+        return metrics_path
+    return None
+
+
+def _decision_signature(seed: str) -> str:
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_alert_decision(
+    source: str,
+    syndrome: str,
+    message: str,
+    severity: str = "warning",
+    choices: list[str] | None = None,
+    evidence: dict | None = None,
+) -> dict:
+    signature_seed = f"{source}:{syndrome}:{message}"
+    return {
+        "action": "alert",
+        "source": source,
+        "syndrome": syndrome,
+        "message": message,
+        "severity": _normalize_severity(severity),
+        "choices": choices or ["Ignore", "Stop Job"],
+        "evidence": evidence or {},
+        "signature": _decision_signature(signature_seed),
+    }
+
+
+def infer_workload_profile(command: str, rows: list[dict], recent_logs: list[str]) -> str:
+    """Infer a lightweight workload profile to choose playbook rules."""
+    command_blob = command.lower()
+    metric_keys = " ".join(str(k).lower() for row in rows[-12:] for k in row.keys())
+    log_blob = " ".join(line.lower() for line in recent_logs[-30:])
+    signal_blob = " ".join([command_blob, metric_keys, log_blob])
+
+    rl_hints = ["ppo", "rlhf", "episode", "actor", "critic", "policy", "reward", "env.step"]
+    if any(hint in signal_blob for hint in rl_hints):
+        return "reinforcement_learning"
+
+    supervised_hints = ["validation", "val/", "eval/", "cross_entropy", "accuracy", "train/loss"]
+    if any(hint in signal_blob for hint in supervised_hints):
+        return "supervised"
+    return "generic"
+
+
+def summarize_metrics_for_monitoring(rows: list[dict]) -> dict:
+    losses = collect_metric_series(rows, ("loss", "train/loss", "train_loss", "training_loss"))
+    val_acc = collect_metric_series(rows, VAL_ACCURACY_KEYS)
+    val_loss = collect_metric_series(rows, VAL_LOSS_KEYS)
+    reward = collect_metric_series(rows, REWARD_KEYS)
+    success = collect_metric_series(rows, SUCCESS_RATE_KEYS)
+    throughput = collect_metric_series(rows, THROUGHPUT_KEYS)
+    summary = {
+        "latest_loss": losses[-1] if losses else None,
+        "best_loss": min(losses) if losses else None,
+        "latest_val_accuracy": val_acc[-1] if val_acc else None,
+        "best_val_accuracy": max(val_acc) if val_acc else None,
+        "latest_val_loss": val_loss[-1] if val_loss else None,
+        "best_val_loss": min(val_loss) if val_loss else None,
+        "latest_reward": reward[-1] if reward else None,
+        "recent_reward_mean": _mean(reward[-5:]) if reward else None,
+        "latest_success_rate": success[-1] if success else None,
+        "recent_success_rate_mean": _mean(success[-5:]) if success else None,
+        "latest_throughput": throughput[-1] if throughput else None,
+        "recent_throughput_mean": _mean(throughput[-5:]) if throughput else None,
+    }
+    return summary
+
+
+def select_most_urgent_decision(decisions: list[dict | None]) -> dict | None:
+    candidates = [d for d in decisions if d and d.get("action") == "alert"]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda d: (
+            _severity_rank(d.get("severity")),
+            1 if d.get("source") == "rulebased" else 0,
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _build_monitor_note(profile: str, summary: dict, baseline: dict | None) -> str:
+    chunks = [f"profile={profile}"]
+    if summary.get("latest_loss") is not None:
+        chunks.append(f"loss={summary['latest_loss']:.4f}")
+    if summary.get("latest_val_accuracy") is not None:
+        chunks.append(f"val_acc={summary['latest_val_accuracy']:.4f}")
+    if summary.get("latest_reward") is not None:
+        chunks.append(f"reward={summary['latest_reward']:.4f}")
+    if summary.get("recent_throughput_mean") is not None:
+        chunks.append(f"throughput={summary['recent_throughput_mean']:.2f}")
+    if baseline and baseline.get("recent_throughput_mean") and summary.get("recent_throughput_mean"):
+        base = baseline["recent_throughput_mean"]
+        cur = summary["recent_throughput_mean"]
+        if base > 0:
+            ratio = cur / base
+            chunks.append(f"tp_vs_base={ratio:.2f}x")
+    return " | ".join(chunks)
+
+
+def baseline_history_path(workdir: str) -> str:
+    return os.path.join(workdir, BASELINE_HISTORY_FILE)
+
+
+def load_baseline_history(workdir: str, max_rows: int = BASELINE_HISTORY_MAX_ROWS) -> list[dict]:
+    path = baseline_history_path(workdir)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-max_rows:]
+    except OSError:
+        return []
+    records: list[dict] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            records.append(data)
+    return records
+
+
+def normalize_command_for_fingerprint(command: str) -> str:
+    normalized = re.sub(r"CUDA_VISIBLE_DEVICES\s*=\s*[^\s]+", "CUDA_VISIBLE_DEVICES=<masked>", command)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def command_fingerprint(command: str) -> str:
+    normalized = normalize_command_for_fingerprint(command)
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+
+
+def baseline_reference_from_history(history: list[dict], fingerprint: str, profile: str) -> dict | None:
+    matched = [
+        row for row in history
+        if row.get("command_fingerprint") == fingerprint and row.get("status") == "finished"
+    ]
+    if not matched:
+        return None
+    if profile != "generic":
+        profiled = [row for row in matched if row.get("profile") == profile]
+        if profiled:
+            matched = profiled
+
+    def collect(field: str) -> list[float]:
+        vals: list[float] = []
+        for row in matched:
+            metrics = row.get("summary")
+            if not isinstance(metrics, dict):
+                continue
+            val = _safe_float(metrics.get(field))
+            if val is not None:
+                vals.append(val)
+        return vals
+
+    baseline = {
+        "recent_throughput_mean": _median(collect("recent_throughput_mean")),
+        "best_val_accuracy": _median(collect("best_val_accuracy")),
+        "best_val_loss": _median(collect("best_val_loss")),
+        "sample_size": len(matched),
+    }
+    if baseline["sample_size"] == 0:
+        return None
+    return baseline
+
+
+def persist_run_summary(workdir: str, payload: dict):
+    path = baseline_history_path(workdir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except OSError as e:
+        logger.warning("Failed writing sidecar baseline history: %s", e)
+
+
+def detect_log_syndrome_alert(job_id: str, log_path: str, state: dict, lines: list[str] | None = None) -> dict | None:
+    if lines is None:
+        lines = read_new_log_lines(job_id, log_path)
+    if not lines:
+        return None
+    decisions: list[dict] = []
+    for line in lines:
+        for pattern in LOG_SYNDROME_PATTERNS:
+            if not pattern["regex"].search(line):
+                continue
+            snippet = line[:180]
+            decision = _build_alert_decision(
+                source="logwatch",
+                syndrome=pattern["syndrome"],
+                message=pattern["template"].format(snippet=snippet),
+                severity=pattern["severity"],
+                evidence={"log_snippet": snippet},
+            )
+            signature = decision["signature"]
+            if seen_recent_signature(state, "logwatch", signature):
+                continue
+            decisions.append(decision)
+    return select_most_urgent_decision(decisions)
+
+
+def detect_supervised_metric_alert(rows: list[dict], state: dict) -> dict | None:
+    if len(rows) < MIN_ROWS_FOR_PROFILE_ALERTS:
+        return None
+    val_acc = collect_metric_series(rows, VAL_ACCURACY_KEYS)
+    decisions: list[dict] = []
+    if len(val_acc) >= MIN_ROWS_FOR_PROFILE_ALERTS:
+        current = val_acc[-1]
+        best_prev = max(val_acc[:-1])
+        recent_mean = _mean(val_acc[-3:]) or current
+        if best_prev > 0 and (best_prev - current) >= 0.08 and recent_mean <= best_prev * 0.9:
+            decision = _build_alert_decision(
+                source="playbook",
+                syndrome="validation_drop",
+                message=(
+                    "Validation accuracy dropped materially "
+                    f"(current={current:.4f}, best={best_prev:.4f})."
+                ),
+                severity="warning",
+                evidence={"current": current, "best": best_prev},
+            )
+            if not seen_recent_signature(state, "playbook", decision["signature"]):
+                decisions.append(decision)
+
+    val_loss = collect_metric_series(rows, VAL_LOSS_KEYS)
+    if len(val_loss) >= MIN_ROWS_FOR_PROFILE_ALERTS:
+        current = val_loss[-1]
+        best_prev = min(val_loss[:-1])
+        recent_mean = _mean(val_loss[-3:]) or current
+        if best_prev > 0 and current >= best_prev * 1.5 and recent_mean >= best_prev * 1.4:
+            decision = _build_alert_decision(
+                source="playbook",
+                syndrome="validation_loss_regression",
+                message=(
+                    "Validation loss regressed strongly "
+                    f"(current={current:.4f}, best={best_prev:.4f})."
+                ),
+                severity="warning",
+                evidence={"current": current, "best": best_prev},
+            )
+            if not seen_recent_signature(state, "playbook", decision["signature"]):
+                decisions.append(decision)
+    return select_most_urgent_decision(decisions)
+
+
+def detect_rl_metric_alert(rows: list[dict], state: dict) -> dict | None:
+    if len(rows) < MIN_ROWS_FOR_PROFILE_ALERTS:
+        return None
+    reward = collect_metric_series(rows, REWARD_KEYS)
+    success = collect_metric_series(rows, SUCCESS_RATE_KEYS)
+    kl_values = collect_metric_series(rows, KL_KEYS)
+    decisions: list[dict] = []
+
+    if len(reward) >= MIN_ROWS_FOR_PROFILE_ALERTS:
+        current_reward = reward[-1]
+        prev_reward = _mean(reward[-6:-1]) or current_reward
+        if prev_reward > 0 and current_reward <= prev_reward * 0.5:
+            decision = _build_alert_decision(
+                source="playbook",
+                syndrome="reward_drop",
+                message=(
+                    "RL reward dropped sharply "
+                    f"(current={current_reward:.4f}, recent_mean={prev_reward:.4f})."
+                ),
+                severity="warning",
+                evidence={"current_reward": current_reward, "recent_reward_mean": prev_reward},
+            )
+            if not seen_recent_signature(state, "playbook", decision["signature"]):
+                decisions.append(decision)
+
+    if len(reward) >= MIN_ROWS_FOR_PROFILE_ALERTS and len(success) >= MIN_ROWS_FOR_PROFILE_ALERTS:
+        curr_reward = reward[-1]
+        prev_reward = _mean(reward[-6:-1]) or curr_reward
+        curr_success = success[-1]
+        prev_success = _mean(success[-6:-1]) or curr_success
+        if prev_reward > 0 and prev_success > 0 and curr_reward >= prev_reward * 1.5 and curr_success <= prev_success * 0.7:
+            decision = _build_alert_decision(
+                source="playbook",
+                syndrome="reward_hacking_suspected",
+                message=(
+                    "Reward increased while success rate dropped "
+                    f"(reward {curr_reward:.4f} vs {prev_reward:.4f}, "
+                    f"success {curr_success:.4f} vs {prev_success:.4f})."
+                ),
+                severity="critical",
+                evidence={
+                    "current_reward": curr_reward,
+                    "recent_reward_mean": prev_reward,
+                    "current_success": curr_success,
+                    "recent_success_mean": prev_success,
+                },
+            )
+            if not seen_recent_signature(state, "playbook", decision["signature"]):
+                decisions.append(decision)
+
+    if len(kl_values) >= MIN_ROWS_FOR_PROFILE_ALERTS:
+        current_kl = kl_values[-1]
+        prev_kl_max = max(kl_values[-6:-1])
+        if prev_kl_max > 0 and current_kl >= prev_kl_max * 2.5 and current_kl > 0.15:
+            decision = _build_alert_decision(
+                source="playbook",
+                syndrome="kl_explosion",
+                message=(
+                    "KL divergence spiked, policy update may be unstable "
+                    f"(current={current_kl:.4f}, previous_max={prev_kl_max:.4f})."
+                ),
+                severity="warning",
+                evidence={"current_kl": current_kl, "previous_max_kl": prev_kl_max},
+            )
+            if not seen_recent_signature(state, "playbook", decision["signature"]):
+                decisions.append(decision)
+
+    return select_most_urgent_decision(decisions)
+
+
+def detect_baseline_drift_alert(summary: dict, baseline: dict | None, state: dict) -> dict | None:
+    if not baseline:
+        return None
+    decisions: list[dict] = []
+    baseline_tp = _safe_float(baseline.get("recent_throughput_mean"))
+    current_tp = _safe_float(summary.get("recent_throughput_mean"))
+    if baseline_tp and current_tp and baseline_tp > 0 and current_tp <= baseline_tp * 0.6:
+        decision = _build_alert_decision(
+            source="baseline",
+            syndrome="throughput_regression",
+            message=(
+                "Throughput is much lower than prior similar runs "
+                f"(current={current_tp:.2f}, baseline={baseline_tp:.2f})."
+            ),
+            severity="warning",
+            evidence={"current_throughput": current_tp, "baseline_throughput": baseline_tp},
+        )
+        if not seen_recent_signature(state, "baseline", decision["signature"]):
+            decisions.append(decision)
+
+    baseline_acc = _safe_float(baseline.get("best_val_accuracy"))
+    current_acc = _safe_float(summary.get("best_val_accuracy"))
+    if baseline_acc and current_acc and current_acc <= baseline_acc - 0.05:
+        decision = _build_alert_decision(
+            source="baseline",
+            syndrome="precision_drift",
+            message=(
+                "Validation quality is behind prior similar runs "
+                f"(current_best={current_acc:.4f}, baseline_best={baseline_acc:.4f})."
+            ),
+            severity="warning",
+            evidence={"current_best_val_accuracy": current_acc, "baseline_best_val_accuracy": baseline_acc},
+        )
+        if not seen_recent_signature(state, "baseline", decision["signature"]):
+            decisions.append(decision)
+
+    return select_most_urgent_decision(decisions)
+
+
+def build_monitoring_snapshot(profile: str, summary: dict, baseline: dict | None, state: dict) -> dict:
+    syndrome_counts = state.get("syndrome_counts")
+    if not isinstance(syndrome_counts, dict):
+        syndrome_counts = {}
+    tags = [profile]
+    if baseline:
+        tags.append("baseline-aware")
+    if syndrome_counts:
+        tags.append("alerts-active")
+    snapshot = {
+        "profile": profile,
+        "summary": summary,
+        "baseline": baseline or {},
+        "syndrome_counts": syndrome_counts,
+        "updated_at": time.time(),
+    }
+    note = _build_monitor_note(profile, summary, baseline)
+    return {
+        "monitor_note": note[:220],
+        "monitor_tags": tags[:8],
+        "monitoring": snapshot,
+    }
+
+
+def record_alert_syndrome(state: dict, decision: dict | None):
+    if not decision or decision.get("action") != "alert":
+        return
+    syndrome = (decision.get("syndrome") or decision.get("source") or "unknown").strip().lower()
+    if not syndrome:
+        syndrome = "unknown"
+    counts = state.setdefault("syndrome_counts", {})
+    counts[syndrome] = int(counts.get(syndrome, 0)) + 1
+
+
+def rulebased_alerts(metrics_rows: list[dict], state: dict) -> dict | None:
     """Deterministic alerts for hard metric anomalies."""
-    metrics_path = os.path.join(wandb_dir, "metrics.jsonl")
-    rows = read_recent_metrics(metrics_path, max_lines=25, max_bytes=24000)
     entries: list[tuple[object, float]] = []
-    for row in rows:
+    for row in metrics_rows:
         loss = extract_loss(row)
         if loss is None:
             continue
@@ -192,17 +954,15 @@ def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
     finite_entries = [(step, loss) for step, loss in entries if math.isfinite(loss)]
     has_non_finite = len(finite_entries) != len(entries)
     if has_non_finite:
-        signature = "nan-inf"
-        if seen_recent_signature(state, "rulebased", signature):
+        decision = _build_alert_decision(
+            source="rulebased",
+            syndrome="nan_inf_loss",
+            message="Training loss became NaN/Inf. This run is unstable.",
+            severity="critical",
+        )
+        if seen_recent_signature(state, "rulebased", decision["signature"]):
             return None
-        return {
-            "action": "alert",
-            "message": "Training loss became NaN/Inf. This run is unstable.",
-            "severity": "critical",
-            "choices": ["Ignore", "Stop Job"],
-            "source": "rulebased",
-            "signature": signature,
-        }
+        return decision
 
     current_step, current = finite_entries[-1]
     previous = [loss for _, loss in finite_entries[:-1]]
@@ -225,30 +985,29 @@ def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
 
     if is_high:
         high_step, high_loss = high_entry
-        signature = f"high:{round(high_loss, 4)}"
         step_prefix = f"step={high_step}, " if isinstance(high_step, (int, float)) else ""
         message = (
             f"High loss detected ({step_prefix}loss={high_loss:.4f}, "
             f"threshold={LOSS_ALERT_THRESHOLD:.1f})."
         )
     else:
-        signature = f"spike:{round(current, 4)}:{round(mean_prev, 4)}"
         message = f"Loss spike detected (loss={current:.4f}, rolling_avg={mean_prev:.4f})."
 
-    if seen_recent_signature(state, "rulebased", signature):
+    decision = _build_alert_decision(
+        source="rulebased",
+        syndrome="loss_anomaly",
+        message=message,
+        severity="warning",
+    )
+    if seen_recent_signature(state, "rulebased", decision["signature"]):
         return None
-
-    return {
-        "action": "alert",
-        "message": message,
-        "severity": "warning",
-        "choices": ["Ignore", "Stop Job"],
-        "source": "rulebased",
-        "signature": signature,
-    }
+    return decision
 
 def should_run_alert_judge(job_id: str, metrics_file: str) -> bool:
-    file_size = os.path.getsize(metrics_file)
+    try:
+        file_size = os.path.getsize(metrics_file)
+    except OSError:
+        return False
     last_size = _last_metrics_pos.get(job_id, 0)
     if file_size < last_size:
         last_size = 0
@@ -320,10 +1079,16 @@ def run_alert_judge(context: str, workdir: str | None = None) -> dict | None:
     logger.info("alert_judge output: %s", output)
     return parse_alert_judge_decision(output)
 
-def alert_judge(job_id: str, wandb_dir: str, workdir: str, state: dict) -> dict:
+def alert_judge(
+    job_id: str,
+    metrics_file: str | None,
+    workdir: str,
+    profile: str,
+    recent_logs: list[str],
+    state: dict,
+) -> dict:
     """LLM-based alert gate for softer anomalies."""
-    metrics_file = os.path.join(wandb_dir, "metrics.jsonl")
-    if not os.path.exists(metrics_file):
+    if not metrics_file or not os.path.exists(metrics_file):
         return {"action": "ignore"}
     if not should_run_alert_judge(job_id, metrics_file):
         return {"action": "ignore"}
@@ -339,7 +1104,9 @@ def alert_judge(job_id: str, wandb_dir: str, workdir: str, state: dict) -> dict:
     context_blob = {
         "event": "metrics_update",
         "metrics_file": metrics_file,
+        "profile": profile,
         "recent_metrics": recent_metrics,
+        "recent_logs": recent_logs[-20:],
     }
     decision = run_alert_judge(json.dumps(context_blob, ensure_ascii=True), workdir)
     if not decision or decision.get("action") != "alert":
@@ -348,16 +1115,17 @@ def alert_judge(job_id: str, wandb_dir: str, workdir: str, state: dict) -> dict:
     message = (decision.get("message") or "Metric anomaly detected.").strip()
     if len(message) > 600:
         message = f"{message[:597]}..."
-    signature = hashlib.sha1(message.encode("utf-8")).hexdigest()
+    signature = _decision_signature(f"judge:{message}")
     if seen_recent_signature(state, "alert_judge", signature):
         return {"action": "ignore"}
 
     return {
         "action": "alert",
         "message": message,
-        "severity": decision.get("severity") or "warning",
+        "severity": _normalize_severity(decision.get("severity")),
         "choices": decision.get("choices") or ["Ignore", "Stop Job"],
         "source": "alert_judge",
+        "syndrome": "judge_soft_anomaly",
         "signature": signature,
     }
 
@@ -416,18 +1184,26 @@ def apply_alert_decision(
         message=message,
         choices=decision.get("choices") or ["Ignore", "Stop Job"],
         severity=decision.get("severity") or "warning",
+        source=decision.get("source"),
+        syndrome=decision.get("syndrome"),
+        evidence=decision.get("evidence") if isinstance(decision.get("evidence"), dict) else None,
         auth_token=auth_token,
     )
     if not alert_id:
         return False
 
-    response = wait_for_response(run_dir, alert_id)
+    timeout_seconds = _safe_float(decision.get("response_timeout_seconds")) if isinstance(decision, dict) else None
+    wait_timeout = int(timeout_seconds) if timeout_seconds and timeout_seconds > 0 else 600
+    response = wait_for_response(run_dir, alert_id, timeout_seconds=wait_timeout)
     logger.info("Alert response (%s): %s", source, response)
     return should_stop_from_choice(response)
 
 
 def get_current_pane():
     """Find the tmux pane where this sidecar is running."""
+    if libtmux is None:
+        logger.error("libtmux is unavailable in this environment")
+        return None
     pane_id = os.environ.get("TMUX_PANE")
     if not pane_id:
         return None
@@ -744,19 +1520,86 @@ def monitor_job(
     time.sleep(0.1)
     logger.info(f"Set WANDB_DIR={wandb_data_dir}, WANDB_RUN_ID={job_id}")
     
+    # Alert/memory state for this sidecar process.
+    alert_state: dict = {}
+    command_fp = command_fingerprint(command)
+    baseline_history = load_baseline_history(workdir)
+
+    # Optional GPU preflight for explicit CUDA pinning.
+    gpu_preflight = wait_for_requested_gpus(command)
+    if gpu_preflight.get("requested_devices"):
+        if gpu_preflight.get("waited_seconds") or gpu_preflight.get("reason"):
+            preflight_note = (
+                f"GPU preflight requested={gpu_preflight.get('requested_devices')} "
+                f"waited={gpu_preflight.get('waited_seconds')}s "
+                f"busy={gpu_preflight.get('busy_devices') or []}"
+            )
+            report_status(
+                server_url,
+                job_id,
+                "launching",
+                {
+                    "monitor_note": preflight_note,
+                    "monitor_tags": ["gpu-preflight"],
+                    "monitoring": {"gpu_preflight": gpu_preflight},
+                },
+                auth_token=auth_token,
+            )
+        if gpu_preflight.get("timed_out") and gpu_preflight.get("busy_devices"):
+            preflight_decision = _build_alert_decision(
+                source="preflight",
+                syndrome="gpu_occupied",
+                message=(
+                    "Requested GPUs are still occupied after preflight wait: "
+                    f"{gpu_preflight.get('busy_devices')}. Continue anyway or stop?"
+                ),
+                severity="warning",
+                choices=["Continue Anyway", "Stop Job"],
+                evidence={"gpu_preflight": gpu_preflight},
+            )
+            preflight_decision["response_timeout_seconds"] = 120
+            if apply_alert_decision(server_url, job_id, run_dir, preflight_decision, auth_token=auth_token):
+                report_status(
+                    server_url,
+                    job_id,
+                    "stopped",
+                    {
+                        "error": "Stopped during GPU preflight",
+                        "monitor_note": "Run stopped after GPU preflight contention alert.",
+                        "monitoring": {"gpu_preflight": gpu_preflight},
+                    },
+                    auth_token=auth_token,
+                )
+                return
+
     # Execute command with exit code capture
     wrapped_command = f"({command}); echo $? > {completion_file}"
     logger.info(f"Executing: {wrapped_command}")
     job_pane.send_keys(wrapped_command)
     
     # Report running status
-    report_status(server_url, job_id, "running", {"tmux_pane": job_pane.pane_id}, auth_token=auth_token)
+    report_status(
+        server_url,
+        job_id,
+        "running",
+        {
+            "tmux_pane": job_pane.pane_id,
+            "monitor_note": "run-started",
+            "monitor_tags": ["sidecar-v2"],
+            "monitoring": {
+                "command_fingerprint": command_fp,
+                "gpu_preflight": gpu_preflight,
+            },
+        },
+        auth_token=auth_token,
+    )
     
     # Monitoring loop
     found_wandb_dir = None
     check_interval = 2
-    alert_state: dict = {}
     metrics_lines_posted = 0
+    last_heartbeat = 0.0
+    last_monitor_note = ""
 
     while not os.path.exists(completion_file):
         logger.debug("[metrics-loop] Monitoring job...")
@@ -789,23 +1632,8 @@ def monitor_job(
                 report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
                 return
 
-            # Rule-based alerts first, then LLM alert judge.
+            # POST new metric rows to server first so local agent_metrics.jsonl stays fresh.
             if found_wandb_dir:
-                rule_decision = rulebased_alerts(job_id, found_wandb_dir, alert_state)
-                if apply_alert_decision(server_url, job_id, run_dir, rule_decision, auth_token=auth_token):
-                    logger.info("Stopping job due to rulebased alert response")
-                    job_pane.cmd("kill-pane")
-                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
-                    return
-
-                judge_decision = alert_judge(job_id, found_wandb_dir, workdir, alert_state)
-                if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
-                    logger.info("Stopping job due to alert_judge response")
-                    job_pane.cmd("kill-pane")
-                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
-                    return
-
-                # POST new metric rows to server
                 logger.info(f"[metrics-loop] Calling post_metrics_delta (found_wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted})")
                 prev_lines = metrics_lines_posted
                 metrics_lines_posted = post_metrics_delta(
@@ -815,6 +1643,82 @@ def monitor_job(
                     logger.info(f"[metrics-loop] lines_posted advanced: {prev_lines} → {metrics_lines_posted}")
             else:
                 logger.debug(f"[metrics-loop] Skipping metrics POST — no wandb_dir found yet")
+
+            metrics_file = resolve_monitor_metrics_file(run_dir, found_wandb_dir)
+            recent_rows = read_recent_metrics(metrics_file, max_lines=50, max_bytes=64000) if metrics_file else []
+            new_log_lines = read_new_log_lines(job_id, log_file)
+            if new_log_lines:
+                ring = alert_state.setdefault("recent_logs_buffer", [])
+                if isinstance(ring, list):
+                    ring.extend(new_log_lines)
+                    if len(ring) > 150:
+                        del ring[:-150]
+                else:
+                    alert_state["recent_logs_buffer"] = new_log_lines[-150:]
+            log_context = alert_state.get("recent_logs_buffer")
+            if not isinstance(log_context, list):
+                log_context = []
+
+            profile = infer_workload_profile(command, recent_rows, log_context)
+            alert_state["profile"] = profile
+            summary = summarize_metrics_for_monitoring(recent_rows)
+            baseline = baseline_reference_from_history(baseline_history, command_fp, profile)
+
+            log_decision = detect_log_syndrome_alert(job_id, log_file, alert_state, lines=new_log_lines)
+            rule_decision = rulebased_alerts(recent_rows, alert_state)
+            profile_decision = None
+            if profile == "reinforcement_learning":
+                profile_decision = detect_rl_metric_alert(recent_rows, alert_state)
+            elif profile == "supervised":
+                profile_decision = detect_supervised_metric_alert(recent_rows, alert_state)
+            baseline_decision = detect_baseline_drift_alert(summary, baseline, alert_state)
+            urgent_decision = select_most_urgent_decision([
+                log_decision, rule_decision, profile_decision, baseline_decision,
+            ])
+
+            if urgent_decision:
+                record_alert_syndrome(alert_state, urgent_decision)
+                if apply_alert_decision(server_url, job_id, run_dir, urgent_decision, auth_token=auth_token):
+                    logger.info("Stopping job due to sidecar playbook alert response")
+                    job_pane.cmd("kill-pane")
+                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                    return
+            else:
+                judge_decision = alert_judge(
+                    job_id=job_id,
+                    metrics_file=metrics_file,
+                    workdir=workdir,
+                    profile=profile,
+                    recent_logs=log_context,
+                    state=alert_state,
+                )
+                if judge_decision and judge_decision.get("action") == "alert":
+                    record_alert_syndrome(alert_state, judge_decision)
+                if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
+                    logger.info("Stopping job due to alert_judge response")
+                    job_pane.cmd("kill-pane")
+                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                    return
+
+            now = time.time()
+            snapshot = build_monitoring_snapshot(profile, summary, baseline, alert_state)
+            monitor_note = snapshot.get("monitor_note", "")
+            if (now - last_heartbeat >= MONITOR_HEARTBEAT_SECONDS) or (monitor_note != last_monitor_note):
+                status_payload = {
+                    "tmux_pane": job_pane.pane_id,
+                    **snapshot,
+                }
+                if found_wandb_dir:
+                    status_payload["wandb_dir"] = found_wandb_dir
+                report_status(
+                    server_url,
+                    job_id,
+                    "running",
+                    status_payload,
+                    auth_token=auth_token,
+                )
+                last_heartbeat = now
+                last_monitor_note = monitor_note
 
         except Exception as e:
             logger.error(f"Error in monitoring loop: {e}")
@@ -845,6 +1749,24 @@ def monitor_job(
         logger.info(f"[metrics-final] Final flush done: lines_posted {metrics_lines_posted} → {final_posted}")
     else:
         logger.info(f"[metrics-final] No wandb_dir found during entire run — skipping final flush")
+
+    final_metrics_file = resolve_monitor_metrics_file(run_dir, found_wandb_dir)
+    final_rows = read_recent_metrics(final_metrics_file, max_lines=200, max_bytes=200000) if final_metrics_file else []
+    final_profile = alert_state.get("profile") if isinstance(alert_state.get("profile"), str) else "generic"
+    if final_profile == "generic":
+        final_profile = infer_workload_profile(command, final_rows, [])
+    final_summary = summarize_metrics_for_monitoring(final_rows)
+    persist_run_summary(
+        workdir,
+        {
+            "run_id": job_id,
+            "status": "finished" if exit_code == "0" else "failed",
+            "timestamp": time.time(),
+            "profile": final_profile,
+            "command_fingerprint": command_fp,
+            "summary": final_summary,
+        },
+    )
     
     logger.info("Sidecar exiting")
 

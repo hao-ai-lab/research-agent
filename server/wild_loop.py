@@ -489,19 +489,31 @@ def record_created_entity(entity_type: str, entity_id: str, chat_session_id: str
 # Auto-Enqueue Helpers (called from server.py create_alert / update_run_status)
 # =============================================================================
 
-def auto_enqueue_alert(alert_id: str, run_id: str, run_name: str, severity: str, message: str, choices: list):
+def auto_enqueue_alert(
+    alert_id: str,
+    run_id: str,
+    run_name: str,
+    severity: str,
+    message: str,
+    choices: list,
+    source: str | None = None,
+    syndrome: str | None = None,
+):
     """Auto-enqueue a wild event for a new alert, if wild mode is on."""
     if not wild_mode_enabled:
         return
     severity_priority = {"critical": 20, "warning": 30, "info": 50}
     priority = severity_priority.get(severity, 30)
+    source_text = source or "unknown"
+    syndrome_text = syndrome or "unspecified"
     wild_event_queue.enqueue({
         "id": f"alert-{alert_id}",
         "priority": priority,
         "title": f"Alert: {run_name}",
         "prompt": (
             f"Alert {alert_id} for run {run_name} ({run_id}). "
-            f"Severity: {severity}. Message: {message}. "
+            f"Severity: {severity}. Source: {source_text}. Syndrome: {syndrome_text}. "
+            f"Message: {message}. "
             f"Choices: {', '.join(choices)}"
         ),
         "type": "alert",
@@ -561,10 +573,20 @@ def build_experiment_context(
 
     lines.append(f"Active runs: {len(active_runs)}")
     for r in active_runs[:5]:
-        lines.append(f"  - {r['id']}: {r.get('name', '?')} [{r.get('status')}] cmd={r.get('command', '')[:80]}")
+        monitor_note = str(r.get("monitor_note", "")).strip()
+        monitor_suffix = f" monitor={monitor_note[:120]}" if monitor_note else ""
+        lines.append(
+            f"  - {r['id']}: {r.get('name', '?')} [{r.get('status')}] "
+            f"cmd={r.get('command', '')[:80]}{monitor_suffix}"
+        )
     lines.append(f"Finished runs: {len(finished_runs)} | Failed runs: {len(failed_runs)}")
     for r in failed_runs[:3]:
-        lines.append(f"  - FAILED {r['id']}: {r.get('name', '?')} error={r.get('error', 'unknown')[:100]}")
+        monitor_note = str(r.get("monitor_note", "")).strip()
+        monitor_suffix = f" monitor={monitor_note[:120]}" if monitor_note else ""
+        lines.append(
+            f"  - FAILED {r['id']}: {r.get('name', '?')} "
+            f"error={r.get('error', 'unknown')[:100]}{monitor_suffix}"
+        )
 
     active_sweeps = [{"id": sid, **s} for sid, s in sweeps.items()]
     if active_sweeps:
@@ -2114,4 +2136,3 @@ class WildLoopEngine:
 # =============================================================================
 
 engine = WildLoopEngine()
-
