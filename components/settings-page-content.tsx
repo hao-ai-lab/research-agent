@@ -276,7 +276,7 @@ export function SettingsPageContent({
           icon: LayoutGrid,
           type: 'select' as const,
           options: ['expert', 'novice'],
-          value: settings.appearance.starterCardFlavor || 'expert',
+          value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
           id: 'mobileEnterToNewline',

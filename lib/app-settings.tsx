@@ -51,7 +51,7 @@ export const defaultAppSettings: AppSettings = {
     wildLoopTasksBoxHeightPx: null,
     wildLoopHistoryBoxHeightPx: null,
     showStarterCards: false,
-    starterCardFlavor: "expert",
+    starterCardFlavor: "novice",
     showSidebarNewChatButton: false,
     mobileEnterToNewline: false,
   },
