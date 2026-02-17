@@ -1,0 +1,48 @@
+{
+  "sweep_id": "4e54cde07396",
+  "sweep_name": "best-loss-baseline",
+  "extraction_timestamp": "2026-02-17T01:31:00Z",
+  "runs": [
+    {
+      "run_id": "130b5c88d308",
+      "name": "baseline-spiky-20steps",
+      "profile": "spiky",
+      "steps": 20,
+      "status": "completed",
+      "metrics": {
+        "final_loss": 1.05,
+        "min_loss": 1.05,
+        "max_loss": 9.7,
+        "spike_steps": [4, 5],
+        "spike_values": [9.7, 9.5],
+        "convergence_step": 18,
+        "final_5_steps_avg": 1.05
+      },
+      "wandb_dir": ".mock_wandb/run-20260217-013022"
+    },
+    {
+      "run_id": "e82acfc3bf3f",
+      "name": "baseline-stable-20steps",
+      "profile": "stable",
+      "steps": 20,
+      "status": "completed",
+      "metrics": {
+        "final_loss": 1.05,
+        "min_loss": 1.05,
+        "max_loss": 2.18,
+        "spike_steps": [],
+        "spike_values": [],
+        "convergence_step": 18,
+        "final_5_steps_avg": 1.05
+      },
+      "wandb_dir": ".mock_wandb/run-20260217-013024"
+    }
+  ],
+  "comparison": {
+    "both_reach_floor": true,
+    "floor_loss": 1.05,
+    "spiky_has_transient_spikes": true,
+    "spike_impact": "Steps 4-5 show elevated loss (9.7, 9.5) but recover by step 6",
+    "recommendation": "Both profiles achieve same final loss at 20 steps. For cleaner training curves, use stable profile."
+  }
+}

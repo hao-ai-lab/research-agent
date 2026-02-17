@@ -12,7 +12,7 @@ import os
 import time
 from datetime import datetime, timezone
 
-DEFAULT_INTERACTIVE_HOLD_SECONDS = 600
+DEFAULT_INTERACTIVE_HOLD_SECONDS = 5
 
 
 def append_metric(metrics_path: str, payload: dict) -> None:
