@@ -1,0 +1,76 @@
+name: Bot Session Cleanup
+
+on:
+  issues:
+    types: [closed]
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    if: >
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'bot')) ||
+      (github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'agent/issue-'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Resolve issue number and stop workspace
+        id: stop
+        run: |
+          set -euo pipefail
+          ISSUE_NUMBER=""
+          if [[ "${{ github.event_name }}" == "issues" ]]; then
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          else
+            BRANCH="${{ github.event.pull_request.head.ref }}"
+            ISSUE_NUMBER="$(echo "${BRANCH}" | sed -nE 's/^agent\/issue-([0-9]+)$/\1/p')"
+          fi
+
+          if [[ -z "${ISSUE_NUMBER}" ]]; then
+            echo "No matching issue number; skipping stop."
+            exit 0
+          fi
+
+          APP_NAME="research-agent-issue-${ISSUE_NUMBER}"
+          echo "ISSUE_NUMBER=${ISSUE_NUMBER}" >> "$GITHUB_ENV"
+          echo "APP_NAME=${APP_NAME}" >> "$GITHUB_ENV"
+          modal app stop "${APP_NAME}" || true
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+      - name: Comment cleanup status
+        if: env.ISSUE_NUMBER != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isIssue = context.eventName === 'issues'
+            const targetNumber = Number(process.env.ISSUE_NUMBER)
+            const appName = process.env.APP_NAME
+            const body = [
+              '🧹 **Bot Session Cleaned Up**',
+              '',
+              `Stopped Modal workspace: \`${appName}\``,
+              `Timestamp: ${new Date().toISOString()}`,
+            ].join('\n')
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: isIssue ? targetNumber : context.payload.pull_request.number,
+              body,
+            })
+        env:
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          APP_NAME: ${{ env.APP_NAME }}

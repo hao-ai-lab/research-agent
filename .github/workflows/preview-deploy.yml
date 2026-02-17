@@ -39,7 +39,6 @@ jobs:
           PY
           )"
           echo "PREVIEW_AUTH_TOKEN=${PREVIEW_AUTH_TOKEN}" >> "$GITHUB_ENV"
-          echo "PREVIEW_AUTH_TOKEN=${PREVIEW_AUTH_TOKEN}"
 
       - name: Generate CI frontend config
         run: |
@@ -186,7 +185,6 @@ jobs:
               `| **Preview (Clean)** | [Open App](${previewUrl}) |`,
               `| **OpenCode** | [${opencodeUrl}](${opencodeUrl}) |`,
               `| **Server** | [${serverUrl}](${serverUrl}) |`,
-              `| **Auth Token** | \`${previewAuthToken}\` |`,
               `| **Commit** | \`${sha}\` |`,
               `| **Status** | ✅ Deployed |`,
               '',
