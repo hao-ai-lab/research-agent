@@ -451,7 +451,7 @@ export function DesktopSidebar({
               </div>
             </section>
 
-            {!isIconRail && showSidebarRunsSweepsPreview && (
+            {!isIconRail && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -550,7 +550,7 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!isIconRail && showSidebarRunsSweepsPreview && (
+            {!isIconRail && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -645,7 +645,7 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!isIconRail && (
+            {!isIconRail && showSidebarRunsSweepsPreview && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -740,7 +740,7 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!isIconRail && (
+            {!isIconRail && showSidebarRunsSweepsPreview && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
