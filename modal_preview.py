@@ -68,13 +68,16 @@ app = modal.App("research-agent-preview")
 OPENCODE_BIN = "/usr/local/bin/opencode"
 OPENCODE_PORT = "4096"
 MODAL_PREVIEW_OPENCODE_URL = os.environ.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
-MODAL_PREVIEW_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "").strip()
+# Captured at deploy time (CI injects a fresh token per run).
+# The Modal Secret may also contain a stale RESEARCH_AGENT_USER_AUTH_TOKEN;
+# we store the deploy-time value here so functions can forcibly use it.
+_DEPLOY_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "").strip()
 
 _FUNCTION_ENV = {}
 if MODAL_PREVIEW_OPENCODE_URL:
     _FUNCTION_ENV["MODAL_PREVIEW_OPENCODE_URL"] = MODAL_PREVIEW_OPENCODE_URL
-if MODAL_PREVIEW_AUTH_TOKEN:
-    _FUNCTION_ENV["RESEARCH_AGENT_USER_AUTH_TOKEN"] = MODAL_PREVIEW_AUTH_TOKEN
+if _DEPLOY_AUTH_TOKEN:
+    _FUNCTION_ENV["RESEARCH_AGENT_USER_AUTH_TOKEN"] = _DEPLOY_AUTH_TOKEN
 
 
 @app.function(
@@ -92,7 +95,8 @@ def preview_server():
     os.chdir("/app")
 
     env = {**os.environ}
-    auth_token = env.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "preview-token")
+    # Prefer the deploy-time token over any stale value from the Modal Secret.
+    auth_token = _DEPLOY_AUTH_TOKEN or env.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "preview-token")
     env["RESEARCH_AGENT_USER_AUTH_TOKEN"] = auth_token
 
     # Prepare workdir
@@ -163,7 +167,8 @@ def preview_app():
     os.chdir("/app")
 
     env = {**os.environ}
-    auth_token = env.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "preview-token")
+    # Prefer the deploy-time token over any stale value from the Modal Secret.
+    auth_token = _DEPLOY_AUTH_TOKEN or env.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "preview-token")
     env["RESEARCH_AGENT_USER_AUTH_TOKEN"] = auth_token
 
     # Prepare workdir

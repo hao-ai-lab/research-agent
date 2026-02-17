@@ -17,6 +17,7 @@ import {
   BarChart3,
   AlertTriangle,
   Bell,
+  ScrollText,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
@@ -47,7 +48,6 @@ import { TagsDialog } from './tags-dialog'
 import { LogViewer } from './log-viewer'
 import { TmuxTerminalPanel } from './tmux-terminal-panel'
 import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
-import { defaultMetricVisualizations } from '@/lib/mock-data'
 import { getSweep, type Alert } from '@/lib/api-client'
 import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
 
@@ -61,55 +61,82 @@ interface RunDetailViewProps {
   sweeps?: Sweep[]
 }
 
-// Generate mock metric data based on run's loss history
-function generateMetricData(run: ExperimentRun, metricPath: string, layer?: number) {
+// Generate chart data from metricSeries (real data) with lossHistory fallback
+function generateMetricData(run: ExperimentRun, metricPath: string, _layer?: number) {
+  // Priority 1: real metricSeries data from the server
+  const series = run.metricSeries?.[metricPath]
+  if (series && series.length > 0) {
+    return series.map((point) => ({ step: point.step, value: point.value }))
+  }
+
+  // Priority 2: derive from lossHistory for backward compat
   if (!run.lossHistory || run.lossHistory.length === 0) return []
 
-  return run.lossHistory.map((point, i) => {
-    let value = 0
-    const noise = (Math.random() - 0.5) * 0.1
+  if (metricPath === 'train/loss') {
+    return run.lossHistory.map((point) => ({ step: point.step, value: point.trainLoss }))
+  }
+  if (metricPath === 'val/loss') {
+    return run.lossHistory.map((point) => ({ step: point.step, value: point.valLoss ?? point.trainLoss * 1.1 }))
+  }
 
-    switch (metricPath) {
-      case 'train/loss':
-        value = point.trainLoss
-        break
-      case 'val/loss':
-        value = point.valLoss || point.trainLoss * 1.1
-        break
-      case 'train/reward':
-        value = 1 - point.trainLoss + noise
-        break
-      case 'train/loss_ema':
-        value = point.trainLoss * 0.95 + noise * 0.1
-        break
-      case 'train/loss_slope':
-        const prevLoss = i > 0 ? run.lossHistory![i - 1].trainLoss : point.trainLoss
-        value = (point.trainLoss - prevLoss) * 10 + noise
-        break
-      case 'val/generalization_gap':
-        value = (point.valLoss || point.trainLoss * 1.1) - point.trainLoss
-        break
-      case 'grad/global_norm':
-        value = 0.5 + Math.sin(i * 0.2) * 0.3 + noise
-        break
-      case 'grad/global_norm_ema':
-        value = 0.5 + Math.sin(i * 0.2) * 0.2 + noise * 0.5
-        break
-      case 'grad/norm/attn':
-        value = 0.3 + (layer || 0) * 0.05 + Math.sin(i * 0.15) * 0.1 + noise
-        break
-      case 'grad/norm_ratio':
-        value = 0.01 + noise * 0.005
-        break
-      case 'act/mean':
-        value = (layer || 0) * 0.1 + Math.cos(i * 0.1) * 0.2 + noise
-        break
-      default:
-        value = point.trainLoss + noise
+  return []
+}
+
+// Helper functions for dynamic metric detection
+function metricCategoryFromPath(_path: string): 'primary' | 'secondary' {
+  return 'primary'
+}
+
+function metricTypeFromPath(path: string): 'line' | 'area' | 'bar' {
+  const key = path.toLowerCase()
+  if (key.includes('slope') || key.includes('gap') || key.includes('delta')) return 'area'
+  return 'line'
+}
+
+function metricDisplayName(path: string): string {
+  const clean = path.replace(/^metrics\//, '')
+  const parts = clean.split('/').filter(Boolean)
+  const last = parts.length > 0 ? parts[parts.length - 1] : clean
+  const name = last.replace(/[_\-]+/g, ' ').trim()
+  return name.charAt(0).toUpperCase() + name.slice(1) || clean
+}
+
+function hasChartData(run: ExperimentRun): boolean {
+  const hasLossHistory = !!(run.lossHistory && run.lossHistory.length > 0)
+  const hasMetricSeries = !!(
+    run.metricSeries &&
+    Object.values(run.metricSeries).some((points) => points && points.length > 0)
+  )
+  return hasLossHistory || hasMetricSeries
+}
+
+function buildMetricVisualizations(run: ExperimentRun): MetricVisualization[] {
+  const metricKeys = new Set<string>()
+
+  // Collect from metricSeries
+  if (run.metricSeries) {
+    Object.entries(run.metricSeries).forEach(([key, points]) => {
+      if (points && points.length > 0) metricKeys.add(key)
+    })
+  }
+
+  // Collect from lossHistory as fallback
+  if (metricKeys.size === 0 && run.lossHistory && run.lossHistory.length > 0) {
+    metricKeys.add('train/loss')
+    if (run.lossHistory.some((p) => p.valLoss !== undefined)) {
+      metricKeys.add('val/loss')
     }
+  }
 
-    return { step: point.step, value: Math.max(0, value) }
-  })
+  return Array.from(metricKeys)
+    .sort((a, b) => a.localeCompare(b))
+    .map((metricPath) => ({
+      id: `metric:${metricPath.replace(/[^a-zA-Z0-9]+/g, '-')}`,
+      name: metricDisplayName(metricPath),
+      path: metricPath,
+      category: metricCategoryFromPath(metricPath),
+      type: metricTypeFromPath(metricPath),
+    }))
 }
 
 // Single metric chart component with lazy loading
@@ -196,19 +223,18 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
 
   // Charts state
-  const [primaryChartsOpen, setPrimaryChartsOpen] = useState(false)
-  const [secondaryChartsOpen, setSecondaryChartsOpen] = useState(false)
+  const [chartsOpen, setChartsOpen] = useState(false)
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set())
   const [layerSelections, setLayerSelections] = useState<Record<string, number>>({})
 
   // Logs and Terminal state
   const [logsOpen, setLogsOpen] = useState(true)
   const [terminalOpen, setTerminalOpen] = useState(false)
+  const [sidecarLogsOpen, setSidecarLogsOpen] = useState(false)
   const [logsFullPage, setLogsFullPage] = useState(false)
   const [alertsOpen, setAlertsOpen] = useState(true)
 
-  const primaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'primary')
-  const secondaryMetrics = defaultMetricVisualizations.filter(m => m.category === 'secondary')
+  const allMetrics = useMemo(() => buildMetricVisualizations(run), [run])
   const linkedSweepFromList = useMemo(
     () => sweeps.find((sweep) => sweep.id === run.sweepId),
     [run.sweepId, sweeps]
@@ -343,8 +369,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
     })
   }
 
-  const allPrimaryExpanded = primaryMetrics.every(m => expandedCharts.has(m.id))
-  const allSecondaryExpanded = secondaryMetrics.every(m => expandedCharts.has(m.id))
+  const allChartsExpanded = allMetrics.every(m => expandedCharts.has(m.id))
 
   const runAlerts = alerts
 
@@ -643,20 +668,17 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
               <div className="grid grid-cols-3 gap-2">
                 {run.metrics ? (
                   <>
-                    <div className="text-center p-2 rounded-lg bg-card border border-border">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Loss</p>
-                      <p className="text-sm font-semibold text-foreground">{run.metrics.loss.toFixed(3)}</p>
-                    </div>
-                    <div className="text-center p-2 rounded-lg bg-card border border-border">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Accuracy</p>
-                      <p className="text-sm font-semibold text-foreground">{run.metrics.accuracy.toFixed(1)}%</p>
-                    </div>
-                    <div className="text-center p-2 rounded-lg bg-card border border-border">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Epoch</p>
-                      <p className="text-sm font-semibold text-foreground">
-                        {run.metrics.epoch}{run.config?.maxEpochs && `/${run.config.maxEpochs}`}
-                      </p>
-                    </div>
+                    {Object.entries(run.metrics)
+                      .filter(([key, val]) => typeof val === 'number' && !key.startsWith('_'))
+                      .slice(0, 6)
+                      .map(([key, val]) => (
+                        <div key={key} className="text-center p-2 rounded-lg bg-card border border-border">
+                          <p className="text-[10px] text-muted-foreground mb-0.5 truncate" title={key}>{key}</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            {typeof val === 'number' ? (Number.isInteger(val) ? val : val.toFixed(4)) : String(val)}
+                          </p>
+                        </div>
+                      ))}
                   </>
                 ) : (
                   <div className="col-span-3 text-center p-3 rounded-lg bg-card border border-border border-dashed">
@@ -735,28 +757,28 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
               </Collapsible>
             </div>
 
-            {/* Charts Section - Primary */}
-            {run.lossHistory && run.lossHistory.length > 0 && (
-              <Collapsible open={primaryChartsOpen} onOpenChange={setPrimaryChartsOpen}>
+            {/* Charts Section */}
+            {hasChartData(run) && allMetrics.length > 0 && (
+              <Collapsible open={chartsOpen} onOpenChange={setChartsOpen}>
                 <div className="rounded-lg border border-border bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
                     <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Primary Metrics</span>
+                      <span className="text-xs font-medium text-foreground">Charts</span>
                       <div className="flex items-center gap-2">
-                        {primaryChartsOpen && (
+                        {chartsOpen && (
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-5 px-2 text-[10px]"
                             onClick={(e) => {
                               e.stopPropagation()
-                              toggleAllInCategory(primaryMetrics, !allPrimaryExpanded)
+                              toggleAllInCategory(allMetrics, !allChartsExpanded)
                             }}
                           >
-                            {allPrimaryExpanded ? 'Collapse All' : 'Expand All'}
+                            {allChartsExpanded ? 'Collapse All' : 'Expand All'}
                           </Button>
                         )}
-                        {primaryChartsOpen ? (
+                        {chartsOpen ? (
                           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                         ) : (
                           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -766,53 +788,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="border-t border-border px-2 pb-2">
-                      {primaryMetrics.map((metric) => (
-                        <MetricChart
-                          key={metric.id}
-                          metric={metric}
-                          run={run}
-                          isExpanded={expandedCharts.has(metric.id)}
-                          onToggle={() => toggleChart(metric.id)}
-                        />
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                </div>
-              </Collapsible>
-            )}
-
-            {/* Charts Section - Secondary */}
-            {run.lossHistory && run.lossHistory.length > 0 && (
-              <Collapsible open={secondaryChartsOpen} onOpenChange={setSecondaryChartsOpen}>
-                <div className="rounded-lg border border-border bg-card overflow-hidden">
-                  <CollapsibleTrigger asChild>
-                    <button type="button" className="flex w-full items-center justify-between p-3">
-                      <span className="text-xs font-medium text-foreground">Secondary Metrics</span>
-                      <div className="flex items-center gap-2">
-                        {secondaryChartsOpen && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 px-2 text-[10px]"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleAllInCategory(secondaryMetrics, !allSecondaryExpanded)
-                            }}
-                          >
-                            {allSecondaryExpanded ? 'Collapse All' : 'Expand All'}
-                          </Button>
-                        )}
-                        {secondaryChartsOpen ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                      </div>
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border px-2 pb-2">
-                      {secondaryMetrics.map((metric) => (
+                      {allMetrics.map((metric) => (
                         <div key={metric.id}>
                           {metric.layerSelector && (
                             <div className="flex items-center gap-2 px-3 pt-2">
@@ -844,7 +820,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
             )}
 
             {/* Charts Section - Empty State */}
-            {(!run.lossHistory || run.lossHistory.length === 0) && (
+            {!hasChartData(run) && (
               <Collapsible>
                 <div className="rounded-lg border border-border border-dashed bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
@@ -926,6 +902,38 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
                       runId={run.id}
                       tmuxWindow={(run as any).tmux_window}
                       tmuxPane={(run as any).tmux_pane}
+                      showHeader={false}
+                      className="rounded-none border-0 bg-transparent"
+                    />
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+
+            {/* Sidecar Logs Section */}
+            <Collapsible open={sidecarLogsOpen} onOpenChange={setSidecarLogsOpen}>
+              <div className="rounded-lg border border-border bg-card overflow-hidden">
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex w-full items-center justify-between p-3">
+                    <div className="flex items-center gap-2">
+                      <ScrollText className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-medium text-foreground">Sidecar Logs</span>
+                      {run.status === 'running' && (
+                        <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                      )}
+                    </div>
+                    {sidecarLogsOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border">
+                    <LogViewer
+                      runId={run.id}
+                      logSource="sidecar"
                       showHeader={false}
                       className="rounded-none border-0 bg-transparent"
                     />

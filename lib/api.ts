@@ -1141,6 +1141,8 @@ export interface WildV2Status {
     pending_events_count?: number
     pending_events?: Array<{ id: string; type: string; title: string; detail: string }>
     steer_context?: string
+    chat_session_id?: string
+    reflection?: string
     no_progress_streak?: number
     short_iteration_count?: number
     system_health?: {
@@ -1241,6 +1243,77 @@ export async function steerWildV2(context: string): Promise<{ ok: boolean }> {
         throw new Error(`Failed to steer wild v2: ${response.statusText}`)
     }
     return response.json()
+}
+
+// =============================================================================
+// Memory Bank Functions
+// =============================================================================
+
+export interface Memory {
+    id: string
+    title: string
+    content: string
+    source: 'user' | 'agent' | 'reflection'
+    tags: string[]
+    session_id: string
+    created_at: number
+    is_active: boolean
+}
+
+export async function listMemories(activeOnly: boolean = false): Promise<Memory[]> {
+    const params = new URLSearchParams()
+    if (activeOnly) params.set('active_only', 'true')
+    const response = await fetch(`${API_URL()}/memories?${params}`, {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list memories: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function createMemory(memory: {
+    title: string
+    content: string
+    source?: string
+    tags?: string[]
+}): Promise<Memory> {
+    const response = await fetch(`${API_URL()}/memories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getHeaders() },
+        body: JSON.stringify(memory),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create memory: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function updateMemory(memoryId: string, updates: {
+    title?: string
+    content?: string
+    is_active?: boolean
+    tags?: string[]
+}): Promise<Memory> {
+    const response = await fetch(`${API_URL()}/memories/${memoryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getHeaders() },
+        body: JSON.stringify(updates),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to update memory: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function deleteMemory(memoryId: string): Promise<void> {
+    const response = await fetch(`${API_URL()}/memories/${memoryId}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to delete memory: ${response.statusText}`)
+    }
 }
 
 // =============================================================================
@@ -1508,6 +1581,75 @@ export async function* streamRunLogs(runId: string): AsyncGenerator<{
             buffer += decoder.decode(value, { stream: true })
 
             // Process SSE format: data: {...}\n\n
+            const events = buffer.split('\n\n')
+            buffer = events.pop() || ''
+
+            for (const event of events) {
+                if (event.startsWith('data: ')) {
+                    try {
+                        yield JSON.parse(event.slice(6))
+                    } catch {
+                        console.warn('Failed to parse SSE event:', event)
+                    }
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
+}
+
+/**
+ * Get sidecar logs with byte-offset pagination
+ */
+export async function getSidecarLogs(
+    runId: string,
+    offset: number = -10000,
+    limit: number = 10000
+): Promise<LogResponse> {
+    const response = await fetch(
+        `${API_URL()}/runs/${runId}/sidecar-logs?offset=${offset}&limit=${limit}`,
+        { headers: getHeaders() }
+    )
+    if (!response.ok) {
+        throw new Error(`Failed to get sidecar logs: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Stream sidecar logs via SSE
+ */
+export async function* streamSidecarLogs(runId: string): AsyncGenerator<{
+    type: 'initial' | 'delta' | 'done' | 'error'
+    content?: string
+    status?: string
+    error?: string
+}> {
+    const response = await fetch(`${API_URL()}/runs/${runId}/sidecar-logs/stream`, {
+        headers: getHeaders()
+    })
+
+    if (!response.ok) {
+        throw new Error(`Failed to stream sidecar logs: ${response.statusText}`)
+    }
+
+    if (!response.body) {
+        throw new Error('Response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+
             const events = buffer.split('\n\n')
             buffer = events.pop() || ''
 

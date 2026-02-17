@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { getRunLogs, streamRunLogs, type LogResponse } from '@/lib/api-client'
+import { getRunLogs, streamRunLogs, getSidecarLogs, streamSidecarLogs, type LogResponse } from '@/lib/api-client'
 
 interface LogViewerProps {
     runId: string
@@ -18,9 +18,13 @@ interface LogViewerProps {
     onExpand?: () => void
     showHeader?: boolean
     className?: string
+    logSource?: 'run' | 'sidecar'
 }
 
-export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = true, className = '' }: LogViewerProps) {
+export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = true, className = '', logSource = 'run' }: LogViewerProps) {
+    // Select API functions based on log source
+    const getLogs = logSource === 'sidecar' ? getSidecarLogs : getRunLogs
+    const streamLogs = logSource === 'sidecar' ? streamSidecarLogs : streamRunLogs
     const [logs, setLogs] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [isStreaming, setIsStreaming] = useState(false)
@@ -40,7 +44,7 @@ export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = tr
         setIsLoading(true)
         setError(null)
         try {
-            const response = await getRunLogs(runId, -10000, 10000)
+            const response = await getLogs(runId, -10000, 10000)
             setLogs(response.content)
             setLogInfo({
                 totalSize: response.total_size,
@@ -71,7 +75,7 @@ export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = tr
             const newOffset = Math.max(0, currentOffsetRef.current - 10000)
             const limit = currentOffsetRef.current - newOffset
 
-            const response = await getRunLogs(runId, newOffset, limit)
+            const response = await getLogs(runId, newOffset, limit)
 
             // Prepend new content
             setLogs(prev => response.content + prev)
@@ -102,7 +106,7 @@ export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = tr
         streamAbortRef.current = new AbortController()
 
         try {
-            for await (const event of streamRunLogs(runId)) {
+            for await (const event of streamLogs(runId)) {
                 if (streamAbortRef.current?.signal.aborted) break
 
                 if (event.type === 'initial') {

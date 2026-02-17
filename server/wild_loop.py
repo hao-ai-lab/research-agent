@@ -466,10 +466,11 @@ def get_all_events() -> dict:
 # Entity Creation Tracking (called from server.py endpoints)
 # =============================================================================
 
-def record_created_entity(entity_type: str, entity_id: str):
+def record_created_entity(entity_type: str, entity_id: str, chat_session_id: str = None):
     """Track a sweep or run created during the current wild session.
 
     entity_type: 'sweep' or 'run'
+    chat_session_id: optional originating chat session for traceability
     """
     if not wild_loop_state.get("is_active"):
         return
@@ -477,6 +478,11 @@ def record_created_entity(entity_type: str, entity_id: str):
     if entity_id not in wild_loop_state.get(key, []):
         wild_loop_state.setdefault(key, []).append(entity_id)
         logger.debug("[wild-engine] Tracked %s creation: %s", entity_type, entity_id)
+    # Store chat_session_id mapping
+    if chat_session_id:
+        mapping_key = "entity_chat_sessions"
+        wild_loop_state.setdefault(mapping_key, {})[entity_id] = chat_session_id
+        logger.debug("[wild-engine] Associated %s %s with chat %s", entity_type, entity_id, chat_session_id)
 
 
 # =============================================================================

@@ -1166,6 +1166,58 @@ export async function* streamRunLogs(runId: string): AsyncGenerator<{
     yield { type: 'done', status: run.status }
 }
 
+export async function getSidecarLogs(
+    runId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _offset: number = -10000,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _limit: number = 10000
+): Promise<LogResponse> {
+    await delay(100)
+    const run = mockRuns.get(runId)
+    if (!run) {
+        throw new Error('Run not found')
+    }
+
+    const mockLog = `[${new Date().toISOString()}] [INFO] Starting job monitor for ${runId}
+[INFO] Command: python train.py --epochs 5
+[INFO] Created job pane: %42
+[INFO] Executing: (python train.py --epochs 5); echo $? > /tmp/job.done
+[INFO] Detected WandB dir: /tmp/wandb/run-20260215
+`
+
+    return {
+        content: mockLog,
+        offset: 0,
+        total_size: mockLog.length,
+        has_more_before: false,
+        has_more_after: false,
+    }
+}
+
+export async function* streamSidecarLogs(runId: string): AsyncGenerator<{
+    type: 'initial' | 'delta' | 'done' | 'error'
+    content?: string
+    status?: string
+    error?: string
+}> {
+    const run = mockRuns.get(runId)
+    if (!run) {
+        yield { type: 'error', error: 'Run not found' }
+        return
+    }
+
+    yield {
+        type: 'initial',
+        content: `[${new Date().toISOString()}] [INFO] Starting job monitor for ${runId}\n[INFO] Created job pane\n`,
+    }
+
+    await delay(500)
+    yield { type: 'delta', content: '[INFO] Detected WandB dir: /tmp/wandb/run-mock\n' }
+    await delay(300)
+    yield { type: 'done', status: run.status }
+}
+
 export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
     await delay(100)
     const run = mockRuns.get(runId)

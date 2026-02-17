@@ -1,0 +1,60 @@
+{
+  "sweep_id": "1c354ca49797",
+  "sweep_name": "best-loss-main",
+  "goal": "Sensitivity analysis: varying steps (10,30,50,100) and learning rates for stable profile",
+  "created_at": "2026-02-17T01:32:57Z",
+  "runs": [
+    {
+      "run_id": "b7d9a9c35890",
+      "name": "stable-10steps",
+      "profile": "stable",
+      "steps": 10,
+      "lr": 0.0003,
+      "type": "steps_sensitivity"
+    },
+    {
+      "run_id": "e9d14933d127",
+      "name": "stable-30steps",
+      "profile": "stable",
+      "steps": 30,
+      "lr": 0.0003,
+      "type": "steps_sensitivity"
+    },
+    {
+      "run_id": "51ee30e4243a",
+      "name": "stable-50steps",
+      "profile": "stable",
+      "steps": 50,
+      "lr": 0.0003,
+      "type": "steps_sensitivity"
+    },
+    {
+      "run_id": "a17b7e755ec9",
+      "name": "stable-100steps",
+      "profile": "stable",
+      "steps": 100,
+      "lr": 0.0003,
+      "type": "steps_sensitivity"
+    },
+    {
+      "run_id": "24c15a519003",
+      "name": "stable-50steps-lr1e-4",
+      "profile": "stable",
+      "steps": 50,
+      "lr": 0.0001,
+      "type": "lr_ablation"
+    },
+    {
+      "run_id": "645257ee0ebb",
+      "name": "stable-50steps-lr1e-3",
+      "profile": "stable",
+      "steps": 50,
+      "lr": 0.001,
+      "type": "lr_ablation"
+    }
+  ],
+  "expected_results": {
+    "steps_sensitivity": "More steps should yield lower final loss (down to floor of 1.05)",
+    "lr_ablation": "Learning rate should not affect loss (synthetic function ignores lr)"
+  }
+}

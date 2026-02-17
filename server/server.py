@@ -11,6 +11,7 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
+import glob
 from dataclasses import dataclass
 import json
 import math
@@ -45,6 +46,7 @@ from wild_loop import (
 )
 import wild_loop as wild_loop_mod
 from wild_loop_v2 import WildV2Engine
+from memory_store import MemoryStore
 
 import httpx
 import uvicorn
@@ -353,6 +355,7 @@ class RunCreate(BaseModel):
     sweep_id: Optional[str] = None  # If part of a sweep
     parent_run_id: Optional[str] = None
     origin_alert_id: Optional[str] = None
+    chat_session_id: Optional[str] = None  # Originating chat session for traceability
     auto_start: bool = False  # If True, skip ready and go straight to queued
 
 
@@ -380,6 +383,7 @@ class SweepCreate(BaseModel):
     goal: Optional[str] = None
     status: Optional[str] = None  # draft, pending, running
     ui_config: Optional[dict] = None
+    chat_session_id: Optional[str] = None  # Originating chat session for traceability
 
 
 class SweepUpdate(BaseModel):
@@ -917,6 +921,13 @@ wild_v2_engine = WildV2Engine(
     chat_sessions=chat_sessions,
 )
 
+# Memory store (persistent lessons / context)
+memory_store = MemoryStore(get_workdir=lambda: WORKDIR)
+memory_store.load()
+
+# Inject memory store into V2 engine so reflections can write memories
+wild_v2_engine.memory_store = memory_store
+
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
 
 STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS = 0.75
@@ -1240,6 +1251,17 @@ def _is_metric_key(key: object) -> bool:
     return True
 
 
+def _find_wandb_dir_from_run_dir(run_dir: Optional[str]) -> Optional[str]:
+    """Scan the predictable wandb_data/ path inside run_dir for a WandB run directory."""
+    if not run_dir:
+        return None
+    wandb_base = os.path.join(run_dir, "wandb_data", "wandb")
+    if not os.path.isdir(wandb_base):
+        return None
+    matches = sorted(glob.glob(os.path.join(wandb_base, "run-*")))
+    return matches[-1] if matches else None
+
+
 def _resolve_metrics_file(wandb_dir: Optional[str]) -> Optional[str]:
     """Resolve likely metrics file paths from a wandb run directory."""
     if not wandb_dir:
@@ -1388,21 +1410,52 @@ def _get_wandb_curve_data(wandb_dir: Optional[str]) -> Optional[dict]:
     return payload
 
 
+def _load_run_metrics(run_dir: Optional[str]) -> dict:
+    """Load stored metrics from agent_metrics.jsonl in the run directory."""
+    if not run_dir:
+        return {}
+    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
+    if not os.path.isfile(metrics_file):
+        return {}
+    return _parse_metrics_history(metrics_file)
+
+
 def _run_response_payload(run_id: str, run: dict) -> dict:
-    """Build run response payload enriched with metrics from wandb (if available)."""
+    """Build run response payload enriched with metrics.
+
+    Metrics come from two sources, in priority order:
+    1. Stored metrics POSTed by the sidecar (agent_metrics.jsonl)
+    2. WandB files discovered via wandb_dir or run_dir
+    """
     payload = {"id": run_id, **run}
-    parsed = _get_wandb_curve_data(run.get("wandb_dir"))
+
+    # Source 1: stored metrics from sidecar POSTs
+    parsed = _load_run_metrics(run.get("run_dir"))
+
+    # Source 2: wandb files (fallback)
+    if not parsed or not parsed.get("metricSeries"):
+        wandb_dir = run.get("wandb_dir")
+        if not wandb_dir:
+            wandb_dir = _find_wandb_dir_from_run_dir(run.get("run_dir"))
+            if wandb_dir:
+                run["wandb_dir"] = wandb_dir
+                payload["wandb_dir"] = wandb_dir
+        wandb_parsed = _get_wandb_curve_data(wandb_dir)
+        if wandb_parsed:
+            parsed = wandb_parsed
+
     if not parsed:
         return payload
-
-    parsed_history = parsed.get("lossHistory")
-    if parsed_history:
-        payload["lossHistory"] = parsed_history
 
     parsed_metric_series = parsed.get("metricSeries")
     if parsed_metric_series:
         payload["metricSeries"] = parsed_metric_series
         payload["metricKeys"] = parsed.get("metricKeys", list(parsed_metric_series.keys()))
+
+    # Also provide lossHistory for backward compat with components that still use it
+    parsed_history = parsed.get("lossHistory")
+    if parsed_history:
+        payload["lossHistory"] = parsed_history
 
     parsed_metrics = parsed.get("metrics") if isinstance(parsed.get("metrics"), dict) else {}
     existing_metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
@@ -1411,11 +1464,9 @@ def _run_response_payload(run_id: str, run: dict) -> dict:
         "accuracy": parsed_metrics.get("accuracy", existing_metrics.get("accuracy")),
         "epoch": parsed_metrics.get("epoch", existing_metrics.get("epoch")),
     }
-    if all(isinstance(merged_metrics.get(key), (int, float)) for key in ("loss", "accuracy", "epoch")):
+    if any(isinstance(merged_metrics.get(key), (int, float)) for key in ("loss", "accuracy", "epoch")):
         payload["metrics"] = {
-            "loss": float(merged_metrics["loss"]),
-            "accuracy": float(merged_metrics["accuracy"]),
-            "epoch": float(merged_metrics["epoch"]),
+            k: float(v) for k, v in merged_metrics.items() if isinstance(v, (int, float))
         }
 
     return payload
@@ -3525,6 +3576,7 @@ async def create_run(req: RunCreate):
         "sweep_id": req.sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
+        "chat_session_id": req.chat_session_id,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -3536,7 +3588,7 @@ async def create_run(req: RunCreate):
     _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
     
-    record_created_entity("run", run_id)
+    record_created_entity("run", run_id, chat_session_id=req.chat_session_id)
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
 
     # If auto_start is requested, actually launch the run in tmux
@@ -3905,6 +3957,64 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
     return {"alert_id": alert_id}
 
 
+# ---- Metrics Endpoints (sidecar-pushed) ----
+
+@app.post("/runs/{run_id}/metrics")
+async def post_run_metrics(run_id: str, request: Request):
+    """Accept metrics rows from the sidecar and append to stored metrics file.
+
+    Body should be JSON with a 'rows' array of metric dictionaries, e.g.:
+    {"rows": [{"step": 1, "train/loss": 0.5, "accuracy": 0.6}, ...]}
+    """
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    body = await request.json()
+    rows = body.get("rows", [])
+    if not isinstance(rows, list) or len(rows) == 0:
+        raise HTTPException(status_code=400, detail="'rows' must be a non-empty array")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
+
+    try:
+        with open(metrics_file, "a") as f:
+            for row in rows:
+                if isinstance(row, dict):
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.error(f"Failed to write metrics for run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write metrics")
+
+    # Invalidate cache for this file
+    _wandb_metrics_cache.pop(metrics_file, None)
+
+    logger.debug(f"Received {len(rows)} metric rows for run {run_id}")
+    return {"appended": len(rows)}
+
+
+@app.get("/runs/{run_id}/metrics")
+async def get_run_metrics(run_id: str):
+    """Return parsed metrics for a run from stored metrics file."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    parsed = _load_run_metrics(run_dir)
+
+    # Fallback to wandb files if no stored metrics
+    if not parsed or not parsed.get("metricSeries"):
+        wandb_dir = run.get("wandb_dir") or _find_wandb_dir_from_run_dir(run_dir)
+        wandb_parsed = _get_wandb_curve_data(wandb_dir)
+        if wandb_parsed:
+            parsed = wandb_parsed
+
+    return parsed or {}
+
+
 @app.get("/alerts")
 async def list_alerts():
     """List alerts ordered by newest first."""
@@ -4233,6 +4343,68 @@ async def wild_v2_steer(req: WildV2SteerRequest):
     return wild_v2_engine.steer(req.context)
 
 
+# =============================================================================
+# Memory Bank Endpoints
+# =============================================================================
+
+class MemoryCreateRequest(BaseModel):
+    title: str
+    content: str
+    source: str = "user"  # "user" | "agent" | "reflection"
+    tags: list = []
+    session_id: str = ""
+
+class MemoryUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    is_active: Optional[bool] = None
+    tags: Optional[list] = None
+
+
+@app.get("/memories")
+async def list_memories(active_only: bool = False, source: Optional[str] = None):
+    """List all memories, optionally filtered."""
+    entries = memory_store.list(active_only=active_only, source=source)
+    return [{"id": m.id, "title": m.title, "content": m.content,
+             "source": m.source, "tags": m.tags, "session_id": m.session_id,
+             "created_at": m.created_at, "is_active": m.is_active}
+            for m in entries]
+
+
+@app.post("/memories")
+async def create_memory(req: MemoryCreateRequest):
+    """Create a new memory entry."""
+    entry = memory_store.add(
+        title=req.title,
+        content=req.content,
+        source=req.source,
+        tags=req.tags,
+        session_id=req.session_id,
+    )
+    return entry.to_dict()
+
+
+@app.patch("/memories/{memory_id}")
+async def update_memory(memory_id: str, req: MemoryUpdateRequest):
+    """Update a memory (toggle, edit title/content)."""
+    updates = {k: v for k, v in req.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    entry = memory_store.update(memory_id, **updates)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return entry.to_dict()
+
+
+@app.delete("/memories/{memory_id}")
+async def delete_memory(memory_id: str):
+    """Delete a memory."""
+    deleted = memory_store.delete(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"deleted": True, "id": memory_id}
+
+
 @app.get("/cluster")
 async def get_cluster_state():
     """Get the persisted cluster state and current run summary."""
@@ -4521,7 +4693,7 @@ async def list_sweeps(
 class WildSweepCreate(BaseModel):
     name: str = "Wild Loop Sweep"
     goal: str = ""
-
+    chat_session_id: Optional[str] = None  # Originating chat session
 
 @app.post("/sweeps/wild")
 async def create_wild_sweep(req: WildSweepCreate):
@@ -4543,6 +4715,7 @@ async def create_wild_sweep(req: WildSweepCreate):
         "created_at": created_at,
         "goal": req.goal,
         "is_wild": True,
+        "chat_session_id": req.chat_session_id,
         "ui_config": None,
         "creation_context": _derive_sweep_creation_context(
             name=req.name,
@@ -4610,6 +4783,7 @@ async def create_sweep(req: SweepCreate):
             "goal": req.goal,
             "max_runs": req.max_runs,
             "ui_config": req.ui_config,
+            "chat_session_id": req.chat_session_id,
             "creation_context": creation_context,
             "progress": {
                 "total": 0,
@@ -4624,7 +4798,7 @@ async def create_sweep(req: SweepCreate):
         }
         sweeps[sweep_id] = sweep_data
         save_runs_state()
-        record_created_entity("sweep", sweep_id)
+        record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
         logger.info(f"Created draft sweep {sweep_id}: {req.name}")
         return {"id": sweep_id, **sweep_data}
     
@@ -4668,6 +4842,7 @@ async def create_sweep(req: SweepCreate):
         "goal": req.goal,
         "max_runs": req.max_runs,
         "ui_config": req.ui_config,
+        "chat_session_id": req.chat_session_id,
         "creation_context": creation_context,
         "progress": {
             "total": len(run_ids),
@@ -4685,9 +4860,9 @@ async def create_sweep(req: SweepCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
     
-    record_created_entity("sweep", sweep_id)
+    record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
     for rid in run_ids:
-        record_created_entity("run", rid)
+        record_created_entity("run", rid, chat_session_id=req.chat_session_id)
     logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
 
@@ -4863,7 +5038,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
 
-    record_created_entity("run", run_id)
+    record_created_entity("run", run_id, chat_session_id=getattr(req, 'chat_session_id', None))
     logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
     return {"id": run_id, **run_data}
 
@@ -5009,6 +5184,106 @@ async def stream_run_logs(run_id: str):
                         last_size = current_size
                         yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
     
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+
+@app.get("/runs/{run_id}/sidecar-logs")
+async def get_sidecar_logs(
+    run_id: str,
+    offset: int = Query(-10000, description="Byte offset. Negative = from end."),
+    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
+):
+    """Get sidecar logs with byte-offset pagination."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+
+    if not run_dir:
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+    log_file = os.path.join(run_dir, "sidecar.log")
+    if not os.path.exists(log_file):
+        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+    limit = min(limit, 100 * 1024)
+
+    try:
+        total_size = os.path.getsize(log_file)
+
+        if offset < 0:
+            actual_offset = max(0, total_size + offset)
+        else:
+            actual_offset = min(offset, total_size)
+
+        with open(log_file, "r", errors="replace") as f:
+            f.seek(actual_offset)
+            content = f.read(limit)
+
+        bytes_read = len(content.encode('utf-8'))
+        end_offset = actual_offset + bytes_read
+
+        return {
+            "content": content,
+            "offset": actual_offset,
+            "total_size": total_size,
+            "has_more_before": actual_offset > 0,
+            "has_more_after": end_offset < total_size
+        }
+    except Exception as e:
+        logger.error(f"Error reading sidecar logs for {run_id}: {e}")
+        return {"content": f"Error reading logs: {e}", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+
+
+@app.get("/runs/{run_id}/sidecar-logs/stream")
+async def stream_sidecar_logs(run_id: str):
+    """Stream sidecar logs via SSE."""
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    run_dir = run.get("run_dir")
+
+    async def log_generator():
+        if not run_dir:
+            yield f"data: {json.dumps({'error': 'No run directory'})}\n\n"
+            return
+
+        log_file = os.path.join(run_dir, "sidecar.log")
+        last_size = 0
+
+        # Send initial content
+        if os.path.exists(log_file):
+            with open(log_file, "r", errors="replace") as f:
+                content = f.read()
+                last_size = len(content.encode('utf-8'))
+                yield f"data: {json.dumps({'type': 'initial', 'content': content})}\n\n"
+
+        # Stream updates
+        while True:
+            await asyncio.sleep(0.5)
+
+            current_run = runs.get(run_id, {})
+            if current_run.get("status") in ["finished", "failed", "stopped"]:
+                if os.path.exists(log_file):
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        if new_content:
+                            yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'status': current_run.get('status')})}\n\n"
+                break
+
+            if os.path.exists(log_file):
+                current_size = os.path.getsize(log_file)
+                if current_size > last_size:
+                    with open(log_file, "r", errors="replace") as f:
+                        f.seek(last_size)
+                        new_content = f.read()
+                        last_size = current_size
+                        yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
+
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 
