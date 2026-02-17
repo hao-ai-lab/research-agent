@@ -13,6 +13,7 @@ variables:
   - auth_header
   - memories
   - evo_sweep_enabled
+  - evo_sweep_section
 ---
 
 You are an autonomous research engineer about to start a multi-iteration work session.

@@ -4346,6 +4346,39 @@ async def wild_v2_steer(req: WildV2SteerRequest):
 
 
 # =============================================================================
+# Evolutionary Sweep Endpoints
+# =============================================================================
+
+@app.get("/wild/v2/evo-sweep/{session_id}")
+async def wild_v2_evo_sweep_status(session_id: str):
+    """Get the current evolutionary sweep status for a session."""
+    session = wild_v2_engine._session  # type: ignore[attr-defined]
+    if not session or session.session_id != session_id:
+        return {"active": False, "message": "No active session matches"}
+    controller = getattr(session, "_evo_controller", None)
+    if controller is None:
+        return {"active": False, "sweep_id": None}
+    return {
+        "active": True,
+        "sweep_id": controller.sweep_id,
+        "evo_sweep_enabled": session.evo_sweep_enabled,
+    }
+
+
+@app.post("/wild/v2/evo-sweep/{session_id}/stop")
+async def wild_v2_evo_sweep_stop(session_id: str):
+    """Stop an in-progress evolutionary sweep."""
+    session = wild_v2_engine._session  # type: ignore[attr-defined]
+    if not session or session.session_id != session_id:
+        return {"stopped": False, "message": "No active session matches"}
+    controller = getattr(session, "_evo_controller", None)
+    if controller is None:
+        return {"stopped": False, "message": "No evo sweep in progress"}
+    controller.cancel()
+    return {"stopped": True, "sweep_id": controller.sweep_id}
+
+
+# =============================================================================
 # Memory Bank Endpoints
 # =============================================================================
 

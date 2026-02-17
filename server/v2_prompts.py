@@ -296,6 +296,66 @@ def _api_catalog(ctx: PromptContext) -> str:
 - `GET  {s}/openapi.json` — OpenAPI schema (health/preflight probe)"""
 
 
+def _evo_sweep_section(ctx: PromptContext) -> str:
+    """Build the evo sweep documentation section (only when enabled)."""
+    if not ctx.evo_sweep_enabled:
+        return ""
+    return """## 🧬 Evolutionary Sweep Mode (Enabled)
+
+Evolutionary sweep is **enabled** for this session. You can trigger a population-based optimization sweep by emitting the `<evo_sweep>` signal.
+
+### When to use Evo Sweep
+- Hyperparameter optimization across a defined search space
+- Code variant selection (e.g., different kernel implementations)
+- Any situation requiring structured generate → evaluate → select → mutate cycles
+
+### How to trigger
+Include this in your response when you want to launch an evolutionary sweep:
+
+```
+<evo_sweep>
+{
+    "target_script": "train.py",
+    "fitness_metric": "accuracy",
+    "fitness_direction": "max",
+    "search_space": {
+        "learning_rate": [0.001, 0.01, 0.1],
+        "batch_size": [16, 32, 64],
+        "dropout": {"low": 0.0, "high": 0.5}
+    },
+    "population_size": 4,
+    "generations": 3,
+    "top_k": 2,
+    "sweep_name": "lr-bs-sweep"
+}
+</evo_sweep>
+```
+
+### Fields
+| Field | Required | Description |
+|-------|----------|-------------|
+| `target_script` | ✅ | Path to the script to run |
+| `fitness_metric` | ✅ | Metric name to optimise |
+| `fitness_direction` | ❌ | `"max"` or `"min"` (default: `"max"`) |
+| `search_space` | ❌ | Dict of param → list of values or `{"low": N, "high": M}` |
+| `population_size` | ❌ | Candidates per generation (default: 4) |
+| `generations` | ❌ | Number of generations (default: 3) |
+| `top_k` | ❌ | Survivors per generation (default: 2) |
+| `sweep_name` | ❌ | Human-readable sweep name |
+
+### Planning with Evo Sweep
+- Include an evo sweep task in your plan with a clear fitness metric and search space
+- The evo sweep runs as an inner loop — creates its own sweep and runs via the server API
+- After the sweep completes, the best config and fitness are appended to the iteration record
+- You can use those results in subsequent iterations
+
+### Constraints
+- Target script must accept `--param=value` CLI arguments matching search space keys
+- Script must report the fitness metric via the server's metrics API
+- The evo sweep will create a dedicated tracking sweep and multiple runs
+"""
+
+
 # ---------------------------------------------------------------------------
 # Planning prompt (iteration 0)
 # ---------------------------------------------------------------------------
@@ -323,6 +383,7 @@ def build_planning_prompt(
         "auth_header": auth_header_val,
         "memories": ctx.memories_text,
         "evo_sweep_enabled": "true" if ctx.evo_sweep_enabled else "false",
+        "evo_sweep_section": _evo_sweep_section(ctx),
     }
 
     rendered = render_fn("wild_v2_planning", variables)
@@ -365,6 +426,7 @@ def build_iteration_prompt(
         "auth_header": auth_header_val,
         "memories": ctx.memories_text,
         "evo_sweep_enabled": "true" if ctx.evo_sweep_enabled else "false",
+        "evo_sweep_section": _evo_sweep_section(ctx),
     }
 
     rendered = render_fn("wild_v2_iteration", variables)
