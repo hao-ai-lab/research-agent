@@ -539,7 +539,7 @@ export function ConnectedChatView({
 
     return (
         <div className="flex h-full overflow-hidden">
-            <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+            <div className="flex flex-1 min-w-[400px] flex-col overflow-hidden">
                 {/* Error banner */}
                 {error && (
                     <div className="shrink-0 bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 text-sm text-destructive">

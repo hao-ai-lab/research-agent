@@ -1,0 +1,88 @@
+{
+  "sweep_id": "1c354ca49797",
+  "sweep_name": "best-loss-main",
+  "extraction_timestamp": "2026-02-17T01:35:00Z",
+  "runs": [
+    {
+      "run_id": "b7d9a9c35890",
+      "name": "stable-10steps",
+      "profile": "stable",
+      "steps": 10,
+      "lr": 0.0003,
+      "type": "steps_sensitivity",
+      "final_loss": 1.55,
+      "min_loss": 1.55,
+      "reached_floor": false,
+      "convergence_step": null
+    },
+    {
+      "run_id": "e9d14933d127",
+      "name": "stable-30steps",
+      "profile": "stable",
+      "steps": 30,
+      "lr": 0.0003,
+      "type": "steps_sensitivity",
+      "final_loss": 1.05,
+      "min_loss": 1.05,
+      "reached_floor": true,
+      "convergence_step": 18
+    },
+    {
+      "run_id": "51ee30e4243a",
+      "name": "stable-50steps",
+      "profile": "stable",
+      "steps": 50,
+      "lr": 0.0003,
+      "type": "steps_sensitivity",
+      "final_loss": 1.05,
+      "min_loss": 1.05,
+      "reached_floor": true,
+      "convergence_step": 18
+    },
+    {
+      "run_id": "a17b7e755ec9",
+      "name": "stable-100steps",
+      "profile": "stable",
+      "steps": 100,
+      "lr": 0.0003,
+      "type": "steps_sensitivity",
+      "final_loss": 1.05,
+      "min_loss": 1.05,
+      "reached_floor": true,
+      "convergence_step": 18
+    },
+    {
+      "run_id": "24c15a519003",
+      "name": "stable-50steps-lr1e-4",
+      "profile": "stable",
+      "steps": 50,
+      "lr": 0.0001,
+      "type": "lr_ablation",
+      "final_loss": 1.05,
+      "min_loss": 1.05,
+      "reached_floor": true,
+      "convergence_step": 18
+    },
+    {
+      "run_id": "645257ee0ebb",
+      "name": "stable-50steps-lr1e-3",
+      "profile": "stable",
+      "steps": 50,
+      "lr": 0.001,
+      "type": "lr_ablation",
+      "final_loss": 1.05,
+      "min_loss": 1.05,
+      "reached_floor": true,
+      "convergence_step": 18
+    }
+  ],
+  "findings": {
+    "steps_threshold": "18+ steps required to reach floor loss (1.05)",
+    "lr_effect": "No effect - all LR values (1e-4, 3e-4, 1e-3) produce identical loss curves",
+    "best_config": {
+      "min_loss": 1.05,
+      "achieved_by": ["stable-30steps", "stable-50steps", "stable-100steps", "stable-50steps-lr1e-4", "stable-50steps-lr1e-3"],
+      "optimal_steps": "18-30 (no benefit beyond 18 steps)"
+    }
+  }
+}

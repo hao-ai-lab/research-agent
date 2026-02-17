@@ -13,7 +13,7 @@ interface WildLoopDebugPanelProps {
 }
 
 const DEBUG_PANEL_MIN_WIDTH = 320
-const DEBUG_PANEL_MAX_WIDTH = 760
+const DEBUG_PANEL_MAX_WIDTH = 600
 const DEBUG_PANEL_DEFAULT_WIDTH = 360
 
 type TaskItemStatus = 'done' | 'doing' | 'todo'
@@ -382,8 +382,8 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
 
     return (
         <div
-            className={`relative flex h-full flex-col border-l border-border bg-background/95 backdrop-blur-sm ${isResizingPanel ? 'select-none' : ''}`}
-            style={{ width: `${panelWidth}px` }}
+            className={`relative flex h-full shrink-0 flex-col border-l border-border bg-background/95 backdrop-blur-sm ${isResizingPanel ? 'select-none' : ''}`}
+            style={{ width: `${panelWidth}px`, maxWidth: '50vw' }}
         >
             <button
                 type="button"
@@ -490,7 +490,7 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                 {/* Goal */}
                                 <div>
                                     <div className="text-[10px] text-muted-foreground mb-1 font-medium">Goal</div>
-                                    <div className="text-foreground">{v2Status.goal || '—'}</div>
+                                    <div className="text-foreground whitespace-pre-wrap break-words">{v2Status.goal || '—'}</div>
                                 </div>
 
                                 {/* Session Dir */}
@@ -879,7 +879,7 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                     <span>{status.iteration}</span>
 
                                     <span className="text-muted-foreground">Goal:</span>
-                                    <span className="truncate" title={status.goal || undefined}>{status.goal || '—'}</span>
+                                    <span className="whitespace-pre-wrap break-words" title={status.goal || undefined}>{status.goal || '—'}</span>
 
                                     <span className="text-muted-foreground">Session:</span>
                                     <span className="font-mono text-[10px] truncate" title={status.session_id || undefined}>
