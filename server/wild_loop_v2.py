@@ -28,8 +28,12 @@ try:
         PromptContext,
         build_iteration_prompt,
         build_planning_prompt,
+        build_reflection_prompt,
+        parse_continue,
+        parse_memories,
         parse_plan,
         parse_promise,
+        parse_reflection,
         parse_summary,
     )
 except ImportError:
@@ -37,8 +41,12 @@ except ImportError:
         PromptContext,
         build_iteration_prompt,
         build_planning_prompt,
+        build_reflection_prompt,
+        parse_continue,
+        parse_memories,
         parse_plan,
         parse_promise,
+        parse_reflection,
         parse_summary,
     )
 
@@ -69,9 +77,16 @@ class WildV2Session:
     # Per-iteration OpenCode session IDs (for debugging)
     opencode_sessions: list = field(default_factory=list)
 
+    # Reflection (set after DONE signal reflection step)
+    reflection: str = ""
+
     # Struggle detection
     no_progress_streak: int = 0      # consecutive iterations with no file changes
     short_iteration_count: int = 0   # iterations < 30s
+
+    # User availability context
+    autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
+    away_duration_minutes: int = 0    # 0 = user is present
 
     def to_dict(self) -> dict:
         return {
@@ -87,8 +102,11 @@ class WildV2Session:
             "steer_context": self.steer_context,
             "chat_session_id": self.chat_session_id,
             "opencode_sessions": self.opencode_sessions,
+            "reflection": self.reflection,
             "no_progress_streak": self.no_progress_streak,
             "short_iteration_count": self.short_iteration_count,
+            "autonomy_level": self.autonomy_level,
+            "away_duration_minutes": self.away_duration_minutes,
         }
 
 
@@ -133,6 +151,9 @@ class WildV2Engine:
         self._session: Optional[WildV2Session] = None
         self._task: Optional[asyncio.Task] = None
 
+        # Memory store — injected after construction by server.py
+        self.memory_store = None  # type: ignore[assignment]
+
     # -- Properties --
 
     @property
@@ -151,9 +172,11 @@ class WildV2Engine:
         chat_session_id: Optional[str] = None,
         max_iterations: int = 25,
         wait_seconds: float = 30.0,
+        autonomy_level: str = "balanced",
+        away_duration_minutes: int = 0,
     ) -> dict:
         """Start a new V2 wild session."""
-        logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d", goal[:80], chat_session_id, max_iterations)
+        logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d autonomy=%s", goal[:80], chat_session_id, max_iterations, autonomy_level)
 
         if self._session and self._session.status == "running":
             logger.info("[wild-v2] Existing session running, stopping first")
@@ -167,6 +190,8 @@ class WildV2Engine:
             started_at=time.time(),
             chat_session_id=chat_session_id,
             wait_seconds=wait_seconds,
+            autonomy_level=autonomy_level,
+            away_duration_minutes=away_duration_minutes,
         )
 
         # Create session storage dir
@@ -346,6 +371,15 @@ class WildV2Engine:
     def _build_context(self, session: "WildV2Session") -> PromptContext:
         """Create a PromptContext from current session + engine state."""
         session_dir = self._session_dir(session.session_id)
+
+        # Load active memories for prompt injection
+        memories_text = ""
+        if self.memory_store is not None:
+            try:
+                memories_text = self.memory_store.format_for_prompt()
+            except Exception as e:
+                logger.warning("[wild-v2] Failed to load memories: %s", e)
+
         return PromptContext(
             goal=session.goal,
             iteration=session.iteration,
@@ -360,6 +394,10 @@ class WildV2Engine:
             history=session.history,
             no_progress_streak=session.no_progress_streak,
             short_iteration_count=session.short_iteration_count,
+            autonomy_level=session.autonomy_level,
+            away_duration_minutes=session.away_duration_minutes,
+            user_wants_questions=session.autonomy_level != "full" and session.away_duration_minutes == 0,
+            memories_text=memories_text,
         )
 
     async def _send_prompt(self, session: "WildV2Session", prompt: str, display_msg: str) -> str:
@@ -415,7 +453,8 @@ class WildV2Engine:
             display_msg = (
                 "[Wild V2 — Step #0]\n"
                 "Role: plan\n"
-                "Goal: Explore the codebase and write a concrete task checklist in tasks.md."
+                f"Goal: {session.goal}\n"
+                "Task: Create a concrete step-by-step plan."
             )
             logger.debug("[wild-v2] Planning prompt built, length=%d chars", len(planning_prompt))
 
@@ -575,7 +614,74 @@ class WildV2Engine:
                            session.iteration, session.max_iterations, promise, iter_duration)
 
                 if promise == "DONE":
-                    logger.info("[wild-v2] Agent signaled DONE at iteration %d", session.iteration)
+                    logger.info("[wild-v2] Agent signaled DONE at iteration %d — running reflection", session.iteration)
+
+                    # --- Reflection step ---
+                    try:
+                        ctx = self._build_context(session)
+                        # Attach current plan text for the reflection template
+                        ctx._plan_text = session.plan
+                        reflection_prompt = build_reflection_prompt(
+                            ctx,
+                            render_fn=self._render_fn,
+                            summary_of_work=summary,
+                        )
+                        display_msg = (
+                            f"[Wild V2 — Reflection after iteration #{session.iteration}]\n"
+                            "Role: reflect\n"
+                            f"Goal: {session.goal}"
+                        )
+                        reflection_text = await self._send_prompt(session, reflection_prompt, display_msg)
+                        logger.info("[wild-v2] Reflection response: %d chars", len(reflection_text))
+
+                        reflection_body = parse_reflection(reflection_text) or reflection_text[:500]
+                        should_continue = parse_continue(reflection_text)
+                        session.reflection = reflection_body
+
+                        # Extract and store memories from reflection
+                        if self.memory_store is not None:
+                            try:
+                                memories = parse_memories(reflection_text)
+                                for mem in memories:
+                                    self.memory_store.add(
+                                        title=mem["title"],
+                                        content=mem["content"],
+                                        source="reflection",
+                                        tags=[mem["tag"]],
+                                        session_id=session.session_id,
+                                    )
+                                if memories:
+                                    logger.info("[wild-v2] Stored %d memories from reflection", len(memories))
+                            except Exception as mem_err:
+                                logger.warning("[wild-v2] Failed to extract/store memories: %s", mem_err)
+
+                        # Record reflection in history
+                        reflection_record = {
+                            "iteration": session.iteration,
+                            "summary": f"[Reflection] {reflection_body[:200]}",
+                            "started_at": time.time(),
+                            "finished_at": time.time(),
+                            "duration_s": 0,
+                            "opencode_session_id": session.chat_session_id or "",
+                            "promise": "REFLECT_CONTINUE" if should_continue else "REFLECT_STOP",
+                            "files_modified": [],
+                            "error_count": 0,
+                            "errors": [],
+                        }
+                        session.history.append(reflection_record)
+                        self._append_iteration_log(session, reflection_record)
+                        self._save_state(session.session_id)
+
+                        if should_continue:
+                            logger.info("[wild-v2] Reflection decided to CONTINUE")
+                            # Don't break — let the while loop continue to next iteration
+                            await asyncio.sleep(2)
+                            continue
+                        else:
+                            logger.info("[wild-v2] Reflection decided to STOP")
+                    except Exception as reflect_err:
+                        logger.warning("[wild-v2] Reflection step failed: %s — stopping anyway", reflect_err, exc_info=True)
+
                     session.status = "done"
                     session.finished_at = time.time()
                     break

@@ -1,0 +1,9 @@
+run_name,profile,steps,lr,final_loss,min_loss,convergence_step,reached_floor
+baseline-spiky-20steps,spiky,20,0.0003,1.05,1.05,18,true
+baseline-stable-20steps,stable,20,0.0003,1.05,1.05,18,true
+stable-10steps,stable,10,0.0003,1.55,1.55,,false
+stable-30steps,stable,30,0.0003,1.05,1.05,18,true
+stable-50steps,stable,50,0.0003,1.05,1.05,18,true
+stable-100steps,stable,100,0.0003,1.05,1.05,18,true
+stable-50steps-lr1e-4,stable,50,0.0001,1.05,1.05,18,true
+stable-50steps-lr1e-3,stable,50,0.001,1.05,1.05,18,true

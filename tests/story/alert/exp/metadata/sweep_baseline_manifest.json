@@ -1,0 +1,33 @@
+{
+  "sweep_id": "4e54cde07396",
+  "sweep_name": "best-loss-baseline",
+  "goal": "Baseline comparison: spiky vs stable profile with 20 steps each",
+  "created_at": "2026-02-17T01:30:06Z",
+  "runs": [
+    {
+      "run_id": "130b5c88d308",
+      "name": "baseline-spiky-20steps",
+      "profile": "spiky",
+      "steps": 20,
+      "command": "cd /Users/mike/Project/GitHub/research-agent/tests/story/alert && python train_gpt2.py --steps 20 --sleep-seconds 0.1 --profile spiky"
+    },
+    {
+      "run_id": "e82acfc3bf3f",
+      "name": "baseline-stable-20steps",
+      "profile": "stable",
+      "steps": 20,
+      "command": "cd /Users/mike/Project/GitHub/research-agent/tests/story/alert && python train_gpt2.py --steps 20 --sleep-seconds 0.1 --profile stable"
+    }
+  ],
+  "expected_final_loss": {
+    "spiky": 1.05,
+    "stable": 1.05
+  },
+  "expected_min_loss": {
+    "spiky": 1.05,
+    "stable": 1.05
+  },
+  "spike_steps": {
+    "spiky": [4, 5]
+  }
+}

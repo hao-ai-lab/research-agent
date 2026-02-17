@@ -1,0 +1,9 @@
+Starting GPT-2 training...
+Config: model=gpt2 lr=0.0003 batch_size=16
+WANDB_RUN_DIR: /Users/mike/Project/GitHub/research-agent/tests/story/alert/.mock_wandb/run-20260217-012911
+[step=1] loss=2.18
+[step=2] loss=2.11
+[step=3] loss=2.04
+[step=4] loss=1.97
+[step=5] loss=1.9
+Training loop complete. Keeping run alive for alert interaction...

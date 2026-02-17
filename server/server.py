@@ -46,6 +46,7 @@ from wild_loop import (
 )
 import wild_loop as wild_loop_mod
 from wild_loop_v2 import WildV2Engine
+from memory_store import MemoryStore
 
 import httpx
 import uvicorn
@@ -354,6 +355,7 @@ class RunCreate(BaseModel):
     sweep_id: Optional[str] = None  # If part of a sweep
     parent_run_id: Optional[str] = None
     origin_alert_id: Optional[str] = None
+    chat_session_id: Optional[str] = None  # Originating chat session for traceability
     auto_start: bool = False  # If True, skip ready and go straight to queued
 
 
@@ -381,6 +383,7 @@ class SweepCreate(BaseModel):
     goal: Optional[str] = None
     status: Optional[str] = None  # draft, pending, running
     ui_config: Optional[dict] = None
+    chat_session_id: Optional[str] = None  # Originating chat session for traceability
 
 
 class SweepUpdate(BaseModel):
@@ -917,6 +920,13 @@ wild_v2_engine = WildV2Engine(
     save_chat_state=lambda: save_chat_state(),
     chat_sessions=chat_sessions,
 )
+
+# Memory store (persistent lessons / context)
+memory_store = MemoryStore(get_workdir=lambda: WORKDIR)
+memory_store.load()
+
+# Inject memory store into V2 engine so reflections can write memories
+wild_v2_engine.memory_store = memory_store
 
 active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
 
@@ -3572,6 +3582,7 @@ async def create_run(req: RunCreate):
         "sweep_id": req.sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
+        "chat_session_id": req.chat_session_id,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -3583,7 +3594,7 @@ async def create_run(req: RunCreate):
     _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
     
-    record_created_entity("run", run_id)
+    record_created_entity("run", run_id, chat_session_id=req.chat_session_id)
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
 
     # If auto_start is requested, actually launch the run in tmux
@@ -4338,6 +4349,68 @@ async def wild_v2_steer(req: WildV2SteerRequest):
     return wild_v2_engine.steer(req.context)
 
 
+# =============================================================================
+# Memory Bank Endpoints
+# =============================================================================
+
+class MemoryCreateRequest(BaseModel):
+    title: str
+    content: str
+    source: str = "user"  # "user" | "agent" | "reflection"
+    tags: list = []
+    session_id: str = ""
+
+class MemoryUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    is_active: Optional[bool] = None
+    tags: Optional[list] = None
+
+
+@app.get("/memories")
+async def list_memories(active_only: bool = False, source: Optional[str] = None):
+    """List all memories, optionally filtered."""
+    entries = memory_store.list(active_only=active_only, source=source)
+    return [{"id": m.id, "title": m.title, "content": m.content,
+             "source": m.source, "tags": m.tags, "session_id": m.session_id,
+             "created_at": m.created_at, "is_active": m.is_active}
+            for m in entries]
+
+
+@app.post("/memories")
+async def create_memory(req: MemoryCreateRequest):
+    """Create a new memory entry."""
+    entry = memory_store.add(
+        title=req.title,
+        content=req.content,
+        source=req.source,
+        tags=req.tags,
+        session_id=req.session_id,
+    )
+    return entry.to_dict()
+
+
+@app.patch("/memories/{memory_id}")
+async def update_memory(memory_id: str, req: MemoryUpdateRequest):
+    """Update a memory (toggle, edit title/content)."""
+    updates = {k: v for k, v in req.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    entry = memory_store.update(memory_id, **updates)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return entry.to_dict()
+
+
+@app.delete("/memories/{memory_id}")
+async def delete_memory(memory_id: str):
+    """Delete a memory."""
+    deleted = memory_store.delete(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"deleted": True, "id": memory_id}
+
+
 @app.get("/cluster")
 async def get_cluster_state():
     """Get the persisted cluster state and current run summary."""
@@ -4626,7 +4699,7 @@ async def list_sweeps(
 class WildSweepCreate(BaseModel):
     name: str = "Wild Loop Sweep"
     goal: str = ""
-
+    chat_session_id: Optional[str] = None  # Originating chat session
 
 @app.post("/sweeps/wild")
 async def create_wild_sweep(req: WildSweepCreate):
@@ -4648,6 +4721,7 @@ async def create_wild_sweep(req: WildSweepCreate):
         "created_at": created_at,
         "goal": req.goal,
         "is_wild": True,
+        "chat_session_id": req.chat_session_id,
         "ui_config": None,
         "creation_context": _derive_sweep_creation_context(
             name=req.name,
@@ -4715,6 +4789,7 @@ async def create_sweep(req: SweepCreate):
             "goal": req.goal,
             "max_runs": req.max_runs,
             "ui_config": req.ui_config,
+            "chat_session_id": req.chat_session_id,
             "creation_context": creation_context,
             "progress": {
                 "total": 0,
@@ -4729,7 +4804,7 @@ async def create_sweep(req: SweepCreate):
         }
         sweeps[sweep_id] = sweep_data
         save_runs_state()
-        record_created_entity("sweep", sweep_id)
+        record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
         logger.info(f"Created draft sweep {sweep_id}: {req.name}")
         return {"id": sweep_id, **sweep_data}
     
@@ -4773,6 +4848,7 @@ async def create_sweep(req: SweepCreate):
         "goal": req.goal,
         "max_runs": req.max_runs,
         "ui_config": req.ui_config,
+        "chat_session_id": req.chat_session_id,
         "creation_context": creation_context,
         "progress": {
             "total": len(run_ids),
@@ -4790,9 +4866,9 @@ async def create_sweep(req: SweepCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
     
-    record_created_entity("sweep", sweep_id)
+    record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
     for rid in run_ids:
-        record_created_entity("run", rid)
+        record_created_entity("run", rid, chat_session_id=req.chat_session_id)
     logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
 
@@ -4968,7 +5044,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
 
-    record_created_entity("run", run_id)
+    record_created_entity("run", run_id, chat_session_id=getattr(req, 'chat_session_id', None))
     logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
     return {"id": run_id, **run_data}
 
