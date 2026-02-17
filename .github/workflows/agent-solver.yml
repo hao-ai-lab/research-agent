@@ -1,20 +1,19 @@
-name: Agent Issue Solver
+name: Bot Issue Solver
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
 
-# Only one solver per issue at a time
+# Only one solver run per issue at a time.
 concurrency:
   group: solver-${{ github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
   solve-issue:
-    # Only trigger when an issue has the 'agent-solve' label
-    if: contains(github.event.issue.labels.*.name, 'agent-solve')
+    if: github.event.label.name == 'bot'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       issues: write
       pull-requests: write
@@ -22,6 +21,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || github.token }}
 
       - uses: actions/setup-python@v5
         with:
@@ -30,38 +31,149 @@ jobs:
       - name: Install dependencies
         run: pip install modal httpx
 
-      - name: Write issue body to file
+      - name: Persist issue body
         run: |
           cat > /tmp/issue_body.txt << 'ISSUE_BODY_EOF'
           ${{ github.event.issue.body }}
           ISSUE_BODY_EOF
 
-      - name: Comment that the agent is working
+      - name: Build issue session URLs and setup link
+        run: |
+          set -euo pipefail
+          APP_SLUG="research-agent-issue-${{ github.event.issue.number }}"
+          SERVER_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-server.modal.run"
+          APP_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-app.modal.run"
+          OPENCODE_URL="https://${{ github.repository_owner }}--${APP_SLUG}-preview-opencode.modal.run"
+          ISSUE_AUTH_TOKEN="$(python - <<'PY'
+          import secrets
+          print(secrets.token_hex(32))
+          PY
+          )"
+          SETUP_URL="$(python - <<'PY'
+          import base64
+          import json
+          import os
+          payload = {
+            "apiUrl": os.environ["SERVER_URL"],
+            "authToken": os.environ["ISSUE_AUTH_TOKEN"],
+          }
+          token = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8").rstrip("=")
+          print(f'{os.environ["APP_URL"]}/#setup={token}')
+          PY
+          )"
+
+          echo "APP_SLUG=${APP_SLUG}" >> "$GITHUB_ENV"
+          echo "SERVER_URL=${SERVER_URL}" >> "$GITHUB_ENV"
+          echo "APP_URL=${APP_URL}" >> "$GITHUB_ENV"
+          echo "OPENCODE_URL=${OPENCODE_URL}" >> "$GITHUB_ENV"
+          echo "ISSUE_AUTH_TOKEN=${ISSUE_AUTH_TOKEN}" >> "$GITHUB_ENV"
+          echo "SETUP_URL=${SETUP_URL}" >> "$GITHUB_ENV"
+
+      - name: Deploy per-issue Modal workspace
+        run: |
+          modal deploy modal_preview.py --name "${APP_SLUG}"
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_PREVIEW_OPENCODE_URL: ${{ env.OPENCODE_URL }}
+          RESEARCH_AGENT_USER_AUTH_TOKEN: ${{ env.ISSUE_AUTH_TOKEN }}
+
+      - name: Verify issue workspace health
+        run: |
+          set -euo pipefail
+          check_url() {
+            local name="$1"
+            local url="$2"
+            local expected_regex="${3:-}"
+            for attempt in $(seq 1 30); do
+              response="$(curl -sS -L --max-time 15 -w '\n%{http_code}' "${url}" || true)"
+              body="$(echo "${response}" | sed '$d')"
+              code="$(echo "${response}" | tail -n 1)"
+              if [[ "${code}" == "200" ]]; then
+                if [[ -z "${expected_regex}" ]] || echo "${body}" | grep -Eq "${expected_regex}"; then
+                  echo "✅ ${name} healthy (attempt ${attempt})"
+                  return 0
+                fi
+              fi
+              echo "Attempt ${attempt}/30: ${name} not ready yet (status: ${code})"
+              sleep 6
+            done
+            echo "❌ ${name} failed health check"
+            return 1
+          }
+
+          check_url "Issue app" "${APP_URL}"
+          check_url "Issue server" "${SERVER_URL}/health" '"status"[[:space:]]*:[[:space:]]*"ok"'
+          unauth_code="$(curl -sS -o /dev/null -w '%{http_code}' "${SERVER_URL}/sessions" || true)"
+          auth_code="$(curl -sS -o /dev/null -w '%{http_code}' -H "X-Auth-Token: ${ISSUE_AUTH_TOKEN}" "${SERVER_URL}/sessions" || true)"
+          [[ "${unauth_code}" == "401" ]]
+          [[ "${auth_code}" == "200" ]]
+
+      - name: Publish issue session comment
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.createComment({
+            const issueNumber = context.payload.issue.number
+            const marker = '<!-- issue-bot-session -->'
+            const body = [
+              marker,
+              '## 🤖 Bot Session Ready',
+              '',
+              `This issue is now attached to an isolated bot workspace.`,
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| **Open Session (auto-setup)** | [Launch](${process.env.SETUP_URL}) |`,
+              `| **App URL** | [Open App](${process.env.APP_URL}) |`,
+              `| **Server URL** | [API](${process.env.SERVER_URL}) |`,
+              `| **OpenCode URL** | [Endpoint](${process.env.OPENCODE_URL}) |`,
+              `| **Workspace** | \`${process.env.APP_SLUG}\` |`,
+              '',
+              '> The setup link preloads endpoint + token in your browser app settings.',
+              '> Do not share this setup link publicly.',
+              `> Updated at ${new Date().toISOString()}`,
+            ].join('\n')
+
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: [
-                '🤖 **Agent Solver Started**',
-                '',
-                `Working on issue #${context.payload.issue.number}...`,
-                `Commit: \`${context.sha.slice(0,7)}\``,
-                `Time: ${new Date().toISOString()}`,
-              ].join('\n'),
-            });
+              issue_number: issueNumber,
+            })
+            const existing = comments.find(c => c.user.type === 'Bot' && c.body.includes(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body,
+              })
+            }
+        env:
+          APP_SLUG: ${{ env.APP_SLUG }}
+          APP_URL: ${{ env.APP_URL }}
+          SERVER_URL: ${{ env.SERVER_URL }}
+          OPENCODE_URL: ${{ env.OPENCODE_URL }}
+          SETUP_URL: ${{ env.SETUP_URL }}
 
-      - name: Run agent solver
+      - name: Run solver for issue
         id: solver
+        continue-on-error: true
         run: |
           python agent_solver.py \
+            --mode solve-issue \
             --issue-number "${{ github.event.issue.number }}" \
             --issue-title "${{ github.event.issue.title }}" \
             --issue-body-file /tmp/issue_body.txt \
             --repo "${{ github.repository }}" \
-            --base-branch "${{ github.event.repository.default_branch }}"
+            --base-branch "${{ github.event.repository.default_branch }}" \
+            --output-file /tmp/solver_result.json
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
@@ -69,32 +181,50 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           RESEARCH_AGENT_KEY: ${{ secrets.RESEARCH_AGENT_KEY }}
 
-      - name: Comment result on issue
+      - name: Publish solver result comment
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const outcome = '${{ steps.solver.outcome }}';
-            const issueNumber = context.payload.issue.number;
-            let body;
-            if (outcome === 'success') {
-              body = [
-                '✅ **Agent Solver Completed**',
-                '',
-                `A PR has been created for issue #${issueNumber}.`,
-                `Check the pull requests tab for branch \`agent/issue-${issueNumber}\`.`,
-              ].join('\n');
-            } else {
-              body = [
-                '❌ **Agent Solver Failed**',
-                '',
-                'The automated solver encountered an error.',
-                'Check the [Actions log](' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions) for details.',
-              ].join('\n');
+            const fs = require('fs')
+            const issueNumber = context.payload.issue.number
+            const outcome = '${{ steps.solver.outcome }}'
+            let parsed = {}
+            try {
+              if (fs.existsSync('/tmp/solver_result.json')) {
+                parsed = JSON.parse(fs.readFileSync('/tmp/solver_result.json', 'utf8'))
+              }
+            } catch (err) {
+              parsed = { parse_error: String(err) }
             }
+
+            const prUrl = parsed.pr_url
+            const logTail = String(parsed.agent_output_tail || '').trim()
+            let body
+            if (outcome === 'success' && prUrl) {
+              body = [
+                '✅ **Bot Solver Completed**',
+                '',
+                `Draft PR opened: ${prUrl}`,
+                '',
+                'Use `/bot <instructions>` in PR comments to continue the loop.',
+                logTail ? `\n### Operations tail\n\`\`\`\n${logTail.slice(-1800)}\n\`\`\`` : '',
+              ].join('\n')
+            } else {
+              const errText = parsed.error || 'The automated solver failed.'
+              body = [
+                '❌ **Bot Solver Failed**',
+                '',
+                `${errText}`,
+                '',
+                `Check [Actions logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions).`,
+                logTail ? `\n### Operations tail\n\`\`\`\n${logTail.slice(-1800)}\n\`\`\`` : '',
+              ].join('\n')
+            }
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
               body,
-            });
+            })
