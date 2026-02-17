@@ -1141,6 +1141,8 @@ export interface WildV2Status {
     pending_events_count?: number
     pending_events?: Array<{ id: string; type: string; title: string; detail: string }>
     steer_context?: string
+    chat_session_id?: string
+    reflection?: string
     no_progress_streak?: number
     short_iteration_count?: number
     system_health?: {

@@ -354,6 +354,7 @@ class RunCreate(BaseModel):
     sweep_id: Optional[str] = None  # If part of a sweep
     parent_run_id: Optional[str] = None
     origin_alert_id: Optional[str] = None
+    chat_session_id: Optional[str] = None  # Originating chat session for traceability
     auto_start: bool = False  # If True, skip ready and go straight to queued
 
 
@@ -381,6 +382,7 @@ class SweepCreate(BaseModel):
     goal: Optional[str] = None
     status: Optional[str] = None  # draft, pending, running
     ui_config: Optional[dict] = None
+    chat_session_id: Optional[str] = None  # Originating chat session for traceability
 
 
 class SweepUpdate(BaseModel):
@@ -3566,6 +3568,7 @@ async def create_run(req: RunCreate):
         "sweep_id": req.sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
+        "chat_session_id": req.chat_session_id,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -3577,7 +3580,7 @@ async def create_run(req: RunCreate):
     _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
     
-    record_created_entity("run", run_id)
+    record_created_entity("run", run_id, chat_session_id=req.chat_session_id)
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
 
     # If auto_start is requested, actually launch the run in tmux
@@ -4620,7 +4623,7 @@ async def list_sweeps(
 class WildSweepCreate(BaseModel):
     name: str = "Wild Loop Sweep"
     goal: str = ""
-
+    chat_session_id: Optional[str] = None  # Originating chat session
 
 @app.post("/sweeps/wild")
 async def create_wild_sweep(req: WildSweepCreate):
@@ -4642,6 +4645,7 @@ async def create_wild_sweep(req: WildSweepCreate):
         "created_at": created_at,
         "goal": req.goal,
         "is_wild": True,
+        "chat_session_id": req.chat_session_id,
         "ui_config": None,
         "creation_context": _derive_sweep_creation_context(
             name=req.name,
@@ -4709,6 +4713,7 @@ async def create_sweep(req: SweepCreate):
             "goal": req.goal,
             "max_runs": req.max_runs,
             "ui_config": req.ui_config,
+            "chat_session_id": req.chat_session_id,
             "creation_context": creation_context,
             "progress": {
                 "total": 0,
@@ -4723,7 +4728,7 @@ async def create_sweep(req: SweepCreate):
         }
         sweeps[sweep_id] = sweep_data
         save_runs_state()
-        record_created_entity("sweep", sweep_id)
+        record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
         logger.info(f"Created draft sweep {sweep_id}: {req.name}")
         return {"id": sweep_id, **sweep_data}
     
@@ -4767,6 +4772,7 @@ async def create_sweep(req: SweepCreate):
         "goal": req.goal,
         "max_runs": req.max_runs,
         "ui_config": req.ui_config,
+        "chat_session_id": req.chat_session_id,
         "creation_context": creation_context,
         "progress": {
             "total": len(run_ids),
@@ -4784,9 +4790,9 @@ async def create_sweep(req: SweepCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
     
-    record_created_entity("sweep", sweep_id)
+    record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
     for rid in run_ids:
-        record_created_entity("run", rid)
+        record_created_entity("run", rid, chat_session_id=req.chat_session_id)
     logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
 
@@ -4962,7 +4968,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
 
-    record_created_entity("run", run_id)
+    record_created_entity("run", run_id, chat_session_id=getattr(req, 'chat_session_id', None))
     logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
     return {"id": run_id, **run_data}
 

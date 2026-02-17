@@ -35,6 +35,68 @@ def parse_summary(text: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def parse_reflection(text: str) -> Optional[str]:
+    """Parse <reflection>...</reflection> from agent output."""
+    m = re.search(r"<reflection>([\s\S]*?)</reflection>", text)
+    return m.group(1).strip() if m else None
+
+
+def parse_continue(text: str) -> bool:
+    """Parse <continue>yes|no</continue> from reflection output.
+
+    Returns True if the agent wants to continue, False otherwise.
+    Defaults to False (stop) if the tag is missing or unparseable.
+    """
+    m = re.search(r"<continue>([\s\S]*?)</continue>", text)
+    if not m:
+        return False
+    return m.group(1).strip().lower() in ("yes", "true", "1")
+
+
+# ---------------------------------------------------------------------------
+# Reflection prompt (after DONE signal)
+# ---------------------------------------------------------------------------
+
+def build_reflection_prompt(
+    ctx: "PromptContext",
+    render_fn: Callable = None,
+    summary_of_work: str = "",
+) -> str:
+    """Build the post-DONE reflection prompt.
+
+    The prompt is resolved from the ``wild_v2_reflection`` SKILL.md template
+    via *render_fn* (typically ``PromptSkillManager.render``).
+
+    Falls back to a minimal inline template if render_fn is not available.
+    """
+    variables = {
+        "goal": ctx.goal,
+        "iteration": str(ctx.iteration),
+        "max_iterations": str(ctx.max_iterations),
+        "summary_of_work": summary_of_work,
+        "plan": getattr(ctx, "_plan_text", "") or "",
+        "workdir": ctx.workdir,
+    }
+
+    if render_fn:
+        rendered = render_fn("wild_v2_reflection", variables)
+        if rendered:
+            return rendered
+
+    # Inline fallback
+    return (
+        f"You just completed iteration {ctx.iteration} of {ctx.max_iterations} "
+        f"and signaled DONE.\n\n"
+        f"## Original Goal\n\n{ctx.goal}\n\n"
+        f"## Work Summary\n\n{summary_of_work}\n\n"
+        "Reflect on what was accomplished, your progress towards the goal, "
+        "whether there is meaningful remaining work, and any lessons learned.\n\n"
+        "Output:\n"
+        "<reflection>Your reflection</reflection>\n"
+        "<continue>yes</continue> or <continue>no</continue>\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Prompt context — plain data, no behaviour
 # ---------------------------------------------------------------------------

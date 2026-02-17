@@ -19,7 +19,14 @@ from wild_loop_v2 import (
     parse_promise,
     parse_summary,
 )
-from v2_prompts import PromptContext, build_planning_prompt, build_iteration_prompt
+from v2_prompts import (
+    PromptContext,
+    build_iteration_prompt,
+    build_planning_prompt,
+    build_reflection_prompt,
+    parse_continue,
+    parse_reflection,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -204,20 +211,26 @@ class TestWildV2Engine:
         engine.stop()
 
     def test_prompt_fallback_without_render_fn(self):
-        """Verify prompts fall back to inline templates without render_fn."""
+        """Verify prompts use a render_fn that returns goal-containing text."""
+        def mock_render(skill_id, variables):
+            return f"[{skill_id}] Goal: {variables.get('goal', '?')} at iteration {variables.get('iteration', 0)}"
+
         self.engine.start(goal="Fallback test")
         ctx = self.engine._build_context(self.engine.session)
-        prompt = build_planning_prompt(ctx)  # no render_fn
+        prompt = build_planning_prompt(ctx, render_fn=mock_render)
         assert "Fallback test" in prompt
-        assert "iteration 0" in prompt.lower() or "planning" in prompt.lower()
+        assert "planning" in prompt.lower()
         self.engine.stop()
 
     def test_api_catalog_in_prompt(self):
         """Verify the API catalog appears in iteration prompts."""
+        def mock_render(skill_id, variables):
+            return f"[{skill_id}] {variables.get('goal', '')} {variables.get('api_catalog', '')}"
+
         self.engine.start(goal="API catalog test")
         ctx = self.engine._build_context(self.engine.session)
         ctx.iteration = 1
-        prompt = build_iteration_prompt(ctx)  # fallback
+        prompt = build_iteration_prompt(ctx, render_fn=mock_render)
         assert "/sweeps/wild" in prompt
         assert "/runs" in prompt
         assert "/wild/v2/events" in prompt
@@ -244,12 +257,17 @@ class TestWildV2Engine:
 # Async loop tests  (mock OpenCode)
 # ---------------------------------------------------------------------------
 
+def _mock_render(skill_id, variables):
+    """Simple render function for tests — returns a minimal prompt with the goal."""
+    return f"[{skill_id}] Goal: {variables.get('goal', '?')}"
+
+
 def test_loop_done_signal():
-    """Agent returns DONE after one iteration — loop should complete."""
+    """Agent returns DONE after one iteration — reflection says stop, loop should complete."""
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000", render_fn=_mock_render)
 
         call_count = 0
 
@@ -263,12 +281,19 @@ def test_loop_done_signal():
                     "<plan>\n# Tasks\n- [ ] Do the thing\n</plan>\n"
                     "<summary>Planning done.</summary>"
                 )
-            # Execution response — DONE
+            if call_count == 2:
+                # Execution response — DONE
+                return (
+                    "I completed the task.\n\n"
+                    "<summary>Finished everything.</summary>\n"
+                    "<plan>\n# Done\n- [x] All done\n</plan>\n"
+                    "<promise>DONE</promise>"
+                )
+            # Reflection response — STOP
             return (
-                "I completed the task.\n\n"
-                "<summary>Finished everything.</summary>\n"
-                "<plan>\n# Done\n- [x] All done\n</plan>\n"
-                "<promise>DONE</promise>"
+                "<reflection>All work is complete. Progress is 100%.\n"
+                "Lessons: test first.</reflection>\n"
+                "<continue>no</continue>"
             )
 
         engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
@@ -294,13 +319,18 @@ def test_loop_done_signal():
             tmpdir, ".agents", "wild", engine.session.session_id, "tasks.md"
         )
         assert os.path.isfile(tasks_path)
-        # History should be: planning (iter 0) + execution (iter 1)
-        assert len(engine.session.history) == 2
+        # History should be: planning (iter 0) + execution (iter 1) + reflection
+        assert len(engine.session.history) == 3
         assert engine.session.history[0]["iteration"] == 0  # planning
         assert engine.session.history[1]["promise"] == "DONE"
+        assert engine.session.history[2]["promise"] == "REFLECT_STOP"
         assert "duration_s" in engine.session.history[1]
         assert "files_modified" in engine.session.history[1]
         assert "error_count" in engine.session.history[1]
+
+        # Reflection should be stored
+        assert engine.session.reflection != ""
+        assert "100%" in engine.session.reflection
 
         # Iteration log should have been written
         log_path = os.path.join(
@@ -320,7 +350,7 @@ def test_loop_max_iterations():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000", render_fn=_mock_render)
 
         call_count = 0
 
@@ -359,7 +389,7 @@ def test_loop_waiting_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000")
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000", render_fn=_mock_render)
 
         call_count = 0
 
@@ -371,7 +401,10 @@ def test_loop_waiting_signal():
                 return "Explored.\n<plan># Tasks\n- [ ] Wait then do</plan>\n<summary>Planned.</summary>"
             if call_count == 2:
                 return "Waiting.\n<summary>Waiting for runs.</summary>\n<promise>WAITING</promise>"
-            return "Done.\n<summary>Finished.</summary>\n<promise>DONE</promise>"
+            if call_count == 3:
+                return "Done.\n<summary>Finished.</summary>\n<promise>DONE</promise>"
+            # Reflection response — STOP
+            return "<reflection>Complete.</reflection>\n<continue>no</continue>"
 
         engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
         engine._run_opencode = mock_run
@@ -389,10 +422,155 @@ def test_loop_waiting_signal():
 
         assert engine.session.status == "done"
         assert engine.session.iteration == 2
-        # History: planning (0) + WAITING (1) + DONE (2)
-        assert len(engine.session.history) == 3
+        # History: planning (0) + WAITING (1) + DONE (2) + REFLECT_STOP
+        assert len(engine.session.history) == 4
         assert engine.session.history[0]["iteration"] == 0  # planning
         assert engine.session.history[1]["promise"] == "WAITING"
         assert engine.session.history[2]["promise"] == "DONE"
+        assert engine.session.history[3]["promise"] == "REFLECT_STOP"
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Reflection Parsers
+# ---------------------------------------------------------------------------
+
+class TestParseReflection:
+    def test_extracts_reflection(self):
+        text = "Before\n<reflection>Learned a lot about the codebase.</reflection>\nAfter"
+        assert parse_reflection(text) == "Learned a lot about the codebase."
+
+    def test_multiline(self):
+        text = "<reflection>\nLine 1\nLine 2\n</reflection>"
+        result = parse_reflection(text)
+        assert "Line 1" in result
+        assert "Line 2" in result
+
+    def test_none(self):
+        assert parse_reflection("no reflection tags") is None
+
+
+class TestParseContinue:
+    def test_yes(self):
+        assert parse_continue("<continue>yes</continue>") is True
+
+    def test_no(self):
+        assert parse_continue("<continue>no</continue>") is False
+
+    def test_true(self):
+        assert parse_continue("<continue>true</continue>") is True
+
+    def test_false(self):
+        assert parse_continue("<continue>false</continue>") is False
+
+    def test_default_no_tag(self):
+        assert parse_continue("No continue tag here") is False
+
+    def test_case_insensitive(self):
+        assert parse_continue("<continue>YES</continue>") is True
+        assert parse_continue("<continue>No</continue>") is False
+
+
+class TestBuildReflectionPrompt:
+    def test_with_render_fn(self):
+        ctx = PromptContext(
+            goal="Build a model",
+            iteration=3,
+            max_iterations=10,
+            workdir="/tmp/test",
+            tasks_path="/tmp/test/tasks.md",
+            log_path="/tmp/test/log.md",
+            server_url="http://localhost:10000",
+            session_id="s1",
+        )
+        def mock_render(skill_id, variables):
+            return f"RENDERED:{skill_id}:goal={variables['goal']}"
+
+        prompt = build_reflection_prompt(ctx, render_fn=mock_render, summary_of_work="Did things")
+        assert prompt == "RENDERED:wild_v2_reflection:goal=Build a model"
+
+    def test_fallback_without_render_fn(self):
+        ctx = PromptContext(
+            goal="Train a model",
+            iteration=2,
+            max_iterations=5,
+            workdir="/tmp/test",
+            tasks_path="/tmp/test/tasks.md",
+            log_path="/tmp/test/log.md",
+            server_url="http://localhost:10000",
+            session_id="s1",
+        )
+        prompt = build_reflection_prompt(ctx, summary_of_work="Trained it")
+        assert "Train a model" in prompt
+        assert "iteration 2" in prompt
+        assert "Trained it" in prompt
+        assert "<reflection>" in prompt
+        assert "<continue>" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Async Reflection Tests
+# ---------------------------------------------------------------------------
+
+def test_loop_done_with_reflection_continue():
+    """Agent says DONE, reflection says continue, resumes for one more iteration."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000", render_fn=_mock_render)
+
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Planning
+                return "Explored.\n<plan># Tasks\n- [ ] Step 1\n- [ ] Step 2</plan>\n<summary>Planned.</summary>"
+            if call_count == 2:
+                # Iteration 1 — DONE
+                return "Step 1 done.\n<summary>Did step 1.</summary>\n<promise>DONE</promise>"
+            if call_count == 3:
+                # Reflection — CONTINUE (more work to do)
+                return (
+                    "<reflection>Step 1 complete but Step 2 remains. Progress: 50%.\n"
+                    "Should continue to finish Step 2.</reflection>\n"
+                    "<continue>yes</continue>"
+                )
+            if call_count == 4:
+                # Iteration 2 — DONE again
+                return "Step 2 done.\n<summary>Did step 2.</summary>\n<promise>DONE</promise>"
+            # Second reflection — STOP
+            return (
+                "<reflection>All done. 100% progress.</reflection>\n"
+                "<continue>no</continue>"
+            )
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+
+        engine.start(goal="Two step task", max_iterations=10)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert engine.session.status == "done"
+        assert engine.session.iteration == 2  # 2 execution iterations
+        # History: plan(0) + exec(1) + reflect_continue + exec(2) + reflect_stop
+        assert len(engine.session.history) == 5
+        assert engine.session.history[1]["promise"] == "DONE"
+        assert engine.session.history[2]["promise"] == "REFLECT_CONTINUE"
+        assert engine.session.history[3]["promise"] == "DONE"
+        assert engine.session.history[4]["promise"] == "REFLECT_STOP"
+
+        # Last reflection is stored
+        assert "100%" in engine.session.reflection
 
     asyncio.run(_run())
