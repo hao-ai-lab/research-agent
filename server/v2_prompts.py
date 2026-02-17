@@ -191,6 +191,9 @@ class PromptContext:
     no_progress_streak: int = 0
     short_iteration_count: int = 0
 
+    # Evolutionary sweep mode
+    evo_sweep_enabled: bool = False
+
     # User availability context
     autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
     away_duration_minutes: int = 0    # 0 = user is present
@@ -319,6 +322,7 @@ def build_planning_prompt(
         "api_catalog": _api_catalog(ctx),
         "auth_header": auth_header_val,
         "memories": ctx.memories_text,
+        "evo_sweep_enabled": "true" if ctx.evo_sweep_enabled else "false",
     }
 
     rendered = render_fn("wild_v2_planning", variables)
@@ -360,6 +364,7 @@ def build_iteration_prompt(
         "api_catalog": _api_catalog(ctx),
         "auth_header": auth_header_val,
         "memories": ctx.memories_text,
+        "evo_sweep_enabled": "true" if ctx.evo_sweep_enabled else "false",
     }
 
     rendered = render_fn("wild_v2_iteration", variables)

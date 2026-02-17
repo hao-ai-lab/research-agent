@@ -1163,6 +1163,7 @@ export async function startWildV2(params: {
     chat_session_id?: string
     max_iterations?: number
     wait_seconds?: number
+    evo_sweep_enabled?: boolean
 }): Promise<WildV2Status> {
     const response = await fetch(`${API_URL()}/wild/v2/start`, {
         method: 'POST',
