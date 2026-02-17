@@ -13,7 +13,7 @@ interface WildLoopDebugPanelProps {
 }
 
 const DEBUG_PANEL_MIN_WIDTH = 320
-const DEBUG_PANEL_MAX_WIDTH = 760
+const DEBUG_PANEL_MAX_WIDTH = 600
 const DEBUG_PANEL_DEFAULT_WIDTH = 360
 
 type TaskItemStatus = 'done' | 'doing' | 'todo'
@@ -382,8 +382,8 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
 
     return (
         <div
-            className={`relative flex h-full flex-col border-l border-border bg-background/95 backdrop-blur-sm ${isResizingPanel ? 'select-none' : ''}`}
-            style={{ width: `${panelWidth}px` }}
+            className={`relative flex h-full shrink-0 flex-col border-l border-border bg-background/95 backdrop-blur-sm ${isResizingPanel ? 'select-none' : ''}`}
+            style={{ width: `${panelWidth}px`, maxWidth: '50vw' }}
         >
             <button
                 type="button"
