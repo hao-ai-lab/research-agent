@@ -131,6 +131,13 @@ class TestWildV2Engine:
 
         self.engine.stop()
 
+    def test_set_server_url_updates_prompt_context(self):
+        self.engine.set_server_url("https://preview.example.com/api")
+        self.engine.start(goal="Server URL test")
+        ctx = self.engine._build_context(self.engine.session)
+        assert ctx.server_url == "https://preview.example.com/api"
+        self.engine.stop()
+
     def test_stop(self):
         self.engine.start(goal="Test", max_iterations=3)
         result = self.engine.stop()

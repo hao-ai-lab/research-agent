@@ -26,6 +26,7 @@ import asyncio
 import shutil
 import socket
 import subprocess
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
 from wild_loop import (
@@ -128,6 +129,7 @@ SETTINGS_DATA_FILE = ""
 PLANS_DATA_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
+CLIENT_SERVER_URL_HEADER = "X-Research-Agent-Server-Url"
 FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
 
 AUTH_PROTECTED_PREFIXES = (
@@ -296,6 +298,50 @@ async def auth_middleware(request: Request, call_next):
         )
     
     return await call_next(request)
+
+
+def _first_header_value(raw: Optional[str]) -> str:
+    """Return the first token from a potentially comma-separated header value."""
+    if not raw:
+        return ""
+    return raw.split(",", 1)[0].strip()
+
+
+def _normalize_server_url(raw: Optional[str]) -> Optional[str]:
+    """Normalize a server URL to scheme://host[:port][/path], dropping query/fragment."""
+    if not raw:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    normalized_path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme, parsed.netloc, normalized_path, "", ""))
+
+
+def resolve_server_callback_url(request: Optional[Request] = None) -> str:
+    """Resolve the URL agents should use to call this backend's API."""
+    if request is None:
+        return SERVER_CALLBACK_URL
+
+    explicit_url = _normalize_server_url(request.headers.get(CLIENT_SERVER_URL_HEADER))
+    if explicit_url:
+        return explicit_url
+
+    forwarded_host = _first_header_value(request.headers.get("X-Forwarded-Host"))
+    forwarded_proto = _first_header_value(request.headers.get("X-Forwarded-Proto")) or request.url.scheme
+    if forwarded_host:
+        forwarded_url = _normalize_server_url(f"{forwarded_proto}://{forwarded_host}")
+        if forwarded_url:
+            return forwarded_url
+
+    request_base = _normalize_server_url(str(request.base_url))
+    if request_base:
+        return request_base
+
+    return SERVER_CALLBACK_URL
 
 # =============================================================================
 # Models
@@ -3175,7 +3221,7 @@ class ModeConfig:
     build_state: Callable[[str], dict]  # (message) -> template variables
 
 
-def _build_plan_state(message: str) -> dict:
+def _build_plan_state(message: str, server_url: Optional[str] = None) -> dict:
     """Build template variables for plan mode."""
     # Summarize existing plans for context
     existing_plans_summary = "No existing plans."
@@ -3188,7 +3234,7 @@ def _build_plan_state(message: str) -> dict:
         "goal": message,
         "experiment_context": _build_experiment_context(),
         "existing_plans": existing_plans_summary,
-        "server_url": SERVER_CALLBACK_URL,
+        "server_url": server_url or SERVER_CALLBACK_URL,
         "auth_token": USER_AUTH_TOKEN or "",
     }
 
@@ -3204,7 +3250,7 @@ MODE_REGISTRY: Dict[str, ModeConfig] = {
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tuple:
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent", server_url: Optional[str] = None) -> tuple:
     """Build the full prompt for a chat turn, prepending mode-specific preamble.
 
     Returns (content: str, provenance: dict | None).
@@ -3212,16 +3258,25 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tupl
     """
     mode_note = ""
     provenance = None
+    effective_server_url = server_url or SERVER_CALLBACK_URL
 
     config = MODE_REGISTRY.get(mode)
     if config:
         if config.skill_id == _WILD_SENTINEL:
             # Delegate to wild_loop module
             experiment_context = _build_experiment_context()
-            mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context, server_url=SERVER_CALLBACK_URL, auth_token=USER_AUTH_TOKEN or "")
+            mode_note = build_wild_prompt(
+                prompt_skill_manager.render,
+                experiment_context,
+                server_url=effective_server_url,
+                auth_token=USER_AUTH_TOKEN or "",
+            )
             # Wild mode provenance is handled by the frontend's wild loop
         else:
-            variables = config.build_state(message)
+            if config.skill_id == "ra_mode_plan":
+                variables = _build_plan_state(message, server_url=effective_server_url)
+            else:
+                variables = config.build_state(message)
             skill = prompt_skill_manager.get(config.skill_id)
             rendered = prompt_skill_manager.render(config.skill_id, variables)
             if rendered:
@@ -3458,7 +3513,7 @@ async def stream_session(session_id: str, from_seq: int = Query(1, ge=1), run_id
 
 
 @app.post("/chat")
-async def chat_endpoint(req: ChatRequest):
+async def chat_endpoint(req: ChatRequest, request: Request):
     """Send a message, start background generation, and attach to the stream."""
     session_id = req.session_id
 
@@ -3488,7 +3543,13 @@ async def chat_endpoint(req: ChatRequest):
         elif req.plan_mode:
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
-    content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
+    runtime_server_url = resolve_server_callback_url(request)
+    content, provenance = _build_chat_prompt(
+        session,
+        llm_input,
+        effective_mode,
+        server_url=runtime_server_url,
+    )
     runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it
@@ -4146,7 +4207,7 @@ async def configure_wild_loop_endpoint(req: WildLoopConfigRequest):
 
 
 @app.post("/wild/build-prompt")
-async def build_wild_loop_prompt(req: BuildPromptRequest):
+async def build_wild_loop_prompt(req: BuildPromptRequest, request: Request):
     """Build a wild loop prompt server-side and return full provenance metadata.
 
     Returns the rendered prompt, the skill template used, the variables applied,
@@ -4154,7 +4215,7 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
     """
     result = build_prompt_for_frontend(
         req, prompt_skill_manager.get,
-        server_url=SERVER_CALLBACK_URL,
+        server_url=resolve_server_callback_url(request),
         auth_token=USER_AUTH_TOKEN or "",
     )
     return result
@@ -4165,8 +4226,9 @@ async def build_wild_loop_prompt(req: BuildPromptRequest):
 # =============================================================================
 
 @app.post("/wild/start")
-async def wild_start(req: WildStartRequest):
+async def wild_start(req: WildStartRequest, request: Request):
     """Start the wild loop with a goal and session."""
+    wild_engine.set_server_url(resolve_server_callback_url(request))
     result = wild_engine.start(req)
     save_settings_state()
     return result
@@ -4240,8 +4302,9 @@ class WildV2ResolveRequest(BaseModel):
 
 
 @app.post("/wild/v2/start")
-async def wild_v2_start(req: WildV2StartRequest):
+async def wild_v2_start(req: WildV2StartRequest, request: Request):
     """Start a new V2 wild session (ralph-style loop)."""
+    wild_v2_engine.set_server_url(resolve_server_callback_url(request))
     result = wild_v2_engine.start(
         goal=req.goal,
         chat_session_id=req.chat_session_id,

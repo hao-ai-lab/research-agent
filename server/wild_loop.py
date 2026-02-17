@@ -1045,6 +1045,11 @@ class WildLoopEngine:
         self._server_url = server_url
         self._auth_token = auth_token
 
+    def set_server_url(self, server_url: str) -> None:
+        """Update the server base URL used in generated prompts."""
+        if server_url:
+            self._server_url = server_url
+
     # -----------------------------------------------------------------
     # Lifecycle
     # -----------------------------------------------------------------
@@ -2114,4 +2119,3 @@ class WildLoopEngine:
 # =============================================================================
 
 engine = WildLoopEngine()
-
