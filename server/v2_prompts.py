@@ -35,6 +35,136 @@ def parse_summary(text: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def parse_reflection(text: str) -> Optional[str]:
+    """Parse <reflection>...</reflection> from agent output."""
+    m = re.search(r"<reflection>([\s\S]*?)</reflection>", text)
+    return m.group(1).strip() if m else None
+
+
+def parse_continue(text: str) -> bool:
+    """Parse <continue>yes|no</continue> from reflection output.
+
+    Returns True if the agent wants to continue, False otherwise.
+    Defaults to False (stop) if the tag is missing or unparseable.
+    """
+    m = re.search(r"<continue>([\s\S]*?)</continue>", text)
+    if not m:
+        return False
+    return m.group(1).strip().lower() in ("yes", "true", "1")
+
+
+def parse_memories(text: str) -> list:
+    """Parse <memories>...</memories> from reflection output.
+
+    Expected format inside the tag:
+        - [tag] Title or lesson text
+        - [tag] Another lesson
+
+    Returns a list of dicts: [{"tag": "lesson", "title": "...", "content": "..."}]
+    """
+    m = re.search(r"<memories>([\s\S]*?)</memories>", text)
+    if not m:
+        return []
+    block = m.group(1).strip()
+    results = []
+    for line in block.split("\n"):
+        line = line.strip()
+        if not line or not line.startswith("-"):
+            continue
+        line = line.lstrip("- ").strip()
+        # Parse [tag] prefix
+        tag_match = re.match(r"\[([^\]]+)\]\s*(.*)", line)
+        if tag_match:
+            tag = tag_match.group(1).strip().lower()
+            content = tag_match.group(2).strip()
+        else:
+            tag = "general"
+            content = line
+        if content:
+            results.append({
+                "tag": tag,
+                "title": content[:80],  # first 80 chars as title
+                "content": content,
+            })
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Reflection prompt (after DONE signal)
+# ---------------------------------------------------------------------------
+
+def build_reflection_prompt(
+    ctx: "PromptContext",
+    render_fn: Callable = None,
+    summary_of_work: str = "",
+) -> str:
+    """Build the post-DONE reflection prompt.
+
+    The prompt is resolved from the ``wild_v2_reflection`` SKILL.md template
+    via *render_fn* (typically ``PromptSkillManager.render``).
+
+    Falls back to a minimal inline template if render_fn is not available.
+    """
+    # Build user availability description
+    if ctx.away_duration_minutes > 0:
+        avail_str = (
+            f"The user is AFK (away for ~{ctx.away_duration_minutes} minutes). "
+            f"Autonomy level: {ctx.autonomy_level}. "
+            "The user would appreciate you continuing autonomously."
+        )
+    elif ctx.autonomy_level == "full":
+        avail_str = (
+            "The user is present but has set autonomy to 'full'. "
+            "Continue working without asking questions."
+        )
+    elif ctx.autonomy_level == "cautious":
+        avail_str = (
+            "The user is present and wants to be consulted on important decisions. "
+            "If you plan to continue, only do so if you're confident."
+        )
+    else:
+        avail_str = (
+            "The user is present with balanced autonomy. "
+            "Continue if there's clearly more important work; stop and ask if unsure."
+        )
+
+    variables = {
+        "goal": ctx.goal,
+        "iteration": str(ctx.iteration),
+        "max_iterations": str(ctx.max_iterations),
+        "summary_of_work": summary_of_work,
+        "plan": getattr(ctx, "_plan_text", "") or "",
+        "workdir": ctx.workdir,
+        "user_availability": avail_str,
+        "autonomy_level": ctx.autonomy_level,
+        "memories": ctx.memories_text,
+    }
+
+    if render_fn:
+        rendered = render_fn("wild_v2_reflection", variables)
+        if rendered:
+            return rendered
+
+    # Inline fallback
+    memories_section = f"\n## Active Memories\n\n{ctx.memories_text}\n" if ctx.memories_text else ""
+    return (
+        f"You just completed iteration {ctx.iteration} of {ctx.max_iterations} "
+        f"and signaled DONE.\n\n"
+        f"## Original Goal\n\n{ctx.goal}\n\n"
+        f"## Work Summary\n\n{summary_of_work}\n\n"
+        f"## User Availability\n\n{avail_str}\n\n"
+        f"{memories_section}"
+        "Reflect on what was accomplished, your progress towards the goal, "
+        "whether there is meaningful remaining work, and any lessons learned.\n\n"
+        "Output:\n"
+        "<reflection>Your reflection</reflection>\n"
+        "<continue>yes</continue> or <continue>no</continue>\n"
+        "<memories>\n"
+        "- [tag] Lesson or insight to remember\n"
+        "</memories>\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Prompt context — plain data, no behaviour
 # ---------------------------------------------------------------------------
@@ -60,6 +190,14 @@ class PromptContext:
     # Struggle indicators
     no_progress_streak: int = 0
     short_iteration_count: int = 0
+
+    # User availability context
+    autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
+    away_duration_minutes: int = 0    # 0 = user is present
+    user_wants_questions: bool = True  # False when autonomy is "full" or user is AFK
+
+    # Memory bank (active lessons from past sessions)
+    memories_text: str = ""  # formatted string for prompt injection
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +318,7 @@ def build_planning_prompt(
         "steer_section": _steer_section(ctx),
         "api_catalog": _api_catalog(ctx),
         "auth_header": auth_header_val,
+        "memories": ctx.memories_text,
     }
 
     rendered = render_fn("wild_v2_planning", variables)
@@ -220,6 +359,7 @@ def build_iteration_prompt(
         "struggle_section": _struggle_section(ctx),
         "api_catalog": _api_catalog(ctx),
         "auth_header": auth_header_val,
+        "memories": ctx.memories_text,
     }
 
     rendered = render_fn("wild_v2_iteration", variables)

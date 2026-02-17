@@ -692,6 +692,24 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                                     </div>
                                 )}
 
+                                {/* Last Reflection */}
+                                {v2Status.reflection && (
+                                    <div className="border-t border-border/30 pt-2">
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">🪞 Last Reflection</div>
+                                        <div className="text-[10px] text-foreground/80 whitespace-pre-wrap max-h-24 overflow-y-auto rounded bg-secondary/30 p-2">
+                                            {v2Status.reflection}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Chat Session */}
+                                {v2Status.chat_session_id && (
+                                    <div className="border-t border-border/30 pt-2">
+                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">💬 Chat Session</div>
+                                        <code className="text-[10px] text-blue-400 font-mono">{v2Status.chat_session_id}</code>
+                                    </div>
+                                )}
+
                                 {/* Iteration History */}
                                 {v2Status.history && v2Status.history.length > 0 && (
                                     <div className="border-t border-border/30 pt-2">

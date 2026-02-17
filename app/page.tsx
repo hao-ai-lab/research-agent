@@ -814,11 +814,8 @@ export default function ResearchChat() {
             )}
             {activeTab === 'memory' && (
               <InsightsView
-                rules={memoryRules}
                 showDesktopSidebarToggle={desktopSidebarHidden}
                 onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
-                onToggleRule={handleToggleRule}
-                onAddRule={handleAddRule}
               />
             )}
             {activeTab === 'skills' && (
