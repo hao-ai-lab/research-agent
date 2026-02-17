@@ -293,14 +293,7 @@ export function SettingsDialog({
           options: ['expert', 'novice'],
           value: settings.appearance.starterCardFlavor || 'expert',
         },
-        {
-          id: 'expandToolsAndThinkingByDefault',
-          label: 'Expand Tools & Thinking',
-          description: 'Keep tool calls and thinking blocks expanded by default',
-          icon: Eye,
-          type: 'toggle' as const,
-          value: settings.appearance.expandToolsAndThinkingByDefault === true,
-        },
+
         {
           id: 'appearanceAdvanced',
           label: 'Advanced Appearance',
@@ -849,7 +842,7 @@ export function SettingsDialog({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
-                if (item.id === 'expandToolsAndThinkingByDefault') updateAppearanceSettings({ expandToolsAndThinkingByDefault: checked })
+
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
                     ...settings,

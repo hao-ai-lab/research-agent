@@ -24,6 +24,7 @@ import { Progress } from '@/components/ui/progress'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { useApiConfig } from '@/lib/api-config'
+import { useAppSettings } from '@/lib/app-settings'
 import type { WildLoopPhase } from '@/lib/types'
 import type { RunStats } from '@/hooks/use-wild-loop'
 import type { Alert } from '@/lib/api'
@@ -119,6 +120,7 @@ export function FloatingNav({
   const isSparseDesktopNav = !isChat && !isReport
   const hideDesktopHeader = isSparseDesktopNav && !showDesktopSidebarToggle
   const { useMock: isDemoMode } = useApiConfig()
+  const { settings, setSettings } = useAppSettings()
   const wl = wildLoop
 
   const formatTokenCount = (count: number) => {
@@ -310,6 +312,35 @@ export function FloatingNav({
                   id="collapse-artifacts"
                   checked={collapseArtifactsInChat}
                   onCheckedChange={onToggleCollapseArtifactsInChat}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="flex items-center justify-between cursor-pointer"
+                onSelect={(e) => {
+                  e.preventDefault()
+                  setSettings({
+                    ...settings,
+                    appearance: {
+                      ...settings.appearance,
+                      expandToolsAndThinkingByDefault: !settings.appearance.expandToolsAndThinkingByDefault,
+                    },
+                  })
+                }}
+              >
+                <Label htmlFor="expand-tools" className="cursor-pointer">Expand tools & thinking</Label>
+                <Switch
+                  id="expand-tools"
+                  checked={settings.appearance.expandToolsAndThinkingByDefault === true}
+                  onCheckedChange={(checked) => {
+                    setSettings({
+                      ...settings,
+                      appearance: {
+                        ...settings.appearance,
+                        expandToolsAndThinkingByDefault: checked,
+                      },
+                    })
+                  }}
                   onClick={(e) => e.stopPropagation()}
                 />
               </DropdownMenuItem>
