@@ -236,16 +236,16 @@
     "research-agent": {
       "type": "local",
       "command": [
-        "/mnt/weka/home/zhuojun.cheng/miniconda3/bin/python3",
-        "/mnt/weka/home/zhuojun.cheng/junli/research-agent/server/research_agent_mcp.py"
+        "python3",
+        "./server/research_agent_mcp.py"
       ],
       "enabled": true
     },
     "slurm-cli": {
       "type": "local",
       "command": [
-        "/mnt/weka/home/zhuojun.cheng/miniconda3/bin/python3",
-        "/mnt/weka/home/zhuojun.cheng/junli/research-agent/server/slurm_mcp_cli.py"
+        "python3",
+        "./server/slurm_mcp_cli.py"
       ],
       "enabled": true
     }
