@@ -42,6 +42,8 @@ interface ChatMessageProps {
   onReplyToSelection?: (text: string) => void
   /** Content of the user message that prompted this assistant response (for context extraction) */
   previousUserContent?: string
+  /** When true, tool and thinking blocks start expanded instead of collapsed */
+  defaultExpandToolsAndThinking?: boolean
 }
 
 function extractLeadingQuoteBlock(content: string): { excerpt: string | null; body: string } {
@@ -117,6 +119,7 @@ export function ChatMessage({
   onRunClick,
   onReplyToSelection,
   previousUserContent,
+  defaultExpandToolsAndThinking,
 }: ChatMessageProps) {
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
@@ -615,6 +618,7 @@ export function ChatMessage({
               key={part.id}
               part={part}
               renderMarkdown={renderMarkdown}
+              defaultExpanded={defaultExpandToolsAndThinking}
             />
           ))
         ) : (
@@ -748,12 +752,14 @@ export function ChatMessage({
  */
 function SavedPartRenderer({
   part,
-  renderMarkdown
+  renderMarkdown,
+  defaultExpanded,
 }: {
   part: MessagePart
   renderMarkdown: (content: string) => React.ReactNode
+  defaultExpanded?: boolean
 }) {
-  const [isOpen, setIsOpen] = useState(false) // Default collapsed per user preference
+  const [isOpen, setIsOpen] = useState(defaultExpanded ?? false)
 
   if (part.type === 'thinking') {
     return (

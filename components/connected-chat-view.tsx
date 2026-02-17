@@ -609,6 +609,7 @@ export function ConnectedChatView({
                                                     onLaunchSweep={onLaunchSweep}
                                                     onRunClick={onRunClick}
                                                     onReplyToSelection={handleReplyToSelection}
+                                                    defaultExpandToolsAndThinking={settings.appearance.expandToolsAndThinkingByDefault}
                                                 />
                                             ))
                                             : displayMessages.map((message, index) => {
@@ -645,6 +646,7 @@ export function ConnectedChatView({
                                                             onRunClick={onRunClick}
                                                             onReplyToSelection={handleReplyToSelection}
                                                             previousUserContent={prevUserContent}
+                                                            defaultExpandToolsAndThinking={settings.appearance.expandToolsAndThinkingByDefault}
                                                         />
                                                     </div>
                                                 )
@@ -730,6 +732,7 @@ function CollapsedChatPair({
     onLaunchSweep,
     onRunClick,
     onReplyToSelection,
+    defaultExpandToolsAndThinking,
 }: {
     pair: { user: ChatMessageType; assistant?: ChatMessageType }
     collapseArtifacts: boolean
@@ -740,6 +743,7 @@ function CollapsedChatPair({
     onLaunchSweep?: (config: SweepConfig) => void
     onRunClick: (run: ExperimentRun) => void
     onReplyToSelection?: (text: string) => void
+    defaultExpandToolsAndThinking?: boolean
 }) {
     const [expanded, setExpanded] = useState(false)
 
@@ -779,6 +783,7 @@ function CollapsedChatPair({
                         onEditSweep={onEditSweep}
                         onLaunchSweep={onLaunchSweep}
                         onRunClick={onRunClick}
+                        defaultExpandToolsAndThinking={defaultExpandToolsAndThinking}
                     />
                     {pair.assistant && (
                         <ChatMessage
@@ -792,6 +797,7 @@ function CollapsedChatPair({
                             onRunClick={onRunClick}
                             onReplyToSelection={onReplyToSelection}
                             previousUserContent={pair.user.content}
+                            defaultExpandToolsAndThinking={defaultExpandToolsAndThinking}
                         />
                     )}
                 </div>

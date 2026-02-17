@@ -105,6 +105,7 @@ export interface AppSettings {
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
     mobileEnterToNewline?: boolean;
+    expandToolsAndThinkingByDefault?: boolean;
   };
   integrations: {
     slack?: {

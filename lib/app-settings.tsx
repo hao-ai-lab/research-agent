@@ -54,6 +54,7 @@ export const defaultAppSettings: AppSettings = {
     starterCardFlavor: "expert",
     showSidebarNewChatButton: false,
     mobileEnterToNewline: false,
+    expandToolsAndThinkingByDefault: false,
   },
   integrations: {},
   notifications: {
@@ -401,6 +402,9 @@ function readStoredSettings(): AppSettings {
         mobileEnterToNewline:
           parsed?.appearance?.mobileEnterToNewline ??
           defaultAppSettings.appearance.mobileEnterToNewline,
+        expandToolsAndThinkingByDefault:
+          parsed?.appearance?.expandToolsAndThinkingByDefault ??
+          defaultAppSettings.appearance.expandToolsAndThinkingByDefault,
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,
       notifications: {
