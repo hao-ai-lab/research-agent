@@ -415,7 +415,8 @@ class WildV2Engine:
             display_msg = (
                 "[Wild V2 — Step #0]\n"
                 "Role: plan\n"
-                "Goal: Explore the codebase and write a concrete task checklist in tasks.md."
+                f"Goal: {session.goal}\n"
+                "Task: Create a concrete step-by-step plan."
             )
             logger.debug("[wild-v2] Planning prompt built, length=%d chars", len(planning_prompt))
 
