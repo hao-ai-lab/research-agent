@@ -41,11 +41,11 @@ curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLG
 ## Manual Setup (Advanced)
 
 ```bash
-# Terminal 1 — OpenCode  (token already set above)
+# Terminal 1 — OpenCode 
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 cd v0-research-agent-mobile
 bash install.sh --dev
-source ~/.bashrc
+source ~/.bashrc          # or: source ~/.zshrc (if you use zsh)
 npm install
 uv venv .ra-venv
 uv pip install --python .ra-venv/bin/python -r server/requirements.txt
