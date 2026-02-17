@@ -41,7 +41,6 @@ curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLG
 ## Manual Setup (Advanced)
 
 ```bash
-# Terminal 1 — OpenCode 
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 cd v0-research-agent-mobile
 bash install.sh --dev
@@ -55,14 +54,14 @@ export OPENCODE_CONFIG="$(pwd)/server/opencode.json"
 opencode serve
 ```
 
+Then in another terminal:
 ```bash
-# Terminal 2 — Backend
 cd v0-research-agent-mobile/server
 ../.ra-venv/bin/python server.py --workdir /path/to/your/research/project --port 10000
 ```
 
+Then in another terminal:
 ```bash
-# Terminal 3 — Frontend
 cd v0-research-agent-mobile
 NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000
 ```
