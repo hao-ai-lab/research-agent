@@ -5,13 +5,19 @@ import type { PromptProvenance } from '@/lib/types'
 
 // Get API URL dynamically at runtime (supports localStorage override)
 const API_URL = () => getApiUrl()
+const CLIENT_SERVER_URL_HEADER = 'X-Research-Agent-Server-Url'
 
 // Get headers with optional auth token
 function getHeaders(includeContentType: boolean = false): HeadersInit {
     const headers: HeadersInit = {}
+    const apiUrl = API_URL()
 
     if (includeContentType) {
         headers['Content-Type'] = 'application/json'
+    }
+
+    if (apiUrl) {
+        headers[CLIENT_SERVER_URL_HEADER] = apiUrl
     }
 
     const authToken = getAuthToken()

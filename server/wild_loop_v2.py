@@ -143,6 +143,11 @@ class WildV2Engine:
     def is_active(self) -> bool:
         return self._session is not None and self._session.status == "running"
 
+    def set_server_url(self, server_url: str) -> None:
+        """Update the server base URL used in iteration prompts."""
+        if server_url:
+            self._server_url = server_url
+
     # -- Lifecycle --
 
     def start(
