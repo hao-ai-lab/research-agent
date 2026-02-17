@@ -49,7 +49,7 @@ jobs:
           print(secrets.token_hex(32))
           PY
           )"
-          SETUP_URL="$(python - <<'PY'
+          SETUP_URL="$(SERVER_URL="${SERVER_URL}" ISSUE_AUTH_TOKEN="${ISSUE_AUTH_TOKEN}" APP_URL="${APP_URL}" python - <<'PY'
           import base64
           import json
           import os
