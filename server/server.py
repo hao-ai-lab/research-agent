@@ -368,6 +368,7 @@ class RunStatusUpdate(BaseModel):
     monitor_note: Optional[str] = None
     monitor_tags: Optional[List[str]] = None
     monitoring: Optional[dict] = None
+    monitor_artifacts: Optional[List[str]] = None
 
 
 class RunUpdate(BaseModel):
@@ -3832,6 +3833,8 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
         run["monitor_tags"] = [str(tag)[:40] for tag in update.monitor_tags[:8]]
     if update.monitoring is not None:
         run["monitoring"] = update.monitoring
+    if update.monitor_artifacts is not None:
+        run["monitor_artifacts"] = [str(path)[:260] for path in update.monitor_artifacts[:20]]
 
     effective_exit_code = _coerce_exit_code(run.get("exit_code"))
     if run.get("exit_code") != effective_exit_code:

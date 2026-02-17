@@ -1,4 +1,4 @@
-"""Unit tests for sidecar monitoring playbook behavior."""
+"""Unit tests for mechanical sidecar behaviors."""
 
 import os
 import sys
@@ -9,103 +9,54 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
 import job_sidecar as js
 
 
-def _rows(key: str, values: list[float]) -> list[dict]:
-    return [{key: value, "step": idx} for idx, value in enumerate(values)]
-
-
 def test_parse_cuda_visible_devices_variants():
     assert js.parse_cuda_visible_devices("CUDA_VISIBLE_DEVICES=0,2 python train.py") == [0, 2]
     assert js.parse_cuda_visible_devices("env FOO=1 CUDA_VISIBLE_DEVICES=3 python train.py") == [3]
     assert js.parse_cuda_visible_devices("python train.py") == []
 
 
-def test_command_fingerprint_masks_gpu_assignment():
-    a = js.command_fingerprint("CUDA_VISIBLE_DEVICES=0 python train.py --lr 1e-3")
-    b = js.command_fingerprint("CUDA_VISIBLE_DEVICES=7 python train.py --lr 1e-3")
-    assert a == b
-
-
-def test_detect_log_syndrome_alert_cuda_oom(tmp_path):
-    js._last_log_pos.clear()
+def test_rulebased_alerts_detects_non_finite_loss_once():
     state = {}
-    log_file = tmp_path / "run.log"
-    log_file.write_text("RuntimeError: CUDA out of memory. Tried to allocate 2.4 GB\n", encoding="utf-8")
-
-    decision = js.detect_log_syndrome_alert("run-log-1", str(log_file), state)
+    rows = [
+        {"step": 1, "loss": 0.4},
+        {"step": 2, "loss": float("inf")},
+    ]
+    decision = js.rulebased_alerts(rows, state)
     assert decision is not None
-    assert decision["source"] == "logwatch"
-    assert decision["syndrome"] == "cuda_oom"
+    assert decision["source"] == "rulebased"
+    assert decision["syndrome"] == "nan_inf_loss"
     assert decision["severity"] == "critical"
 
-    # Same signature should dedupe within TTL.
-    log_file.write_text(
-        "RuntimeError: CUDA out of memory. Tried to allocate 2.4 GB\n"
-        "RuntimeError: CUDA out of memory. Tried to allocate 2.4 GB\n",
-        encoding="utf-8",
-    )
-    deduped = js.detect_log_syndrome_alert("run-log-1", str(log_file), state)
+    # Same alert should be deduped in recent-signature window.
+    deduped = js.rulebased_alerts(rows, state)
     assert deduped is None
 
 
-def test_detect_supervised_metric_alert_validation_drop():
+def test_rulebased_alerts_ignores_normal_rows():
     state = {}
-    rows = _rows("val/accuracy", [0.71, 0.74, 0.79, 0.84, 0.85, 0.69, 0.67])
-    decision = js.detect_supervised_metric_alert(rows, state)
-    assert decision is not None
-    assert decision["source"] == "playbook"
-    assert decision["syndrome"] == "validation_drop"
-
-
-def test_detect_rl_metric_alert_reward_hacking():
-    state = {}
-    rows = []
-    rewards = [10.0, 12.0, 13.0, 14.0, 15.0, 24.0]
-    success = [0.80, 0.82, 0.81, 0.79, 0.78, 0.45]
-    for idx in range(len(rewards)):
-        rows.append({"step": idx, "episode_reward": rewards[idx], "success_rate": success[idx]})
-
-    decision = js.detect_rl_metric_alert(rows, state)
-    assert decision is not None
-    assert decision["source"] == "playbook"
-    assert decision["syndrome"] == "reward_hacking_suspected"
-    assert decision["severity"] == "critical"
-
-
-def test_detect_baseline_drift_alert_throughput_regression():
-    state = {}
-    summary = {
-        "recent_throughput_mean": 20.0,
-        "best_val_accuracy": 0.83,
-    }
-    baseline = {
-        "recent_throughput_mean": 50.0,
-        "best_val_accuracy": 0.84,
-        "sample_size": 3,
-    }
-
-    decision = js.detect_baseline_drift_alert(summary, baseline, state)
-    assert decision is not None
-    assert decision["source"] == "baseline"
-    assert decision["syndrome"] == "throughput_regression"
-
-
-def test_baseline_reference_from_history_prefers_profile_match():
-    history = [
-        {
-            "command_fingerprint": "abc",
-            "status": "finished",
-            "profile": "supervised",
-            "summary": {"recent_throughput_mean": 40.0, "best_val_accuracy": 0.90},
-        },
-        {
-            "command_fingerprint": "abc",
-            "status": "finished",
-            "profile": "reinforcement_learning",
-            "summary": {"recent_throughput_mean": 15.0, "best_val_accuracy": 0.10},
-        },
+    rows = [
+        {"step": 1, "loss": 0.8},
+        {"step": 2, "loss": 0.6},
+        {"step": 3, "loss": 0.5},
     ]
+    assert js.rulebased_alerts(rows, state) is None
 
-    baseline = js.baseline_reference_from_history(history, fingerprint="abc", profile="supervised")
-    assert baseline is not None
-    assert baseline["recent_throughput_mean"] == 40.0
-    assert baseline["best_val_accuracy"] == 0.90
+
+def test_read_new_log_lines_incremental(tmp_path):
+    js._last_log_pos.clear()
+    run_id = "r1"
+    log_file = tmp_path / "run.log"
+
+    log_file.write_text("line1\nline2\n", encoding="utf-8")
+    first = js.read_new_log_lines(run_id, str(log_file))
+    assert first == ["line1", "line2"]
+
+    # No append => no new lines.
+    second = js.read_new_log_lines(run_id, str(log_file))
+    assert second == []
+
+    # Append one line => only delta returned.
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write("line3\n")
+    third = js.read_new_log_lines(run_id, str(log_file))
+    assert third == ["line3"]

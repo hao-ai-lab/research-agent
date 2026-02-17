@@ -28,6 +28,14 @@ try:
 except ImportError:  # pragma: no cover - exercised in minimal unit-test environments
     libtmux = None
 
+from sidecar_smart import (
+    load_sidecar_skills,
+    materialize_jit_tasks,
+    render_skill_bundle,
+    run_smart_sidecar_session,
+    should_run_smart_analysis,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -36,12 +44,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("job-sidecar")
 
-LOSS_ALERT_THRESHOLD = 8.0
-LOSS_SPIKE_MULTIPLIER = 3.0
-RULE_MIN_PREV_POINTS = 3
 AGENT_JUDGE_INTERVAL = 30
-AGENT_JUDGE_MAX_LINES = 5
-AGENT_JUDGE_MAX_BYTES = 8000
 ALERT_SIGNATURE_TTL_SECONDS = 180
 MONITOR_HEARTBEAT_SECONDS = 30
 LOG_TAIL_MAX_LINES = 120
@@ -50,92 +53,9 @@ GPU_PREFLIGHT_MAX_WAIT_SECONDS = 180
 GPU_PREFLIGHT_POLL_SECONDS = 10
 GPU_BUSY_UTIL_THRESHOLD = 85.0
 GPU_BUSY_MEM_RATIO_THRESHOLD = 0.85
-BASELINE_HISTORY_FILE = os.path.join(".agents", "sidecar_history.jsonl")
-BASELINE_HISTORY_MAX_ROWS = 400
-MIN_ROWS_FOR_PROFILE_ALERTS = 6
 
 SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
 
-VAL_ACCURACY_KEYS = (
-    "val/accuracy",
-    "val_accuracy",
-    "validation/accuracy",
-    "validation_accuracy",
-    "eval/accuracy",
-    "eval_accuracy",
-    "accuracy/val",
-)
-VAL_LOSS_KEYS = (
-    "val/loss",
-    "val_loss",
-    "validation/loss",
-    "validation_loss",
-    "eval/loss",
-    "eval_loss",
-)
-REWARD_KEYS = (
-    "reward",
-    "train/reward",
-    "episode_reward",
-    "episode/reward",
-    "rollout/ep_rew_mean",
-    "eval/reward",
-    "mean_reward",
-)
-SUCCESS_RATE_KEYS = (
-    "success_rate",
-    "train/success_rate",
-    "eval/success_rate",
-    "success",
-    "win_rate",
-)
-THROUGHPUT_KEYS = (
-    "throughput",
-    "samples_per_second",
-    "tokens_per_second",
-    "steps_per_second",
-    "train/samples_per_second",
-    "train/tokens_per_second",
-    "samples/s",
-    "tokens/s",
-)
-KL_KEYS = (
-    "kl",
-    "train/kl",
-    "policy/kl",
-    "approx_kl",
-    "kl_divergence",
-)
-
-LOG_SYNDROME_PATTERNS = [
-    {
-        "syndrome": "cuda_oom",
-        "severity": "critical",
-        "regex": re.compile(r"cuda out of memory|cublas_status_alloc_failed|out of memory", re.I),
-        "template": "CUDA OOM detected in logs: {snippet}",
-    },
-    {
-        "syndrome": "gpu_busy",
-        "severity": "warning",
-        "regex": re.compile(r"device busy or unavailable|all cuda-capable devices are busy|resource busy", re.I),
-        "template": "GPU appears occupied/unavailable: {snippet}",
-    },
-    {
-        "syndrome": "nccl_failure",
-        "severity": "critical",
-        "regex": re.compile(r"nccl.*(timeout|error|unhandled)|collective operation timeout", re.I),
-        "template": "Distributed backend issue detected: {snippet}",
-    },
-    {
-        "syndrome": "traceback",
-        "severity": "warning",
-        "regex": re.compile(r"traceback \(most recent call last\)", re.I),
-        "template": "Python traceback detected in run logs.",
-    },
-]
-
-_last_metrics_pos: dict[str, int] = {}
-_last_judge_check: dict[str, float] = {}
 _last_log_pos: dict[str, int] = {}
 
 
@@ -255,22 +175,6 @@ def _safe_float(value) -> float | None:
     return val
 
 
-def _mean(values: list[float]) -> float | None:
-    if not values:
-        return None
-    return sum(values) / len(values)
-
-
-def _median(values: list[float]) -> float | None:
-    if not values:
-        return None
-    sorted_values = sorted(values)
-    mid = len(sorted_values) // 2
-    if len(sorted_values) % 2 == 1:
-        return sorted_values[mid]
-    return (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
-
-
 def _severity_rank(severity: str | None) -> int:
     if not severity:
         return 0
@@ -282,25 +186,6 @@ def _normalize_severity(severity: str | None) -> str:
     if normalized not in SEVERITY_ORDER:
         return "warning"
     return normalized
-
-
-def extract_metric_value(row: dict, keys: tuple[str, ...]) -> float | None:
-    for key in keys:
-        if key not in row:
-            continue
-        value = _safe_float(row.get(key))
-        if value is not None:
-            return value
-    return None
-
-
-def collect_metric_series(rows: list[dict], keys: tuple[str, ...]) -> list[float]:
-    values: list[float] = []
-    for row in rows:
-        value = extract_metric_value(row, keys)
-        if value is not None:
-            values.append(value)
-    return values
 
 
 def parse_cuda_visible_devices(command: str) -> list[int]:
@@ -571,47 +456,6 @@ def _build_alert_decision(
     }
 
 
-def infer_workload_profile(command: str, rows: list[dict], recent_logs: list[str]) -> str:
-    """Infer a lightweight workload profile to choose playbook rules."""
-    command_blob = command.lower()
-    metric_keys = " ".join(str(k).lower() for row in rows[-12:] for k in row.keys())
-    log_blob = " ".join(line.lower() for line in recent_logs[-30:])
-    signal_blob = " ".join([command_blob, metric_keys, log_blob])
-
-    rl_hints = ["ppo", "rlhf", "episode", "actor", "critic", "policy", "reward", "env.step"]
-    if any(hint in signal_blob for hint in rl_hints):
-        return "reinforcement_learning"
-
-    supervised_hints = ["validation", "val/", "eval/", "cross_entropy", "accuracy", "train/loss"]
-    if any(hint in signal_blob for hint in supervised_hints):
-        return "supervised"
-    return "generic"
-
-
-def summarize_metrics_for_monitoring(rows: list[dict]) -> dict:
-    losses = collect_metric_series(rows, ("loss", "train/loss", "train_loss", "training_loss"))
-    val_acc = collect_metric_series(rows, VAL_ACCURACY_KEYS)
-    val_loss = collect_metric_series(rows, VAL_LOSS_KEYS)
-    reward = collect_metric_series(rows, REWARD_KEYS)
-    success = collect_metric_series(rows, SUCCESS_RATE_KEYS)
-    throughput = collect_metric_series(rows, THROUGHPUT_KEYS)
-    summary = {
-        "latest_loss": losses[-1] if losses else None,
-        "best_loss": min(losses) if losses else None,
-        "latest_val_accuracy": val_acc[-1] if val_acc else None,
-        "best_val_accuracy": max(val_acc) if val_acc else None,
-        "latest_val_loss": val_loss[-1] if val_loss else None,
-        "best_val_loss": min(val_loss) if val_loss else None,
-        "latest_reward": reward[-1] if reward else None,
-        "recent_reward_mean": _mean(reward[-5:]) if reward else None,
-        "latest_success_rate": success[-1] if success else None,
-        "recent_success_rate_mean": _mean(success[-5:]) if success else None,
-        "latest_throughput": throughput[-1] if throughput else None,
-        "recent_throughput_mean": _mean(throughput[-5:]) if throughput else None,
-    }
-    return summary
-
-
 def select_most_urgent_decision(decisions: list[dict | None]) -> dict | None:
     candidates = [d for d in decisions if d and d.get("action") == "alert"]
     if not candidates:
@@ -626,309 +470,6 @@ def select_most_urgent_decision(decisions: list[dict | None]) -> dict | None:
     return candidates[0]
 
 
-def _build_monitor_note(profile: str, summary: dict, baseline: dict | None) -> str:
-    chunks = [f"profile={profile}"]
-    if summary.get("latest_loss") is not None:
-        chunks.append(f"loss={summary['latest_loss']:.4f}")
-    if summary.get("latest_val_accuracy") is not None:
-        chunks.append(f"val_acc={summary['latest_val_accuracy']:.4f}")
-    if summary.get("latest_reward") is not None:
-        chunks.append(f"reward={summary['latest_reward']:.4f}")
-    if summary.get("recent_throughput_mean") is not None:
-        chunks.append(f"throughput={summary['recent_throughput_mean']:.2f}")
-    if baseline and baseline.get("recent_throughput_mean") and summary.get("recent_throughput_mean"):
-        base = baseline["recent_throughput_mean"]
-        cur = summary["recent_throughput_mean"]
-        if base > 0:
-            ratio = cur / base
-            chunks.append(f"tp_vs_base={ratio:.2f}x")
-    return " | ".join(chunks)
-
-
-def baseline_history_path(workdir: str) -> str:
-    return os.path.join(workdir, BASELINE_HISTORY_FILE)
-
-
-def load_baseline_history(workdir: str, max_rows: int = BASELINE_HISTORY_MAX_ROWS) -> list[dict]:
-    path = baseline_history_path(workdir)
-    if not os.path.isfile(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            lines = f.readlines()[-max_rows:]
-    except OSError:
-        return []
-    records: list[dict] = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict):
-            records.append(data)
-    return records
-
-
-def normalize_command_for_fingerprint(command: str) -> str:
-    normalized = re.sub(r"CUDA_VISIBLE_DEVICES\s*=\s*[^\s]+", "CUDA_VISIBLE_DEVICES=<masked>", command)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
-
-
-def command_fingerprint(command: str) -> str:
-    normalized = normalize_command_for_fingerprint(command)
-    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
-
-
-def baseline_reference_from_history(history: list[dict], fingerprint: str, profile: str) -> dict | None:
-    matched = [
-        row for row in history
-        if row.get("command_fingerprint") == fingerprint and row.get("status") == "finished"
-    ]
-    if not matched:
-        return None
-    if profile != "generic":
-        profiled = [row for row in matched if row.get("profile") == profile]
-        if profiled:
-            matched = profiled
-
-    def collect(field: str) -> list[float]:
-        vals: list[float] = []
-        for row in matched:
-            metrics = row.get("summary")
-            if not isinstance(metrics, dict):
-                continue
-            val = _safe_float(metrics.get(field))
-            if val is not None:
-                vals.append(val)
-        return vals
-
-    baseline = {
-        "recent_throughput_mean": _median(collect("recent_throughput_mean")),
-        "best_val_accuracy": _median(collect("best_val_accuracy")),
-        "best_val_loss": _median(collect("best_val_loss")),
-        "sample_size": len(matched),
-    }
-    if baseline["sample_size"] == 0:
-        return None
-    return baseline
-
-
-def persist_run_summary(workdir: str, payload: dict):
-    path = baseline_history_path(workdir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    try:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
-    except OSError as e:
-        logger.warning("Failed writing sidecar baseline history: %s", e)
-
-
-def detect_log_syndrome_alert(job_id: str, log_path: str, state: dict, lines: list[str] | None = None) -> dict | None:
-    if lines is None:
-        lines = read_new_log_lines(job_id, log_path)
-    if not lines:
-        return None
-    decisions: list[dict] = []
-    for line in lines:
-        for pattern in LOG_SYNDROME_PATTERNS:
-            if not pattern["regex"].search(line):
-                continue
-            snippet = line[:180]
-            decision = _build_alert_decision(
-                source="logwatch",
-                syndrome=pattern["syndrome"],
-                message=pattern["template"].format(snippet=snippet),
-                severity=pattern["severity"],
-                evidence={"log_snippet": snippet},
-            )
-            signature = decision["signature"]
-            if seen_recent_signature(state, "logwatch", signature):
-                continue
-            decisions.append(decision)
-    return select_most_urgent_decision(decisions)
-
-
-def detect_supervised_metric_alert(rows: list[dict], state: dict) -> dict | None:
-    if len(rows) < MIN_ROWS_FOR_PROFILE_ALERTS:
-        return None
-    val_acc = collect_metric_series(rows, VAL_ACCURACY_KEYS)
-    decisions: list[dict] = []
-    if len(val_acc) >= MIN_ROWS_FOR_PROFILE_ALERTS:
-        current = val_acc[-1]
-        best_prev = max(val_acc[:-1])
-        recent_mean = _mean(val_acc[-3:]) or current
-        if best_prev > 0 and (best_prev - current) >= 0.08 and recent_mean <= best_prev * 0.9:
-            decision = _build_alert_decision(
-                source="playbook",
-                syndrome="validation_drop",
-                message=(
-                    "Validation accuracy dropped materially "
-                    f"(current={current:.4f}, best={best_prev:.4f})."
-                ),
-                severity="warning",
-                evidence={"current": current, "best": best_prev},
-            )
-            if not seen_recent_signature(state, "playbook", decision["signature"]):
-                decisions.append(decision)
-
-    val_loss = collect_metric_series(rows, VAL_LOSS_KEYS)
-    if len(val_loss) >= MIN_ROWS_FOR_PROFILE_ALERTS:
-        current = val_loss[-1]
-        best_prev = min(val_loss[:-1])
-        recent_mean = _mean(val_loss[-3:]) or current
-        if best_prev > 0 and current >= best_prev * 1.5 and recent_mean >= best_prev * 1.4:
-            decision = _build_alert_decision(
-                source="playbook",
-                syndrome="validation_loss_regression",
-                message=(
-                    "Validation loss regressed strongly "
-                    f"(current={current:.4f}, best={best_prev:.4f})."
-                ),
-                severity="warning",
-                evidence={"current": current, "best": best_prev},
-            )
-            if not seen_recent_signature(state, "playbook", decision["signature"]):
-                decisions.append(decision)
-    return select_most_urgent_decision(decisions)
-
-
-def detect_rl_metric_alert(rows: list[dict], state: dict) -> dict | None:
-    if len(rows) < MIN_ROWS_FOR_PROFILE_ALERTS:
-        return None
-    reward = collect_metric_series(rows, REWARD_KEYS)
-    success = collect_metric_series(rows, SUCCESS_RATE_KEYS)
-    kl_values = collect_metric_series(rows, KL_KEYS)
-    decisions: list[dict] = []
-
-    if len(reward) >= MIN_ROWS_FOR_PROFILE_ALERTS:
-        current_reward = reward[-1]
-        prev_reward = _mean(reward[-6:-1]) or current_reward
-        if prev_reward > 0 and current_reward <= prev_reward * 0.5:
-            decision = _build_alert_decision(
-                source="playbook",
-                syndrome="reward_drop",
-                message=(
-                    "RL reward dropped sharply "
-                    f"(current={current_reward:.4f}, recent_mean={prev_reward:.4f})."
-                ),
-                severity="warning",
-                evidence={"current_reward": current_reward, "recent_reward_mean": prev_reward},
-            )
-            if not seen_recent_signature(state, "playbook", decision["signature"]):
-                decisions.append(decision)
-
-    if len(reward) >= MIN_ROWS_FOR_PROFILE_ALERTS and len(success) >= MIN_ROWS_FOR_PROFILE_ALERTS:
-        curr_reward = reward[-1]
-        prev_reward = _mean(reward[-6:-1]) or curr_reward
-        curr_success = success[-1]
-        prev_success = _mean(success[-6:-1]) or curr_success
-        if prev_reward > 0 and prev_success > 0 and curr_reward >= prev_reward * 1.5 and curr_success <= prev_success * 0.7:
-            decision = _build_alert_decision(
-                source="playbook",
-                syndrome="reward_hacking_suspected",
-                message=(
-                    "Reward increased while success rate dropped "
-                    f"(reward {curr_reward:.4f} vs {prev_reward:.4f}, "
-                    f"success {curr_success:.4f} vs {prev_success:.4f})."
-                ),
-                severity="critical",
-                evidence={
-                    "current_reward": curr_reward,
-                    "recent_reward_mean": prev_reward,
-                    "current_success": curr_success,
-                    "recent_success_mean": prev_success,
-                },
-            )
-            if not seen_recent_signature(state, "playbook", decision["signature"]):
-                decisions.append(decision)
-
-    if len(kl_values) >= MIN_ROWS_FOR_PROFILE_ALERTS:
-        current_kl = kl_values[-1]
-        prev_kl_max = max(kl_values[-6:-1])
-        if prev_kl_max > 0 and current_kl >= prev_kl_max * 2.5 and current_kl > 0.15:
-            decision = _build_alert_decision(
-                source="playbook",
-                syndrome="kl_explosion",
-                message=(
-                    "KL divergence spiked, policy update may be unstable "
-                    f"(current={current_kl:.4f}, previous_max={prev_kl_max:.4f})."
-                ),
-                severity="warning",
-                evidence={"current_kl": current_kl, "previous_max_kl": prev_kl_max},
-            )
-            if not seen_recent_signature(state, "playbook", decision["signature"]):
-                decisions.append(decision)
-
-    return select_most_urgent_decision(decisions)
-
-
-def detect_baseline_drift_alert(summary: dict, baseline: dict | None, state: dict) -> dict | None:
-    if not baseline:
-        return None
-    decisions: list[dict] = []
-    baseline_tp = _safe_float(baseline.get("recent_throughput_mean"))
-    current_tp = _safe_float(summary.get("recent_throughput_mean"))
-    if baseline_tp and current_tp and baseline_tp > 0 and current_tp <= baseline_tp * 0.6:
-        decision = _build_alert_decision(
-            source="baseline",
-            syndrome="throughput_regression",
-            message=(
-                "Throughput is much lower than prior similar runs "
-                f"(current={current_tp:.2f}, baseline={baseline_tp:.2f})."
-            ),
-            severity="warning",
-            evidence={"current_throughput": current_tp, "baseline_throughput": baseline_tp},
-        )
-        if not seen_recent_signature(state, "baseline", decision["signature"]):
-            decisions.append(decision)
-
-    baseline_acc = _safe_float(baseline.get("best_val_accuracy"))
-    current_acc = _safe_float(summary.get("best_val_accuracy"))
-    if baseline_acc and current_acc and current_acc <= baseline_acc - 0.05:
-        decision = _build_alert_decision(
-            source="baseline",
-            syndrome="precision_drift",
-            message=(
-                "Validation quality is behind prior similar runs "
-                f"(current_best={current_acc:.4f}, baseline_best={baseline_acc:.4f})."
-            ),
-            severity="warning",
-            evidence={"current_best_val_accuracy": current_acc, "baseline_best_val_accuracy": baseline_acc},
-        )
-        if not seen_recent_signature(state, "baseline", decision["signature"]):
-            decisions.append(decision)
-
-    return select_most_urgent_decision(decisions)
-
-
-def build_monitoring_snapshot(profile: str, summary: dict, baseline: dict | None, state: dict) -> dict:
-    syndrome_counts = state.get("syndrome_counts")
-    if not isinstance(syndrome_counts, dict):
-        syndrome_counts = {}
-    tags = [profile]
-    if baseline:
-        tags.append("baseline-aware")
-    if syndrome_counts:
-        tags.append("alerts-active")
-    snapshot = {
-        "profile": profile,
-        "summary": summary,
-        "baseline": baseline or {},
-        "syndrome_counts": syndrome_counts,
-        "updated_at": time.time(),
-    }
-    note = _build_monitor_note(profile, summary, baseline)
-    return {
-        "monitor_note": note[:220],
-        "monitor_tags": tags[:8],
-        "monitoring": snapshot,
-    }
-
-
 def record_alert_syndrome(state: dict, decision: dict | None):
     if not decision or decision.get("action") != "alert":
         return
@@ -940,7 +481,7 @@ def record_alert_syndrome(state: dict, decision: dict | None):
 
 
 def rulebased_alerts(metrics_rows: list[dict], state: dict) -> dict | None:
-    """Deterministic alerts for hard metric anomalies."""
+    """Mechanical deterministic checks only (no smart heuristics)."""
     entries: list[tuple[object, float]] = []
     for row in metrics_rows:
         loss = extract_loss(row)
@@ -963,171 +504,7 @@ def rulebased_alerts(metrics_rows: list[dict], state: dict) -> dict | None:
         if seen_recent_signature(state, "rulebased", decision["signature"]):
             return None
         return decision
-
-    current_step, current = finite_entries[-1]
-    previous = [loss for _, loss in finite_entries[:-1]]
-    mean_prev = (sum(previous) / len(previous)) if previous else 0.0
-
-    high_entry: tuple[object, float] | None = None
-    if finite_entries:
-        max_entry = max(finite_entries, key=lambda item: item[1])
-        if max_entry[1] >= LOSS_ALERT_THRESHOLD:
-            high_entry = max_entry
-
-    is_high = high_entry is not None
-    is_spike = (
-        len(previous) >= RULE_MIN_PREV_POINTS
-        and mean_prev > 0
-        and current >= mean_prev * LOSS_SPIKE_MULTIPLIER
-    )
-    if not (is_high or is_spike):
-        return None
-
-    if is_high:
-        high_step, high_loss = high_entry
-        step_prefix = f"step={high_step}, " if isinstance(high_step, (int, float)) else ""
-        message = (
-            f"High loss detected ({step_prefix}loss={high_loss:.4f}, "
-            f"threshold={LOSS_ALERT_THRESHOLD:.1f})."
-        )
-    else:
-        message = f"Loss spike detected (loss={current:.4f}, rolling_avg={mean_prev:.4f})."
-
-    decision = _build_alert_decision(
-        source="rulebased",
-        syndrome="loss_anomaly",
-        message=message,
-        severity="warning",
-    )
-    if seen_recent_signature(state, "rulebased", decision["signature"]):
-        return None
-    return decision
-
-def should_run_alert_judge(job_id: str, metrics_file: str) -> bool:
-    try:
-        file_size = os.path.getsize(metrics_file)
-    except OSError:
-        return False
-    last_size = _last_metrics_pos.get(job_id, 0)
-    if file_size < last_size:
-        last_size = 0
-    if file_size == last_size:
-        return False
-    _last_metrics_pos[job_id] = file_size
-
-    now = time.time()
-    last_check = _last_judge_check.get(job_id, 0.0)
-    if now - last_check < AGENT_JUDGE_INTERVAL:
-        return False
-    _last_judge_check[job_id] = now
-    return True
-
-def parse_alert_judge_decision(output: str) -> dict | None:
-    if not output or "NOTHING" in output:
-        return {"action": "ignore"}
-    match = re.search(r"\{.*\}", output, re.S)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-
-    action = data.get("action")
-    if action not in {"alert", "ignore"}:
-        return None
-    message = (data.get("message") or "").strip()
-    severity = (data.get("severity") or "warning").strip().lower()
-    if severity not in {"info", "warning", "critical"}:
-        severity = "warning"
-    choices = data.get("choices")
-    if not isinstance(choices, list) or not choices:
-        choices = ["Ignore", "Stop Job"]
-    return {
-        "action": action,
-        "message": message,
-        "severity": severity,
-        "choices": choices,
-    }
-
-def run_alert_judge(context: str, workdir: str | None = None) -> dict | None:
-    prompt = (
-        "[SYSTEM] You are an ML training alert judge. "
-        "Decide if this update warrants interrupting a human. "
-        "Return ONLY JSON with keys: action ('alert'|'ignore'), "
-        "message (string), severity (info|warning|critical), choices (list of strings). "
-        "If action is ignore, keep message empty.\n"
-        f"Context:\n{context}"
-    )
-    cmd = ["opencode", "run", "--model", "opencode/kimi-k2.5-free", prompt]
-    try:
-        res = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=workdir or None,
-        )
-    except FileNotFoundError:
-        logger.warning("opencode CLI not found; skipping alert_judge.")
-        return None
-    except Exception as e:
-        logger.warning("alert_judge execution failed: %s", e)
-        return None
-
-    output = (res.stdout or "").strip()
-    logger.info("alert_judge output: %s", output)
-    return parse_alert_judge_decision(output)
-
-def alert_judge(
-    job_id: str,
-    metrics_file: str | None,
-    workdir: str,
-    profile: str,
-    recent_logs: list[str],
-    state: dict,
-) -> dict:
-    """LLM-based alert gate for softer anomalies."""
-    if not metrics_file or not os.path.exists(metrics_file):
-        return {"action": "ignore"}
-    if not should_run_alert_judge(job_id, metrics_file):
-        return {"action": "ignore"}
-
-    recent_metrics = read_recent_metrics(
-        metrics_file,
-        max_lines=AGENT_JUDGE_MAX_LINES,
-        max_bytes=AGENT_JUDGE_MAX_BYTES,
-    )
-    if not recent_metrics:
-        return {"action": "ignore"}
-
-    context_blob = {
-        "event": "metrics_update",
-        "metrics_file": metrics_file,
-        "profile": profile,
-        "recent_metrics": recent_metrics,
-        "recent_logs": recent_logs[-20:],
-    }
-    decision = run_alert_judge(json.dumps(context_blob, ensure_ascii=True), workdir)
-    if not decision or decision.get("action") != "alert":
-        return {"action": "ignore"}
-
-    message = (decision.get("message") or "Metric anomaly detected.").strip()
-    if len(message) > 600:
-        message = f"{message[:597]}..."
-    signature = _decision_signature(f"judge:{message}")
-    if seen_recent_signature(state, "alert_judge", signature):
-        return {"action": "ignore"}
-
-    return {
-        "action": "alert",
-        "message": message,
-        "severity": _normalize_severity(decision.get("severity")),
-        "choices": decision.get("choices") or ["Ignore", "Stop Job"],
-        "source": "alert_judge",
-        "syndrome": "judge_soft_anomaly",
-        "signature": signature,
-    }
+    return None
 
 
 def maybe_trigger_manual_alert(
@@ -1522,8 +899,11 @@ def monitor_job(
     
     # Alert/memory state for this sidecar process.
     alert_state: dict = {}
-    command_fp = command_fingerprint(command)
-    baseline_history = load_baseline_history(workdir)
+    skill_env = os.environ.get("SIDECAR_SMART_SKILLS", "").strip()
+    requested_skill_ids = [part.strip() for part in skill_env.split(",") if part.strip()] if skill_env else None
+    smart_skills = load_sidecar_skills(skill_ids=requested_skill_ids)
+    smart_skill_bundle = render_skill_bundle(smart_skills)
+    alert_state["smart_skills_loaded"] = list(smart_skills.keys())
 
     # Optional GPU preflight for explicit CUDA pinning.
     gpu_preflight = wait_for_requested_gpus(command)
@@ -1587,8 +967,8 @@ def monitor_job(
             "monitor_note": "run-started",
             "monitor_tags": ["sidecar-v2"],
             "monitoring": {
-                "command_fingerprint": command_fp,
                 "gpu_preflight": gpu_preflight,
+                "smart_skills_loaded": list(smart_skills.keys()),
             },
         },
         auth_token=auth_token,
@@ -1659,64 +1039,79 @@ def monitor_job(
             if not isinstance(log_context, list):
                 log_context = []
 
-            profile = infer_workload_profile(command, recent_rows, log_context)
-            alert_state["profile"] = profile
-            summary = summarize_metrics_for_monitoring(recent_rows)
-            baseline = baseline_reference_from_history(baseline_history, command_fp, profile)
-
-            log_decision = detect_log_syndrome_alert(job_id, log_file, alert_state, lines=new_log_lines)
             rule_decision = rulebased_alerts(recent_rows, alert_state)
-            profile_decision = None
-            if profile == "reinforcement_learning":
-                profile_decision = detect_rl_metric_alert(recent_rows, alert_state)
-            elif profile == "supervised":
-                profile_decision = detect_supervised_metric_alert(recent_rows, alert_state)
-            baseline_decision = detect_baseline_drift_alert(summary, baseline, alert_state)
-            urgent_decision = select_most_urgent_decision([
-                log_decision, rule_decision, profile_decision, baseline_decision,
-            ])
+            smart_decision = {"action": "ignore"}
+            jit_artifacts: list[dict] = []
+            if should_run_smart_analysis(
+                job_id=job_id,
+                metrics_file=metrics_file,
+                log_file=log_file,
+                state=alert_state,
+                min_interval_seconds=AGENT_JUDGE_INTERVAL,
+            ):
+                smart_decision = run_smart_sidecar_session(
+                    job_id=job_id,
+                    command=command,
+                    run_dir=run_dir,
+                    workdir=workdir,
+                    metrics_rows=recent_rows,
+                    recent_logs=log_context,
+                    skill_bundle=smart_skill_bundle,
+                )
+                jit_artifacts = materialize_jit_tasks(
+                    run_dir=run_dir,
+                    jit_tasks=smart_decision.get("jit_tasks") if isinstance(smart_decision, dict) else [],
+                )
 
+            urgent_decision = select_most_urgent_decision([rule_decision, smart_decision])
             if urgent_decision:
                 record_alert_syndrome(alert_state, urgent_decision)
                 if apply_alert_decision(server_url, job_id, run_dir, urgent_decision, auth_token=auth_token):
-                    logger.info("Stopping job due to sidecar playbook alert response")
-                    job_pane.cmd("kill-pane")
-                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
-                    return
-            else:
-                judge_decision = alert_judge(
-                    job_id=job_id,
-                    metrics_file=metrics_file,
-                    workdir=workdir,
-                    profile=profile,
-                    recent_logs=log_context,
-                    state=alert_state,
-                )
-                if judge_decision and judge_decision.get("action") == "alert":
-                    record_alert_syndrome(alert_state, judge_decision)
-                if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
-                    logger.info("Stopping job due to alert_judge response")
+                    logger.info("Stopping job due to sidecar alert response")
                     job_pane.cmd("kill-pane")
                     report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
                     return
 
             now = time.time()
-            snapshot = build_monitoring_snapshot(profile, summary, baseline, alert_state)
-            monitor_note = snapshot.get("monitor_note", "")
+            latest_loss = extract_loss(recent_rows[-1]) if recent_rows else None
+            smart_note = str(smart_decision.get("monitor_note") or "").strip() if isinstance(smart_decision, dict) else ""
+            fallback_note = f"metrics={len(recent_rows)} logs={len(log_context)}"
+            monitor_note = smart_note or fallback_note
+            monitor_tags = ["sidecar-v2", "smart-agent"]
+            if isinstance(smart_decision, dict):
+                raw_tags = smart_decision.get("monitor_tags")
+                if isinstance(raw_tags, list):
+                    monitor_tags.extend([str(tag)[:40] for tag in raw_tags[:6] if str(tag).strip()])
+            if jit_artifacts:
+                monitor_tags.append("jit-artifacts")
+
+            monitoring_payload = {
+                "latest_loss": latest_loss,
+                "metrics_points": len(recent_rows),
+                "log_points": len(log_context),
+                "smart_skills_loaded": list(smart_skills.keys()),
+                "analysis_summary": (
+                    str(smart_decision.get("analysis_summary") or "")[:1200]
+                    if isinstance(smart_decision, dict)
+                    else ""
+                ),
+                "jit_artifacts": jit_artifacts,
+            }
+            if found_wandb_dir:
+                monitoring_payload["wandb_dir"] = found_wandb_dir
+
             if (now - last_heartbeat >= MONITOR_HEARTBEAT_SECONDS) or (monitor_note != last_monitor_note):
                 status_payload = {
                     "tmux_pane": job_pane.pane_id,
-                    **snapshot,
+                    "monitor_note": monitor_note,
+                    "monitor_tags": monitor_tags[:8],
+                    "monitoring": monitoring_payload,
                 }
                 if found_wandb_dir:
                     status_payload["wandb_dir"] = found_wandb_dir
-                report_status(
-                    server_url,
-                    job_id,
-                    "running",
-                    status_payload,
-                    auth_token=auth_token,
-                )
+                if jit_artifacts:
+                    status_payload["monitor_artifacts"] = [a.get("relative_path") for a in jit_artifacts if a.get("relative_path")]
+                report_status(server_url, job_id, "running", status_payload, auth_token=auth_token)
                 last_heartbeat = now
                 last_monitor_note = monitor_note
 
@@ -1750,24 +1145,6 @@ def monitor_job(
     else:
         logger.info(f"[metrics-final] No wandb_dir found during entire run — skipping final flush")
 
-    final_metrics_file = resolve_monitor_metrics_file(run_dir, found_wandb_dir)
-    final_rows = read_recent_metrics(final_metrics_file, max_lines=200, max_bytes=200000) if final_metrics_file else []
-    final_profile = alert_state.get("profile") if isinstance(alert_state.get("profile"), str) else "generic"
-    if final_profile == "generic":
-        final_profile = infer_workload_profile(command, final_rows, [])
-    final_summary = summarize_metrics_for_monitoring(final_rows)
-    persist_run_summary(
-        workdir,
-        {
-            "run_id": job_id,
-            "status": "finished" if exit_code == "0" else "failed",
-            "timestamp": time.time(),
-            "profile": final_profile,
-            "command_fingerprint": command_fp,
-            "summary": final_summary,
-        },
-    )
-    
     logger.info("Sidecar exiting")
 
 
