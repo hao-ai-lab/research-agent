@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-import { getAuthToken } from '@/lib/api-config'
+import { getAuthToken, getResearchAgentKey } from '@/lib/api-config'
 
 type ExplorerNodeType = 'file' | 'directory'
 
@@ -108,9 +108,15 @@ export function FileExplorerView({
     }
 
     try {
+      const headers: HeadersInit = { 'X-Auth-Token': getAuthToken() }
+      const researchAgentKey = getResearchAgentKey()
+      if (researchAgentKey) {
+        headers['X-Research-Agent-Key'] = researchAgentKey
+      }
+
       const response = await fetch(`/api/file-explorer/tree?path=${encodeURIComponent(directoryPath)}`, {
         cache: 'no-store',
-        headers: { 'X-Auth-Token': getAuthToken() },
+        headers,
       })
 
       if (!response.ok) {
@@ -148,9 +154,15 @@ export function FileExplorerView({
     setFileError(null)
 
     try {
+      const headers: HeadersInit = { 'X-Auth-Token': getAuthToken() }
+      const researchAgentKey = getResearchAgentKey()
+      if (researchAgentKey) {
+        headers['X-Research-Agent-Key'] = researchAgentKey
+      }
+
       const response = await fetch(`/api/file-explorer/file?path=${encodeURIComponent(filePath)}`, {
         cache: 'no-store',
-        headers: { 'X-Auth-Token': getAuthToken() },
+        headers,
       })
 
       if (!response.ok) {
