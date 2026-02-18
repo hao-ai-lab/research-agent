@@ -8,13 +8,11 @@ The wild loop agent is expected to optimize this kernel's parameters
 
 import math
 
-# Tunable parameters — OPTIMIZED CONFIGURATION
-# Achieved 1.4253x speedup (+65% over baseline) via grid search
-# sweep: f4987feda4b3, run: 46a2a935eb25
-BLOCK_SIZE = 256
-NUM_WARPS = 8
-NUM_STAGES = 4
-USE_FP8 = True
+# Tunable parameters — the wild loop agent should experiment with these
+BLOCK_SIZE = 64
+NUM_WARPS = 4
+NUM_STAGES = 2
+USE_FP8 = False
 
 
 def kernel(
