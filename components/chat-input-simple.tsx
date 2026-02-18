@@ -18,6 +18,7 @@ import {
   Cpu,
   Check,
   Sparkles,
+  Wand2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -96,7 +97,7 @@ function autoResize(textarea: HTMLTextAreaElement) {
 // ---------------------------------------------------------------------------
 // Regex to detect @type:id reference tokens
 // ---------------------------------------------------------------------------
-const REFERENCE_REGEX = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
+const REFERENCE_REGEX = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat|skill):[A-Za-z0-9:._-]+/g
 
 // ---------------------------------------------------------------------------
 // Component
@@ -122,6 +123,7 @@ export function ChatInput({
   insertReplyExcerpt = null,
   conversationKey = 'default',
   layout = 'docked',
+  skills = [],
   isWildLoopActive = false,
   onSteer,
   onOpenReplyExcerpt,
@@ -257,6 +259,17 @@ export function ChatInput({
       })
     })
 
+    skills.forEach((skill) => {
+      items.push({
+        id: `skill:${skill.id}`,
+        type: 'skill',
+        label: skill.name,
+        sublabel: skill.description || skill.id,
+        color: '#8b5cf6',
+        icon: <Wand2 className="h-3 w-3" />,
+      })
+    })
+
     messages
       .filter((m) => m.role === 'user' && m.content.trim())
       .slice(-10)
@@ -287,7 +300,7 @@ export function ChatInput({
     })
 
     return items
-  }, [runs, sweeps, artifacts, charts, messages, alerts])
+  }, [runs, sweeps, artifacts, charts, skills, messages, alerts])
 
   const filteredMentionItems = useMemo(() => {
     let items = mentionItems
@@ -467,6 +480,7 @@ export function ChatInput({
         else if (afterAt.startsWith('artifact:')) { setMentionFilter('artifact'); setMentionQuery(afterAt.slice(9)) }
         else if (afterAt.startsWith('chart:')) { setMentionFilter('chart'); setMentionQuery(afterAt.slice(6)) }
         else if (afterAt.startsWith('chat:')) { setMentionFilter('chat'); setMentionQuery(afterAt.slice(5)) }
+        else if (afterAt.startsWith('skill:')) { setMentionFilter('skill'); setMentionQuery(afterAt.slice(6)) }
         else { setMentionFilter('all'); setMentionQuery(afterAt) }
         return
       }
@@ -613,7 +627,7 @@ export function ChatInput({
               <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
               <div className="flex-1 min-w-0 overflow-x-auto">
                 <div className="flex min-w-max items-center gap-1 pr-1">
-                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
+                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat', 'skill'] as const).map((type) => (
                     <button
                       key={type}
                       type="button"
