@@ -24,18 +24,12 @@ from wild_loop_v2 import (
 )
 from v2_prompts import (
     PromptContext,
-<<<<<<< HEAD
     build_analysis_prompt,
-    build_iteration_prompt,
-    build_planning_prompt,
-    build_reflection_prompt,
-=======
     build_iteration_prompt,
     build_planning_prompt,
     build_reflection_prompt,
     parse_continue,
     parse_reflection,
->>>>>>> main
 )
 
 
@@ -221,13 +215,6 @@ class TestWildV2Engine:
         engine.stop()
 
     def test_prompt_fallback_without_render_fn(self):
-<<<<<<< HEAD
-        """Verify prompts raise TypeError without render_fn."""
-        self.engine.start(goal="Fallback test")
-        ctx = self.engine._build_context(self.engine.session)
-        with pytest.raises(TypeError):
-            build_planning_prompt(ctx, render_fn=None)
-=======
         """Verify prompts use a render_fn that returns goal-containing text."""
         def mock_render(skill_id, variables):
             return f"[{skill_id}] Goal: {variables.get('goal', '?')} at iteration {variables.get('iteration', 0)}"
@@ -237,29 +224,17 @@ class TestWildV2Engine:
         prompt = build_planning_prompt(ctx, render_fn=mock_render)
         assert "Fallback test" in prompt
         assert "planning" in prompt.lower()
->>>>>>> main
         self.engine.stop()
 
     def test_api_catalog_in_prompt(self):
         """Verify the API catalog appears in iteration prompts."""
-<<<<<<< HEAD
-
-        def pass_through_render(skill_id, variables):
-            # Return the api_catalog variable so we can test its content
-            return variables.get("api_catalog", "")
-=======
         def mock_render(skill_id, variables):
             return f"[{skill_id}] {variables.get('goal', '')} {variables.get('api_catalog', '')}"
->>>>>>> main
 
         self.engine.start(goal="API catalog test")
         ctx = self.engine._build_context(self.engine.session)
         ctx.iteration = 1
-<<<<<<< HEAD
-        prompt = build_iteration_prompt(ctx, render_fn=pass_through_render)
-=======
         prompt = build_iteration_prompt(ctx, render_fn=mock_render)
->>>>>>> main
         assert "/sweeps/wild" in prompt
         assert "/runs" in prompt
         assert "/wild/v2/events" in prompt
@@ -286,18 +261,9 @@ class TestWildV2Engine:
 # Async loop tests  (mock OpenCode)
 # ---------------------------------------------------------------------------
 
-<<<<<<< HEAD
-def _make_mock_render():
-    """Create a mock render_fn that returns skill_id + key variables."""
-    def mock_render(skill_id, variables):
-        goal = variables.get('goal', '')
-        return f"RENDERED:{skill_id}:{goal}"
-    return mock_render
-=======
 def _mock_render(skill_id, variables):
     """Simple render function for tests — returns a minimal prompt with the goal."""
     return f"[{skill_id}] Goal: {variables.get('goal', '?')}"
->>>>>>> main
 
 
 def test_loop_done_signal():
@@ -305,15 +271,7 @@ def test_loop_done_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-<<<<<<< HEAD
-        engine = WildV2Engine(
-            get_workdir=lambda: tmpdir,
-            server_url="http://localhost:10000",
-            render_fn=_make_mock_render(),
-        )
-=======
         engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000", render_fn=_mock_render)
->>>>>>> main
 
         call_count = 0
 
@@ -396,15 +354,7 @@ def test_loop_max_iterations():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-<<<<<<< HEAD
-        engine = WildV2Engine(
-            get_workdir=lambda: tmpdir,
-            server_url="http://localhost:10000",
-            render_fn=_make_mock_render(),
-        )
-=======
         engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000", render_fn=_mock_render)
->>>>>>> main
 
         call_count = 0
 
@@ -443,15 +393,7 @@ def test_loop_waiting_signal():
 
     async def _run():
         tmpdir = tempfile.mkdtemp()
-<<<<<<< HEAD
-        engine = WildV2Engine(
-            get_workdir=lambda: tmpdir,
-            server_url="http://localhost:10000",
-            render_fn=_make_mock_render(),
-        )
-=======
         engine = WildV2Engine(get_workdir=lambda: tmpdir, server_url="http://localhost:10000", render_fn=_mock_render)
->>>>>>> main
 
         call_count = 0
 
@@ -472,7 +414,7 @@ def test_loop_waiting_signal():
         engine._run_opencode = mock_run
         engine._git_commit = AsyncMock()
 
-        engine.start(goal="Test", max_iterations=5, wait_seconds=0.1)
+        engine.start(goal="Test", max_iterations=5, wait_seconds=0.1, auto_analysis=False)
         if engine._task:
             engine._task.cancel()
             try:
@@ -549,10 +491,11 @@ class TestBuildReflectionPrompt:
         def mock_render(skill_id, variables):
             return f"RENDERED:{skill_id}:goal={variables['goal']}"
 
-        prompt = build_reflection_prompt(ctx, render_fn=mock_render, summary_of_work="Did things")
+        prompt = build_reflection_prompt(ctx, render_fn=mock_render, reflection_reason="Periodic check")
         assert prompt == "RENDERED:wild_v2_reflection:goal=Build a model"
 
     def test_fallback_without_render_fn(self):
+        """Verify reflection prompt raises RuntimeError without render_fn."""
         ctx = PromptContext(
             goal="Train a model",
             iteration=2,
@@ -563,12 +506,9 @@ class TestBuildReflectionPrompt:
             server_url="http://localhost:10000",
             session_id="s1",
         )
-        prompt = build_reflection_prompt(ctx, summary_of_work="Trained it")
-        assert "Train a model" in prompt
-        assert "iteration 2" in prompt
-        assert "Trained it" in prompt
-        assert "<reflection>" in prompt
-        assert "<continue>" in prompt
+        # HEAD's build_reflection_prompt requires render_fn — no inline fallback
+        with pytest.raises((RuntimeError, TypeError)):
+            build_reflection_prompt(ctx, render_fn=None, reflection_reason="Test")
 
 
 # ---------------------------------------------------------------------------

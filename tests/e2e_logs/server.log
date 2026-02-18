@@ -1,0 +1,76 @@
+22:21:05 [research-agent-server] INFO: Initialized with workdir: /home/yuxua/hao_ai_lab/research-agent/tests/story/flashinfer-kernel
+22:21:05 [research-agent-server] WARNING: ⚠️  RESEARCH_AGENT_KEY environment variable is not set!
+22:21:05 [research-agent-server] WARNING:    The Anthropic gateway requires this for authentication.
+22:21:05 [research-agent-server] WARNING:    Set it with: export RESEARCH_AGENT_KEY=your-gateway-token
+22:21:05 [research-agent-server] WARNING: ⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!
+22:21:05 [research-agent-server] WARNING:    Your server has NO authentication - anyone can access it.
+22:21:05 [research-agent-server] WARNING:    For secure remote access, generate a token with:
+22:21:05 [research-agent-server] WARNING:      ./generate_auth_token.sh
+22:21:05 [research-agent-server] WARNING:    Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>
+22:21:05 [research-agent-server] INFO: Starting Research Agent Server on 0.0.0.0:10099
+22:21:05 [research-agent-server] INFO: Working directory: /home/yuxua/hao_ai_lab/research-agent/tests/story/flashinfer-kernel
+[wild-v2] OpenCode run failed: peer closed connection without sending complete message body (incomplete chunked read)
+Traceback (most recent call last):
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 271, in __aiter__
+    async for part in self._httpcore_stream:
+        yield part
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpcore/_async/connection_pool.py", line 407, in __aiter__
+    raise exc from None
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpcore/_async/connection_pool.py", line 403, in __aiter__
+    async for part in self._stream:
+        yield part
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpcore/_async/http11.py", line 342, in __aiter__
+    raise exc
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpcore/_async/http11.py", line 334, in __aiter__
+    async for chunk in self._connection._receive_response_body(**kwargs):
+        yield chunk
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpcore/_async/http11.py", line 203, in _receive_response_body
+    event = await self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpcore/_async/http11.py", line 213, in _receive_event
+    with map_exceptions({h11.RemoteProtocolError: RemoteProtocolError}):
+         ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yuxua/miniconda3/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpcore/_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/yuxua/hao_ai_lab/research-agent/server/wild_loop_v2.py", line 941, in _run_opencode
+    async for line in response.aiter_lines():
+    ...<35 lines>...
+            continue
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_models.py", line 1031, in aiter_lines
+    async for text in self.aiter_text():
+        for line in decoder.decode(text):
+            yield line
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_models.py", line 1018, in aiter_text
+    async for byte_content in self.aiter_bytes():
+    ...<2 lines>...
+            yield chunk
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_models.py", line 997, in aiter_bytes
+    async for raw_bytes in self.aiter_raw():
+    ...<2 lines>...
+            yield chunk
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_models.py", line 1055, in aiter_raw
+    async for raw_stream_bytes in self.stream:
+    ...<2 lines>...
+            yield chunk
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_client.py", line 176, in __aiter__
+    async for chunk in self._stream:
+        yield chunk
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 270, in __aiter__
+    with map_httpcore_exceptions():
+         ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/yuxua/miniconda3/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)

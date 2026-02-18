@@ -34,7 +34,7 @@ import requests
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-WORKDIR = "/home/juc049/projects/ra-projects/02-mnist-mlp"
+WORKDIR = os.path.join(PROJECT_ROOT, "tests", "story", "flashinfer-kernel")
 SERVER_DIR = os.path.join(PROJECT_ROOT, "server")
 SERVER_PYTHON = os.path.join(PROJECT_ROOT, ".ra-venv", "bin", "python3")
 SERVER_PORT = 10099
@@ -43,8 +43,9 @@ SERVER_URL = f"http://127.0.0.1:{SERVER_PORT}"
 OPENCODE_URL = f"http://127.0.0.1:{OPENCODE_PORT}"
 
 GOAL = (
-    "Train a one-layer MLP to achieve SOTA MNIST using GPU. "
-    "Recursively hyperparameter search to find the best configuration."
+    "Optimize the Triton fused MoE kernel to maximize benchmark speedup. "
+    "Tune BLOCK_SIZE, NUM_WARPS, NUM_STAGES, and USE_FP8 in solution/triton/kernel.py, "
+    "then run scripts/benchmark.py to measure performance."
 )
 
 MAX_ITERATIONS = 10

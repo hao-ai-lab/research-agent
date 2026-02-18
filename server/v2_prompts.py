@@ -41,7 +41,6 @@ def parse_reflection(text: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
-<<<<<<< HEAD
 def parse_replan(text: str) -> Optional[str]:
     """Parse <replan>...</replan> from agent output."""
     m = re.search(r"<replan>([\s\S]*?)</replan>", text)
@@ -52,7 +51,8 @@ def parse_analysis(text: str) -> Optional[str]:
     """Parse <analysis>...</analysis> from agent output."""
     m = re.search(r"<analysis>([\s\S]*?)</analysis>", text)
     return m.group(1).strip() if m else None
-=======
+
+
 def parse_continue(text: str) -> bool:
     """Parse <continue>yes|no</continue> from reflection output.
 
@@ -102,83 +102,6 @@ def parse_memories(text: str) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Reflection prompt (after DONE signal)
-# ---------------------------------------------------------------------------
-
-def build_reflection_prompt(
-    ctx: "PromptContext",
-    render_fn: Callable = None,
-    summary_of_work: str = "",
-) -> str:
-    """Build the post-DONE reflection prompt.
-
-    The prompt is resolved from the ``wild_v2_reflection`` SKILL.md template
-    via *render_fn* (typically ``PromptSkillManager.render``).
-
-    Falls back to a minimal inline template if render_fn is not available.
-    """
-    # Build user availability description
-    if ctx.away_duration_minutes > 0:
-        avail_str = (
-            f"The user is AFK (away for ~{ctx.away_duration_minutes} minutes). "
-            f"Autonomy level: {ctx.autonomy_level}. "
-            "The user would appreciate you continuing autonomously."
-        )
-    elif ctx.autonomy_level == "full":
-        avail_str = (
-            "The user is present but has set autonomy to 'full'. "
-            "Continue working without asking questions."
-        )
-    elif ctx.autonomy_level == "cautious":
-        avail_str = (
-            "The user is present and wants to be consulted on important decisions. "
-            "If you plan to continue, only do so if you're confident."
-        )
-    else:
-        avail_str = (
-            "The user is present with balanced autonomy. "
-            "Continue if there's clearly more important work; stop and ask if unsure."
-        )
-
-    variables = {
-        "goal": ctx.goal,
-        "iteration": str(ctx.iteration),
-        "max_iterations": str(ctx.max_iterations),
-        "summary_of_work": summary_of_work,
-        "plan": getattr(ctx, "_plan_text", "") or "",
-        "workdir": ctx.workdir,
-        "user_availability": avail_str,
-        "autonomy_level": ctx.autonomy_level,
-        "memories": ctx.memories_text,
-    }
-
-    if render_fn:
-        rendered = render_fn("wild_v2_reflection", variables)
-        if rendered:
-            return rendered
-
-    # Inline fallback
-    memories_section = f"\n## Active Memories\n\n{ctx.memories_text}\n" if ctx.memories_text else ""
-    return (
-        f"You just completed iteration {ctx.iteration} of {ctx.max_iterations} "
-        f"and signaled DONE.\n\n"
-        f"## Original Goal\n\n{ctx.goal}\n\n"
-        f"## Work Summary\n\n{summary_of_work}\n\n"
-        f"## User Availability\n\n{avail_str}\n\n"
-        f"{memories_section}"
-        "Reflect on what was accomplished, your progress towards the goal, "
-        "whether there is meaningful remaining work, and any lessons learned.\n\n"
-        "Output:\n"
-        "<reflection>Your reflection</reflection>\n"
-        "<continue>yes</continue> or <continue>no</continue>\n"
-        "<memories>\n"
-        "- [tag] Lesson or insight to remember\n"
-        "</memories>\n"
-    )
->>>>>>> main
-
-
-# ---------------------------------------------------------------------------
 # Prompt context — plain data, no behaviour
 # ---------------------------------------------------------------------------
 
@@ -204,12 +127,11 @@ class PromptContext:
     no_progress_streak: int = 0
     short_iteration_count: int = 0
 
-<<<<<<< HEAD
     # Reflection & analysis state
     reflections: list = field(default_factory=list)
     reflection_interval: int = 5
     analyses: list = field(default_factory=list)
-=======
+
     # User availability context
     autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
     away_duration_minutes: int = 0    # 0 = user is present
@@ -217,7 +139,6 @@ class PromptContext:
 
     # Memory bank (active lessons from past sessions)
     memories_text: str = ""  # formatted string for prompt injection
->>>>>>> main
 
 
 # ---------------------------------------------------------------------------

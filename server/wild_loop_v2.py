@@ -30,19 +30,13 @@ try:
         build_iteration_prompt,
         build_planning_prompt,
         build_reflection_prompt,
-<<<<<<< HEAD
         parse_analysis,
-        parse_plan,
-        parse_promise,
-        parse_reflection,
-        parse_replan,
-=======
         parse_continue,
         parse_memories,
         parse_plan,
         parse_promise,
         parse_reflection,
->>>>>>> main
+        parse_replan,
         parse_summary,
     )
 except ImportError:
@@ -52,19 +46,13 @@ except ImportError:
         build_iteration_prompt,
         build_planning_prompt,
         build_reflection_prompt,
-<<<<<<< HEAD
         parse_analysis,
-        parse_plan,
-        parse_promise,
-        parse_reflection,
-        parse_replan,
-=======
         parse_continue,
         parse_memories,
         parse_plan,
         parse_promise,
         parse_reflection,
->>>>>>> main
+        parse_replan,
         parse_summary,
     )
 
@@ -102,17 +90,15 @@ class WildV2Session:
     no_progress_streak: int = 0      # consecutive iterations with no file changes
     short_iteration_count: int = 0   # iterations < 30s
 
-<<<<<<< HEAD
     # Reflection & analysis
     reflections: list = field(default_factory=list)
     reflection_interval: int = 5     # reflect every N iterations
     analyses: list = field(default_factory=list)
     auto_analysis: bool = True       # run auto analysis after WAITING transitions
-=======
+
     # User availability context
     autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
     away_duration_minutes: int = 0    # 0 = user is present
->>>>>>> main
 
     def to_dict(self) -> dict:
         return {
@@ -131,15 +117,12 @@ class WildV2Session:
             "reflection": self.reflection,
             "no_progress_streak": self.no_progress_streak,
             "short_iteration_count": self.short_iteration_count,
-<<<<<<< HEAD
             "reflections": self.reflections,
             "reflection_interval": self.reflection_interval,
             "analyses": self.analyses,
             "auto_analysis": self.auto_analysis,
-=======
             "autonomy_level": self.autonomy_level,
             "away_duration_minutes": self.away_duration_minutes,
->>>>>>> main
         }
 
 
@@ -205,13 +188,10 @@ class WildV2Engine:
         chat_session_id: Optional[str] = None,
         max_iterations: int = 25,
         wait_seconds: float = 30.0,
-<<<<<<< HEAD
         reflection_interval: int = 5,
         auto_analysis: bool = True,
-=======
         autonomy_level: str = "balanced",
         away_duration_minutes: int = 0,
->>>>>>> main
     ) -> dict:
         """Start a new V2 wild session."""
         logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d autonomy=%s", goal[:80], chat_session_id, max_iterations, autonomy_level)
@@ -228,13 +208,10 @@ class WildV2Engine:
             started_at=time.time(),
             chat_session_id=chat_session_id,
             wait_seconds=wait_seconds,
-<<<<<<< HEAD
             reflection_interval=reflection_interval,
             auto_analysis=auto_analysis,
-=======
             autonomy_level=autonomy_level,
             away_duration_minutes=away_duration_minutes,
->>>>>>> main
         )
 
         # Create session storage dir
@@ -437,16 +414,13 @@ class WildV2Engine:
             history=session.history,
             no_progress_streak=session.no_progress_streak,
             short_iteration_count=session.short_iteration_count,
-<<<<<<< HEAD
             reflections=session.reflections,
             reflection_interval=session.reflection_interval,
             analyses=session.analyses,
-=======
             autonomy_level=session.autonomy_level,
             away_duration_minutes=session.away_duration_minutes,
             user_wants_questions=session.autonomy_level != "full" and session.away_duration_minutes == 0,
             memories_text=memories_text,
->>>>>>> main
         )
 
     async def _send_prompt(self, session: "WildV2Session", prompt: str, display_msg: str) -> str:
@@ -673,7 +647,7 @@ class WildV2Engine:
                         reflection_prompt = build_reflection_prompt(
                             ctx,
                             render_fn=self._render_fn,
-                            summary_of_work=summary,
+                            reflection_reason=f"Agent signaled DONE. Summary: {summary}",
                         )
                         display_msg = (
                             f"[Wild V2 — Reflection after iteration #{session.iteration}]\n"
