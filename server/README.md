@@ -40,9 +40,9 @@ npm run dev
 ### Prerequisites
 
 - Python 3.10+
-- Node.js 18+ (for frontend)
+- Node.js 20.9+ (for frontend)
 - tmux (for job execution)
-- OpenCode CLI installed (`npm install -g opencode` or `bun install -g opencode`)
+- OpenCode CLI installed (`npm install -g opencode-ai`)
 
 ### 1. Configure OpenCode
 

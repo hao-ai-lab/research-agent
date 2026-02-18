@@ -5504,11 +5504,8 @@ def main():
         logger.warning("   Set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
     
     if not USER_AUTH_TOKEN:
-        logger.warning("⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!")
-        logger.warning("   Your server has NO authentication - anyone can access it.")
-        logger.warning("   For secure remote access, generate a token with:")
-        logger.warning("     ./generate_auth_token.sh")
-        logger.warning("   Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>")
+        logger.info("RESEARCH_AGENT_USER_AUTH_TOKEN is not set — running without server-side auth.")
+        logger.info("   You can set your auth token in the GUI Settings page, or export the env var for remote access.")
     
     # Start OpenCode server subprocess
     # start_opencode_server_subprocess(args)

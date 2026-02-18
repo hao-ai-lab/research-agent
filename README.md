@@ -21,10 +21,10 @@ An AI-powered research assistant for ML experiment tracking. Provides a mobile-f
 
 ## Prerequisites
 
-- **Node.js** 18+ and **npm**
+- **Node.js** 20.9+ and **npm**
 - **Python** 3.10+
 - **tmux** (for background job execution)
-- **OpenCode** CLI (`npm install -g opencode`), auto-attempted by installer
+- **OpenCode** CLI (`npm install -g opencode-ai`), auto-attempted by installer
 - **ngrok** (optional, for public tunnel URLs)
 - **uv** (optional, preferred for isolated backend environment)
 
@@ -43,26 +43,28 @@ curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLG
 ```bash
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 cd v0-research-agent-mobile
+bash install.sh --dev
+nvm use 20               # activate Node 20 installed by install.sh
 npm install
 uv venv .ra-venv
 uv pip install --python .ra-venv/bin/python -r server/requirements.txt
 export RESEARCH_AGENT_USER_AUTH_TOKEN="$(openssl rand -hex 16)"
+echo $RESEARCH_AGENT_USER_AUTH_TOKEN  # Store this token for future use!
 export OPENCODE_CONFIG="$(pwd)/server/opencode.json"
 opencode serve
 ```
 
 Then in another terminal:
-
 ```bash
-cd server
+cd v0-research-agent-mobile/server
 ../.ra-venv/bin/python server.py --workdir /path/to/your/research/project --port 10000
 ```
 
 Then in another terminal:
-
 ```bash
+cd v0-research-agent-mobile
 NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000
-```
+``
 
 ## Environment Variables
 
