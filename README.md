@@ -2,7 +2,8 @@
 
 An AI-powered research assistant for ML experiment tracking. Provides a mobile-first web interface for monitoring training runs, chatting with an AI assistant, managing hyperparameter sweeps, and autonomous "Wild Mode" research loops.
 
-**Demo**: https://km71ympfr5y29n-3000.proxy.runpod.net/
+**Demo**: https://hao-ai-lab--research-agent-main-preview-app.modal.run
+
 
 ## Architecture
 
