@@ -1,0 +1,8 @@
+[solution]
+name = "test-fused-moe-v1"
+definition = "fused_moe"
+author = "wild-loop-test"
+
+[build]
+language = "triton"
+entry_point = "kernel"

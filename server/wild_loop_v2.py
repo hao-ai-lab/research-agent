@@ -26,27 +26,33 @@ import httpx
 try:
     from server.v2_prompts import (
         PromptContext,
+        build_analysis_prompt,
         build_iteration_prompt,
         build_planning_prompt,
         build_reflection_prompt,
+        parse_analysis,
         parse_continue,
         parse_memories,
         parse_plan,
         parse_promise,
         parse_reflection,
+        parse_replan,
         parse_summary,
     )
 except ImportError:
     from v2_prompts import (  # type: ignore[no-redef]
         PromptContext,
+        build_analysis_prompt,
         build_iteration_prompt,
         build_planning_prompt,
         build_reflection_prompt,
+        parse_analysis,
         parse_continue,
         parse_memories,
         parse_plan,
         parse_promise,
         parse_reflection,
+        parse_replan,
         parse_summary,
     )
 
@@ -84,6 +90,12 @@ class WildV2Session:
     no_progress_streak: int = 0      # consecutive iterations with no file changes
     short_iteration_count: int = 0   # iterations < 30s
 
+    # Reflection & analysis
+    reflections: list = field(default_factory=list)
+    reflection_interval: int = 5     # reflect every N iterations
+    analyses: list = field(default_factory=list)
+    auto_analysis: bool = True       # run auto analysis after WAITING transitions
+
     # User availability context
     autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
     away_duration_minutes: int = 0    # 0 = user is present
@@ -105,6 +117,10 @@ class WildV2Session:
             "reflection": self.reflection,
             "no_progress_streak": self.no_progress_streak,
             "short_iteration_count": self.short_iteration_count,
+            "reflections": self.reflections,
+            "reflection_interval": self.reflection_interval,
+            "analyses": self.analyses,
+            "auto_analysis": self.auto_analysis,
             "autonomy_level": self.autonomy_level,
             "away_duration_minutes": self.away_duration_minutes,
         }
@@ -172,6 +188,8 @@ class WildV2Engine:
         chat_session_id: Optional[str] = None,
         max_iterations: int = 25,
         wait_seconds: float = 30.0,
+        reflection_interval: int = 5,
+        auto_analysis: bool = True,
         autonomy_level: str = "balanced",
         away_duration_minutes: int = 0,
     ) -> dict:
@@ -190,6 +208,8 @@ class WildV2Engine:
             started_at=time.time(),
             chat_session_id=chat_session_id,
             wait_seconds=wait_seconds,
+            reflection_interval=reflection_interval,
+            auto_analysis=auto_analysis,
             autonomy_level=autonomy_level,
             away_duration_minutes=away_duration_minutes,
         )
@@ -394,6 +414,9 @@ class WildV2Engine:
             history=session.history,
             no_progress_streak=session.no_progress_streak,
             short_iteration_count=session.short_iteration_count,
+            reflections=session.reflections,
+            reflection_interval=session.reflection_interval,
+            analyses=session.analyses,
             autonomy_level=session.autonomy_level,
             away_duration_minutes=session.away_duration_minutes,
             user_wants_questions=session.autonomy_level != "full" and session.away_duration_minutes == 0,
@@ -624,7 +647,7 @@ class WildV2Engine:
                         reflection_prompt = build_reflection_prompt(
                             ctx,
                             render_fn=self._render_fn,
-                            summary_of_work=summary,
+                            reflection_reason=f"Agent signaled DONE. Summary: {summary}",
                         )
                         display_msg = (
                             f"[Wild V2 — Reflection after iteration #{session.iteration}]\n"
@@ -686,16 +709,36 @@ class WildV2Engine:
                     session.finished_at = time.time()
                     break
 
+                # 12. Reflection gate (periodic)
+                if (
+                    session.reflection_interval > 0
+                    and session.iteration > 0
+                    and session.iteration % session.reflection_interval == 0
+                    and session.status == "running"
+                ):
+                    await self._run_reflection(
+                        session,
+                        reason=f"Scheduled reflection at iteration {session.iteration} (every {session.reflection_interval} iterations)",
+                    )
+
                 if promise == "WAITING":
                     logger.info(
                         "[wild-v2] Agent signaled WAITING, sleeping %ds",
                         int(session.wait_seconds),
                     )
                     await asyncio.sleep(session.wait_seconds)
+
+                    # Auto analysis after WAITING (runs likely completed)
+                    if session.auto_analysis and session.status == "running":
+                        await self._run_auto_analysis(session)
                 else:
                     # Brief pause between iterations to avoid hammering
                     logger.debug("[wild-v2] Sleeping 2s before next iteration")
                     await asyncio.sleep(2)
+
+            # Final reflection before ending
+            if session.status in ("done", "running") and session.history:
+                await self._run_reflection(session, reason="Final reflection — loop completing")
 
             # Max iterations reached
             if session.status == "running":
@@ -711,6 +754,146 @@ class WildV2Engine:
         finally:
             self._save_state(session.session_id)
             logger.info("[wild-v2] Loop ended for session %s (status=%s)", session.session_id, session.status)
+
+    # -- Reflection & Analysis --
+
+    async def _run_reflection(self, session: "WildV2Session", reason: str = "Scheduled periodic reflection"):
+        """Run a reflection pass: review progress, optionally replan."""
+        logger.info("[wild-v2] ========== REFLECTION at iteration %d ==========", session.iteration)
+
+        try:
+            ctx = self._build_context(session)
+            reflection_prompt = build_reflection_prompt(ctx, render_fn=self._render_fn, reflection_reason=reason)
+            display_msg = (
+                f"[Wild V2 — Reflection at iteration {session.iteration}]\n"
+                f"Role: reflect\n"
+                f"Reason: {reason}"
+            )
+
+            ref_text = await self._send_prompt(session, reflection_prompt, display_msg)
+
+            # Parse reflection
+            reflection = parse_reflection(ref_text)
+            if reflection:
+                ref_record = {
+                    "iteration": session.iteration,
+                    "reason": reason,
+                    "content": reflection,
+                    "timestamp": time.time(),
+                }
+                session.reflections.append(ref_record)
+
+                # Write to reflections.md
+                ref_path = os.path.join(self._session_dir(session.session_id), "reflections.md")
+                with open(ref_path, "a") as f:
+                    f.write(f"\n## Reflection at iteration {session.iteration}\n\n")
+                    f.write(f"Reason: {reason}\n\n")
+                    f.write(reflection)
+                    f.write("\n\n---\n\n")
+
+                logger.info("[wild-v2] Reflection recorded: %d chars", len(reflection))
+            else:
+                logger.warning("[wild-v2] No <reflection> tag found in response")
+
+            # Check for replan
+            replan = parse_replan(ref_text)
+            if replan:
+                session.plan = replan
+                tasks_path = os.path.join(self._session_dir(session.session_id), "tasks.md")
+                with open(tasks_path, "w") as f:
+                    f.write(replan)
+                logger.info("[wild-v2] Replan: tasks.md rewritten (%d chars)", len(replan))
+
+            self._save_state(session.session_id)
+
+        except Exception as err:
+            logger.warning("[wild-v2] Reflection failed (non-fatal): %s", err)
+
+        logger.info("[wild-v2] ========== REFLECTION END ==========")
+
+    async def _run_auto_analysis(self, session: "WildV2Session"):
+        """Run automatic data analysis on collected metrics."""
+        logger.info("[wild-v2] ========== AUTO ANALYSIS at iteration %d ==========", session.iteration)
+
+        try:
+            metrics_data = self._collect_metrics(session)
+            ctx = self._build_context(session)
+            analysis_prompt = build_analysis_prompt(ctx, metrics_data=metrics_data, render_fn=self._render_fn)
+            display_msg = (
+                f"[Wild V2 — Data Analysis at iteration {session.iteration}]\n"
+                f"Role: analyze\n"
+                f"Goal: Analyze experiment results and metrics"
+            )
+
+            analysis_text = await self._send_prompt(session, analysis_prompt, display_msg)
+
+            # Parse analysis
+            analysis = parse_analysis(analysis_text)
+            if analysis:
+                analysis_record = {
+                    "iteration": session.iteration,
+                    "content": analysis,
+                    "metrics_sources": list(metrics_data.keys()),
+                    "timestamp": time.time(),
+                }
+                session.analyses.append(analysis_record)
+
+                # Write analysis artifact
+                analysis_path = os.path.join(
+                    self._session_dir(session.session_id),
+                    f"analysis_{session.iteration}.md",
+                )
+                with open(analysis_path, "w") as f:
+                    f.write(f"# Analysis at iteration {session.iteration}\n\n")
+                    f.write(analysis)
+
+                logger.info("[wild-v2] Analysis recorded: %d chars, sources=%s",
+                           len(analysis), list(metrics_data.keys()))
+            else:
+                logger.warning("[wild-v2] No <analysis> tag found in response")
+
+            self._save_state(session.session_id)
+
+        except Exception as err:
+            logger.warning("[wild-v2] Auto analysis failed (non-fatal): %s", err)
+
+        logger.info("[wild-v2] ========== AUTO ANALYSIS END ==========")
+
+    def _collect_metrics(self, session: "WildV2Session") -> dict:
+        """Scan workdir for metrics/results files and return their contents."""
+        metrics: dict = {}
+        workdir = self._get_workdir()
+
+        # Scan for results JSON files
+        for root, _dirs, files in os.walk(workdir):
+            # Skip hidden dirs and common noise
+            rel_root = os.path.relpath(root, workdir)
+            if any(part.startswith(".") for part in rel_root.split(os.sep)):
+                continue
+            if "node_modules" in rel_root or "__pycache__" in rel_root:
+                continue
+
+            for fname in files:
+                if not fname.endswith(".json"):
+                    continue
+                # Look for files that likely contain metrics
+                lower = fname.lower()
+                if any(kw in lower for kw in ("metric", "result", "benchmark", "score")):
+                    fpath = os.path.join(root, fname)
+                    try:
+                        with open(fpath) as f:
+                            data = json.load(f)
+                        rel_path = os.path.relpath(fpath, workdir)
+                        metrics[rel_path] = data
+                        logger.debug("[wild-v2] Found metrics file: %s", rel_path)
+                    except Exception:
+                        pass
+
+            # Limit scan depth
+            if len(metrics) >= 20:
+                break
+
+        return metrics
 
     # -- OpenCode interaction --
 
@@ -733,12 +916,28 @@ class WildV2Engine:
             logger.error("[wild-v2] Failed to create OpenCode session: %s", err)
             return None
 
-    async def _run_opencode(self, session_id: str, prompt: str) -> str:
-        """Send prompt to OpenCode and stream the full response text."""
+    async def _run_opencode(self, session_id: str, prompt: str,
+                            timeout_s: float = 300.0) -> str:
+        """Send prompt to OpenCode and stream the full response text.
+
+        Opens the SSE stream FIRST, then sends the prompt, to avoid
+        missing early events due to a race condition.
+
+        Text deltas arrive as either ``message.part.updated`` (with
+        ``props.delta``) or ``message.part.delta`` (OpenCode bus format).
+        Completion is ``session.status`` with ``status.type == "idle"``.
+        """
         full_text = ""
         try:
             async with httpx.AsyncClient(timeout=None) as client:
-                # Send prompt
+                # 1. Start SSE listener BEFORE sending prompt (avoid race)
+                sse_task = asyncio.create_task(
+                    self._stream_opencode_sse(client, session_id)
+                )
+                # Brief pause to let SSE connection establish
+                await asyncio.sleep(0.15)
+
+                # 2. Send prompt
                 payload = {
                     "model": {"providerID": self._model_provider, "modelID": self._model_id},
                     "parts": [{"type": "text", "text": prompt}],
@@ -749,56 +948,117 @@ class WildV2Engine:
                     auth=self._get_auth() if self._get_auth else None,
                 )
                 resp.raise_for_status()
+                logger.info("[wild-v2] Prompt sent to session %s", session_id)
 
-                # Stream events
-                url = f"{self._opencode_url}/global/event"
-                headers = {"Accept": "text/event-stream"}
-                async with client.stream(
-                    "GET", url, headers=headers,
-                    auth=self._get_auth() if self._get_auth else None,
-                ) as response:
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        try:
-                            raw_data = json.loads(line[6:])
-                            # Unwrap opencode's {payload: {...}} wrapper if present
-                            event_data = raw_data.get("payload", raw_data)
-
-                            if "error" in event_data:
-                                logger.error("[wild-v2] OpenCode error: %s", event_data["error"])
-                                break
-
-                            event_type = event_data.get("type", "")
-                            props = event_data.get("properties", {})
-
-                            # Extract text from event
-                            content_parts = props.get("parts", [])
-                            for part in content_parts:
-                                if part.get("type") == "text":
-                                    full_text += part.get("content", "")
-
-                            # Check for completion
-                            if event_type == "message.updated":
-                                metadata = props.get("metadata", {})
-                                if metadata.get("done"):
-                                    logger.info("[wild-v2] SSE: message.updated done=True")
-                                    break
-
-                            # Simple done detection: session idle
-                            if (event_type == "session.updated"
-                                and props.get("id") == session_id):
-                                if props.get("busy") is False:
-                                    logger.info("[wild-v2] SSE: session %s no longer busy", session_id)
-                                    break
-                        except Exception as parse_err:
-                            logger.debug("[wild-v2] Event parse error: %s", parse_err)
-                            continue
+                # 3. Wait for SSE to complete with timeout
+                try:
+                    full_text = await asyncio.wait_for(
+                        sse_task,
+                        timeout=timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[wild-v2] SSE stream timed out after %.0fs for session %s",
+                        timeout_s, session_id,
+                    )
+                    sse_task.cancel()
+                    try:
+                        await sse_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
 
         except Exception as err:
             logger.error("[wild-v2] OpenCode run failed: %s", err, exc_info=True)
 
         logger.info("[wild-v2] Got %d chars of response", len(full_text))
+        return full_text
+
+    async def _stream_opencode_sse(self, client: httpx.AsyncClient,
+                                    session_id: str) -> str:
+        """Read SSE events from OpenCode and return accumulated text.
+
+        Handles two event formats for text deltas:
+        - ``message.part.updated`` with ``props.delta`` (parse_opencode_event format)
+        - ``message.part.delta`` with ``props.delta`` (OpenCode bus format)
+        Completion: ``session.status`` with ``status.type == "idle"``
+        """
+        full_text = ""
+        event_count = 0
+        text_event_count = 0
+        url = f"{self._opencode_url}/global/event"
+        headers = {"Accept": "text/event-stream"}
+
+        async with client.stream(
+            "GET", url, headers=headers,
+            auth=self._get_auth() if self._get_auth else None,
+        ) as response:
+            logger.info("[wild-v2] SSE stream connected for session %s", session_id)
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    raw_data = json.loads(line[6:])
+
+                    # Check for top-level error
+                    if "error" in raw_data:
+                        logger.error("[wild-v2] OpenCode error: %s", raw_data["error"])
+                        break
+
+                    payload = raw_data.get("payload", {})
+                    if not isinstance(payload, dict):
+                        continue
+
+                    etype = payload.get("type", "")
+                    props = payload.get("properties", {})
+                    if not isinstance(props, dict):
+                        continue
+                    part = props.get("part", {}) or {}
+                    if not isinstance(part, dict):
+                        part = {}
+
+                    event_count += 1
+
+                    # Filter by session ID (skip events for other sessions)
+                    event_sid = (
+                        props.get("sessionID")
+                        or part.get("sessionID")
+                        or (props.get("session") or {}).get("id")
+                    )
+                    if event_sid and event_sid != session_id:
+                        continue
+
+                    # Accumulate text deltas from message.part.updated
+                    if etype == "message.part.updated" and part.get("type") == "text":
+                        delta = props.get("delta", "")
+                        if delta:
+                            full_text += delta
+                            text_event_count += 1
+
+                    # Accumulate text deltas from message.part.delta (bus format)
+                    elif etype == "message.part.delta":
+                        delta = props.get("delta", "")
+                        if delta:
+                            full_text += delta
+                            text_event_count += 1
+
+                    # Completion: session becomes idle
+                    if etype == "session.status":
+                        status_obj = props.get("status", {})
+                        if isinstance(status_obj, dict) and status_obj.get("type") == "idle":
+                            logger.info(
+                                "[wild-v2] SSE: session idle — %d events, %d text deltas, %d chars",
+                                event_count, text_event_count, len(full_text),
+                            )
+                            break
+
+                except json.JSONDecodeError:
+                    continue
+                except Exception as parse_err:
+                    logger.debug("[wild-v2] Event parse error: %s", parse_err)
+                    continue
+
+        logger.info("[wild-v2] SSE stream ended: %d total events, %d text, %d chars",
+                    event_count, text_event_count, len(full_text))
         return full_text
 
     # -- Prompt builder --
@@ -879,9 +1139,9 @@ class WildV2Engine:
                 logger.debug("[wild-v2] No changes to commit")
                 return
 
-            # Stage all changes (respecting .gitignore)
+            # Stage changes within workdir only (respecting .gitignore)
             subprocess.run(
-                ["git", "add", "-A"],
+                ["git", "add", "-A", "--", "."],
                 capture_output=True, cwd=self._get_workdir(), timeout=10,
             )
 
@@ -954,9 +1214,23 @@ class WildV2Engine:
     # -- Iteration log --
 
     def _append_iteration_log(self, session: WildV2Session, record: dict):
-        """Append a structured entry to the iteration log on disk."""
+        """Append a structured entry to the iteration log on disk.
+
+        Skips writing if the agent already wrote an entry for this iteration
+        and our record has no summary (avoids duplicate empty entries).
+        """
         log_path = os.path.join(self._session_dir(session.session_id), "iteration_log.md")
         try:
+            # Check if agent already wrote an entry for this iteration
+            marker = f"## Iteration {record['iteration']}"
+            try:
+                with open(log_path) as f:
+                    existing = f.read()
+                if marker in existing and not record.get("summary"):
+                    return  # Agent already wrote richer entry; skip empty engine entry
+            except FileNotFoundError:
+                pass
+
             files_str = ", ".join(record.get("files_modified", [])[:10]) or "none"
             errors_str = ""
             if record.get("errors"):

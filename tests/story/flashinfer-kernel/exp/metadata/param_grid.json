@@ -1,0 +1,17 @@
+{
+  "block_sizes": [32, 64, 128, 256, 512],
+  "num_warps": [2, 4, 8, 16],
+  "num_stages": [1, 2, 3, 4, 5],
+  "use_fp8": [true, false],
+  "total_combinations": 200,
+  "priority_configs": [
+    {"block_size": 256, "num_warps": 8, "num_stages": 4, "use_fp8": true, "reason": "Theoretical optimal"},
+    {"block_size": 256, "num_warps": 8, "num_stages": 4, "use_fp8": false, "reason": "Optimal without FP8"},
+    {"block_size": 256, "num_warps": 8, "num_stages": 3, "use_fp8": true, "reason": "High block + warp + FP8"},
+    {"block_size": 256, "num_warps": 8, "num_stages": 3, "use_fp8": false, "reason": "High block + warp"},
+    {"block_size": 128, "num_warps": 8, "num_stages": 4, "use_fp8": true, "reason": "Good balance"},
+    {"block_size": 128, "num_warps": 8, "num_stages": 3, "use_fp8": true, "reason": "Test FP8 impact"},
+    {"block_size": 256, "num_warps": 4, "num_stages": 4, "use_fp8": true, "reason": "Test warp impact"},
+    {"block_size": 256, "num_warps": 16, "num_stages": 4, "use_fp8": true, "reason": "Test high warp count"}
+  ]
+}

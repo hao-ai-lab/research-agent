@@ -240,11 +240,11 @@ class WildEventQueue:
         return sum(1 for e in self._events.values() if e.get("status") == "pending")
 
     def enqueue(self, event: dict) -> bool:
-        """Add an event. Returns False if the id is already present (dedup)."""
+        """Add an event. Returns False if the id is already pending (dedup)."""
         eid = event.get("id", "")
-        if eid in self._events:
+        if eid in self._events and self._events[eid].get("status") == "pending":
             return False
-        event.setdefault("status", "pending")
+        event["status"] = "pending"
         self._events[eid] = event
         self._counter += 1
         heapq.heappush(self._heap, (event["priority"], event["created_at"], self._counter, event))
