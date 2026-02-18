@@ -103,6 +103,7 @@ export interface AppSettings {
     wildLoopHistoryBoxHeightPx?: number | null;
     showStarterCards?: boolean;
     starterCardFlavor?: "novice" | "expert";
+    showChatContextPanel?: boolean;
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
     mobileEnterToNewline?: boolean;

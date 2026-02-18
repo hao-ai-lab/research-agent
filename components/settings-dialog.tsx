@@ -294,6 +294,14 @@ export function SettingsDialog({
           value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatContextPanel !== false,
+        },
+        {
           id: 'appearanceAdvanced',
           label: 'Advanced Appearance',
           description: 'Set exact numeric sizes',
@@ -849,6 +857,7 @@ export function SettingsDialog({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
                     ...settings,

@@ -110,6 +110,7 @@ export function ConnectedChatView({
     const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
     const { settings, setSettings } = useAppSettings()
     const showStarterCards = settings.appearance.showStarterCards !== false
+    const showChatContextPanel = settings.appearance.showChatContextPanel !== false
     const starterCardFlavor = settings.appearance.starterCardFlavor || 'novice'
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
     const handleEditTemplate = useCallback((cardId: string, template: string | null) => {
@@ -132,6 +133,7 @@ export function ConnectedChatView({
     // Counter to force re-render when provenance is added (ref alone won't trigger)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
+    const wasChatContextPanelEnabledRef = useRef(showChatContextPanel)
 
     // Web notification hook
     const { notify } = useWebNotification(webNotificationsEnabled)
@@ -180,6 +182,18 @@ export function ConnectedChatView({
         if (typeof window === 'undefined') return
         window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(contextPanelHidden))
     }, [contextPanelHidden])
+
+    useEffect(() => {
+        if (showChatContextPanel && !wasChatContextPanelEnabledRef.current) {
+            setContextPanelHidden(false)
+        } else if (!showChatContextPanel) {
+            setContextPanelHidden(true)
+            if (mobilePanelTab === 'context') {
+                setMobilePanelTab('chat')
+            }
+        }
+        wasChatContextPanelEnabledRef.current = showChatContextPanel
+    }, [showChatContextPanel, mobilePanelTab])
 
     const getScrollViewport = useCallback((): HTMLDivElement | null => {
         if (!scrollRef.current) return null
@@ -578,12 +592,12 @@ export function ConnectedChatView({
         />
     )
 
-    const showChatPane = !isMobile || mobilePanelTab === 'chat'
+    const showChatPane = !isMobile || !showChatContextPanel || mobilePanelTab === 'chat'
 
     return (
         <div className="relative flex h-full overflow-hidden">
             <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${isMobile ? '' : 'min-w-[400px]'}`}>
-                {isMobile && (
+                {isMobile && showChatContextPanel && (
                     <div className="shrink-0 border-b border-border/70 px-3 py-2">
                         <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-1">
                             <button
@@ -790,8 +804,8 @@ export function ConnectedChatView({
                     </SheetContent>
                 </Sheet>
             </div>
-            {!isMobile && !contextPanelHidden && contextPanelElement}
-            {!isMobile && contextPanelHidden && (
+            {!isMobile && showChatContextPanel && !contextPanelHidden && contextPanelElement}
+            {!isMobile && showChatContextPanel && contextPanelHidden && (
                 <button
                     type="button"
                     onClick={() => setContextPanelHidden(false)}

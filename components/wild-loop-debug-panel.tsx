@@ -315,6 +315,7 @@ export function WildLoopDebugPanel({
     const [contextPromptsOpen, setContextPromptsOpen] = useState(false)
     const panelWidthRef = useRef(panelWidth)
     const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null)
+    const activePointerIdRef = useRef<number | null>(null)
     const settingsRef = useRef(settings)
     const prevIterationRef = useRef<number | null>(null)
 
@@ -488,18 +489,20 @@ export function WildLoopDebugPanel({
         if (isMobileLayout) return
         if (!isResizingPanel) return
 
-        const handleMouseMove = (event: MouseEvent) => {
+        const handlePointerMove = (event: PointerEvent) => {
+            if (activePointerIdRef.current !== null && event.pointerId !== activePointerIdRef.current) return
             const dragState = resizeStartRef.current
             if (!dragState) return
             const nextWidth = clampDebugPanelWidth(dragState.startWidth + (dragState.startX - event.clientX))
             setPanelWidth(nextWidth)
         }
 
-        const handleMouseUp = () => {
+        const finishResize = () => {
             const nextWidth = panelWidthRef.current
             const currentSettings = settingsRef.current
             setIsResizingPanel(false)
             resizeStartRef.current = null
+            activePointerIdRef.current = null
             setSettings({
                 ...currentSettings,
                 developer: {
@@ -509,22 +512,33 @@ export function WildLoopDebugPanel({
             })
         }
 
-        window.addEventListener('mousemove', handleMouseMove)
-        window.addEventListener('mouseup', handleMouseUp)
+        const handlePointerUp = (event: PointerEvent) => {
+            if (activePointerIdRef.current !== null && event.pointerId !== activePointerIdRef.current) return
+            finishResize()
+        }
+
+        window.addEventListener('pointermove', handlePointerMove)
+        window.addEventListener('pointerup', handlePointerUp)
+        window.addEventListener('pointercancel', handlePointerUp)
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
+        document.body.style.touchAction = 'none'
 
         return () => {
-            window.removeEventListener('mousemove', handleMouseMove)
-            window.removeEventListener('mouseup', handleMouseUp)
+            window.removeEventListener('pointermove', handlePointerMove)
+            window.removeEventListener('pointerup', handlePointerUp)
+            window.removeEventListener('pointercancel', handlePointerUp)
             document.body.style.cursor = ''
             document.body.style.userSelect = ''
+            document.body.style.touchAction = ''
         }
     }, [isMobileLayout, isResizingPanel, setSettings])
 
-    const startPanelResize = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const startPanelResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
         if (isMobileLayout) return
         event.preventDefault()
+        activePointerIdRef.current = event.pointerId
+        event.currentTarget.setPointerCapture(event.pointerId)
         resizeStartRef.current = {
             startX: event.clientX,
             startWidth: panelWidthRef.current,
@@ -587,7 +601,7 @@ export function WildLoopDebugPanel({
                 <button
                     type="button"
                     className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize"
-                    onMouseDown={startPanelResize}
+                    onPointerDown={startPanelResize}
                     onDoubleClick={resetPanelWidth}
                     title="Drag to resize panel. Double click to reset."
                     aria-label="Resize debug panel"

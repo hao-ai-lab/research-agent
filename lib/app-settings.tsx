@@ -52,6 +52,7 @@ export const defaultAppSettings: AppSettings = {
     wildLoopHistoryBoxHeightPx: null,
     showStarterCards: false,
     starterCardFlavor: "novice",
+    showChatContextPanel: true,
     showSidebarNewChatButton: false,
     mobileEnterToNewline: false,
   },
@@ -388,6 +389,9 @@ function readStoredSettings(): AppSettings {
           parsed?.appearance?.showStarterCards ??
           defaultAppSettings.appearance.showStarterCards,
         starterCardFlavor: resolvedStarterCardFlavor,
+        showChatContextPanel:
+          parsed?.appearance?.showChatContextPanel ??
+          defaultAppSettings.appearance.showChatContextPanel,
         showSidebarNewChatButton:
           parsed?.appearance?.showSidebarNewChatButton ??
           defaultAppSettings.appearance.showSidebarNewChatButton,

@@ -279,6 +279,14 @@ export function SettingsPageContent({
           value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatContextPanel !== false,
+        },
+        {
           id: 'mobileEnterToNewline',
           label: 'Mobile Enter Key Insert New Line',
           description: 'On mobile, Enter inserts newline instead of sending (send button to send)',
@@ -817,6 +825,7 @@ export function SettingsPageContent({
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'mobileEnterToNewline') updateAppearanceSettings({ mobileEnterToNewline: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
