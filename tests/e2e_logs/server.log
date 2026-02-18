@@ -1,14 +1,14 @@
-22:21:05 [research-agent-server] INFO: Initialized with workdir: /home/yuxua/hao_ai_lab/research-agent/tests/story/flashinfer-kernel
-22:21:05 [research-agent-server] WARNING: ⚠️  RESEARCH_AGENT_KEY environment variable is not set!
-22:21:05 [research-agent-server] WARNING:    The Anthropic gateway requires this for authentication.
-22:21:05 [research-agent-server] WARNING:    Set it with: export RESEARCH_AGENT_KEY=your-gateway-token
-22:21:05 [research-agent-server] WARNING: ⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!
-22:21:05 [research-agent-server] WARNING:    Your server has NO authentication - anyone can access it.
-22:21:05 [research-agent-server] WARNING:    For secure remote access, generate a token with:
-22:21:05 [research-agent-server] WARNING:      ./generate_auth_token.sh
-22:21:05 [research-agent-server] WARNING:    Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>
-22:21:05 [research-agent-server] INFO: Starting Research Agent Server on 0.0.0.0:10099
-22:21:05 [research-agent-server] INFO: Working directory: /home/yuxua/hao_ai_lab/research-agent/tests/story/flashinfer-kernel
+22:35:29 [research-agent-server] INFO: Initialized with workdir: /home/yuxua/hao_ai_lab/research-agent/tests/story/flashinfer-kernel
+22:35:29 [research-agent-server] WARNING: ⚠️  RESEARCH_AGENT_KEY environment variable is not set!
+22:35:29 [research-agent-server] WARNING:    The Anthropic gateway requires this for authentication.
+22:35:29 [research-agent-server] WARNING:    Set it with: export RESEARCH_AGENT_KEY=your-gateway-token
+22:35:29 [research-agent-server] WARNING: ⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!
+22:35:29 [research-agent-server] WARNING:    Your server has NO authentication - anyone can access it.
+22:35:29 [research-agent-server] WARNING:    For secure remote access, generate a token with:
+22:35:29 [research-agent-server] WARNING:      ./generate_auth_token.sh
+22:35:29 [research-agent-server] WARNING:    Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>
+22:35:29 [research-agent-server] INFO: Starting Research Agent Server on 0.0.0.0:10099
+22:35:29 [research-agent-server] INFO: Working directory: /home/yuxua/hao_ai_lab/research-agent/tests/story/flashinfer-kernel
 [wild-v2] OpenCode run failed: peer closed connection without sending complete message body (incomplete chunked read)
 Traceback (most recent call last):
   File "/home/yuxua/hao_ai_lab/research-agent/.ra-venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
