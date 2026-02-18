@@ -62,7 +62,6 @@ export function SettingsPageContent({
   const [authTokenCopied, setAuthTokenCopied] = useState(false)
   const [setupLinkCopied, setSetupLinkCopied] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
-  const [appearanceAdvancedOpen, setAppearanceAdvancedOpen] = useState(false)
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
 
   // Local state for advanced appearance inputs (only update settings on blur)
@@ -312,7 +311,7 @@ export function SettingsPageContent({
           icon: LayoutGrid,
           type: 'select' as const,
           options: ['expert', 'novice'],
-          value: settings.appearance.starterCardFlavor || 'expert',
+          value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
           id: 'mobileEnterToNewline',
@@ -874,25 +873,17 @@ export function SettingsPageContent({
         if (item.id === 'appearanceAdvanced') {
           return (
             <div className="rounded-lg bg-secondary/50 p-4">
-              <button
-                type="button"
-                onClick={() => setAppearanceAdvancedOpen((prev) => !prev)}
-                className="flex w-full items-center justify-between text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
-                    <Square className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Advanced Appearance</p>
-                    <p className="text-xs text-muted-foreground">Numeric control for fonts and buttons</p>
-                  </div>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                  <Square className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${appearanceAdvancedOpen ? 'rotate-90' : ''}`} />
-              </button>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Advanced Appearance</p>
+                  <p className="text-xs text-muted-foreground">Numeric control for fonts and buttons</p>
+                </div>
+              </div>
 
-              {appearanceAdvancedOpen && (
-                <div className="mt-4 space-y-3 border-t border-border pt-4">
+              <div className="mt-4 space-y-3 border-t border-border pt-4">
                   <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
                     <div>
                       <Label htmlFor="sidebar-new-chat-toggle" className="text-xs">Sidebar New Chat Button</Label>
@@ -1122,7 +1113,6 @@ export function SettingsPageContent({
                     </Button>
                   </div>
                 </div>
-              )}
             </div>
           )
         }
