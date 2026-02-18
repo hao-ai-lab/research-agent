@@ -10,7 +10,7 @@ import math
 
 # Tunable parameters — the wild loop agent should experiment with these
 BLOCK_SIZE = 256
-NUM_WARPS = 4
+NUM_WARPS = 8
 NUM_STAGES = 4
 USE_FP8 = True
 
