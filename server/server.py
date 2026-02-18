@@ -3181,6 +3181,15 @@ class ModeConfig:
     build_state: Callable[[str], dict]  # (message) -> template variables
 
 
+def _build_agent_state(_message: str) -> dict:
+    """Build template variables for agent (default chat) mode."""
+    return {
+        "experiment_context": _build_experiment_context(),
+        "server_url": SERVER_CALLBACK_URL,
+        "auth_token": USER_AUTH_TOKEN or "",
+    }
+
+
 def _build_plan_state(message: str) -> dict:
     """Build template variables for plan mode."""
     # Summarize existing plans for context
@@ -3205,6 +3214,7 @@ def _build_plan_state(message: str) -> dict:
 _WILD_SENTINEL = "__wild__"
 
 MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "agent": ModeConfig(skill_id="ra_mode_agent", build_state=_build_agent_state),
     "plan": ModeConfig(skill_id="ra_mode_plan", build_state=_build_plan_state),
     "wild": ModeConfig(skill_id=_WILD_SENTINEL, build_state=lambda _msg: {}),
 }
