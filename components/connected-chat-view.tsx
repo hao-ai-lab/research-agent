@@ -35,6 +35,21 @@ import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64
+const STORAGE_KEY_DEFAULT_CHAT_SKILL = 'research-agent-default-chat-skill-id'
+
+function buildDefaultSkillContext(skill: PromptSkill): string {
+    const skillDescription = skill.description?.trim() || 'No description provided.'
+    const endpoint = `/prompt-skills/${skill.id}`
+    return [
+        '[DEFAULT SKILL CONTEXT]',
+        `Use this default skill for this chat unless the user overrides it:`,
+        `- Skill ID: ${skill.id}`,
+        `- Skill Name: ${skill.name}`,
+        `- Skill Description: ${skillDescription}`,
+        `- Retrieve Full Skill: GET ${endpoint} (use the server base URL from system context)`,
+        '[/DEFAULT SKILL CONTEXT]',
+    ].join('\n')
+}
 
 interface ConnectedChatViewProps {
     runs: ExperimentRun[]
@@ -92,6 +107,7 @@ export function ConnectedChatView({
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
+    const [defaultSkillId, setDefaultSkillId] = useState<string | null>(null)
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
     const [starterReplyExcerptInsert, setStarterReplyExcerptInsert] = useState<{
@@ -152,6 +168,38 @@ export function ConnectedChatView({
         messageQueue,
         removeFromQueue,
     } = externalChatSession || internalChatSession
+
+    const selectableSkills = useMemo(() => skills.filter((skill) => !skill.internal), [skills])
+    const selectedDefaultSkill = useMemo(
+        () => selectableSkills.find((skill) => skill.id === defaultSkillId) || null,
+        [defaultSkillId, selectableSkills]
+    )
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const stored = window.localStorage.getItem(STORAGE_KEY_DEFAULT_CHAT_SKILL)
+        if (stored) {
+            setDefaultSkillId(stored)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        if (!defaultSkillId) {
+            window.localStorage.removeItem(STORAGE_KEY_DEFAULT_CHAT_SKILL)
+            return
+        }
+        window.localStorage.setItem(STORAGE_KEY_DEFAULT_CHAT_SKILL, defaultSkillId)
+    }, [defaultSkillId])
+
+    useEffect(() => {
+        if (!defaultSkillId) return
+        if (skills.length === 0) return
+        const stillExists = selectableSkills.some((skill) => skill.id === defaultSkillId)
+        if (!stillExists) {
+            setDefaultSkillId(null)
+        }
+    }, [defaultSkillId, selectableSkills, skills.length])
 
     // Always-current messages ref so streaming-end effect reads latest without re-triggering
     const messagesRef = useRef(messages)
@@ -350,6 +398,10 @@ export function ConnectedChatView({
     // Handle send - create session if needed, start wild loop if in wild mode
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
         let sessionId = currentSessionId
+        const isFirstInteraction = !currentSessionId || messages.length === 0
+        const defaultSkillContext = (isFirstInteraction && selectedDefaultSkill)
+            ? buildDefaultSkillContext(selectedDefaultSkill)
+            : null
         if (!sessionId) {
             sessionId = await createNewSession()
             if (!sessionId) {
@@ -365,7 +417,7 @@ export function ConnectedChatView({
         // so we do NOT send the message via sendMessage — that would create a conflicting
         // chat worker on the same session and cause a 409.
         if (effectiveMode === 'wild' && wildLoop && !wildLoop.isActive) {
-            wildLoop.start(message, sessionId)
+            wildLoop.start(message, sessionId, defaultSkillContext || undefined)
 
             // Auto-name the session since wild mode bypasses sendMessage
             const title = `🚀 ${message.slice(0, 60)}${message.length > 60 ? '...' : ''}`
@@ -392,8 +444,11 @@ export function ConnectedChatView({
 
         // Send the message normally — in wild mode (already running), the V2 backend
         // handles all subsequent iterations autonomously
-        await sendMessage(message, effectiveMode, sessionId)
-    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage, selectSession])
+        const promptOverride = (effectiveMode === 'agent' && defaultSkillContext)
+            ? `${message}\n\n${defaultSkillContext}`
+            : undefined
+        await sendMessage(message, effectiveMode, sessionId, promptOverride)
+    }, [currentSessionId, messages.length, selectedDefaultSkill, createNewSession, sendMessage, mode, wildLoop, onUserMessage, selectSession])
 
     const handleReplyToSelection = useCallback((selectedText: string) => {
         if (!currentSessionId) return
@@ -505,6 +560,8 @@ export function ConnectedChatView({
                 conversationKey={currentSessionId || 'new'}
                 layout={layout}
                 skills={skills}
+                defaultSkillId={defaultSkillId}
+                onDefaultSkillChange={setDefaultSkillId}
                 isWildLoopActive={wildLoop?.isActive ?? false}
                 onSteer={wildLoop ? (msg, priority) => {
                     wildLoop.insertIntoQueue({

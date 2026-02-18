@@ -72,6 +72,8 @@ interface ChatInputProps {
   conversationKey?: string
   layout?: 'docked' | 'centered'
   skills?: PromptSkill[]
+  defaultSkillId?: string | null
+  onDefaultSkillChange?: (skillId: string | null) => void
   isWildLoopActive?: boolean
   onSteer?: (message: string, priority: number) => void
   onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void
@@ -124,6 +126,8 @@ export function ChatInput({
   conversationKey = 'default',
   layout = 'docked',
   skills = [],
+  defaultSkillId = null,
+  onDefaultSkillChange,
   isWildLoopActive = false,
   onSteer,
   onOpenReplyExcerpt,
@@ -313,6 +317,11 @@ export function ChatInput({
   }, [mentionItems, mentionQuery, mentionFilter])
 
   useEffect(() => { setSelectedMentionIndex(0) }, [filteredMentionItems])
+
+  const selectableSkills = useMemo(
+    () => skills.filter((skill) => !skill.internal),
+    [skills]
+  )
 
   // =========================================================================
   // Highlighted message overlay – text color only, no background
@@ -767,6 +776,28 @@ export function ChatInput({
                 </div>
               </PopoverContent>
             </Popover>
+          )}
+
+          {/* Default skill selector */}
+          {onDefaultSkillChange && selectableSkills.length > 0 && (
+            <div className="chat-toolbar-pill flex items-center gap-1 rounded-lg border border-border/60 bg-secondary px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80">
+              <Wand2 className="h-3 w-3 shrink-0 text-violet-500" />
+              <label htmlFor="default-skill-select" className="sr-only">Default skill</label>
+              <select
+                id="default-skill-select"
+                value={defaultSkillId ?? ''}
+                onChange={(event) => onDefaultSkillChange(event.target.value || null)}
+                className="max-w-[180px] min-w-[120px] truncate bg-transparent text-[11px] text-foreground focus:outline-none"
+                title="Default skill for first message in a new chat"
+              >
+                <option value="">No default skill</option>
+                {selectableSkills.map((skill) => (
+                  <option key={skill.id} value={skill.id}>
+                    {skill.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
         </div>
 

@@ -4256,6 +4256,7 @@ class WildV2StartRequest(BaseModel):
     chat_session_id: Optional[str] = None
     max_iterations: int = 25
     wait_seconds: float = 30.0
+    initial_context: Optional[str] = None
 
 class WildV2SteerRequest(BaseModel):
     context: str
@@ -4272,6 +4273,7 @@ async def wild_v2_start(req: WildV2StartRequest):
         chat_session_id=req.chat_session_id,
         max_iterations=req.max_iterations,
         wait_seconds=req.wait_seconds,
+        initial_context=req.initial_context or "",
     )
     return result
 

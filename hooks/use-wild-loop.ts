@@ -54,7 +54,7 @@ export interface UseWildLoopResult {
   pendingEvents: Array<{ id: string; type: string; title: string; detail: string }>
 
   // Lifecycle
-  start: (goal: string, sessionId: string) => void
+  start: (goal: string, sessionId: string, initialContext?: string) => void
   pause: () => void
   resume: () => void
   stop: () => void
@@ -113,12 +113,13 @@ export function useWildLoop(): UseWildLoopResult {
 
   // ---- Lifecycle actions ----
 
-  const start = useCallback(async (goal: string, sessionId: string) => {
+  const start = useCallback(async (goal: string, sessionId: string, initialContext?: string) => {
     try {
       console.log('[wild-loop-v2] Starting: goal=%s session=%s', goal, sessionId)
       const s = await startWildV2({
         goal,
         chat_session_id: sessionId,
+        initial_context: initialContext,
       })
       setStatus(s)
     } catch (err) {

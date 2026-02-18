@@ -174,6 +174,7 @@ class WildV2Engine:
         wait_seconds: float = 30.0,
         autonomy_level: str = "balanced",
         away_duration_minutes: int = 0,
+        initial_context: str = "",
     ) -> dict:
         """Start a new V2 wild session."""
         logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d autonomy=%s", goal[:80], chat_session_id, max_iterations, autonomy_level)
@@ -192,6 +193,7 @@ class WildV2Engine:
             wait_seconds=wait_seconds,
             autonomy_level=autonomy_level,
             away_duration_minutes=away_duration_minutes,
+            steer_context=initial_context or "",
         )
 
         # Create session storage dir
@@ -499,6 +501,13 @@ class WildV2Engine:
             self._append_iteration_log(session, plan_record)
             await self._git_commit(session)
             self._save_state(session.session_id)
+
+            # Initial start context should only affect the first planning prompt.
+            if session.steer_context:
+                session.steer_context = ""
+                ctx_path = os.path.join(self._session_dir(session.session_id), "context.md")
+                if os.path.exists(ctx_path):
+                    os.remove(ctx_path)
 
             logger.info("[wild-v2] ========== Iteration 0 (PLANNING) END (duration=%.1fs) ==========", plan_duration)
             await asyncio.sleep(2)  # Brief pause before first execution iteration
