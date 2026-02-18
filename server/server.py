@@ -2558,7 +2558,16 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
     if event_sid != target_session_id:
         return None
     
-    if etype == "message.part.updated":
+    if etype == "message.part.delta":
+        delta = props.get("delta")
+        if not isinstance(delta, str) or delta == "":
+            return None
+        field = props.get("field", "")
+        part_id = props.get("partID")
+        if field in ("text", "reasoning"):
+            return {"type": "part_delta", "id": part_id, "ptype": field, "delta": delta}
+
+    elif etype == "message.part.updated":
         ptype = part.get("type")
         part_id = part.get("id")
 
@@ -2582,7 +2591,7 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
                 "name": _extract_tool_name(part),
                 **tool_data,
             }
-    
+
     elif etype == "session.status":
         if props.get("status", {}).get("type") == "idle":
             return {"type": "session_status", "status": "idle", "_done": True}
