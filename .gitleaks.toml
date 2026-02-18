@@ -1,0 +1,13 @@
+# Gitleaks configuration – allowlist for known false positives.
+# https://github.com/gitleaks/gitleaks#configuration
+
+[allowlist]
+  # Pyright LSP session UUIDs in test logs and placeholder tokens in docs
+  paths = [
+    '''tests/e2e_logs/.*''',
+  ]
+
+  # Allowlisted commits (placeholder "YOUR_TOKEN" in Slack docs)
+  commits = [
+    "267619858ac90676bde0417dba1c52da4a46786e",
+  ]
