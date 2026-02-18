@@ -24,6 +24,7 @@ import {
   PlugZap,
   Filter,
   Plus,
+  Copy,
   Sparkles,
   Loader2,
   RefreshCw,
@@ -138,6 +139,8 @@ interface RunsViewProps {
   onRespondToAlert?: (alertId: string, choice: string) => Promise<void>
   showDesktopSidebarToggle?: boolean
   onDesktopSidebarToggle?: () => void
+  openDialogIntent?: 'run' | 'sweep' | null
+  onDialogIntentHandled?: () => void
 }
 
 export function RunsView({
@@ -168,6 +171,8 @@ export function RunsView({
   onRespondToAlert,
   showDesktopSidebarToggle = false,
   onDesktopSidebarToggle,
+  openDialogIntent = null,
+  onDialogIntentHandled,
 }: RunsViewProps) {
   const { settings } = useAppSettings()
   const interactionMode = settings.appearance.runItemInteractionMode || 'detail-page'
@@ -201,6 +206,7 @@ export function RunsView({
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
   const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runCreateFromRunId, setRunCreateFromRunId] = useState<string | null>(null)
   const [runCreateName, setRunCreateName] = useState('')
   const [runCreateCommand, setRunCreateCommand] = useState('')
   const [runCreateWorkdir, setRunCreateWorkdir] = useState('')
@@ -235,6 +241,16 @@ export function RunsView({
           (a.startedAt?.getTime() || a.createdAt.getTime())
       ),
     [sweeps]
+  )
+  const sortedRunsForCreate = useMemo(
+    () =>
+      [...runs]
+        .sort((a, b) => {
+          const aTime = (a.createdAt || a.startTime).getTime()
+          const bTime = (b.createdAt || b.startTime).getTime()
+          return bTime - aTime
+        }),
+    [runs]
   )
   const sweepOptions = useMemo(
     () =>
@@ -748,6 +764,7 @@ export function RunsView({
   }
 
   const resetCreateRunForm = useCallback(() => {
+    setRunCreateFromRunId(null)
     setRunCreateName('')
     setRunCreateCommand('')
     setRunCreateWorkdir('')
@@ -756,6 +773,31 @@ export function RunsView({
     setRunCreateError(null)
     setRunCreateSubmitting(false)
   }, [])
+
+  const openCreateRunDialog = useCallback(() => {
+    setRunDialogOpen(true)
+    setRunCreateError(null)
+  }, [])
+
+  const handleDuplicateRun = useCallback((runId: string) => {
+    const run = runs.find((candidate) => candidate.id === runId)
+    if (!run) return
+    setRunCreateFromRunId(runId)
+    setRunCreateName(run.alias || run.name || '')
+    setRunCreateCommand(run.command || '')
+    setRunCreateSweepId(run.sweepId || 'none')
+    setRunCreateError(null)
+  }, [runs])
+
+  useEffect(() => {
+    if (!openDialogIntent) return
+    if (openDialogIntent === 'run') {
+      openCreateRunDialog()
+    } else {
+      setSweepDialogOpen(true)
+    }
+    onDialogIntentHandled?.()
+  }, [onDialogIntentHandled, openCreateRunDialog, openDialogIntent])
 
   const handleSubmitCreateRun = useCallback(async () => {
     if (!onCreateRun || runCreateSubmitting) return
@@ -1843,10 +1885,7 @@ export function RunsView({
                   variant="outline"
                   size="sm"
                   className="h-6 px-2 text-[11px] gap-1"
-                  onClick={() => {
-                    setRunDialogOpen(true)
-                    setRunCreateError(null)
-                  }}
+                  onClick={openCreateRunDialog}
                 >
                   <Play className="h-3 w-3" />
                   Create Run
@@ -2486,7 +2525,48 @@ export function RunsView({
       >
         <DialogContent className="max-w-xl p-0 overflow-hidden">
           <div className="border-b border-border px-5 py-4">
-            <DialogTitle className="text-sm font-semibold text-foreground">Create Run</DialogTitle>
+            <div className="flex items-center justify-between gap-2">
+              <DialogTitle className="text-sm font-semibold text-foreground">Create Run</DialogTitle>
+              {sortedRunsForCreate.length > 0 && (
+                <Select value={runCreateFromRunId ?? undefined} onValueChange={handleDuplicateRun}>
+                  <SelectTrigger className={`h-7 w-auto gap-1 px-2 text-[11px] border-none ${runCreateFromRunId
+                    ? 'bg-accent/20 text-accent hover:bg-accent/30'
+                    : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                    }`}>
+                    <Copy className="h-3 w-3" />
+                    <span className="hidden sm:inline"><SelectValue placeholder="Create from..." /></span>
+                  </SelectTrigger>
+                  <SelectContent align="end" className="max-w-[360px]">
+                    <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      Create from run...
+                    </div>
+                    {sortedRunsForCreate.map((run) => {
+                      const createdAt = run.createdAt || run.startTime
+                      const createdAtLabel = createdAt
+                        ? new Date(createdAt).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                        : ''
+                      const runTitle = run.alias || run.name || run.id
+
+                      return (
+                        <SelectItem key={run.id} value={run.id} className="text-xs">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-medium">{runTitle}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {run.id}{createdAtLabel ? ` · ${createdAtLabel}` : ''}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Create a single run and optionally attach it to an existing sweep.
             </p>
