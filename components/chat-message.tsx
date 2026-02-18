@@ -258,7 +258,7 @@ export function ChatMessage({
 
   const renderReferences = (text: string, keyPrefix: string) => {
     const output: React.ReactNode[] = []
-    const referenceRegex = /@((?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+)(?=$|[\s,.;!?)\]])/g
+    const referenceRegex = /@((?:run|sweep|artifact|alert|chart|chat|skill):[A-Za-z0-9:._-]+)(?=$|[\s,.;!?)\]])/g
     let cursor = 0
     let match: RegExpExecArray | null
     let partIndex = 0
