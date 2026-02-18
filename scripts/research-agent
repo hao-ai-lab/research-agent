@@ -221,7 +221,31 @@ maybe_install_opencode() {
     if npm install -g opencode-ai --prefix "$npm_prefix" 2>/dev/null; then
       export PATH="${npm_prefix}/bin:${PATH}"
       log "opencode installed to ${npm_prefix}/bin/opencode"
-      log "Add to your shell profile: export PATH=\"${npm_prefix}/bin:\$PATH\""
+
+      # Persist PATH update to the appropriate shell profile, similar to install.sh
+      local shell_rc
+      case "${SHELL:-}" in
+        *zsh)
+          shell_rc="${HOME}/.zshrc"
+          ;;
+        *bash)
+          shell_rc="${HOME}/.bashrc"
+          ;;
+        *)
+          shell_rc="${HOME}/.bashrc"
+          ;;
+      esac
+
+      local path_export="export PATH=\"${npm_prefix}/bin:\$PATH\""
+      if [ -n "${shell_rc:-}" ]; then
+        touch "$shell_rc"
+        if ! grep -Fq "$path_export" "$shell_rc"; then
+          printf '\n%s\n' "$path_export" >> "$shell_rc"
+          log "Updated ${shell_rc} to include opencode in PATH"
+        else
+          log "PATH update already present in ${shell_rc}"
+        fi
+      fi
       return
     fi
   fi
