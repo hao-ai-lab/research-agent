@@ -105,11 +105,6 @@ def preview_server():
     except Exception as e:
         print(f"WARNING: tmux failed to start: {e}")
 
-    # Generate opencode server password for secure local communication
-    import secrets as _secrets
-    oc_password = env.get("OPENCODE_SERVER_PASSWORD") or _secrets.token_hex(16)
-    env["OPENCODE_SERVER_PASSWORD"] = oc_password
-
     # Route backend OpenCode traffic to external endpoint when configured.
     external_opencode_url = env.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
     if external_opencode_url:
