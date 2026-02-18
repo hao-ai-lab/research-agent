@@ -29,6 +29,7 @@ import {
 import type { ExperimentRun, Artifact, InsightChart, ChatMessage, Sweep } from '@/lib/types'
 import type { Alert as ApiAlert } from '@/lib/api-client'
 import type { ChatModelOption, SessionModelSelection } from '@/lib/api-client'
+import type { SessionLocation } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
 import {
   REFERENCE_TYPE_COLOR_MAP,
@@ -80,6 +81,10 @@ interface ChatInputProps {
   selectedModel?: SessionModelSelection | null
   isModelUpdating?: boolean
   onModelChange?: (model: SessionModelSelection) => Promise<void> | void
+  sessionLocation?: SessionLocation
+  canSelectSessionLocation?: boolean
+  onSessionLocationChange?: (location: SessionLocation) => void
+  activeWorktreeName?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +136,10 @@ export function ChatInput({
   selectedModel = null,
   isModelUpdating = false,
   onModelChange,
+  sessionLocation = 'local',
+  canSelectSessionLocation = false,
+  onSessionLocationChange,
+  activeWorktreeName = null,
 }: ChatInputProps) {
   const { settings } = useAppSettings()
   const isMobile = useIsMobile()
@@ -698,6 +707,39 @@ export function ChatInput({
       {/* Bottom controls */}
       <div className="flex flex-wrap items-center gap-1.5">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
+          {canSelectSessionLocation ? (
+            <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-border/60 bg-secondary/30 p-0.5">
+              <button
+                type="button"
+                onClick={() => onSessionLocationChange?.('local')}
+                className={`rounded-md px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  sessionLocation === 'local'
+                    ? 'bg-secondary text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-secondary/70'
+                }`}
+                title="Use current project directory"
+              >
+                local
+              </button>
+              <button
+                type="button"
+                onClick={() => onSessionLocationChange?.('worktree')}
+                className={`rounded-md px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  sessionLocation === 'worktree'
+                    ? 'bg-secondary text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-secondary/70'
+                }`}
+                title="Create and use a git worktree for this chat"
+              >
+                worktree
+              </button>
+            </div>
+          ) : sessionLocation === 'worktree' && activeWorktreeName ? (
+            <span className="mr-1 rounded-md border border-emerald-500/35 bg-emerald-500/12 px-2 py-1 text-[10px] font-semibold text-emerald-700 dark:border-emerald-400/45 dark:bg-emerald-500/24 dark:text-emerald-300">
+              {activeWorktreeName}
+            </span>
+          ) : null}
+
           {/* Mode toggle */}
           <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
             <PopoverTrigger asChild>

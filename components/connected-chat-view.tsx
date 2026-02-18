@@ -32,6 +32,7 @@ import type {
     WildModeSetup,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
+import type { SessionLocation } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64
@@ -102,6 +103,7 @@ export function ConnectedChatView({
     } | null>(null)
     const [excerptPreview, setExcerptPreview] = useState<{ fileName: string; text: string } | null>(null)
     const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
+    const [newSessionLocation, setNewSessionLocation] = useState<SessionLocation>('local')
     const { settings, setSettings } = useAppSettings()
     const showStarterCards = settings.appearance.showStarterCards !== false
     const starterCardFlavor = settings.appearance.starterCardFlavor || 'novice'
@@ -156,11 +158,19 @@ export function ConnectedChatView({
     // Always-current messages ref so streaming-end effect reads latest without re-triggering
     const messagesRef = useRef(messages)
     messagesRef.current = messages
+    const previousSessionIdRef = useRef<string | null>(currentSessionId)
 
     // Notify parent of session changes
     useEffect(() => {
         onSessionChange?.(currentSessionId)
     }, [currentSessionId, onSessionChange])
+
+    useEffect(() => {
+        if (previousSessionIdRef.current && !currentSessionId) {
+            setNewSessionLocation('local')
+        }
+        previousSessionIdRef.current = currentSessionId
+    }, [currentSessionId])
 
     const getScrollViewport = useCallback((): HTMLDivElement | null => {
         if (!scrollRef.current) return null
@@ -351,7 +361,7 @@ export function ConnectedChatView({
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
         let sessionId = currentSessionId
         if (!sessionId) {
-            sessionId = await createNewSession()
+            sessionId = await createNewSession(newSessionLocation)
             if (!sessionId) {
                 return
             }
@@ -393,7 +403,7 @@ export function ConnectedChatView({
         // Send the message normally — in wild mode (already running), the V2 backend
         // handles all subsequent iterations autonomously
         await sendMessage(message, effectiveMode, sessionId)
-    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage, selectSession])
+    }, [currentSessionId, createNewSession, newSessionLocation, sendMessage, mode, wildLoop, onUserMessage, selectSession])
 
     const handleReplyToSelection = useCallback((selectedText: string) => {
         if (!currentSessionId) return
@@ -522,6 +532,10 @@ export function ConnectedChatView({
                 selectedModel={selectedModel}
                 isModelUpdating={isModelUpdating}
                 onModelChange={setSelectedModel}
+                sessionLocation={currentSession?.session_location ?? newSessionLocation}
+                canSelectSessionLocation={!currentSessionId}
+                onSessionLocationChange={setNewSessionLocation}
+                activeWorktreeName={currentSession?.worktree_name ?? null}
             />
         </>
     )

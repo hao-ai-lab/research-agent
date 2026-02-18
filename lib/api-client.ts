@@ -15,6 +15,7 @@ import * as mockApi from './api-mock'
 // Export types from real API
 export type {
     ChatSession,
+    SessionLocation,
     ChatModelOption,
     SessionModelSelection,
     ChatMessageData,

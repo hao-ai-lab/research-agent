@@ -5,6 +5,7 @@
 
 import type {
     ChatSession,
+    SessionLocation,
     ChatModelOption,
     SessionModelSelection,
     ActiveSessionStream,
@@ -118,6 +119,7 @@ const DEFAULT_MODEL_SELECTION: SessionModelSelection = {
     provider_id: 'opencode',
     model_id: 'kimi-k2.5-free',
 }
+const MOCK_WORKDIR = '/workspace/qwen-finetune'
 
 const mockSessions: Map<string, SessionWithMessages> = new Map([
     ['demo-session-1', {
@@ -764,11 +766,18 @@ export async function listSessions(): Promise<ChatSession[]> {
         message_count: s.message_count,
         model_provider: s.model_provider,
         model_id: s.model_id,
+        session_location: s.session_location,
+        worktree_name: s.worktree_name,
+        workdir: s.workdir,
         status: hasPendingAlertBySessionId.has(s.id) ? 'awaiting_human' : (s.message_count > 0 ? 'completed' : 'idle'),
     }))
 }
 
-export async function createSession(title?: string, model?: SessionModelSelection): Promise<ChatSession> {
+export async function createSession(
+    title?: string,
+    model?: SessionModelSelection,
+    location: SessionLocation = 'local',
+): Promise<ChatSession> {
     await delay(150)
     const id = `session-${generateId()}`
     const selectedModel = model ?? DEFAULT_MODEL_SELECTION
@@ -779,6 +788,9 @@ export async function createSession(title?: string, model?: SessionModelSelectio
         message_count: 0,
         model_provider: selectedModel.provider_id,
         model_id: selectedModel.model_id,
+        session_location: location,
+        worktree_name: location === 'worktree' ? `chat-${id}` : null,
+        workdir: location === 'worktree' ? `${MOCK_WORKDIR}-worktrees/chat-${id}` : MOCK_WORKDIR,
         messages: [],
     }
     mockSessions.set(id, session)
@@ -789,6 +801,9 @@ export async function createSession(title?: string, model?: SessionModelSelectio
         message_count: 0,
         model_provider: session.model_provider,
         model_id: session.model_id,
+        session_location: session.session_location,
+        worktree_name: session.worktree_name,
+        workdir: session.workdir,
         status: 'idle',
     }
 }
@@ -814,6 +829,9 @@ export async function renameSession(sessionId: string, title: string): Promise<C
         message_count: session.messages.length,
         model_provider: session.model_provider,
         model_id: session.model_id,
+        session_location: session.session_location,
+        worktree_name: session.worktree_name,
+        workdir: session.workdir,
         status: session.messages.length > 0 ? 'completed' : 'idle',
     }
 }

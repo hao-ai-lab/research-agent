@@ -129,6 +129,8 @@ PLANS_DATA_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
+SESSION_LOCATION_LOCAL = "local"
+SESSION_LOCATION_WORKTREE = "worktree"
 
 AUTH_PROTECTED_PREFIXES = (
     "/sessions",
@@ -256,6 +258,117 @@ def get_session_model(session: dict[str, Any]) -> tuple[str, str]:
     return provider, model
 
 
+def _normalize_session_location(raw: Optional[str]) -> str:
+    if not raw:
+        return SESSION_LOCATION_LOCAL
+    value = raw.strip().lower()
+    if value not in {SESSION_LOCATION_LOCAL, SESSION_LOCATION_WORKTREE}:
+        return SESSION_LOCATION_LOCAL
+    return value
+
+
+def _sanitize_worktree_name(raw: Optional[str], fallback: str) -> str:
+    source = (raw or fallback).strip()
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", source).strip("._-")
+    if not cleaned:
+        cleaned = fallback
+    return cleaned[:64]
+
+
+def _worktree_parent_dir() -> str:
+    root = os.path.abspath(WORKDIR)
+    base_name = os.path.basename(root.rstrip(os.sep)) or "workspace"
+    return os.path.join(os.path.dirname(root), f"{base_name}-worktrees")
+
+
+def _ensure_git_repo_for_worktree() -> None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", WORKDIR, "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to check git repository: {exc}") from exc
+
+    if result.returncode != 0 or result.stdout.strip() != "true":
+        detail = result.stderr.strip() or "Current workdir is not a git repository"
+        raise HTTPException(status_code=400, detail=detail)
+
+
+def _create_git_worktree(name_hint: Optional[str], session_id: str) -> tuple[str, str]:
+    _ensure_git_repo_for_worktree()
+
+    parent_dir = _worktree_parent_dir()
+    os.makedirs(parent_dir, exist_ok=True)
+
+    base_name = _sanitize_worktree_name(name_hint, fallback=f"chat-{session_id}")
+    candidate = base_name
+    counter = 2
+    while os.path.exists(os.path.join(parent_dir, candidate)):
+        candidate = f"{base_name}-{counter}"
+        counter += 1
+
+    worktree_name = candidate
+    worktree_path = os.path.abspath(os.path.join(parent_dir, worktree_name))
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", WORKDIR, "worktree", "add", "--detach", worktree_path, "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create git worktree: {exc}") from exc
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "Failed to create git worktree"
+        raise HTTPException(status_code=500, detail=detail)
+
+    return worktree_name, worktree_path
+
+
+def _ensure_session_defaults(session: dict[str, Any]) -> None:
+    location = _normalize_session_location(session.get("session_location"))
+    session["session_location"] = location
+
+    existing_workdir = str(session.get("workdir") or "").strip()
+    if existing_workdir:
+        resolved_workdir = os.path.abspath(existing_workdir)
+    else:
+        resolved_workdir = os.path.abspath(WORKDIR)
+
+    if location == SESSION_LOCATION_WORKTREE:
+        worktree_name = session.get("worktree_name")
+        if not isinstance(worktree_name, str) or not worktree_name.strip():
+            worktree_name = os.path.basename(resolved_workdir.rstrip(os.sep)) or None
+        session["worktree_name"] = worktree_name
+    else:
+        session["worktree_name"] = None
+
+    session["workdir"] = resolved_workdir
+
+
+def _session_workdir(session: Optional[dict[str, Any]]) -> str:
+    if isinstance(session, dict):
+        _ensure_session_defaults(session)
+        workdir = str(session.get("workdir") or "").strip()
+        if workdir:
+            return os.path.abspath(workdir)
+    return os.path.abspath(WORKDIR)
+
+
+def _resolve_chat_session_workdir(chat_session_id: Optional[str]) -> Optional[str]:
+    if not chat_session_id:
+        return None
+    session = chat_sessions.get(chat_session_id)
+    if not isinstance(session, dict):
+        return None
+    return _session_workdir(session)
+
+
 # =============================================================================
 # FastAPI App
 # =============================================================================
@@ -325,6 +438,8 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
     model_provider: Optional[str] = None
     model_id: Optional[str] = None
+    location: Optional[str] = None
+    worktree_name: Optional[str] = None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -1005,6 +1120,7 @@ def load_chat_state():
                 for session in chat_sessions.values():
                     if not isinstance(session, dict):
                         continue
+                    _ensure_session_defaults(session)
                     active_stream = session.get("active_stream")
                     if isinstance(active_stream, dict) and active_stream.get("status") == "running":
                         # Streaming workers are in-memory only; mark stale snapshots as interrupted on restart.
@@ -2075,14 +2191,17 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         raise HTTPException(status_code=404, detail="Chat session not found")
     
     session = chat_sessions[chat_session_id]
+    _ensure_session_defaults(session)
     if session.get("opencode_session_id"):
         return session["opencode_session_id"]
+
+    session_workdir = _session_workdir(session)
     
     async with httpx.AsyncClient() as client:
-        # Bind new OpenCode sessions to this server's workdir to avoid stale project reuse.
+        # Bind new OpenCode sessions to the chat session's own working directory.
         resp = await client.post(
             f"{OPENCODE_URL}/session",
-            params={"directory": os.path.abspath(WORKDIR)},
+            params={"directory": session_workdir},
             json={},
             auth=get_auth(),
         )
@@ -2090,7 +2209,12 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         opencode_id = resp.json().get("id")
         session["opencode_session_id"] = opencode_id
         save_chat_state()
-        logger.info(f"Created new OpenCode session {opencode_id} for chat {chat_session_id}")
+        logger.info(
+            "Created new OpenCode session %s for chat %s (workdir=%s)",
+            opencode_id,
+            chat_session_id,
+            session_workdir,
+        )
         return opencode_id
 
 
@@ -3028,6 +3152,7 @@ async def list_sessions():
     for sid, session in chat_sessions.items():
         if not isinstance(session, dict):
             continue
+        _ensure_session_defaults(session)
         session_model_provider, session_model_id = get_session_model(session)
         sessions.append({
             "id": sid,
@@ -3037,6 +3162,9 @@ async def list_sessions():
             "model_provider": session_model_provider,
             "model_id": session_model_id,
             "status": resolve_session_status(sid, session),
+            "session_location": session.get("session_location", SESSION_LOCATION_LOCAL),
+            "worktree_name": session.get("worktree_name"),
+            "workdir": session.get("workdir", os.path.abspath(WORKDIR)),
         })
     sessions.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return sessions
@@ -3055,8 +3183,18 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
     requested_model_id = req.model_id if req else None
     session_model_provider = str(requested_provider or MODEL_PROVIDER).strip() or MODEL_PROVIDER
     session_model_id = str(requested_model_id or MODEL_ID).strip() or MODEL_ID
+    requested_location = _normalize_session_location(req.location if req else None)
     session_id = uuid.uuid4().hex[:12]
     title = req.title if req and req.title else "New Chat"
+
+    worktree_name: Optional[str] = None
+    session_workdir = os.path.abspath(WORKDIR)
+    if requested_location == SESSION_LOCATION_WORKTREE:
+        worktree_name, session_workdir = _create_git_worktree(
+            req.worktree_name if req else None,
+            session_id,
+        )
+
     chat_sessions[session_id] = {
         "title": title,
         "created_at": time.time(),
@@ -3066,7 +3204,11 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "model_provider": session_model_provider,
         "model_id": session_model_id,
         "last_status": "idle",
+        "session_location": requested_location,
+        "worktree_name": worktree_name,
+        "workdir": session_workdir,
     }
+    _ensure_session_defaults(chat_sessions[session_id])
     save_chat_state()
     return {
         "id": session_id,
@@ -3076,6 +3218,9 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "model_provider": session_model_provider,
         "model_id": session_model_id,
         "status": "idle",
+        "session_location": chat_sessions[session_id].get("session_location", SESSION_LOCATION_LOCAL),
+        "worktree_name": chat_sessions[session_id].get("worktree_name"),
+        "workdir": chat_sessions[session_id].get("workdir", os.path.abspath(WORKDIR)),
     }
 
 
@@ -3085,6 +3230,7 @@ async def get_session(session_id: str):
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     session = chat_sessions[session_id]
+    _ensure_session_defaults(session)
     session_model_provider, session_model_id = get_session_model(session)
     runtime = active_chat_streams.get(session_id)
     active_stream = runtime.snapshot() if runtime and runtime.status == "running" else session.get("active_stream")
@@ -3096,6 +3242,9 @@ async def get_session(session_id: str):
         "system_prompt": session.get("system_prompt", ""),
         "model_provider": session_model_provider,
         "model_id": session_model_id,
+        "session_location": session.get("session_location", SESSION_LOCATION_LOCAL),
+        "worktree_name": session.get("worktree_name"),
+        "workdir": session.get("workdir", os.path.abspath(WORKDIR)),
         "active_stream": active_stream,
     }
 
@@ -3106,6 +3255,7 @@ async def update_session(session_id: str, req: UpdateSessionRequest):
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     chat_sessions[session_id]["title"] = req.title
+    _ensure_session_defaults(chat_sessions[session_id])
     save_chat_state()
     session = chat_sessions[session_id]
     session_model_provider, session_model_id = get_session_model(session)
@@ -3116,6 +3266,9 @@ async def update_session(session_id: str, req: UpdateSessionRequest):
         "message_count": len(session.get("messages", [])),
         "model_provider": session_model_provider,
         "model_id": session_model_id,
+        "session_location": session.get("session_location", SESSION_LOCATION_LOCAL),
+        "worktree_name": session.get("worktree_name"),
+        "workdir": session.get("workdir", os.path.abspath(WORKDIR)),
     }
 
 
@@ -3590,11 +3743,12 @@ async def create_run(req: RunCreate):
         raise HTTPException(status_code=404, detail=f"Sweep not found: {req.sweep_id}")
     
     initial_status = "queued" if req.auto_start else "ready"
+    resolved_workdir = req.workdir or _resolve_chat_session_workdir(req.chat_session_id) or WORKDIR
     
     run_data = {
         "name": req.name,
         "command": req.command,
-        "workdir": req.workdir or WORKDIR,
+        "workdir": resolved_workdir,
         "status": initial_status,
         "created_at": time.time(),
         "is_archived": False,
@@ -3915,7 +4069,11 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
             "system_prompt": "",
             "model_provider": MODEL_PROVIDER,
             "model_id": MODEL_ID,
+            "session_location": SESSION_LOCATION_LOCAL,
+            "worktree_name": None,
+            "workdir": os.path.abspath(WORKDIR),
         }
+        _ensure_session_defaults(chat_sessions[session_id])
         alert_payload["session_id"] = session_id
         alert_payload["auto_session"] = True
         save_chat_state()
@@ -4729,11 +4887,13 @@ async def create_wild_sweep(req: WildSweepCreate):
     """
     sweep_id = uuid.uuid4().hex[:12]
     
+    resolved_workdir = _resolve_chat_session_workdir(req.chat_session_id) or WORKDIR
+
     created_at = time.time()
     sweep_data = {
         "name": req.name,
         "base_command": "",
-        "workdir": WORKDIR,
+        "workdir": resolved_workdir,
         "parameters": {},
         "run_ids": [],
         "status": "pending",
@@ -4784,6 +4944,8 @@ async def create_sweep(req: SweepCreate):
     if requested_status not in {"draft", "pending", "running"}:
         raise HTTPException(status_code=400, detail=f"Unsupported sweep status: {requested_status}")
 
+    resolved_workdir = req.workdir or _resolve_chat_session_workdir(req.chat_session_id) or WORKDIR
+
     created_at = time.time()
     creation_context = _derive_sweep_creation_context(
         name=req.name,
@@ -4800,7 +4962,7 @@ async def create_sweep(req: SweepCreate):
         sweep_data = {
             "name": req.name,
             "base_command": req.base_command,
-            "workdir": req.workdir or WORKDIR,
+            "workdir": resolved_workdir,
             "parameters": req.parameters or {},
             "run_ids": [],
             "status": "draft",
@@ -4839,12 +5001,13 @@ async def create_sweep(req: SweepCreate):
         run_data = {
             "name": f"{req.name} #{i+1}",
             "command": command,
-            "workdir": req.workdir or WORKDIR,
+            "workdir": resolved_workdir,
             "status": "queued" if requested_status == "running" else "ready",
             "created_at": time.time(),
             "is_archived": False,
             "sweep_id": sweep_id,
             "sweep_params": params,
+            "chat_session_id": req.chat_session_id,
             "tmux_window": None,
             "run_dir": None,
             "exit_code": None,
@@ -4859,7 +5022,7 @@ async def create_sweep(req: SweepCreate):
     sweep_data = {
         "name": req.name,
         "base_command": req.base_command,
-        "workdir": req.workdir or WORKDIR,
+        "workdir": resolved_workdir,
         "parameters": req.parameters,
         "run_ids": run_ids,
         "status": "running" if requested_status == "running" else "pending",
@@ -5038,19 +5201,22 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
     # Force sweep_id on the run regardless of what was provided
     req.sweep_id = sweep_id
 
+    resolved_workdir = req.workdir or _resolve_chat_session_workdir(req.chat_session_id) or WORKDIR
+
     run_id = uuid.uuid4().hex[:12]
     initial_status = "queued" if req.auto_start else "ready"
 
     run_data = {
         "name": req.name,
         "command": req.command,
-        "workdir": req.workdir or WORKDIR,
+        "workdir": resolved_workdir,
         "status": initial_status,
         "created_at": time.time(),
         "is_archived": False,
         "sweep_id": sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
+        "chat_session_id": req.chat_session_id,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
