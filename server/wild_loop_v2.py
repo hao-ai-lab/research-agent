@@ -718,8 +718,10 @@ class WildV2Engine:
         """Create a fresh OpenCode session."""
         try:
             async with httpx.AsyncClient() as client:
+                workdir = os.path.abspath(self._get_workdir())
                 resp = await client.post(
                     f"{self._opencode_url}/session",
+                    params={"directory": workdir},
                     json={},
                     auth=self._get_auth() if self._get_auth else None,
                 )

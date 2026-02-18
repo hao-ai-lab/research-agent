@@ -2079,7 +2079,13 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         return session["opencode_session_id"]
     
     async with httpx.AsyncClient() as client:
-        resp = await client.post(f"{OPENCODE_URL}/session", json={}, auth=get_auth())
+        # Bind new OpenCode sessions to this server's workdir to avoid stale project reuse.
+        resp = await client.post(
+            f"{OPENCODE_URL}/session",
+            params={"directory": os.path.abspath(WORKDIR)},
+            json={},
+            auth=get_auth(),
+        )
         resp.raise_for_status()
         opencode_id = resp.json().get("id")
         session["opencode_session_id"] = opencode_id
