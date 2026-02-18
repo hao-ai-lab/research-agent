@@ -169,7 +169,7 @@ export function ConnectedChatView({
         removeFromQueue,
     } = externalChatSession || internalChatSession
 
-    const selectableSkills = useMemo(() => skills.filter((skill) => !skill.internal), [skills])
+    const selectableSkills = useMemo(() => skills, [skills])
     const selectedDefaultSkill = useMemo(
         () => selectableSkills.find((skill) => skill.id === defaultSkillId) || null,
         [defaultSkillId, selectableSkills]

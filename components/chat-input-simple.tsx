@@ -318,10 +318,7 @@ export function ChatInput({
 
   useEffect(() => { setSelectedMentionIndex(0) }, [filteredMentionItems])
 
-  const selectableSkills = useMemo(
-    () => skills.filter((skill) => !skill.internal),
-    [skills]
-  )
+  const selectableSkills = useMemo(() => skills, [skills])
 
   // =========================================================================
   // Highlighted message overlay – text color only, no background

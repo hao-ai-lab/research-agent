@@ -5,6 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
 import { ChatInput, type ChatMode } from './chat-input-simple'
 import { ArtifactsPanel } from './artifacts-panel'
+import type { PromptSkill } from '@/lib/api'
 import type {
   ChatMessage as ChatMessageType,
   ExperimentRun,
@@ -15,6 +16,21 @@ import type {
 } from '@/lib/types'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64
+const STORAGE_KEY_DEFAULT_CHAT_SKILL = 'research-agent-default-chat-skill-id'
+
+function buildDefaultSkillContext(skill: PromptSkill): string {
+  const skillDescription = skill.description?.trim() || 'No description provided.'
+  const endpoint = `/prompt-skills/${skill.id}`
+  return [
+    '[DEFAULT SKILL CONTEXT]',
+    'Use this default skill for this chat unless the user overrides it:',
+    `- Skill ID: ${skill.id}`,
+    `- Skill Name: ${skill.name}`,
+    `- Skill Description: ${skillDescription}`,
+    `- Retrieve Full Skill: GET ${endpoint} (use the server base URL from system context)`,
+    '[/DEFAULT SKILL CONTEXT]',
+  ].join('\n')
+}
 
 interface ChatViewProps {
   messages: ChatMessageType[]
@@ -27,6 +43,7 @@ interface ChatViewProps {
   onLaunchSweep?: (config: SweepConfig) => void
   mode: ChatMode
   onModeChange: (mode: ChatMode) => void
+  skills?: PromptSkill[]
   showArtifacts?: boolean
   collapseChats?: boolean
   collapseArtifactsInChat?: boolean
@@ -43,12 +60,36 @@ export function ChatView({
   onLaunchSweep,
   mode,
   onModeChange,
+  skills = [],
   showArtifacts = false,
   collapseChats = false,
   collapseArtifactsInChat = false,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollEnabledRef = useRef(true)
+  const [defaultSkillId, setDefaultSkillId] = useState<string | null>(null)
+
+  const selectedDefaultSkill = useMemo(
+    () => skills.find((skill) => skill.id === defaultSkillId) || null,
+    [defaultSkillId, skills]
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const stored = window.localStorage.getItem(STORAGE_KEY_DEFAULT_CHAT_SKILL)
+    if (stored) {
+      setDefaultSkillId(stored)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!defaultSkillId) {
+      window.localStorage.removeItem(STORAGE_KEY_DEFAULT_CHAT_SKILL)
+      return
+    }
+    window.localStorage.setItem(STORAGE_KEY_DEFAULT_CHAT_SKILL, defaultSkillId)
+  }, [defaultSkillId])
 
   const getScrollViewport = () => {
     if (!scrollRef.current) return null
@@ -111,6 +152,17 @@ export function ChatView({
     }
     return pairs
   }, [messages])
+
+  const handleSendMessage = (rawMessage: string, attachments?: File[], sendMode?: ChatMode) => {
+    const isFirstInteraction = messages.length === 0
+    const effectiveMode = sendMode || mode
+    if (isFirstInteraction && selectedDefaultSkill && (effectiveMode === 'agent' || effectiveMode === 'wild')) {
+      const context = buildDefaultSkillContext(selectedDefaultSkill)
+      onSendMessage(`${rawMessage}\n\n${context}`, attachments, sendMode)
+      return
+    }
+    onSendMessage(rawMessage, attachments, sendMode)
+  }
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -185,7 +237,7 @@ export function ChatView({
                       <button
                         key={suggestion}
                         type="button"
-                        onClick={() => onSendMessage(suggestion)}
+                        onClick={() => handleSendMessage(suggestion)}
                         className="rounded-full border border-border bg-secondary px-4 py-2 text-sm text-foreground transition-colors hover:bg-secondary/80 active:scale-95"
                       >
                         {suggestion}
@@ -201,13 +253,16 @@ export function ChatView({
         {/* Chat Input - Fixed at bottom */}
         <div className="shrink-0">
           <ChatInput 
-            onSend={onSendMessage} 
+            onSend={handleSendMessage}
             mode={mode}
             onModeChange={onModeChange}
             runs={runs}
             artifacts={allArtifacts}
             charts={charts}
             messages={messages}
+            skills={skills}
+            defaultSkillId={defaultSkillId}
+            onDefaultSkillChange={setDefaultSkillId}
           />
         </div>
       </div>
