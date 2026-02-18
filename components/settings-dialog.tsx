@@ -37,7 +37,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
-import { useApiConfig } from '@/lib/api-config'
+import { createSetupShareLink, useApiConfig } from '@/lib/api-config'
 import type { AppSettings } from '@/lib/types'
 import { LeftPanelConfig } from '@/components/left-panel-config'
 import { PromptSkillEditor } from '@/components/prompt-skill-editor'
@@ -73,6 +73,7 @@ export function SettingsDialog({
   const [authTokenInput, setAuthTokenInput] = useState(authToken)
   const [showAuthToken, setShowAuthToken] = useState(false)
   const [authTokenCopied, setAuthTokenCopied] = useState(false)
+  const [setupLinkCopied, setSetupLinkCopied] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
   const [appearanceAdvancedOpen, setAppearanceAdvancedOpen] = useState(false)
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
@@ -215,6 +216,31 @@ export function SettingsDialog({
       setTimeout(() => setAuthTokenCopied(false), 1500)
     } catch (error) {
       console.error('Failed to copy auth token:', error)
+    }
+  }
+
+  const handleCopySetupLink = async () => {
+    const nextApiUrl = apiUrlInput.trim()
+    const nextAuthToken = authTokenInput.trim()
+    if (!nextApiUrl || !nextAuthToken) return
+
+    const confirmed = window.confirm(
+      'You are copying a setup link with the full auth token. Anyone with this link can access this entire session. Continue?'
+    )
+    if (!confirmed) return
+
+    const setupLink = createSetupShareLink({
+      apiUrl: nextApiUrl,
+      authToken: nextAuthToken,
+    })
+    if (!setupLink) return
+
+    try {
+      await navigator.clipboard.writeText(setupLink)
+      setSetupLinkCopied(true)
+      setTimeout(() => setSetupLinkCopied(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy setup link:', error)
     }
   }
 
@@ -1212,6 +1238,26 @@ export function SettingsDialog({
                         Save
                       </Button>
                     </div>
+                  </div>
+
+                  <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                    <Label className="text-xs">Share Setup Link</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Copy a one-click setup link with this server URL and auth token.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopySetupLink}
+                      disabled={!apiUrlInput.trim() || !authTokenInput.trim()}
+                      className="w-full justify-center gap-2"
+                    >
+                      {setupLinkCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                      {setupLinkCopied ? 'Copied' : 'Copy Setup Link'}
+                    </Button>
+                    <p className="text-xs text-amber-700">
+                      Warning: This includes the full auth token. Anyone with the link gets full session access.
+                    </p>
                   </div>
 
                   {/* Connection Test */}
