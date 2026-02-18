@@ -1,4 +1,4 @@
-export type ReferenceTokenType = 'run' | 'sweep' | 'artifact' | 'alert' | 'chart' | 'chat'
+export type ReferenceTokenType = 'run' | 'sweep' | 'artifact' | 'alert' | 'chart' | 'chat' | 'skill'
 
 export const REFERENCE_TYPE_COLOR_MAP: Record<ReferenceTokenType, string> = {
   run: '#22c55e',
@@ -7,6 +7,7 @@ export const REFERENCE_TYPE_COLOR_MAP: Record<ReferenceTokenType, string> = {
   alert: '#f97316',
   chart: '#14b8a6',
   chat: '#64748b',
+  skill: '#8b5cf6',
 }
 
 export const REFERENCE_TYPE_BACKGROUND_MAP: Record<ReferenceTokenType, string> = {
@@ -16,4 +17,5 @@ export const REFERENCE_TYPE_BACKGROUND_MAP: Record<ReferenceTokenType, string> =
   alert: 'rgba(249, 115, 22, 0.18)',
   chart: 'rgba(20, 184, 166, 0.16)',
   chat: 'rgba(100, 116, 139, 0.2)',
+  skill: 'rgba(139, 92, 246, 0.2)',
 }

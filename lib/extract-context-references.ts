@@ -3,7 +3,7 @@
  * Scans for patterns like @run:abc123, @sweep:xyz, @artifact:foo, etc.
  */
 
-const REFERENCE_REGEX = /@((?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+)/g
+const REFERENCE_REGEX = /@((?:run|sweep|artifact|alert|chart|chat|skill):[A-Za-z0-9:._-]+)/g
 
 export interface ContextReference {
   /** Full reference string, e.g. "run:abc123" */

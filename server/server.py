@@ -2079,7 +2079,13 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         return session["opencode_session_id"]
     
     async with httpx.AsyncClient() as client:
-        resp = await client.post(f"{OPENCODE_URL}/session", json={}, auth=get_auth())
+        # Bind new OpenCode sessions to this server's workdir to avoid stale project reuse.
+        resp = await client.post(
+            f"{OPENCODE_URL}/session",
+            params={"directory": os.path.abspath(WORKDIR)},
+            json={},
+            auth=get_auth(),
+        )
         resp.raise_for_status()
         opencode_id = resp.json().get("id")
         session["opencode_session_id"] = opencode_id
@@ -2552,7 +2558,16 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
     if event_sid != target_session_id:
         return None
     
-    if etype == "message.part.updated":
+    if etype == "message.part.delta":
+        delta = props.get("delta")
+        if not isinstance(delta, str) or delta == "":
+            return None
+        field = props.get("field", "")
+        part_id = props.get("partID")
+        if field in ("text", "reasoning"):
+            return {"type": "part_delta", "id": part_id, "ptype": field, "delta": delta}
+
+    elif etype == "message.part.updated":
         ptype = part.get("type")
         part_id = part.get("id")
 
@@ -2576,7 +2591,7 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
                 "name": _extract_tool_name(part),
                 **tool_data,
             }
-    
+
     elif etype == "session.status":
         if props.get("status", {}).get("type") == "idle":
             return {"type": "session_status", "status": "idle", "_done": True}
@@ -3175,6 +3190,15 @@ class ModeConfig:
     build_state: Callable[[str], dict]  # (message) -> template variables
 
 
+def _build_agent_state(_message: str) -> dict:
+    """Build template variables for agent (default chat) mode."""
+    return {
+        "experiment_context": _build_experiment_context(),
+        "server_url": SERVER_CALLBACK_URL,
+        "auth_token": USER_AUTH_TOKEN or "",
+    }
+
+
 def _build_plan_state(message: str) -> dict:
     """Build template variables for plan mode."""
     # Summarize existing plans for context
@@ -3199,6 +3223,7 @@ def _build_plan_state(message: str) -> dict:
 _WILD_SENTINEL = "__wild__"
 
 MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "agent": ModeConfig(skill_id="ra_mode_agent", build_state=_build_agent_state),
     "plan": ModeConfig(skill_id="ra_mode_plan", build_state=_build_plan_state),
     "wild": ModeConfig(skill_id=_WILD_SENTINEL, build_state=lambda _msg: {}),
 }
@@ -5514,16 +5539,12 @@ def main():
     
     # Check required environment variables
     if not os.environ.get("RESEARCH_AGENT_KEY"):
-        logger.warning("⚠️  RESEARCH_AGENT_KEY environment variable is not set!")
-        logger.warning("   The Anthropic gateway requires this for authentication.")
-        logger.warning("   Set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+        logger.info("💡 Tip: Want free Anthropic credits? Ask the maintainer for a gateway key.")
+        logger.info("   Then set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
     
     if not USER_AUTH_TOKEN:
-        logger.warning("⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!")
-        logger.warning("   Your server has NO authentication - anyone can access it.")
-        logger.warning("   For secure remote access, generate a token with:")
-        logger.warning("     ./generate_auth_token.sh")
-        logger.warning("   Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>")
+        logger.info("RESEARCH_AGENT_USER_AUTH_TOKEN is not set — running without server-side auth.")
+        logger.info("   You can set your auth token in the GUI Settings page, or export the env var for remote access.")
     
     # Start OpenCode server subprocess
     # start_opencode_server_subprocess(args)

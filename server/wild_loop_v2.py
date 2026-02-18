@@ -453,7 +453,8 @@ class WildV2Engine:
             display_msg = (
                 "[Wild V2 — Step #0]\n"
                 "Role: plan\n"
-                "Goal: Explore the codebase and write a concrete task checklist in tasks.md."
+                f"Goal: {session.goal}\n"
+                "Task: Create a concrete step-by-step plan."
             )
             logger.debug("[wild-v2] Planning prompt built, length=%d chars", len(planning_prompt))
 
@@ -717,8 +718,10 @@ class WildV2Engine:
         """Create a fresh OpenCode session."""
         try:
             async with httpx.AsyncClient() as client:
+                workdir = os.path.abspath(self._get_workdir())
                 resp = await client.post(
                     f"{self._opencode_url}/session",
+                    params={"directory": workdir},
                     json={},
                     auth=self._get_auth() if self._get_auth else None,
                 )

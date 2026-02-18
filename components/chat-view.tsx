@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
-import { ChatInput, type ChatMode } from './chat-input'
+import { ChatInput, type ChatMode } from './chat-input-simple'
 import { ArtifactsPanel } from './artifacts-panel'
 import type {
   ChatMessage as ChatMessageType,

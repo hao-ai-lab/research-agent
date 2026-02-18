@@ -574,3 +574,53 @@ def test_loop_done_with_reflection_continue():
         assert "100%" in engine.session.reflection
 
     asyncio.run(_run())
+
+
+def test_planning_display_message_uses_user_goal():
+    """Planning display message should show the original user goal."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        captured_display_messages = []
+
+        async def mock_send_chat(_chat_session_id, _prompt, display_message):
+            captured_display_messages.append(display_message)
+            if len(captured_display_messages) == 1:
+                return (
+                    "<plan>\n# Tasks\n- [ ] Execute the plan\n</plan>\n"
+                    "<summary>Planning done.</summary>"
+                )
+            return "<summary>Done.</summary>\n<promise>DONE</promise>"
+
+        def mock_render(_skill_id, variables):
+            return f"prompt for {variables['goal']}"
+
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            send_chat_message=mock_send_chat,
+            render_fn=mock_render,
+        )
+        engine._git_commit = AsyncMock()
+
+        user_goal = "Find the best model setup for CIFAR-10 with reproducible runs."
+        engine.start(goal=user_goal, chat_session_id="chat-test", max_iterations=1)
+
+        # Cancel auto-started task and run manually for deterministic assertions.
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert captured_display_messages
+        planning_display = captured_display_messages[0]
+        assert "Role: plan" in planning_display
+        assert f"Goal: {user_goal}" in planning_display
+        assert "Task: Create a concrete step-by-step plan." in planning_display
+        assert "Explore the codebase and write a concrete task checklist in tasks.md." not in planning_display
+
+    asyncio.run(_run())

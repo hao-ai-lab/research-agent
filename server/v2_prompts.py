@@ -247,7 +247,7 @@ def _struggle_section(ctx: PromptContext) -> str:
 
 
 def _api_catalog(ctx: PromptContext) -> str:
-    """Build the full API catalog the agent can use via curl."""
+    """Build the full API catalog the agent can use via MCP tools or curl."""
     s = ctx.server_url
     sid = ctx.session_id
     auth_header = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
@@ -259,7 +259,12 @@ def _api_catalog(ctx: PromptContext) -> str:
 ```
 
 """ if ctx.auth_token else ""
-    return f"""{auth_note}### Chat linkage (required for create endpoints)
+    return f"""{auth_note}### Preferred Tool Calls (MCP)
+- `mcp__research-agent__create_run` — Fixed-schema run creation (`name`, `command`, `workdir`, `sweep_id`, `launch_policy`)
+- `mcp__research-agent__start_run` — Start a run by id
+- Prefer MCP tools for run creation/start to avoid ad-hoc command construction.
+
+### Chat linkage (required for create endpoints)
 - For this session, include `"chat_session_id": "{sid}"` in bodies for `POST /runs`, `POST /sweeps`, `POST /sweeps/wild`, and `POST /sweeps/{{id}}/runs`.
 - Use `null` only when intentionally creating entities not tied to this chat.
 

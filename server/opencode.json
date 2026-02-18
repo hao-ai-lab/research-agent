@@ -232,6 +232,22 @@
       "type": "remote",
       "url": "https://mcp.context7.com/mcp",
       "enabled": true
+    },
+    "research-agent": {
+      "type": "local",
+      "command": [
+        "python3",
+        "./server/research_agent_mcp.py"
+      ],
+      "enabled": true
+    },
+    "slurm-cli": {
+      "type": "local",
+      "command": [
+        "python3",
+        "./server/slurm_mcp_cli.py"
+      ],
+      "enabled": true
     }
   }
 }

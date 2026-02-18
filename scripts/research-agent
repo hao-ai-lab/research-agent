@@ -211,12 +211,46 @@ maybe_install_opencode() {
 
   if maybe_cmd npm; then
     warn "opencode not found; attempting npm global install"
-    if npm install -g opencode; then
+    if npm install -g opencode-ai 2>/dev/null; then
+      return
+    fi
+
+    local npm_prefix="${HOME}/.npm-global"
+    warn "Global install failed; falling back to user-local prefix: ${npm_prefix}"
+    mkdir -p "$npm_prefix"
+    if npm install -g opencode-ai --prefix "$npm_prefix" 2>/dev/null; then
+      export PATH="${npm_prefix}/bin:${PATH}"
+      log "opencode installed to ${npm_prefix}/bin/opencode"
+
+      # Persist PATH update to the appropriate shell profile, similar to install.sh
+      local shell_rc
+      case "${SHELL:-}" in
+        *zsh)
+          shell_rc="${HOME}/.zshrc"
+          ;;
+        *bash)
+          shell_rc="${HOME}/.bashrc"
+          ;;
+        *)
+          shell_rc="${HOME}/.bashrc"
+          ;;
+      esac
+
+      local path_export="export PATH=\"${npm_prefix}/bin:\$PATH\""
+      if [ -n "${shell_rc:-}" ]; then
+        touch "$shell_rc"
+        if ! grep -Fq "$path_export" "$shell_rc"; then
+          printf '\n%s\n' "$path_export" >> "$shell_rc"
+          log "Updated ${shell_rc} to include opencode in PATH"
+        else
+          log "PATH update already present in ${shell_rc}"
+        fi
+      fi
       return
     fi
   fi
 
-  warn "opencode CLI is still missing. Install manually: npm install -g opencode"
+  warn "opencode CLI is still missing. Install manually: npm install -g opencode-ai"
 }
 
 install_cli_links() {
@@ -584,13 +618,20 @@ get_http_content_type() {
 }
 
 build_opencode_command() {
+  local auth_token="${1:-}"
   local config_path="${INSTALL_DIR}/server/opencode.json"
+  local backend_url="http://127.0.0.1:${BACKEND_PORT}"
   if [ -f "$config_path" ]; then
-    printf 'cd %s && OPENCODE_CONFIG=%s opencode serve' \
+    printf 'cd %s && RESEARCH_AGENT_SERVER_URL=%s RESEARCH_AGENT_USER_AUTH_TOKEN=%s OPENCODE_CONFIG=%s opencode serve' \
       "$(q "$PROJECT_ROOT")" \
+      "$(q "$backend_url")" \
+      "$(q "$auth_token")" \
       "$(q "$config_path")"
   else
-    printf 'cd %s && opencode serve' "$(q "$PROJECT_ROOT")"
+    printf 'cd %s && RESEARCH_AGENT_SERVER_URL=%s RESEARCH_AGENT_USER_AUTH_TOKEN=%s opencode serve' \
+      "$(q "$PROJECT_ROOT")" \
+      "$(q "$backend_url")" \
+      "$(q "$auth_token")"
   fi
 }
 
@@ -654,7 +695,7 @@ start_services() {
   FRONTEND_PUBLIC_URL="${FRONTEND_PUBLIC_URL:-}"
 
   ensure_tmux_session
-  tmux_replace_window "$TMUX_SESSION_NAME" "opencode" "$(build_opencode_command)"
+  tmux_replace_window "$TMUX_SESSION_NAME" "opencode" "$(build_opencode_command "$auth_token")"
   tmux_replace_window "$TMUX_SESSION_NAME" "backend" "$(build_backend_command "$auth_token")"
 
   if [ -n "$frontend_static_dir" ]; then

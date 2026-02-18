@@ -179,7 +179,16 @@ def preview_app():
     # NEXT_PUBLIC_API_URL=auto → resolves to window.location.origin in browser
     # Next.js rewrites in next.config.mjs proxy API calls to backend on 10000
     print("Starting frontend dev server on port 8080...")
-    frontend_env = {**env, "NEXT_PUBLIC_API_URL": "auto", "PORT": "8080"}
+    frontend_env = {
+        **env,
+        "NEXT_PUBLIC_API_URL": "auto",
+        "PORT": "8080",
+        # Server-side API routes need these to resolve the workspace root
+        # and validate auth tokens without depending on the backend.
+        "RESEARCH_AGENT_WORKDIR": workdir,
+        "RESEARCH_AGENT_USER_AUTH_TOKEN": auth_token,
+        "RESEARCH_AGENT_BACKEND_URL": "http://127.0.0.1:10000",
+    }
     subprocess.Popen(
         ["npx", "next", "dev", "-p", "8080"],
         env=frontend_env,
