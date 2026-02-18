@@ -466,346 +466,15 @@ class ClusterDetectRequest(BaseModel):
 
 
 # =============================================================================
-# Prompt Skill Manager
+# Prompt Skill Manager (extracted to skill_manager.py)
 # =============================================================================
 
-import yaml
-import shutil
-import subprocess
-
-# Skills that ship with the server and cannot be deleted.
-# Keep explicit IDs for one-offs and reserve prefixes for families of
-# system-managed skills.
-INTERNAL_SKILL_IDS = {
-    "ra_mode_plan",
-}
-INTERNAL_SKILL_PREFIXES = ("wild_", "ra_mode_")
-
-
-def _is_internal_skill(skill_id: str) -> bool:
-    return skill_id in INTERNAL_SKILL_IDS or skill_id.startswith(INTERNAL_SKILL_PREFIXES)
-
-class PromptSkillManager:
-    """Manages prompt template files (markdown with YAML frontmatter).
-    
-    Skills are Codex-standard folders: prompt_skills/<name>/SKILL.md
-    with YAML frontmatter and {{variable}} placeholders.
-    """
-
-    def __init__(self, skills_dir: Optional[str] = None):
-        self.skills_dir = skills_dir or os.path.join(_SERVER_FILE_DIR, "prompt_skills")
-        self._skills: Dict[str, dict] = {}
-        self.load_all()
-
-    def load_all(self) -> None:
-        """Load all SKILL.md files from skill subdirectories."""
-        self._skills.clear()
-        if not os.path.isdir(self.skills_dir):
-            logger.warning(f"Prompt skills directory not found: {self.skills_dir}")
-            return
-        for entry in sorted(os.listdir(self.skills_dir)):
-            skill_dir = os.path.join(self.skills_dir, entry)
-            if not os.path.isdir(skill_dir):
-                continue
-            skill_md = os.path.join(skill_dir, "SKILL.md")
-            if not os.path.isfile(skill_md):
-                continue
-            try:
-                skill = self._parse_file(skill_md, entry)
-                self._skills[skill["id"]] = skill
-            except Exception as e:
-                logger.error(f"Failed to parse prompt skill {entry}: {e}")
-
-    def _parse_file(self, filepath: str, folder_name: str) -> dict:
-        """Parse a SKILL.md file with YAML frontmatter."""
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # Split YAML frontmatter from body
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                frontmatter = yaml.safe_load(parts[1]) or {}
-                template = parts[2].strip()
-            else:
-                frontmatter = {}
-                template = content
-        else:
-            frontmatter = {}
-            template = content
-
-        skill_id = folder_name
-        return {
-            "id": skill_id,
-            "name": frontmatter.get("name", skill_id),
-            "description": frontmatter.get("description", ""),
-            "template": template,
-            "variables": frontmatter.get("variables", []),
-            "category": frontmatter.get("category", "prompt"),  # "prompt" | "skill"
-            "built_in": True,
-            "internal": _is_internal_skill(skill_id),
-            "filepath": filepath,
-            "folder": os.path.dirname(filepath),
-        }
-
-    def list(self) -> list:
-        """Return all skills (without internal paths)."""
-        exclude = {"filepath", "folder"}
-        return [
-            {k: v for k, v in skill.items() if k not in exclude}
-            for skill in self._skills.values()
-        ]
-
-    def create(
-        self,
-        name: str,
-        description: str = "",
-        template: str = "",
-        category: str = "skill",
-        variables: Optional[list] = None,
-    ) -> dict:
-        """Create a new skill folder with SKILL.md.
-
-        Returns the new skill dict.  Raises ValueError if the ID already exists.
-        """
-        import re as _re
-        skill_id = _re.sub(r"[^a-zA-Z0-9_-]", "_", name.strip().lower().replace(" ", "_"))
-        if skill_id in self._skills:
-            raise ValueError(f"Skill '{skill_id}' already exists")
-
-        folder = os.path.join(self.skills_dir, skill_id)
-        os.makedirs(folder, exist_ok=True)
-
-        frontmatter = {
-            "name": name,
-            "description": description,
-            "category": category,
-        }
-        if variables:
-            frontmatter["variables"] = variables
-
-        fm_text = yaml.dump(frontmatter, default_flow_style=False).strip()
-        file_content = f"---\n{fm_text}\n---\n{template}\n"
-
-        filepath = os.path.join(folder, "SKILL.md")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(file_content)
-
-        skill = self._parse_file(filepath, skill_id)
-        self._skills[skill_id] = skill
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def delete(self, skill_id: str) -> bool:
-        """Delete a user-created skill.
-
-        Raises ValueError for internal skills.  Returns True on success.
-        """
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            raise KeyError(f"Skill '{skill_id}' not found")
-        if skill.get("internal"):
-            raise ValueError(f"Cannot delete internal skill '{skill_id}'")
-
-        folder = skill["folder"]
-        if os.path.isdir(folder):
-            shutil.rmtree(folder)
-        del self._skills[skill_id]
-        return True
-
-    def install_from_git(self, url: str, name: Optional[str] = None) -> dict:
-        """Clone a skill from a git URL.
-
-        If *name* is not provided, derive it from the repo name.
-        Returns the parsed skill dict.
-        """
-        if not name:
-            # Derive from URL: https://github.com/user/my-skill.git -> my-skill
-            name = url.rstrip("/").rstrip(".git").rsplit("/", 1)[-1]
-        import re as _re
-        skill_id = _re.sub(r"[^a-zA-Z0-9_-]", "_", name.strip().lower().replace(" ", "_"))
-        if skill_id in self._skills:
-            raise ValueError(f"Skill '{skill_id}' already exists")
-
-        dest = os.path.join(self.skills_dir, skill_id)
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", url, dest],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
-
-        skill_md = os.path.join(dest, "SKILL.md")
-        if not os.path.isfile(skill_md):
-            shutil.rmtree(dest)
-            raise FileNotFoundError("Repository does not contain a SKILL.md file")
-
-        skill = self._parse_file(skill_md, skill_id)
-        self._skills[skill_id] = skill
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def search(self, query: str, limit: int = 20) -> list:
-        """Search skills by name, description, and template content.
-
-        Returns a list of skill dicts sorted by relevance score.
-        """
-        if not query or not query.strip():
-            return self.list()[:limit]
-
-        q = query.strip().lower()
-        scored: list[tuple[float, dict]] = []
-        exclude = {"filepath", "folder"}
-
-        for skill in self._skills.values():
-            score = 0.0
-            name = skill.get("name", "").lower()
-            desc = skill.get("description", "").lower()
-            tmpl = skill.get("template", "").lower()
-
-            # Exact name match is strongest signal
-            if q == name:
-                score += 100
-            elif q in name:
-                score += 60
-
-            # Description match
-            if q in desc:
-                score += 30
-
-            # Template body match (weakest signal)
-            if q in tmpl:
-                score += 10
-
-            if score > 0:
-                clean = {k: v for k, v in skill.items() if k not in exclude}
-                clean["_score"] = score
-                scored.append((score, clean))
-
-        scored.sort(key=lambda t: t[0], reverse=True)
-        return [s[1] for s in scored[:limit]]
-
-    def get(self, skill_id: str) -> Optional[dict]:
-        """Get a single skill by ID."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def update(self, skill_id: str, template: str) -> Optional[dict]:
-        """Update a skill's template and write back to disk."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-
-        # Rebuild the file content with original frontmatter + new template
-        filepath = skill["filepath"]
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # Extract original frontmatter
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                frontmatter_text = parts[1]
-            else:
-                frontmatter_text = ""
-        else:
-            frontmatter_text = ""
-
-        # Write back
-        new_content = f"---{frontmatter_text}---\n{template}\n"
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(new_content)
-
-        # Update in-memory cache
-        skill["template"] = template
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def list_files(self, skill_id: str) -> Optional[list]:
-        """List all files in a skill's folder."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        folder = skill["folder"]
-        entries = []
-        for root, dirs, files in os.walk(folder):
-            rel_root = os.path.relpath(root, folder)
-            if rel_root == ".":
-                rel_root = ""
-            for d in sorted(dirs):
-                entries.append({
-                    "name": d,
-                    "path": os.path.join(rel_root, d) if rel_root else d,
-                    "type": "directory",
-                })
-            for fname in sorted(files):
-                fpath = os.path.join(root, fname)
-                entries.append({
-                    "name": fname,
-                    "path": os.path.join(rel_root, fname) if rel_root else fname,
-                    "type": "file",
-                    "size": os.path.getsize(fpath),
-                })
-        return entries
-
-    def read_file(self, skill_id: str, file_path: str) -> Optional[str]:
-        """Read a file from a skill's folder."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        full_path = os.path.join(skill["folder"], file_path)
-        # Security: ensure path doesn't escape skill folder
-        real_folder = os.path.realpath(skill["folder"])
-        real_path = os.path.realpath(full_path)
-        if not real_path.startswith(real_folder):
-            return None
-        if not os.path.isfile(real_path):
-            return None
-        with open(real_path, "r", encoding="utf-8") as f:
-            return f.read()
-
-    def write_file(self, skill_id: str, file_path: str, content: str) -> Optional[bool]:
-        """Write a file in a skill's folder."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        full_path = os.path.join(skill["folder"], file_path)
-        # Security: ensure path doesn't escape skill folder
-        real_folder = os.path.realpath(skill["folder"])
-        real_path = os.path.realpath(full_path)
-        if not real_path.startswith(real_folder):
-            return None
-        os.makedirs(os.path.dirname(real_path), exist_ok=True)
-        with open(real_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        # Re-parse if SKILL.md was updated
-        if os.path.basename(file_path) == "SKILL.md":
-            try:
-                updated = self._parse_file(real_path, skill_id)
-                self._skills[skill_id] = updated
-            except Exception as e:
-                logger.error(f"Failed to re-parse SKILL.md for {skill_id}: {e}")
-        return True
-
-    def render(self, skill_id: str, variables: Dict[str, str]) -> Optional[str]:
-        """Render a skill template with the given variables.
-        
-        Replaces {{variable_name}} with the provided value.
-        Missing variables are left as empty strings.
-        """
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        result = skill["template"]
-        for var_name, value in variables.items():
-            result = result.replace("{{" + var_name + "}}", str(value))
-        # Clean up any remaining unreplaced variables
-        import re as _re
-        result = _re.sub(r"\{\{[a-zA-Z_]+\}\}", "", result)
-        return result
+from skill_manager import (
+    PromptSkillManager,
+    _is_internal_skill,
+    INTERNAL_SKILL_IDS,
+    INTERNAL_SKILL_PREFIXES,
+)
 
 
 # Initialize the prompt skill manager
@@ -934,53 +603,18 @@ STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS = 0.75
 STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS = 20
 STREAM_RUNTIME_RETENTION_SECONDS = 120.0
 
-_wandb_metrics_cache: Dict[str, dict] = {}
-
-LOSS_KEYS = ("loss", "train/loss", "train_loss", "training_loss")
-VAL_LOSS_KEYS = ("val/loss", "val_loss", "validation/loss", "eval/loss", "valid/loss")
-ACCURACY_KEYS = ("accuracy", "val/accuracy", "eval/accuracy", "train/accuracy", "acc")
-EPOCH_KEYS = ("epoch", "train/epoch")
-STEP_KEYS = ("step", "_step", "global_step", "trainer/global_step")
-MAX_HISTORY_POINTS = 400
-MAX_METRIC_SERIES_KEYS = 200
-IGNORED_METRIC_KEYS = set(STEP_KEYS) | {
-    "_runtime",
-    "_timestamp",
-    "_wall_time",
-    "_timestamp_step",
-}
+# Metrics constants imported from metrics_helpers
 
 
-CLUSTER_TYPE_VALUES = {
-    "unknown",
-    "slurm",
-    "local_gpu",
-    "kubernetes",
-    "ray",
-    "shared_head_node",
-}
-CLUSTER_STATUS_VALUES = {"unknown", "healthy", "degraded", "offline"}
-CLUSTER_SOURCE_VALUES = {"unset", "manual", "detected"}
-
-
-def _default_cluster_state() -> dict:
-    now = time.time()
-    return {
-        "type": "unknown",
-        "status": "unknown",
-        "source": "unset",
-        "label": "Unknown",
-        "description": "Cluster has not been configured yet.",
-        "head_node": None,
-        "node_count": None,
-        "gpu_count": None,
-        "notes": None,
-        "confidence": None,
-        "details": {},
-        "last_detected_at": None,
-        "updated_at": now,
-    }
-
+# Cluster detection (extracted to cluster_detection.py)
+from cluster_detection import (
+    CLUSTER_TYPE_VALUES, CLUSTER_STATUS_VALUES, CLUSTER_SOURCE_VALUES,
+    _default_cluster_state, _cluster_type_label, _cluster_type_description,
+    _normalize_cluster_type, _normalize_cluster_status, _normalize_cluster_source,
+    _normalize_cluster_state,
+    _run_command_capture, _count_gpu_devices, _count_slurm_nodes,
+    _count_kubernetes_nodes, _count_ssh_hosts, _infer_cluster_from_environment,
+)
 
 cluster_state: dict = _default_cluster_state()
 
@@ -1095,84 +729,7 @@ def load_plans_state():
             logger.error(f"Error loading plans state: {e}")
 
 
-def _cluster_type_label(cluster_type: str) -> str:
-    mapping = {
-        "unknown": "Unknown",
-        "slurm": "Slurm",
-        "local_gpu": "Local GPU",
-        "kubernetes": "Kubernetes",
-        "ray": "Ray",
-        "shared_head_node": "Shared GPU Head Node",
-    }
-    return mapping.get(cluster_type, "Unknown")
 
-
-def _cluster_type_description(cluster_type: str) -> str:
-    mapping = {
-        "unknown": "Cluster has not been configured yet.",
-        "slurm": "Slurm-managed cluster scheduler detected.",
-        "local_gpu": "Single-host GPU workstation/cluster detected.",
-        "kubernetes": "Kubernetes cluster control plane detected.",
-        "ray": "Ray cluster runtime detected.",
-        "shared_head_node": "Head node with SSH fan-out to worker nodes.",
-    }
-    return mapping.get(cluster_type, "Cluster has not been configured yet.")
-
-
-def _normalize_cluster_type(raw_type: Optional[str]) -> str:
-    if not raw_type:
-        return "unknown"
-    value = raw_type.strip().lower().replace("-", "_")
-    aliases = {
-        "localgpu": "local_gpu",
-        "local_gpu_cluster": "local_gpu",
-        "shared_gpu_head_node": "shared_head_node",
-        "shared_gpu": "shared_head_node",
-        "head_node": "shared_head_node",
-        "k8s": "kubernetes",
-    }
-    value = aliases.get(value, value)
-    return value if value in CLUSTER_TYPE_VALUES else "unknown"
-
-
-def _normalize_cluster_status(raw_status: Optional[str]) -> str:
-    if not raw_status:
-        return "unknown"
-    value = raw_status.strip().lower()
-    return value if value in CLUSTER_STATUS_VALUES else "unknown"
-
-
-def _normalize_cluster_source(raw_source: Optional[str]) -> str:
-    if not raw_source:
-        return "unset"
-    value = raw_source.strip().lower()
-    return value if value in CLUSTER_SOURCE_VALUES else "unset"
-
-
-def _normalize_cluster_state(raw_state: Any) -> dict:
-    normalized = _default_cluster_state()
-    if not isinstance(raw_state, dict):
-        return normalized
-
-    cluster_type = _normalize_cluster_type(raw_state.get("type"))
-    normalized.update(
-        {
-            "type": cluster_type,
-            "status": _normalize_cluster_status(raw_state.get("status")),
-            "source": _normalize_cluster_source(raw_state.get("source")),
-            "label": _cluster_type_label(cluster_type),
-            "description": _cluster_type_description(cluster_type),
-            "head_node": raw_state.get("head_node"),
-            "node_count": raw_state.get("node_count"),
-            "gpu_count": raw_state.get("gpu_count"),
-            "notes": raw_state.get("notes"),
-            "confidence": raw_state.get("confidence"),
-            "details": raw_state.get("details") if isinstance(raw_state.get("details"), dict) else {},
-            "last_detected_at": raw_state.get("last_detected_at"),
-            "updated_at": raw_state.get("updated_at") or time.time(),
-        }
-    )
-    return normalized
 
 
 def save_settings_state():
@@ -1206,863 +763,101 @@ def load_settings_state():
             logger.error(f"Error loading settings state: {e}")
 
 
-def _to_float(value: object) -> Optional[float]:
-    """Convert primitive numeric values to float."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        converted = float(value)
-        return converted if math.isfinite(converted) else None
-    if isinstance(value, str):
-        try:
-            converted = float(value.strip())
-            return converted if math.isfinite(converted) else None
-        except ValueError:
-            return None
-    return None
-
-
-def _first_numeric(row: dict, keys: tuple[str, ...]) -> Optional[float]:
-    for key in keys:
-        if key in row:
-            value = _to_float(row.get(key))
-            if value is not None:
-                return value
-    return None
-
-
-def _extract_step(row: dict, fallback_step: int) -> int:
-    step = _first_numeric(row, STEP_KEYS)
-    if step is None:
-        return fallback_step
-    if step < 0:
-        return fallback_step
-    return int(step)
-
-
-def _is_metric_key(key: object) -> bool:
-    if not isinstance(key, str) or not key:
-        return False
-    if key in IGNORED_METRIC_KEYS:
-        return False
-    # W&B internal metadata keys are usually underscore-prefixed.
-    if key.startswith("_"):
-        return False
-    return True
-
-
-def _find_wandb_dir_from_run_dir(run_dir: Optional[str]) -> Optional[str]:
-    """Scan the predictable wandb_data/ path inside run_dir for a WandB run directory."""
-    if not run_dir:
-        return None
-    wandb_base = os.path.join(run_dir, "wandb_data", "wandb")
-    if not os.path.isdir(wandb_base):
-        return None
-    matches = sorted(glob.glob(os.path.join(wandb_base, "run-*")))
-    return matches[-1] if matches else None
-
-
-def _resolve_metrics_file(wandb_dir: Optional[str]) -> Optional[str]:
-    """Resolve likely metrics file paths from a wandb run directory."""
-    if not wandb_dir:
-        return None
-
-    base_path = wandb_dir
-    if not os.path.isabs(base_path):
-        base_path = os.path.join(WORKDIR, base_path)
-
-    if os.path.isfile(base_path):
-        return base_path if base_path.endswith(".jsonl") else None
-    if not os.path.isdir(base_path):
-        return None
-
-    candidates = [
-        os.path.join(base_path, "metrics.jsonl"),
-        os.path.join(base_path, "files", "metrics.jsonl"),
-        os.path.join(base_path, "wandb-history.jsonl"),
-        os.path.join(base_path, "files", "wandb-history.jsonl"),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    return None
-
-
-def _downsample_history(history: list[dict], max_points: int = MAX_HISTORY_POINTS) -> list[dict]:
-    if len(history) <= max_points:
-        return history
-    stride = max(1, math.ceil(len(history) / max_points))
-    sampled = history[::stride]
-    if sampled[-1] != history[-1]:
-        sampled.append(history[-1])
-    return sampled[:max_points]
-
-
-def _parse_metrics_history(metrics_file: str) -> dict:
-    """Parse a metrics JSONL file into chart-ready history and summary metrics."""
-    loss_history: list[dict] = []
-    metric_series: Dict[str, list[dict]] = {}
-    latest_loss: Optional[float] = None
-    latest_accuracy: Optional[float] = None
-    latest_epoch: Optional[float] = None
-    fallback_step = 0
-
-    try:
-        with open(metrics_file, "r", errors="replace") as f:
-            for line in f:
-                raw = line.strip()
-                if not raw:
-                    continue
-                try:
-                    row = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(row, dict):
-                    continue
-
-                fallback_step += 1
-                step = _extract_step(row, fallback_step)
-                train_loss = _first_numeric(row, LOSS_KEYS)
-                val_loss = _first_numeric(row, VAL_LOSS_KEYS)
-                accuracy = _first_numeric(row, ACCURACY_KEYS)
-                epoch = _first_numeric(row, EPOCH_KEYS)
-
-                if train_loss is not None:
-                    point = {"step": step, "trainLoss": round(train_loss, 6)}
-                    if val_loss is not None:
-                        point["valLoss"] = round(val_loss, 6)
-                    loss_history.append(point)
-                    latest_loss = train_loss
-
-                if accuracy is not None:
-                    latest_accuracy = accuracy
-
-                if epoch is not None:
-                    latest_epoch = epoch
-
-                for key, raw_value in row.items():
-                    if not _is_metric_key(key):
-                        continue
-                    numeric_value = _to_float(raw_value)
-                    if numeric_value is None:
-                        continue
-                    metric_series.setdefault(key, []).append(
-                        {"step": step, "value": round(numeric_value, 6)}
-                    )
-    except OSError as e:
-        logger.debug(f"Unable to read metrics file {metrics_file}: {e}")
-        return {}
-
-    if latest_accuracy is not None and latest_accuracy <= 1.5:
-        latest_accuracy *= 100.0
-
-    if latest_epoch is None and loss_history:
-        latest_epoch = float(loss_history[-1]["step"])
-
-    parsed: dict = {}
-    if loss_history:
-        parsed["lossHistory"] = _downsample_history(loss_history)
-
-    if metric_series:
-        # Keep payload bounded for very high-dimensional logs.
-        ranked_metric_keys = sorted(
-            metric_series.keys(),
-            key=lambda key: (-len(metric_series[key]), key),
-        )[:MAX_METRIC_SERIES_KEYS]
-        parsed["metricSeries"] = {
-            key: _downsample_history(metric_series[key])
-            for key in ranked_metric_keys
-        }
-        parsed["metricKeys"] = ranked_metric_keys
-
-    parsed["metrics"] = {
-        "loss": latest_loss,
-        "accuracy": latest_accuracy,
-        "epoch": latest_epoch,
-    }
-    return parsed
-
-
-def _get_wandb_curve_data(wandb_dir: Optional[str]) -> Optional[dict]:
-    metrics_file = _resolve_metrics_file(wandb_dir)
-    if not metrics_file:
-        return None
-
-    try:
-        stat = os.stat(metrics_file)
-    except OSError:
-        return None
-
-    cached = _wandb_metrics_cache.get(metrics_file)
-    if (
-        cached
-        and cached.get("size") == stat.st_size
-        and cached.get("mtime") == stat.st_mtime
-    ):
-        return cached.get("payload")
-
-    payload = _parse_metrics_history(metrics_file)
-    _wandb_metrics_cache[metrics_file] = {
-        "size": stat.st_size,
-        "mtime": stat.st_mtime,
-        "payload": payload,
-    }
-    return payload
-
-
-def _load_run_metrics(run_dir: Optional[str]) -> dict:
-    """Load stored metrics from agent_metrics.jsonl in the run directory."""
-    if not run_dir:
-        return {}
-    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
-    if not os.path.isfile(metrics_file):
-        return {}
-    return _parse_metrics_history(metrics_file)
-
+# Metrics helpers (extracted to metrics_helpers.py)
+from metrics_helpers import (
+    LOSS_KEYS, VAL_LOSS_KEYS, ACCURACY_KEYS, EPOCH_KEYS, STEP_KEYS,
+    MAX_HISTORY_POINTS, MAX_METRIC_SERIES_KEYS, IGNORED_METRIC_KEYS,
+    _wandb_metrics_cache,
+    _to_float, _first_numeric, _extract_step, _is_metric_key,
+    _find_wandb_dir_from_run_dir, _resolve_metrics_file, _downsample_history,
+    _parse_metrics_history, _get_wandb_curve_data, _load_run_metrics,
+    _run_response_payload as _run_response_payload_impl,
+)
 
 def _run_response_payload(run_id: str, run: dict) -> dict:
-    """Build run response payload enriched with metrics.
-
-    Metrics come from two sources, in priority order:
-    1. Stored metrics POSTed by the sidecar (agent_metrics.jsonl)
-    2. WandB files discovered via wandb_dir or run_dir
-    """
-    payload = {"id": run_id, **run}
-
-    # Source 1: stored metrics from sidecar POSTs
-    parsed = _load_run_metrics(run.get("run_dir"))
-
-    # Source 2: wandb files (fallback)
-    if not parsed or not parsed.get("metricSeries"):
-        wandb_dir = run.get("wandb_dir")
-        if not wandb_dir:
-            wandb_dir = _find_wandb_dir_from_run_dir(run.get("run_dir"))
-            if wandb_dir:
-                run["wandb_dir"] = wandb_dir
-                payload["wandb_dir"] = wandb_dir
-        wandb_parsed = _get_wandb_curve_data(wandb_dir)
-        if wandb_parsed:
-            parsed = wandb_parsed
-
-    if not parsed:
-        return payload
-
-    parsed_metric_series = parsed.get("metricSeries")
-    if parsed_metric_series:
-        payload["metricSeries"] = parsed_metric_series
-        payload["metricKeys"] = parsed.get("metricKeys", list(parsed_metric_series.keys()))
-
-    # Also provide lossHistory for backward compat with components that still use it
-    parsed_history = parsed.get("lossHistory")
-    if parsed_history:
-        payload["lossHistory"] = parsed_history
-
-    parsed_metrics = parsed.get("metrics") if isinstance(parsed.get("metrics"), dict) else {}
-    existing_metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
-    merged_metrics = {
-        "loss": parsed_metrics.get("loss", existing_metrics.get("loss")),
-        "accuracy": parsed_metrics.get("accuracy", existing_metrics.get("accuracy")),
-        "epoch": parsed_metrics.get("epoch", existing_metrics.get("epoch")),
-    }
-    if any(isinstance(merged_metrics.get(key), (int, float)) for key in ("loss", "accuracy", "epoch")):
-        payload["metrics"] = {
-            k: float(v) for k, v in merged_metrics.items() if isinstance(v, (int, float))
-        }
-
-    return payload
+    return _run_response_payload_impl(run_id, run, WORKDIR)
 
 
 # =============================================================================
 # Run/Sweep State Helpers
 # =============================================================================
 
-RUN_STATUS_ACTIVE = {"launching", "running"}
-RUN_STATUS_PENDING = {"ready", "queued"}
-RUN_STATUS_TERMINAL = {"finished", "failed", "stopped"}
-
-SWEEP_STATUS_TERMINAL = {"completed", "failed", "canceled"}
-SWEEP_STATUS_EDITABLE = {"draft", "pending"}
-
-
-def _coerce_exit_code(raw_value: object) -> Optional[int]:
-    if raw_value is None:
-        return None
-    if isinstance(raw_value, bool):
-        return int(raw_value)
-    if isinstance(raw_value, int):
-        return raw_value
-    if isinstance(raw_value, float) and raw_value.is_integer():
-        return int(raw_value)
-    if isinstance(raw_value, str):
-        stripped = raw_value.strip()
-        if not stripped:
-            return None
-        try:
-            return int(stripped)
-        except ValueError:
-            return None
-    return None
-
-
-def _terminal_status_from_exit_code(exit_code: Optional[int]) -> Optional[str]:
-    if exit_code is None:
-        return None
-    return "finished" if exit_code == 0 else "failed"
-
-
-def _reconcile_run_terminal_state(run_id: str, run: dict) -> bool:
-    changed = False
-
-    normalized_exit_code = _coerce_exit_code(run.get("exit_code"))
-    if run.get("exit_code") != normalized_exit_code:
-        run["exit_code"] = normalized_exit_code
-        changed = True
-
-    completion_file = None
-    run_dir = run.get("run_dir")
-    if run_dir:
-        completion_candidate = os.path.join(run_dir, "job.done")
-        if os.path.exists(completion_candidate):
-            completion_file = completion_candidate
-
-    if completion_file:
-        completion_exit_code: Optional[int] = None
-        try:
-            with open(completion_file, "r", encoding="utf-8", errors="replace") as f:
-                completion_exit_code = _coerce_exit_code(f.read())
-        except Exception as e:
-            logger.warning("Failed to read completion file for %s: %s", run_id, e)
-
-        if completion_exit_code is not None and run.get("exit_code") != completion_exit_code:
-            run["exit_code"] = completion_exit_code
-            normalized_exit_code = completion_exit_code
-            changed = True
-
-        completion_status = _terminal_status_from_exit_code(completion_exit_code)
-        current_status = run.get("status")
-        if completion_status and current_status not in RUN_STATUS_TERMINAL:
-            run["status"] = completion_status
-            changed = True
-        elif not completion_status and current_status not in RUN_STATUS_TERMINAL:
-            run["status"] = "failed"
-            changed = True
-            if not run.get("error"):
-                run["error"] = "Run ended but exit code could not be parsed"
-                changed = True
-
-        if completion_status == "failed" and completion_exit_code not in (None, 0) and not run.get("error"):
-            run["error"] = f"Process exited with code {completion_exit_code}"
-            changed = True
-
-        if not run.get("ended_at"):
-            try:
-                run["ended_at"] = os.path.getmtime(completion_file)
-            except OSError:
-                run["ended_at"] = time.time()
-            changed = True
-    elif run.get("status") in RUN_STATUS_TERMINAL and not run.get("ended_at"):
-        run["ended_at"] = time.time()
-        changed = True
-
-    return changed
+# Run/Sweep state helpers (extracted to sweep_helpers.py)
+from sweep_helpers import (
+    RUN_STATUS_ACTIVE, RUN_STATUS_PENDING, RUN_STATUS_TERMINAL,
+    SWEEP_STATUS_TERMINAL, SWEEP_STATUS_EDITABLE,
+    _coerce_exit_code, _terminal_status_from_exit_code,
+    _reconcile_run_terminal_state,
+    _reconcile_all_run_terminal_states as _reconcile_all_run_terminal_states_impl,
+    _normalize_sweep_status, _coerce_optional_text, _coerce_optional_int,
+    _coerce_optional_bool, _json_clone,
+    _derive_sweep_creation_context, _ensure_sweep_creation_context,
+    _compute_sweep_progress as _compute_sweep_progress_impl,
+    _infer_sweep_status,
+    recompute_sweep_state as _recompute_sweep_state_impl,
+    recompute_all_sweep_states as _recompute_all_sweep_states_impl,
+    _sync_run_membership_with_sweep as _sync_run_membership_with_sweep_impl,
+    _current_run_summary as _current_run_summary_impl,
+    expand_parameter_grid, build_command_with_params,
+)
 
 
 def _reconcile_all_run_terminal_states() -> bool:
-    changed = False
-    affected_sweeps: set[str] = set()
-
-    for run_id, run in runs.items():
-        if _reconcile_run_terminal_state(run_id, run):
-            changed = True
-            sweep_id = run.get("sweep_id")
-            if sweep_id:
-                affected_sweeps.add(sweep_id)
-
-    for sweep_id in affected_sweeps:
-        recompute_sweep_state(sweep_id)
-
-    if changed:
-        save_runs_state()
-
-    return changed
-
-
-def _normalize_sweep_status(raw_status: Optional[str]) -> str:
-    if not raw_status:
-        return "pending"
-    normalized = raw_status.strip().lower()
-    if normalized == "ready":
-        return "pending"
-    if normalized in {"draft", "pending", "running", "completed", "failed", "canceled"}:
-        return normalized
-    return "pending"
-
-
-def _coerce_optional_text(value: object) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    stripped = str(value).strip()
-    return stripped or None
-
-
-def _coerce_optional_int(value: object) -> Optional[int]:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            return int(stripped)
-        except ValueError:
-            return None
-    return None
-
-
-def _coerce_optional_bool(value: object) -> Optional[bool]:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return bool(value)
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"true", "1", "yes", "y", "on"}:
-            return True
-        if lowered in {"false", "0", "no", "n", "off"}:
-            return False
-    return None
-
-
-def _json_clone(value: object) -> Optional[dict]:
-    if not isinstance(value, dict):
-        return None
-    try:
-        return json.loads(json.dumps(value))
-    except Exception:
-        return None
-
-
-def _derive_sweep_creation_context(
-    *,
-    name: Optional[str],
-    base_command: Optional[str],
-    goal: Optional[str],
-    max_runs: Optional[int],
-    ui_config: Optional[dict],
-    parameters: Optional[dict],
-    created_at: float,
-) -> dict:
-    ui = ui_config if isinstance(ui_config, dict) else {}
-    parameter_grid = parameters if isinstance(parameters, dict) else {}
-
-    ui_hyperparameters = ui.get("hyperparameters")
-    ui_metrics = ui.get("metrics")
-    ui_insights = ui.get("insights")
-
-    max_runs_from_ui = _coerce_optional_int(ui.get("maxRuns"))
-    parallel_runs = _coerce_optional_int(ui.get("parallelRuns"))
-
-    hyperparameter_count = (
-        len(ui_hyperparameters)
-        if isinstance(ui_hyperparameters, list)
-        else len(parameter_grid)
-    )
-    metric_count = len(ui_metrics) if isinstance(ui_metrics, list) else None
-    insight_count = len(ui_insights) if isinstance(ui_insights, list) else None
-
-    return {
-        "name": _coerce_optional_text(ui.get("name")) or _coerce_optional_text(name),
-        "goal": _coerce_optional_text(ui.get("goal")) or _coerce_optional_text(goal),
-        "description": _coerce_optional_text(ui.get("description")),
-        "command": _coerce_optional_text(ui.get("command")) or _coerce_optional_text(base_command),
-        "notes": _coerce_optional_text(ui.get("notes")),
-        "max_runs": max_runs_from_ui if max_runs_from_ui is not None else _coerce_optional_int(max_runs),
-        "parallel_runs": parallel_runs,
-        "early_stopping_enabled": _coerce_optional_bool(ui.get("earlyStoppingEnabled")),
-        "early_stopping_patience": _coerce_optional_int(ui.get("earlyStoppingPatience")),
-        "hyperparameter_count": hyperparameter_count,
-        "metric_count": metric_count,
-        "insight_count": insight_count,
-        "created_at": created_at,
-        "ui_config_snapshot": _json_clone(ui),
-    }
-
-
-def _ensure_sweep_creation_context(sweep: dict) -> bool:
-    existing = sweep.get("creation_context")
-    if isinstance(existing, dict):
-        return False
-
-    sweep["creation_context"] = _derive_sweep_creation_context(
-        name=_coerce_optional_text(sweep.get("name")),
-        base_command=_coerce_optional_text(sweep.get("base_command")),
-        goal=_coerce_optional_text(sweep.get("goal")),
-        max_runs=_coerce_optional_int(sweep.get("max_runs")),
-        ui_config=sweep.get("ui_config") if isinstance(sweep.get("ui_config"), dict) else None,
-        parameters=sweep.get("parameters") if isinstance(sweep.get("parameters"), dict) else None,
-        created_at=float(sweep.get("created_at") or time.time()),
-    )
-    return True
+    return _reconcile_all_run_terminal_states_impl(runs, sweeps, save_runs_state)
 
 
 def _compute_sweep_progress(sweep: dict) -> dict:
-    """Compute progress counts for a sweep from current run statuses."""
-    run_ids = sweep.get("run_ids", []) or []
-    sweep_runs = [runs[rid] for rid in run_ids if rid in runs]
-
-    return {
-        "total": len(sweep_runs),
-        "completed": sum(1 for r in sweep_runs if r.get("status") == "finished"),
-        "failed": sum(1 for r in sweep_runs if r.get("status") == "failed"),
-        "running": sum(1 for r in sweep_runs if r.get("status") == "running"),
-        "launching": sum(1 for r in sweep_runs if r.get("status") == "launching"),
-        "ready": sum(1 for r in sweep_runs if r.get("status") == "ready"),
-        "queued": sum(1 for r in sweep_runs if r.get("status") == "queued"),
-        "canceled": sum(1 for r in sweep_runs if r.get("status") == "stopped"),
-    }
+    return _compute_sweep_progress_impl(sweep, runs)
 
 
-def _infer_sweep_status(previous_status: str, progress: dict) -> str:
-    """Derive a sweep status from run state counts."""
-    total = progress.get("total", 0)
-    running = progress.get("running", 0) + progress.get("launching", 0)
-    queued = progress.get("queued", 0)
-    ready = progress.get("ready", 0)
-    completed = progress.get("completed", 0)
-    failed = progress.get("failed", 0)
-    canceled = progress.get("canceled", 0)
-    terminal = completed + failed + canceled
-
-    if previous_status == "draft" and total == 0:
-        return "draft"
-    if total == 0:
-        return "pending"
-    if running > 0:
-        return "running"
-    if queued > 0:
-        return "pending"
-    if ready > 0:
-        return "pending"
-    if terminal < total:
-        return "running"
-    if failed > 0:
-        return "failed"
-    if completed > 0:
-        return "completed"
-    return "canceled"
-
-
-def recompute_sweep_state(sweep_id: str) -> Optional[dict]:
-    """Refresh a single sweep's progress and derived status."""
-    sweep = sweeps.get(sweep_id)
-    if not sweep:
-        return None
-
-    previous_status = _normalize_sweep_status(sweep.get("status"))
-    progress = _compute_sweep_progress(sweep)
-    next_status = _infer_sweep_status(previous_status, progress)
-
-    sweep["status"] = next_status
-    sweep["progress"] = progress
-
-    if next_status == "running":
-        if not sweep.get("started_at"):
-            sweep["started_at"] = time.time()
-        sweep.pop("completed_at", None)
-    elif next_status in SWEEP_STATUS_TERMINAL:
-        sweep["completed_at"] = sweep.get("completed_at") or time.time()
-    else:
-        sweep.pop("completed_at", None)
-
-    return sweep
+def recompute_sweep_state(sweep_id: str):
+    return _recompute_sweep_state_impl(sweep_id, runs, sweeps)
 
 
 def recompute_all_sweep_states() -> None:
-    for sweep_id in list(sweeps.keys()):
-        recompute_sweep_state(sweep_id)
+    _recompute_all_sweep_states_impl(runs, sweeps)
 
 
-def _sync_run_membership_with_sweep(run_id: str, sweep_id: Optional[str]) -> None:
-    if not sweep_id:
-        return
-    if sweep_id not in sweeps:
-        raise HTTPException(status_code=404, detail=f"Sweep not found: {sweep_id}")
-    run_ids = sweeps[sweep_id].setdefault("run_ids", [])
-    if run_id not in run_ids:
-        run_ids.append(run_id)
-    recompute_sweep_state(sweep_id)
-
-
-def _run_command_capture(args: list[str], timeout: float = 2.0) -> tuple[bool, str]:
-    try:
-        proc = subprocess.run(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        output = (proc.stdout or proc.stderr or "").strip()
-        return proc.returncode == 0, output
-    except Exception:
-        return False, ""
-
-
-def _count_gpu_devices() -> Optional[int]:
-    if not shutil.which("nvidia-smi"):
-        return None
-    ok, output = _run_command_capture(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], timeout=2.5)
-    if not ok:
-        return None
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    return len(lines) if lines else 0
-
-
-def _count_slurm_nodes() -> Optional[int]:
-    if not shutil.which("sinfo"):
-        return None
-    ok, output = _run_command_capture(["sinfo", "-h", "-N"], timeout=2.0)
-    if not ok:
-        return None
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    return len(lines) if lines else 0
-
-
-def _count_kubernetes_nodes() -> Optional[int]:
-    if not shutil.which("kubectl"):
-        return None
-    ok, output = _run_command_capture(["kubectl", "get", "nodes", "--no-headers"], timeout=2.5)
-    if not ok:
-        return None
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    return len(lines) if lines else 0
-
-
-def _count_ssh_hosts() -> int:
-    ssh_config = os.path.expanduser("~/.ssh/config")
-    if not os.path.exists(ssh_config):
-        return 0
-    try:
-        count = 0
-        with open(ssh_config, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if not line.lower().startswith("host "):
-                    continue
-                host_targets = [segment for segment in line[5:].split(" ") if segment]
-                has_real_target = any(
-                    target not in {"*", "?"} and "*" not in target and "?" not in target
-                    for target in host_targets
-                )
-                if has_real_target:
-                    count += 1
-        return count
-    except Exception:
-        return 0
-
-
-def _infer_cluster_from_environment() -> dict:
-    now = time.time()
-    type_hint = _normalize_cluster_type(os.environ.get("RESEARCH_AGENT_CLUSTER_TYPE"))
-    gpu_count = _count_gpu_devices()
-    slurm_nodes = _count_slurm_nodes()
-    kube_nodes = _count_kubernetes_nodes()
-    ssh_hosts = _count_ssh_hosts()
-
-    has_slurm_env = any(key.startswith("SLURM_") for key in os.environ.keys())
-    has_kube_env = bool(os.environ.get("KUBERNETES_SERVICE_HOST")) or os.path.exists(
-        "/var/run/secrets/kubernetes.io/serviceaccount/token"
-    )
-    has_ray_env = bool(os.environ.get("RAY_ADDRESS"))
-    has_ray_cli = bool(shutil.which("ray"))
-
-    detected_type = "unknown"
-    confidence = 0.35
-    details: dict[str, Any] = {
-        "signals": [],
-        "slurm_nodes": slurm_nodes,
-        "kubernetes_nodes": kube_nodes,
-        "ssh_hosts": ssh_hosts,
-    }
-
-    if type_hint != "unknown":
-        detected_type = type_hint
-        confidence = 0.98
-        details["signals"].append("RESEARCH_AGENT_CLUSTER_TYPE")
-    elif has_kube_env or (kube_nodes or 0) > 0:
-        detected_type = "kubernetes"
-        confidence = 0.93 if has_kube_env else 0.82
-        details["signals"].append("kubernetes")
-    elif has_slurm_env or (slurm_nodes or 0) > 0:
-        detected_type = "slurm"
-        confidence = 0.9 if has_slurm_env else 0.8
-        details["signals"].append("slurm")
-    elif has_ray_env or has_ray_cli:
-        detected_type = "ray"
-        confidence = 0.85 if has_ray_env else 0.65
-        details["signals"].append("ray")
-    elif ssh_hosts >= 3:
-        detected_type = "shared_head_node"
-        confidence = 0.64
-        details["signals"].append("ssh-host-fanout")
-    elif gpu_count is not None and gpu_count > 0:
-        detected_type = "local_gpu"
-        confidence = 0.78 if gpu_count > 1 else 0.68
-        details["signals"].append("nvidia-smi")
-
-    if detected_type == "slurm":
-        node_count = slurm_nodes
-    elif detected_type == "kubernetes":
-        node_count = kube_nodes
-    elif detected_type == "shared_head_node":
-        node_count = ssh_hosts if ssh_hosts > 0 else None
-    elif detected_type == "local_gpu":
-        node_count = 1
-    else:
-        node_count = None
-
-    host = socket.gethostname() if detected_type in {"local_gpu", "shared_head_node"} else None
-    status = "healthy" if detected_type != "unknown" else "unknown"
-
-    return {
-        "type": detected_type,
-        "status": status,
-        "source": "detected",
-        "label": _cluster_type_label(detected_type),
-        "description": _cluster_type_description(detected_type),
-        "head_node": host,
-        "node_count": node_count,
-        "gpu_count": gpu_count,
-        "notes": None,
-        "confidence": round(confidence, 2),
-        "details": details,
-        "last_detected_at": now,
-        "updated_at": now,
-    }
+def _sync_run_membership_with_sweep(run_id: str, sweep_id) -> None:
+    _sync_run_membership_with_sweep_impl(run_id, sweep_id, runs, sweeps)
 
 
 def _current_run_summary() -> dict:
-    _reconcile_all_run_terminal_states()
-    active_runs = [run for run in runs.values() if not run.get("is_archived", False)]
-    return {
-        "total": len(active_runs),
-        "running": sum(1 for run in active_runs if run.get("status") == "running"),
-        "launching": sum(1 for run in active_runs if run.get("status") == "launching"),
-        "queued": sum(1 for run in active_runs if run.get("status") == "queued"),
-        "ready": sum(1 for run in active_runs if run.get("status") == "ready"),
-        "failed": sum(1 for run in active_runs if run.get("status") == "failed"),
-        "finished": sum(1 for run in active_runs if run.get("status") == "finished"),
-    }
+    return _current_run_summary_impl(runs, sweeps, save_runs_state)
+
+
+
+
+
+
 
 
 # =============================================================================
-# Tmux Helpers
+# Tmux Helpers (extracted to tmux_helpers.py)
 # =============================================================================
 
-def get_tmux_server():
-    """Get or create tmux server connection."""
-    try:
-        return libtmux.Server()
-    except Exception as e:
-        logger.error(f"Failed to connect to tmux server: {e}")
-        return None
+from tmux_helpers import (
+    get_tmux_server,
+    get_or_create_session as _get_or_create_session_impl,
+    launch_run_in_tmux as _launch_run_in_tmux_impl,
+)
 
 
 def get_or_create_session(session_name: Optional[str] = None):
-    """Get or create the research-agent tmux session."""
     if session_name is None:
         session_name = TMUX_SESSION_NAME
-    server = get_tmux_server()
-    if not server:
-        return None
-    
-    try:
-        session = server.sessions.get(session_name=session_name, default=None)
-        if not session:
-            logger.info(f"Creating new tmux session: {session_name}")
-            session = server.new_session(session_name=session_name)
-        return session
-    except Exception as e:
-        logger.error(f"Error getting/creating tmux session: {e}")
-        return None
+    return _get_or_create_session_impl(session_name)
 
 
 def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
-    """Launch a run in a new tmux window with sidecar."""
-    session = get_or_create_session()
-    if not session:
-        raise Exception("Tmux session not available. Start tmux first.")
-    
-    # Create window name
-    run_name = run_data.get("name", run_id)[:20].replace(" ", "-")
-    tmux_window_name = f"ra-{run_id[:8]}"
-    
-    logger.info(f"Launching run {run_id} in window {tmux_window_name}")
-    
-    # Create window
-    window = session.new_window(window_name=tmux_window_name, attach=False)
-    pane = window.active_pane
-    
-    # Setup run directory
-    run_dir = os.path.join(DATA_DIR, "runs", run_id)
-    os.makedirs(run_dir, exist_ok=True)
-    
-    # Write command to file
-    command_file = os.path.join(run_dir, "command.txt")
-    with open(command_file, "w") as f:
-        f.write(run_data["command"])
-    
-    # Get sidecar path
-    server_dir = os.path.dirname(os.path.abspath(__file__))
-    sidecar_path = os.path.join(server_dir, "job_sidecar.py")
-    
-    # Build sidecar command
-    server_url = SERVER_CALLBACK_URL
-    run_workdir = run_data.get("workdir") or WORKDIR
-    
-    if getattr(sys, "frozen", False):
-        sidecar_cmd = (
-            f"{shlex.quote(sys.executable)} --run-sidecar "
-            f"--job_id {shlex.quote(run_id)} "
-            f"--server_url {shlex.quote(server_url)} "
-            f"--command_file {shlex.quote(command_file)} "
-            f"--agent_run_dir {shlex.quote(run_dir)} "
-            f"--workdir {shlex.quote(run_workdir)}"
-        )
-    else:
-        sidecar_cmd = (
-            f'{shlex.quote(sys.executable)} "{sidecar_path}" '
-            f'--job_id {shlex.quote(run_id)} '
-            f'--server_url {shlex.quote(server_url)} '
-            f'--command_file {shlex.quote(command_file)} '
-            f'--agent_run_dir {shlex.quote(run_dir)} '
-            f'--workdir {shlex.quote(run_workdir)}'
-        )
-    if USER_AUTH_TOKEN:
-        sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
-    
-    logger.info(f"Executing sidecar: {sidecar_cmd}")
-    pane.send_keys(sidecar_cmd)
-    
-    # Update run data
-    run_data["status"] = "launching"
-    run_data["tmux_window"] = tmux_window_name
-    run_data["run_dir"] = run_dir
-    run_data["launched_at"] = time.time()
-    
-    return tmux_window_name
+    return _launch_run_in_tmux_impl(
+        run_id, run_data,
+        tmux_session_name=TMUX_SESSION_NAME,
+        data_dir=DATA_DIR,
+        workdir=WORKDIR,
+        server_callback_url=SERVER_CALLBACK_URL,
+        user_auth_token=USER_AUTH_TOKEN,
+    )
 
 
 # =============================================================================
@@ -2137,374 +932,50 @@ def should_stop_session(session_id: str) -> bool:
     return session_stop_flags.get(session_id, False)
 
 
-def _extract_tool_name(part: dict) -> Optional[str]:
-    """Best-effort extraction for tool part names across OpenCode versions."""
-    state = part.get("state") if isinstance(part, dict) else {}
-    if not isinstance(state, dict):
-        state = {}
-    state_input = state.get("input")
-    if not isinstance(state_input, dict):
-        state_input = {}
-
-    for candidate in (
-        part.get("name"),
-        part.get("tool"),
-        state.get("title"),
-        state_input.get("description"),
-    ):
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate
-    return None
+# OpenCode streaming helpers (extracted to opencode_streaming.py)
+from opencode_streaming import (
+    _extract_tool_name, _coerce_tool_text, _extract_tool_data,
+    StreamPartsAccumulator, ChatStreamRuntime,
+    _public_stream_event,
+    _persist_active_stream_snapshot as _persist_active_stream_snapshot_impl,
+    _append_runtime_event, _close_runtime_subscribers,
+    _expire_runtime_after as _expire_runtime_after_impl,
+    _finalize_runtime as _finalize_runtime_impl,
+    _stream_runtime_events as _stream_runtime_events_impl,
+    parse_opencode_event,
+    stream_opencode_events as _stream_opencode_events_impl,
+)
 
 
-def _coerce_tool_text(value: Any) -> Optional[str]:
-    """Convert tool input/output payloads to readable text."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    try:
-        return json.dumps(value, ensure_ascii=False, indent=2)
-    except Exception:
-        return str(value)
-
-
-def _extract_tool_data(part: dict) -> dict[str, Any]:
-    """Extract normalized tool fields used for streaming and persistence."""
-    state = part.get("state")
-    if not isinstance(state, dict):
-        state = {}
-
-    state_input = state.get("input")
-    if not isinstance(state_input, dict):
-        state_input = {}
-
-    metadata = state.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
-
-    time_data = state.get("time")
-    if not isinstance(time_data, dict):
-        time_data = {}
-
-    status = state.get("status")
-    if not isinstance(status, str):
-        status = None
-
-    tool_input = _coerce_tool_text(state_input) if state_input else None
-    output_value = state.get("output")
-    if output_value is None:
-        output_value = metadata.get("output")
-    tool_output = _coerce_tool_text(output_value)
-
-    started_at = time_data.get("start") if isinstance(time_data.get("start"), (int, float)) else None
-    ended_at = time_data.get("end") if isinstance(time_data.get("end"), (int, float)) else None
-    duration_ms = None
-    if isinstance(started_at, (int, float)) and isinstance(ended_at, (int, float)) and ended_at >= started_at:
-        duration_ms = int(ended_at - started_at)
-
-    return {
-        "tool_status": status,
-        "tool_input": tool_input,
-        "tool_output": tool_output,
-        "tool_started_at": started_at,
-        "tool_ended_at": ended_at,
-        "tool_duration_ms": duration_ms,
-    }
-
-
-class StreamPartsAccumulator:
-    """
-    Collect ordered message parts while preserving type transitions.
-
-    Text/reasoning are buffered and flushed whenever we switch type/part ID or
-    encounter a tool event. Tool parts are keyed by ID so state updates amend
-    the original tool part.
-    """
-
-    def __init__(self):
-        self._parts: list[dict[str, Any]] = []
-        self._text_buffer: Optional[dict[str, Any]] = None
-        self._tool_index_by_id: dict[str, int] = {}
-        self._text_segment_counts: dict[str, int] = {}
-
-    def consume(self, event: dict):
-        ptype = event.get("ptype")
-        if ptype in ("text", "reasoning"):
-            self._consume_text_or_reasoning(event)
-            return
-        if ptype == "tool":
-            self._flush_text_buffer()
-            self._consume_tool_update(event)
-            return
-        if event.get("type") == "session_status":
-            self._flush_text_buffer()
-
-    def snapshot(self) -> list[dict[str, Any]]:
-        parts = list(self._parts)
-        if self._text_buffer and self._text_buffer.get("content"):
-            parts.append({k: v for k, v in self._text_buffer.items() if k != "source_id"})
-        return parts
-
-    def finalize(self) -> list[dict[str, Any]]:
-        self._flush_text_buffer()
-        return list(self._parts)
-
-    def _consume_text_or_reasoning(self, event: dict):
-        delta = event.get("delta")
-        if not isinstance(delta, str) or delta == "":
-            return
-
-        part_id = event.get("id")
-        part_type = "thinking" if event.get("ptype") == "reasoning" else "text"
-        if self._text_buffer and self._text_buffer.get("source_id") == part_id and self._text_buffer.get("type") == part_type:
-            self._text_buffer["content"] += delta
-            return
-
-        self._flush_text_buffer()
-        base_id = part_id if isinstance(part_id, str) and part_id else f"part_{uuid.uuid4().hex[:12]}"
-        segment_index = self._text_segment_counts.get(base_id, 0)
-        self._text_segment_counts[base_id] = segment_index + 1
-        stored_id = base_id if segment_index == 0 else f"{base_id}#{segment_index}"
-        self._text_buffer = {
-            "id": stored_id,
-            "source_id": base_id,
-            "type": part_type,
-            "content": delta,
-        }
-
-    def _consume_tool_update(self, event: dict):
-        part_id = event.get("id")
-        if not isinstance(part_id, str) or not part_id:
-            return
-
-        existing_index = self._tool_index_by_id.get(part_id)
-        tool_name = event.get("name")
-        if existing_index is None:
-            self._parts.append(
-                {
-                    "id": part_id,
-                    "type": "tool",
-                    "content": "",
-                    "tool_name": tool_name,
-                    "tool_state": event.get("tool_status"),
-                    "tool_state_raw": event.get("state"),
-                    "tool_input": event.get("tool_input"),
-                    "tool_output": event.get("tool_output"),
-                    "tool_started_at": event.get("tool_started_at"),
-                    "tool_ended_at": event.get("tool_ended_at"),
-                    "tool_duration_ms": event.get("tool_duration_ms"),
-                }
-            )
-            self._tool_index_by_id[part_id] = len(self._parts) - 1
-            return
-
-        existing_part = self._parts[existing_index]
-        existing_part["tool_state"] = event.get("tool_status")
-        existing_part["tool_state_raw"] = event.get("state")
-        existing_part["tool_input"] = event.get("tool_input")
-        existing_part["tool_output"] = event.get("tool_output")
-        existing_part["tool_started_at"] = event.get("tool_started_at")
-        existing_part["tool_ended_at"] = event.get("tool_ended_at")
-        existing_part["tool_duration_ms"] = event.get("tool_duration_ms")
-        if tool_name:
-            existing_part["tool_name"] = tool_name
-
-    def _flush_text_buffer(self):
-        if not self._text_buffer:
-            return
-        if self._text_buffer.get("content"):
-            flushed_part = {k: v for k, v in self._text_buffer.items() if k != "source_id"}
-            self._parts.append(flushed_part)
-        self._text_buffer = None
-
-
-class ChatStreamRuntime:
-    """In-memory runtime state for a single in-flight assistant response."""
-
-    def __init__(self, session_id: str):
-        self.session_id = session_id
-        self.run_id = uuid.uuid4().hex[:12]
-        self.status = "running"
-        self.error: Optional[str] = None
-        self.started_at = time.time()
-        self.updated_at = self.started_at
-        self.full_text = ""
-        self.full_thinking = ""
-        self.parts_accumulator = StreamPartsAccumulator()
-        self.events: list[dict[str, Any]] = []
-        self.next_sequence = 1
-        self.last_persist_at = 0.0
-        self.last_persist_sequence = 0
-        self.subscribers: set[asyncio.Queue] = set()
-        self.lock = asyncio.Lock()
-        self.cleanup_task: Optional[asyncio.Task] = None
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "run_id": self.run_id,
-            "status": self.status,
-            "sequence": max(0, self.next_sequence - 1),
-            "text": self.full_text,
-            "thinking": self.full_thinking,
-            "parts": self.parts_accumulator.snapshot(),
-            "error": self.error,
-            "started_at": self.started_at,
-            "updated_at": self.updated_at,
-        }
-
-
-def _public_stream_event(event: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in event.items() if not str(k).startswith("_")}
-
-
-def _persist_active_stream_snapshot(
-    session_id: str,
-    runtime: ChatStreamRuntime,
-    *,
-    force: bool = False,
-) -> None:
-    session = chat_sessions.get(session_id)
-    if not isinstance(session, dict):
-        return
-
-    now = time.time()
-    current_sequence = max(0, runtime.next_sequence - 1)
-    if not force:
-        if current_sequence == runtime.last_persist_sequence:
-            return
-        if (
-            current_sequence - runtime.last_persist_sequence < STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS
-            and now - runtime.last_persist_at < STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS
-        ):
-            return
-
-    session["active_stream"] = runtime.snapshot()
-    save_chat_state()
-    runtime.last_persist_at = now
-    runtime.last_persist_sequence = current_sequence
-
-
-async def _append_runtime_event(runtime: ChatStreamRuntime, event: dict[str, Any]) -> dict[str, Any]:
-    public_event = _public_stream_event(event)
-    runtime.parts_accumulator.consume(public_event)
-
-    if public_event.get("type") == "part_delta":
-        delta = public_event.get("delta")
-        if isinstance(delta, str):
-            if public_event.get("ptype") == "text":
-                runtime.full_text += delta
-            elif public_event.get("ptype") == "reasoning":
-                runtime.full_thinking += delta
-    elif public_event.get("type") == "error":
-        runtime.error = public_event.get("message") or "Unknown chat stream error"
-        runtime.status = "failed"
-    elif public_event.get("type") == "session_status" and public_event.get("status") == "idle":
-        if runtime.status == "running":
-            runtime.status = "completed"
-
-    runtime.updated_at = time.time()
-    async with runtime.lock:
-        seq_event = {"seq": runtime.next_sequence, **public_event}
-        runtime.next_sequence += 1
-        runtime.events.append(seq_event)
-        subscribers = list(runtime.subscribers)
-
-    for queue in subscribers:
-        try:
-            queue.put_nowait(seq_event)
-        except asyncio.QueueFull:
-            logger.warning("Dropping chat stream event for session %s due to full subscriber queue", runtime.session_id)
-
-    return seq_event
-
-
-async def _close_runtime_subscribers(runtime: ChatStreamRuntime) -> None:
-    async with runtime.lock:
-        subscribers = list(runtime.subscribers)
-        runtime.subscribers.clear()
-
-    for queue in subscribers:
-        try:
-            queue.put_nowait(None)
-        except asyncio.QueueFull:
-            pass
-
-
-async def _expire_runtime_after(session_id: str, runtime: ChatStreamRuntime, delay_seconds: float) -> None:
-    try:
-        await asyncio.sleep(delay_seconds)
-    except asyncio.CancelledError:
-        return
-
-    if active_chat_streams.get(session_id) is runtime:
-        active_chat_streams.pop(session_id, None)
-
-
-async def _finalize_runtime(session_id: str, runtime: ChatStreamRuntime, *, retain: bool = True) -> None:
-    await _close_runtime_subscribers(runtime)
-    if runtime.cleanup_task and not runtime.cleanup_task.done():
-        runtime.cleanup_task.cancel()
-        runtime.cleanup_task = None
-
-    if not retain:
-        if active_chat_streams.get(session_id) is runtime:
-            active_chat_streams.pop(session_id, None)
-        return
-
-    runtime.cleanup_task = asyncio.create_task(
-        _expire_runtime_after(session_id, runtime, STREAM_RUNTIME_RETENTION_SECONDS)
+def _persist_active_stream_snapshot(session_id, runtime, *, force=False):
+    _persist_active_stream_snapshot_impl(
+        session_id, runtime, chat_sessions, save_chat_state,
+        STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS,
+        STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS,
+        force=force,
     )
 
 
-async def _stream_runtime_events(
-    session_id: str,
-    *,
-    from_seq: int = 1,
-    run_id: Optional[str] = None,
-) -> AsyncIterator[str]:
-    runtime = active_chat_streams.get(session_id)
-    if runtime is None:
-        yield json.dumps({"type": "session_status", "status": "idle"}) + "\n"
-        return
+async def _expire_runtime_after(session_id, runtime, delay_seconds):
+    await _expire_runtime_after_impl(session_id, runtime, delay_seconds, active_chat_streams)
 
-    if run_id and runtime.run_id != run_id:
-        yield json.dumps({"type": "session_status", "status": "idle"}) + "\n"
-        return
 
-    from_seq = max(1, from_seq)
-    queue: asyncio.Queue = asyncio.Queue()
-    subscribed = False
+async def _finalize_runtime(session_id, runtime, *, retain=True):
+    await _finalize_runtime_impl(
+        session_id, runtime, active_chat_streams, STREAM_RUNTIME_RETENTION_SECONDS, retain=retain,
+    )
 
-    async with runtime.lock:
-        backlog = [event for event in runtime.events if int(event.get("seq", 0)) >= from_seq]
-        done = runtime.status != "running"
-        if not done:
-            runtime.subscribers.add(queue)
-            subscribed = True
 
-    try:
-        for event in backlog:
-            yield json.dumps(event) + "\n"
-            if event.get("type") == "session_status" and event.get("status") == "idle":
-                return
+async def _stream_runtime_events(session_id, *, from_seq=1, run_id=None):
+    async for chunk in _stream_runtime_events_impl(
+        session_id, active_chat_streams, from_seq=from_seq, run_id=run_id
+    ):
+        yield chunk
 
-        if done:
-            return
 
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            if int(item.get("seq", 0)) < from_seq:
-                continue
-            yield json.dumps(item) + "\n"
-            if item.get("type") == "session_status" and item.get("status") == "idle":
-                break
-    finally:
-        if subscribed:
-            async with runtime.lock:
-                runtime.subscribers.discard(queue)
+async def stream_opencode_events(client, session_id):
+    async for item in _stream_opencode_events_impl(client, session_id, OPENCODE_URL, get_auth):
+        yield item
 
 
 async def run_opencode_session(chat_session_id: str, opencode_session_id: str, content: str) -> tuple[str, str, list]:
@@ -2536,117 +1007,6 @@ async def run_opencode_session(chat_session_id: str, opencode_session_id: str, c
     return full_text, full_thinking, parts_accumulator.finalize()
 
 
-def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[dict]:
-    """Parse an OpenCode SSE event and translate it to our protocol."""
-    payload = event_data.get("payload", {})
-    if not isinstance(payload, dict):
-        return None
-
-    etype = payload.get("type", "")
-    props = payload.get("properties", {})
-    if not isinstance(props, dict):
-        return None
-    part = props.get("part", {})
-    if not isinstance(part, dict):
-        part = {}
-    
-    session_props = props.get("session")
-    if not isinstance(session_props, dict):
-        session_props = {}
-
-    event_sid = props.get("sessionID") or part.get("sessionID") or session_props.get("id")
-    if event_sid != target_session_id:
-        return None
-    
-    if etype == "message.part.delta":
-        delta = props.get("delta")
-        if not isinstance(delta, str) or delta == "":
-            return None
-        field = props.get("field", "")
-        part_id = props.get("partID")
-        if field in ("text", "reasoning"):
-            return {"type": "part_delta", "id": part_id, "ptype": field, "delta": delta}
-
-    elif etype == "message.part.updated":
-        ptype = part.get("type")
-        part_id = part.get("id")
-
-        if ptype == "text":
-            delta = props.get("delta")
-            if not isinstance(delta, str) or delta == "":
-                return None
-            return {"type": "part_delta", "id": part_id, "ptype": "text", "delta": delta}
-        elif ptype == "reasoning":
-            delta = props.get("delta")
-            if not isinstance(delta, str) or delta == "":
-                return None
-            return {"type": "part_delta", "id": part_id, "ptype": "reasoning", "delta": delta}
-        elif ptype == "tool":
-            tool_data = _extract_tool_data(part)
-            return {
-                "type": "part_update",
-                "id": part_id,
-                "ptype": "tool",
-                "state": part.get("state"),
-                "name": _extract_tool_name(part),
-                **tool_data,
-            }
-
-    elif etype == "session.status":
-        if props.get("status", {}).get("type") == "idle":
-            return {"type": "session_status", "status": "idle", "_done": True}
-    
-    return None
-
-
-async def stream_opencode_events(
-    client: httpx.AsyncClient, session_id: str
-) -> AsyncIterator[tuple[dict, str, str, Optional[dict]]]:
-    """Stream parsed OpenCode events with text/thinking deltas and tool updates."""
-    url = f"{OPENCODE_URL}/global/event"
-    headers = {"Accept": "text/event-stream"}
-    
-    async with client.stream("GET", url, headers=headers, auth=get_auth()) as response:
-        async for line in response.aiter_lines():
-            if not line.startswith("data: "):
-                continue
-            
-            try:
-                event_data = json.loads(line[6:])
-                
-                # Check for error responses from OpenCode
-                if "error" in event_data:
-                    error_msg = event_data.get("error", "Unknown OpenCode error")
-                    logger.error(f"OpenCode returned error: {error_msg}")
-                    raise RuntimeError(f"OpenCode error: {error_msg}")
-                
-                translated = parse_opencode_event(event_data, session_id)
-                if translated is None:
-                    continue
-                
-                text_delta = ""
-                thinking_delta = ""
-                tool_update = None
-                ptype = translated.get("ptype")
-                if ptype == "text":
-                    text_delta = translated.get("delta", "")
-                elif ptype == "reasoning":
-                    thinking_delta = translated.get("delta", "")
-                elif ptype == "tool":
-                    tool_update = translated
-                
-                yield translated, text_delta, thinking_delta, tool_update
-                
-                if translated.get("_done"):
-                    break
-            except RuntimeError:
-                # Re-raise OpenCode errors
-                raise
-            except Exception as e:
-                logger.error(f"Error parsing event line: {e}")
-                continue
-
-
 # =============================================================================
 # Chat Endpoints
 # =============================================================================
@@ -2668,249 +1028,44 @@ async def health_json():
 
 
 # =============================================================================
-# Git Diff Endpoints
+# Git Diff Endpoints (helpers extracted to git_helpers.py)
 # =============================================================================
 
-GIT_DIFF_MAX_LINES_PER_FILE = 400
-GIT_DIFF_DEFAULT_FILE_LIMIT = 200
-GIT_FILES_DEFAULT_LIMIT = 5000
-GIT_FILE_MAX_BYTES = 120000
-_HUNK_HEADER_RE = re.compile(r"^@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)? @@")
+from git_helpers import (
+    GIT_DIFF_MAX_LINES_PER_FILE, GIT_DIFF_DEFAULT_FILE_LIMIT,
+    GIT_FILES_DEFAULT_LIMIT, GIT_FILE_MAX_BYTES, _HUNK_HEADER_RE,
+    _run_git_command as _run_git_command_impl,
+    _is_git_repo as _is_git_repo_impl,
+    _collect_changed_files as _collect_changed_files_impl,
+    _parse_unified_diff,
+    _build_untracked_file_lines as _build_untracked_file_lines_impl,
+    _build_file_diff as _build_file_diff_impl,
+    _resolve_repo_path as _resolve_repo_path_impl,
+)
 
 
-def _run_git_command(args: List[str], timeout_seconds: int = 10) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", WORKDIR, *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-    )
+def _run_git_command(args, timeout_seconds=10):
+    return _run_git_command_impl(args, WORKDIR, timeout_seconds)
 
 
-def _is_git_repo() -> bool:
-    try:
-        result = _run_git_command(["rev-parse", "--is-inside-work-tree"], timeout_seconds=5)
-    except Exception:
-        return False
-    return result.returncode == 0 and result.stdout.strip() == "true"
+def _is_git_repo():
+    return _is_git_repo_impl(WORKDIR)
 
 
-def _collect_changed_files(limit: int) -> List[Dict[str, str]]:
-    files_by_path: Dict[str, str] = {}
-
-    diff_names = _run_git_command(["diff", "--name-status", "-z", "HEAD", "--"], timeout_seconds=15)
-    if diff_names.returncode != 0:
-        raise RuntimeError(diff_names.stderr.strip() or "Failed to list git diff files")
-
-    tokens = [token for token in diff_names.stdout.split("\x00") if token]
-    index = 0
-    while index < len(tokens):
-        status_token = tokens[index]
-        status_code = status_token[:1] if status_token else "M"
-        index += 1
-
-        path = ""
-        if status_code in {"R", "C"}:
-            if index + 1 >= len(tokens):
-                break
-            index += 1  # Skip old path
-            path = tokens[index]
-            index += 1
-            status_code = "M"
-        else:
-            if index >= len(tokens):
-                break
-            path = tokens[index]
-            index += 1
-
-        if not path:
-            continue
-
-        status = "modified"
-        if status_code == "A":
-            status = "added"
-        elif status_code == "D":
-            status = "deleted"
-        files_by_path[path] = status
-
-    untracked = _run_git_command(["ls-files", "--others", "--exclude-standard", "-z"], timeout_seconds=10)
-    if untracked.returncode == 0:
-        for path in untracked.stdout.split("\x00"):
-            if path:
-                files_by_path[path] = "added"
-
-    changed = [
-        {"path": path, "status": files_by_path[path]}
-        for path in sorted(files_by_path.keys())
-    ]
-    return changed[:limit]
+def _collect_changed_files(limit):
+    return _collect_changed_files_impl(WORKDIR, limit)
 
 
-def _parse_unified_diff(diff_text: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> List[Dict[str, Any]]:
-    parsed: List[Dict[str, Any]] = []
-    old_line: Optional[int] = None
-    new_line: Optional[int] = None
-
-    for raw_line in diff_text.splitlines():
-        if raw_line.startswith(("diff --git ", "index ", "--- ", "+++ ")):
-            continue
-
-        if raw_line.startswith("Binary files "):
-            parsed.append(
-                {"type": "hunk", "text": "Binary file changed.", "oldLine": None, "newLine": None}
-            )
-            break
-
-        if raw_line.startswith("\\ No newline at end of file"):
-            continue
-
-        if raw_line.startswith("@@"):
-            match = _HUNK_HEADER_RE.match(raw_line)
-            if match:
-                old_line = int(match.group("old"))
-                new_line = int(match.group("new"))
-            else:
-                old_line = None
-                new_line = None
-
-            parsed.append({"type": "hunk", "text": raw_line, "oldLine": None, "newLine": None})
-
-        elif raw_line.startswith("+"):
-            parsed.append({"type": "add", "text": raw_line[1:], "oldLine": None, "newLine": new_line})
-            if new_line is not None:
-                new_line += 1
-
-        elif raw_line.startswith("-"):
-            parsed.append({"type": "remove", "text": raw_line[1:], "oldLine": old_line, "newLine": None})
-            if old_line is not None:
-                old_line += 1
-
-        elif raw_line.startswith(" "):
-            parsed.append({"type": "context", "text": raw_line[1:], "oldLine": old_line, "newLine": new_line})
-            if old_line is not None:
-                old_line += 1
-            if new_line is not None:
-                new_line += 1
-
-        if len(parsed) >= max_lines:
-            parsed.append(
-                {
-                    "type": "hunk",
-                    "text": f"... diff truncated to {max_lines} lines ...",
-                    "oldLine": None,
-                    "newLine": None,
-                }
-            )
-            break
-
-    return parsed
+def _build_untracked_file_lines(path, max_lines=GIT_DIFF_MAX_LINES_PER_FILE):
+    return _build_untracked_file_lines_impl(path, WORKDIR, max_lines)
 
 
-def _build_untracked_file_lines(path: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> List[Dict[str, Any]]:
-    workdir_real = os.path.realpath(WORKDIR)
-    file_path = os.path.realpath(os.path.join(WORKDIR, path))
-
-    if not (file_path == workdir_real or file_path.startswith(workdir_real + os.sep)):
-        return [{"type": "hunk", "text": "Invalid path outside repository.", "oldLine": None, "newLine": None}]
-
-    if not os.path.exists(file_path):
-        return [{"type": "hunk", "text": "File not found in working tree.", "oldLine": None, "newLine": None}]
-
-    try:
-        with open(file_path, "rb") as handle:
-            content = handle.read()
-    except Exception as exc:
-        return [{"type": "hunk", "text": f"Unable to read file: {exc}", "oldLine": None, "newLine": None}]
-
-    if b"\x00" in content:
-        return [{"type": "hunk", "text": "Binary file added.", "oldLine": None, "newLine": None}]
-
-    lines = content.decode("utf-8", errors="replace").splitlines()
-    parsed: List[Dict[str, Any]] = [
-        {"type": "hunk", "text": f"@@ -0,0 +1,{len(lines)} @@", "oldLine": None, "newLine": None}
-    ]
-
-    if not lines:
-        parsed.append({"type": "add", "text": "", "oldLine": None, "newLine": 1})
-        return parsed
-
-    for line_number, line_text in enumerate(lines[:max_lines], start=1):
-        parsed.append({"type": "add", "text": line_text, "oldLine": None, "newLine": line_number})
-
-    if len(lines) > max_lines:
-        parsed.append(
-            {
-                "type": "hunk",
-                "text": f"... file truncated to {max_lines} lines ...",
-                "oldLine": None,
-                "newLine": None,
-            }
-        )
-
-    return parsed
+def _build_file_diff(path, status, unified):
+    return _build_file_diff_impl(path, status, unified, WORKDIR)
 
 
-def _build_file_diff(path: str, status: str, unified: int) -> Dict[str, Any]:
-    lines: List[Dict[str, Any]] = []
-
-    if status == "added":
-        tracked_check = _run_git_command(["ls-files", "--error-unmatch", "--", path], timeout_seconds=5)
-        if tracked_check.returncode == 0:
-            diff_result = _run_git_command(
-                ["diff", "--no-color", f"--unified={unified}", "HEAD", "--", path],
-                timeout_seconds=20,
-            )
-            if diff_result.returncode == 0:
-                lines = _parse_unified_diff(diff_result.stdout)
-            else:
-                lines = [{"type": "hunk", "text": "Unable to render file diff.", "oldLine": None, "newLine": None}]
-        else:
-            lines = _build_untracked_file_lines(path)
-    else:
-        diff_result = _run_git_command(
-            ["diff", "--no-color", f"--unified={unified}", "HEAD", "--", path],
-            timeout_seconds=20,
-        )
-        if diff_result.returncode == 0:
-            lines = _parse_unified_diff(diff_result.stdout)
-        else:
-            lines = [{"type": "hunk", "text": "Unable to render file diff.", "oldLine": None, "newLine": None}]
-
-    if not lines:
-        if status == "deleted":
-            lines = [{"type": "hunk", "text": "File deleted with no textual hunks.", "oldLine": None, "newLine": None}]
-        elif status == "added":
-            lines = [{"type": "hunk", "text": "New file with no textual content.", "oldLine": None, "newLine": None}]
-        else:
-            lines = [{"type": "hunk", "text": "No textual diff available.", "oldLine": None, "newLine": None}]
-
-    additions = sum(1 for line in lines if line.get("type") == "add")
-    deletions = sum(1 for line in lines if line.get("type") == "remove")
-
-    return {
-        "path": path,
-        "status": status,
-        "additions": additions,
-        "deletions": deletions,
-        "lines": lines,
-    }
-
-
-def _resolve_repo_path(relative_path: str) -> Optional[str]:
-    """Resolve repository-relative file path and block traversal outside WORKDIR."""
-    if not relative_path:
-        return None
-
-    normalized = relative_path.strip().replace("\\", "/")
-    if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
-        return None
-
-    repo_root = os.path.realpath(WORKDIR)
-    target = os.path.realpath(os.path.join(WORKDIR, normalized))
-
-    if target == repo_root or target.startswith(repo_root + os.sep):
-        return target
-    return None
+def _resolve_repo_path(relative_path):
+    return _resolve_repo_path_impl(relative_path, WORKDIR)
 
 
 @app.get("/git/diff")
@@ -4676,23 +2831,7 @@ async def write_skill_file(skill_id: str, file_path: str, req: SkillFileWrite):
 # Sweep Endpoints
 # =============================================================================
 
-def expand_parameter_grid(parameters: dict, max_runs: int) -> list:
-    """Expand parameter dict into list of parameter combinations."""
-    import itertools
-    
-    keys = list(parameters.keys())
-    values = [parameters[k] if isinstance(parameters[k], list) else [parameters[k]] for k in keys]
-    
-    combinations = list(itertools.product(*values))[:max_runs]
-    
-    return [dict(zip(keys, combo)) for combo in combinations]
-
-
-def build_command_with_params(base_command: str, params: dict) -> str:
-    """Insert parameters into command string."""
-    # Simple approach: append as CLI args
-    param_str = " ".join([f"--{k}={v}" for k, v in params.items()])
-    return f"{base_command} {param_str}".strip()
+# expand_parameter_grid and build_command_with_params imported from sweep_helpers above
 
 
 @app.get("/sweeps")
