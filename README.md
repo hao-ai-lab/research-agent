@@ -118,6 +118,70 @@ npm run start     # Start production server
 npm run lint      # Run ESLint
 ```
 
+## GPU Orchestration (New! 🚀)
+
+**Automated GPU resource management for multi-user ML experiments**
+
+The GPU Orchestration system provides intelligent scheduling and resource management for GPU workloads across a cluster. Designed to eliminate manual coordination via spreadsheets and maximize GPU utilization.
+
+### Key Features
+
+- 🎯 **Automated Scheduling**: Jobs scheduled automatically when resources available
+- 📊 **Priority Queuing**: High-priority experiments get resources first
+- 🔍 **Real-time Monitoring**: Live GPU allocation and utilization tracking
+- 🤖 **AI Agent Control**: Background agent coordinates multi-user experiments
+- ⚡ **Multi-Node Support**: Manages resources across distributed GPU nodes
+
+### Quick Start
+
+Enable GPU orchestration:
+
+```bash
+export RESEARCH_AGENT_GPU_ORCHESTRATION_ENABLED=true
+cd server
+python server.py --workdir /path/to/project
+```
+
+Submit a job:
+
+```bash
+curl -X POST http://localhost:10000/queue/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "run_id": "experiment-1",
+    "user": "researcher",
+    "command": "python train.py",
+    "gpu_count": 4,
+    "priority": 2
+  }'
+```
+
+Start the orchestrator:
+
+```bash
+curl -X POST http://localhost:10000/orchestrator/start
+```
+
+### Documentation
+
+- 📖 [Quick Start Guide](docs/gpu_orchestration.md)
+- 🎯 [GitHub Issue](https://github.com/hao-ai-lab/research-agent/blob/main/.dev/gpu_orchestration_issue.md)
+- 🏗️ [Technical Design](https://github.com/hao-ai-lab/research-agent/blob/main/.dev/gpu_orchestration_design.md)
+- 🧪 [Tests & Demo](tests/)
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/gpu/status` | GET | Get GPU resource status |
+| `/queue` | GET | Get job queue state |
+| `/queue/submit` | POST | Submit job to queue |
+| `/queue/{job_id}` | DELETE | Cancel queued job |
+| `/orchestrator/start` | POST | Start orchestration agent |
+| `/orchestrator/status` | GET | Get orchestrator status |
+
+See [full API documentation](docs/gpu_orchestration.md#api-overview) for details.
+
 ## Troubleshooting
 
 | Problem                     | Solution                                                                            |
