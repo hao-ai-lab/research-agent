@@ -39,6 +39,33 @@ function decodeBase64Url(value: string): string | null {
     }
 }
 
+function encodeBase64Url(value: string): string {
+    return btoa(value)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '')
+}
+
+export function createSetupShareLink(config: { apiUrl: string; authToken: string }): string | null {
+    if (typeof window === 'undefined') {
+        return null
+    }
+
+    const nextApiUrl = config.apiUrl.trim()
+    const nextAuthToken = config.authToken.trim()
+    if (!nextApiUrl || !nextAuthToken) {
+        return null
+    }
+
+    const encodedSetup = encodeBase64Url(JSON.stringify({
+        apiUrl: nextApiUrl,
+        authToken: nextAuthToken,
+    }))
+
+    const baseUrl = `${window.location.origin}${window.location.pathname}`
+    return `${baseUrl}#setup=${encodedSetup}`
+}
+
 function parseLinkSetupConfig(): LinkSetupConfig | null {
     if (typeof window === 'undefined') {
         return null
