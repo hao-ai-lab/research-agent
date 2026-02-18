@@ -9,10 +9,10 @@ The wild loop agent is expected to optimize this kernel's parameters
 import math
 
 # Tunable parameters — the wild loop agent should experiment with these
-BLOCK_SIZE = 64
+BLOCK_SIZE = 256
 NUM_WARPS = 4
-NUM_STAGES = 2
-USE_FP8 = False
+NUM_STAGES = 4
+USE_FP8 = True
 
 
 def kernel(

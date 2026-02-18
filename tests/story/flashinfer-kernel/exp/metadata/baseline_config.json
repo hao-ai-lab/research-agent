@@ -1,0 +1,11 @@
+{
+  "block_size": 64,
+  "num_warps": 4,
+  "num_stages": 2,
+  "use_fp8": false,
+  "expected_avg_speedup": 0.8618,
+  "expected_best_speedup": 0.9911,
+  "expected_win_rate": 1.0,
+  "baseline_slower_than_flashinfer": true,
+  "timestamp": "2026-02-18T00:20:00"
+}

@@ -1,0 +1,88 @@
+{
+  "summary": {
+    "avg_speedup": 1.3027,
+    "best_speedup": 1.4981,
+    "worst_speedup": 1.1073,
+    "win_rate": 1.0,
+    "total_workloads": 8,
+    "correct_workloads": 8
+  },
+  "kernel_config": {
+    "BLOCK_SIZE": 256,
+    "NUM_WARPS": 4,
+    "NUM_STAGES": 4,
+    "USE_FP8": true
+  },
+  "solution_config": {
+    "name": "test-fused-moe-v1",
+    "definition": "fused_moe",
+    "author": "wild-loop-test"
+  },
+  "workload_results": [
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk8",
+      "batch_size": 1,
+      "speedup": 1.1073,
+      "latency_ms": 2.2126,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    },
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk8",
+      "batch_size": 4,
+      "speedup": 1.2376,
+      "latency_ms": 1.9797,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    },
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk8",
+      "batch_size": 16,
+      "speedup": 1.3678,
+      "latency_ms": 1.7912,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    },
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk8",
+      "batch_size": 64,
+      "speedup": 1.4981,
+      "latency_ms": 1.6354,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    },
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk2",
+      "batch_size": 1,
+      "speedup": 1.1073,
+      "latency_ms": 2.2126,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    },
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk2",
+      "batch_size": 4,
+      "speedup": 1.2376,
+      "latency_ms": 1.9797,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    },
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk2",
+      "batch_size": 16,
+      "speedup": 1.3678,
+      "latency_ms": 1.7912,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    },
+    {
+      "workload": "moe_fp8_e32_h7168_i2048_topk2",
+      "batch_size": 64,
+      "speedup": 1.4981,
+      "latency_ms": 1.6354,
+      "correctness": true,
+      "baseline_latency_ms": 2.45
+    }
+  ],
+  "timestamp": "2026-02-18 00:20:40"
+}
