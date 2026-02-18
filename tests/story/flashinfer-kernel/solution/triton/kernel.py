@@ -8,8 +8,9 @@ The wild loop agent is expected to optimize this kernel's parameters
 
 import math
 
-# Tunable parameters — the wild loop agent should experiment with these
-# OPTIMAL CONFIGURATION (achieved 1.4253x speedup, +65% over baseline)
+# Tunable parameters — OPTIMIZED CONFIGURATION
+# Achieved 1.4253x speedup (+65% over baseline) via grid search
+# sweep: f4987feda4b3, run: 46a2a935eb25
 BLOCK_SIZE = 256
 NUM_WARPS = 8
 NUM_STAGES = 4
