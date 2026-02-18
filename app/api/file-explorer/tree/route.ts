@@ -5,6 +5,7 @@ import {
   joinExplorerPath,
   normalizeExplorerPath,
   resolveExplorerPath,
+  validateAuthToken,
   type ExplorerTreeEntry,
 } from '../_utils'
 
@@ -25,6 +26,13 @@ function sortTreeEntries(a: ExplorerTreeEntry, b: ExplorerTreeEntry): number {
 }
 
 export async function GET(request: NextRequest) {
+  if (!validateAuthToken(request)) {
+    return NextResponse.json(
+      { error: 'Unauthorized - invalid or missing X-Auth-Token' },
+      { status: 401 },
+    )
+  }
+
   try {
     const workspaceRoot = await getWorkspaceRoot()
     const relativePath = normalizeExplorerPath(request.nextUrl.searchParams.get('path'))

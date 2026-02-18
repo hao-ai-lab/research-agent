@@ -819,8 +819,10 @@ build_backend_command() {
 
 build_frontend_command() {
   local api_url="$1"
-  printf 'cd %s && NEXT_PUBLIC_API_URL=%s NEXT_PUBLIC_USE_MOCK=false npm run dev -- --hostname 127.0.0.1 --port %s' \
+  printf 'cd %s && NEXT_PUBLIC_API_URL=%s NEXT_PUBLIC_USE_MOCK=false RESEARCH_AGENT_WORKDIR=%s RESEARCH_AGENT_BACKEND_URL=%s npm run dev -- --hostname 127.0.0.1 --port %s' \
     "$(q "$INSTALL_DIR")" \
+    "$(q "$api_url")" \
+    "$(q "$PROJECT_ROOT")" \
     "$(q "$api_url")" \
     "$(q "$FRONTEND_PORT")"
 }
