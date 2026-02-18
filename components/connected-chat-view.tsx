@@ -3,7 +3,7 @@
 import { Fragment, useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
-import { ChatInput, type ChatMode } from './chat-input'
+import { ChatInput, type ChatMode } from './chat-input-simple'
 import { StreamingMessage } from './streaming-message'
 import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
