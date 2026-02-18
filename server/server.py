@@ -68,11 +68,16 @@ logger.setLevel(logging.DEBUG)
 logger.addHandler(_log_handler)
 logger.propagate = False  # Don't depend on root logger (uvicorn resets it)
 
-# Wild loop logger
+# Wild loop loggers (v1 uses "wild_loop", v2 uses "wild_loop_v2")
 _wild_logger = logging.getLogger("wild_loop")
 _wild_logger.setLevel(logging.DEBUG)
 _wild_logger.addHandler(_log_handler)
 _wild_logger.propagate = False
+
+_wild_v2_logger = logging.getLogger("wild_loop_v2")
+_wild_v2_logger.setLevel(logging.DEBUG)
+_wild_v2_logger.addHandler(_log_handler)
+_wild_v2_logger.propagate = False
 
 # =============================================================================
 # Configuration
@@ -5496,6 +5501,9 @@ def main():
     init_paths(args.workdir)
     SERVER_CALLBACK_URL = f"http://127.0.0.1:{args.port}"
     TMUX_SESSION_NAME = args.tmux_session
+
+    # Update engines initialized at module level with default port (10000)
+    wild_v2_engine._server_url = SERVER_CALLBACK_URL
     
     # Check required environment variables
     if not os.environ.get("RESEARCH_AGENT_KEY"):

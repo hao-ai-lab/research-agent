@@ -952,3 +952,301 @@ def test_reflection_replan():
         assert "Original task" not in content
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# SSE Parsing Tests (_stream_opencode_sse / _run_opencode)
+# ---------------------------------------------------------------------------
+
+class TestStreamOpencodeSSE:
+    """Tests for the rewritten _run_opencode / _stream_opencode_sse logic.
+
+    These verify that the SSE event parsing matches the actual OpenCode format
+    (same as server.py:parse_opencode_event).
+    """
+
+    def _make_engine(self, tmpdir):
+        return WildV2Engine(
+            opencode_url="http://127.0.0.1:4097",
+            model_provider="opencode",
+            model_id="test-model",
+            get_workdir=lambda: tmpdir,
+            server_url="http://127.0.0.1:10099",
+            render_fn=_mock_render,
+        )
+
+    def _sse_line(self, payload: dict) -> str:
+        """Build an SSE data line from a payload dict."""
+        return f"data: {json.dumps({'payload': payload})}"
+
+    @staticmethod
+    def _async_line_iter(lines):
+        """Create an async iterator factory from a list of SSE lines."""
+        async def _iter():
+            for line in lines:
+                yield line
+        return _iter
+
+    def test_text_accumulation(self):
+        """Text deltas from message.part.updated are accumulated correctly."""
+        async def _run():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                engine = self._make_engine(tmpdir)
+
+                lines = [
+                    self._sse_line({
+                        "type": "message.part.updated",
+                        "properties": {
+                            "sessionID": "ses_123",
+                            "delta": "Hello ",
+                            "part": {"type": "text", "sessionID": "ses_123"},
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "message.part.updated",
+                        "properties": {
+                            "sessionID": "ses_123",
+                            "delta": "world!",
+                            "part": {"type": "text", "sessionID": "ses_123"},
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "session.status",
+                        "properties": {
+                            "sessionID": "ses_123",
+                            "status": {"type": "idle"},
+                        },
+                    }),
+                ]
+
+                mock_response = AsyncMock()
+                mock_response.aiter_lines = self._async_line_iter(lines)
+                mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_response.__aexit__ = AsyncMock(return_value=False)
+
+                mock_client = AsyncMock()
+                mock_client.stream = MagicMock(return_value=mock_response)
+
+                result = await engine._stream_opencode_sse(mock_client, "ses_123")
+                assert result == "Hello world!"
+
+        asyncio.run(_run())
+
+    def test_session_status_idle_completes(self):
+        """session.status with type=idle breaks the SSE loop."""
+        async def _run():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                engine = self._make_engine(tmpdir)
+
+                lines = [
+                    self._sse_line({
+                        "type": "message.part.updated",
+                        "properties": {
+                            "sessionID": "ses_abc",
+                            "delta": "Response text",
+                            "part": {"type": "text", "sessionID": "ses_abc"},
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "session.status",
+                        "properties": {
+                            "sessionID": "ses_abc",
+                            "status": {"type": "idle"},
+                        },
+                    }),
+                    # This line should never be reached
+                    self._sse_line({
+                        "type": "message.part.updated",
+                        "properties": {
+                            "sessionID": "ses_abc",
+                            "delta": " SHOULD NOT APPEAR",
+                            "part": {"type": "text", "sessionID": "ses_abc"},
+                        },
+                    }),
+                ]
+
+                mock_response = AsyncMock()
+                mock_response.aiter_lines = self._async_line_iter(lines)
+                mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_response.__aexit__ = AsyncMock(return_value=False)
+
+                mock_client = AsyncMock()
+                mock_client.stream = MagicMock(return_value=mock_response)
+
+                result = await engine._stream_opencode_sse(mock_client, "ses_abc")
+                assert result == "Response text"
+                assert "SHOULD NOT APPEAR" not in result
+
+        asyncio.run(_run())
+
+    def test_filters_other_sessions(self):
+        """Events for other sessions are ignored."""
+        async def _run():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                engine = self._make_engine(tmpdir)
+
+                lines = [
+                    # Event for a different session — should be ignored
+                    self._sse_line({
+                        "type": "message.part.updated",
+                        "properties": {
+                            "sessionID": "ses_OTHER",
+                            "delta": "wrong session",
+                            "part": {"type": "text", "sessionID": "ses_OTHER"},
+                        },
+                    }),
+                    # Event for our session
+                    self._sse_line({
+                        "type": "message.part.updated",
+                        "properties": {
+                            "sessionID": "ses_mine",
+                            "delta": "correct",
+                            "part": {"type": "text", "sessionID": "ses_mine"},
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "session.status",
+                        "properties": {
+                            "sessionID": "ses_mine",
+                            "status": {"type": "idle"},
+                        },
+                    }),
+                ]
+
+                mock_response = AsyncMock()
+                mock_response.aiter_lines = self._async_line_iter(lines)
+                mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_response.__aexit__ = AsyncMock(return_value=False)
+
+                mock_client = AsyncMock()
+                mock_client.stream = MagicMock(return_value=mock_response)
+
+                result = await engine._stream_opencode_sse(mock_client, "ses_mine")
+                assert result == "correct"
+
+        asyncio.run(_run())
+
+    def test_message_part_delta_accumulation(self):
+        """Text deltas from message.part.delta (bus format) are accumulated."""
+        async def _run():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                engine = self._make_engine(tmpdir)
+
+                lines = [
+                    # message.part.delta events (OpenCode bus format)
+                    self._sse_line({
+                        "type": "message.part.delta",
+                        "properties": {
+                            "sessionID": "ses_delta",
+                            "delta": "Hello ",
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "message.part.delta",
+                        "properties": {
+                            "sessionID": "ses_delta",
+                            "delta": "from delta!",
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "session.status",
+                        "properties": {
+                            "sessionID": "ses_delta",
+                            "status": {"type": "idle"},
+                        },
+                    }),
+                ]
+
+                mock_response = AsyncMock()
+                mock_response.aiter_lines = self._async_line_iter(lines)
+                mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_response.__aexit__ = AsyncMock(return_value=False)
+
+                mock_client = AsyncMock()
+                mock_client.stream = MagicMock(return_value=mock_response)
+
+                result = await engine._stream_opencode_sse(mock_client, "ses_delta")
+                assert result == "Hello from delta!"
+
+        asyncio.run(_run())
+
+    def test_mixed_updated_and_delta_events(self):
+        """Both message.part.updated and message.part.delta events are accumulated."""
+        async def _run():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                engine = self._make_engine(tmpdir)
+
+                lines = [
+                    self._sse_line({
+                        "type": "message.part.updated",
+                        "properties": {
+                            "sessionID": "ses_mix",
+                            "delta": "A",
+                            "part": {"type": "text", "sessionID": "ses_mix"},
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "message.part.delta",
+                        "properties": {
+                            "sessionID": "ses_mix",
+                            "delta": "B",
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "message.part.delta",
+                        "properties": {
+                            "sessionID": "ses_mix",
+                            "delta": "C",
+                        },
+                    }),
+                    self._sse_line({
+                        "type": "session.status",
+                        "properties": {
+                            "sessionID": "ses_mix",
+                            "status": {"type": "idle"},
+                        },
+                    }),
+                ]
+
+                mock_response = AsyncMock()
+                mock_response.aiter_lines = self._async_line_iter(lines)
+                mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_response.__aexit__ = AsyncMock(return_value=False)
+
+                mock_client = AsyncMock()
+                mock_client.stream = MagicMock(return_value=mock_response)
+
+                result = await engine._stream_opencode_sse(mock_client, "ses_mix")
+                assert result == "ABC"
+
+        asyncio.run(_run())
+
+    def test_run_opencode_timeout(self):
+        """_run_opencode returns partial text on timeout."""
+        async def _run():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                engine = self._make_engine(tmpdir)
+
+                # Mock _stream_opencode_sse to hang forever
+                async def _hang_forever(client, sid):
+                    await asyncio.sleep(999)
+                    return ""
+
+                engine._stream_opencode_sse = _hang_forever
+
+                # Mock the prompt POST
+                mock_resp = AsyncMock()
+                mock_resp.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_resp)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+
+                with patch("httpx.AsyncClient", return_value=mock_client):
+                    result = await engine._run_opencode("ses_timeout", "test prompt", timeout_s=0.1)
+
+                # Should return empty (timed out before any text)
+                assert result == ""
+
+        asyncio.run(_run())

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-End-to-end backend-only Wild Loop V2 test on MNIST.
+End-to-end backend-only Wild Loop V2 test on FlashInfer kernel optimization.
 
 This script:
-  1. Starts opencode in headless mode (opencode serve) in the MNIST project dir
+  1. Starts opencode in headless mode (opencode serve) in the FlashInfer project dir
   2. Starts the research-agent server on port 10099
   3. Kicks off a V2 wild loop via POST /wild/v2/start
-  4. Polls status every 30s, streaming server logs and sweep/run state
+  4. Polls status every 15s, streaming server logs and sweep/run state
   5. Terminates after the loop finishes or a 30-minute timeout
   6. Prints a summary of what happened
 
@@ -15,11 +15,13 @@ Usage:
 
 Environment:
     MODEL_PROVIDER  (default: opencode)
-    MODEL_ID        (default: minimax-m2.5-free)
+    MODEL_ID        (default: kimi-k2.5-free)
 """
 
 import json
 import os
+import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -50,11 +52,11 @@ GOAL = (
 
 MAX_ITERATIONS = 10
 WAIT_SECONDS = 30.0   # wait between iterations when WAITING
-POLL_INTERVAL = 30    # seconds between status polls
+POLL_INTERVAL = 15    # seconds between status polls
 TIMEOUT_MINUTES = 30
 
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
-MODEL_ID = os.environ.get("MODEL_ID", "minimax-m2.5-free")
+MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
 
 # Auth token — read from .ra-auth-token file
 AUTH_TOKEN_FILE = os.path.join(PROJECT_ROOT, ".ra-auth-token")
@@ -159,6 +161,7 @@ def start_server() -> subprocess.Popen:
     env["MODEL_PROVIDER"] = MODEL_PROVIDER
     env["MODEL_ID"] = MODEL_ID
     env["OPENCODE_URL"] = OPENCODE_URL
+    env["PYTHONUNBUFFERED"] = "1"
     if AUTH_TOKEN:
         env["RESEARCH_AGENT_USER_AUTH_TOKEN"] = AUTH_TOKEN
     proc = subprocess.Popen(
@@ -229,11 +232,60 @@ def api_post(path: str, data: dict = None):
 # Main test flow
 # ---------------------------------------------------------------------------
 
+def _reset_test_state():
+    """Clean stale session state and reset kernel.py to defaults."""
+    # Remove old wild loop sessions
+    wild_dir = os.path.join(WORKDIR, ".agents", "wild")
+    if os.path.exists(wild_dir):
+        shutil.rmtree(wild_dir)
+        log("   Cleaned stale .agents/wild/")
+
+    # Remove old jobs (sweeps/runs)
+    jobs_file = os.path.join(WORKDIR, ".agents", "jobs.json")
+    if os.path.exists(jobs_file):
+        os.remove(jobs_file)
+        log("   Cleaned stale .agents/jobs.json")
+
+    # Remove old experiment results
+    exp_dir = os.path.join(WORKDIR, "exp")
+    if os.path.exists(exp_dir):
+        shutil.rmtree(exp_dir)
+        log("   Cleaned stale exp/")
+
+    # Reset kernel.py to default (unoptimized) values
+    kernel_path = os.path.join(WORKDIR, "solution", "triton", "kernel.py")
+    if os.path.exists(kernel_path):
+        with open(kernel_path) as f:
+            content = f.read()
+        # Replace optimized values with defaults
+        replacements = [
+            (r"BLOCK_SIZE\s*=\s*\d+", "BLOCK_SIZE = 64"),
+            (r"NUM_WARPS\s*=\s*\d+", "NUM_WARPS = 4"),
+            (r"NUM_STAGES\s*=\s*\d+", "NUM_STAGES = 2"),
+            (r"USE_FP8\s*=\s*\w+", "USE_FP8 = False"),
+        ]
+        for pattern, replacement in replacements:
+            content = re.sub(pattern, replacement, content)
+        # Reset the comment block to default
+        content = re.sub(
+            r"# Tunable parameters.*?\n(?:#.*\n)*",
+            "# Tunable parameters — the wild loop agent should experiment with these\n",
+            content,
+        )
+        with open(kernel_path, "w") as f:
+            f.write(content)
+        log("   Reset kernel.py to default params (BLOCK_SIZE=64, NUM_WARPS=4, NUM_STAGES=2, USE_FP8=False)")
+
+
 def run_test():
     os.makedirs(LOG_DIR, exist_ok=True)
 
     log_separator()
-    log("🧪 Wild Loop V2 E2E Test — MNIST MLP")
+    log("🧹 Resetting test state...")
+    _reset_test_state()
+
+    log_separator()
+    log("🧪 Wild Loop V2 E2E Test — FlashInfer Kernel Optimization")
     log(f"   Goal: {GOAL}")
     log(f"   Model: {MODEL_PROVIDER}/{MODEL_ID}")
     log(f"   Workdir: {WORKDIR}")
@@ -277,6 +329,7 @@ def run_test():
     deadline = time.time() + TIMEOUT_MINUTES * 60
     poll_count = 0
     last_iteration = -1
+    stall_polls = 0          # polls since last iteration change
     sweeps_seen = set()
     runs_seen = set()
 
@@ -294,6 +347,14 @@ def run_test():
         current_iter = status.get("iteration", 0)
         loop_status = status.get("status", "unknown")
         history = status.get("history", [])
+
+        # Stall detection
+        if current_iter != last_iteration:
+            stall_polls = 0
+        else:
+            stall_polls += 1
+        if stall_polls >= 10:
+            log(f"   ⚠️  STALL: iteration stuck at {current_iter} for {stall_polls} polls ({stall_polls * POLL_INTERVAL}s)")
 
         # Print update
         if current_iter != last_iteration or poll_count % 5 == 0:
