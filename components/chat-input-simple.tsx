@@ -776,7 +776,7 @@ export function ChatInput({
           )}
 
           {/* Default skill selector */}
-          {onDefaultSkillChange && selectableSkills.length > 0 && (
+          {onDefaultSkillChange && selectableSkills.length >= 0 && (
             <div className="chat-toolbar-pill flex items-center gap-1 rounded-lg border border-border/60 bg-secondary px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80">
               <Wand2 className="h-3 w-3 shrink-0 text-violet-500" />
               <label htmlFor="default-skill-select" className="sr-only">Default skill</label>
