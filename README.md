@@ -44,7 +44,7 @@ curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLG
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 cd v0-research-agent-mobile
 bash install.sh --dev
-xf          # or: source ~/.zshrc (if you use zsh)
+nvm use 20               # activate Node 20 installed by install.sh
 npm install
 uv venv .ra-venv
 uv pip install --python .ra-venv/bin/python -r server/requirements.txt
