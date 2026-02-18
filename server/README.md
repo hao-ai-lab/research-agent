@@ -182,6 +182,24 @@ The `/chat` endpoint returns NDJSON (newline-delimited JSON) with these event ty
 1. Ensure tmux session exists: `tmux list-sessions`
 2. Create if missing: `tmux new-session -s research-agent -d`
 
+### Shared GPU auto-selection (gpuwrap)
+
+The sidecar now routes run commands through `server/gpuwrap.sh` by default.
+`gpuwrap` selects `CUDA_VISIBLE_DEVICES` per command (without global export),
+detects likely GPU contention failures, emits alerts, and retries.
+You can override these settings per run from the frontend "Create Run" dialog.
+
+Useful env knobs:
+
+```bash
+export RESEARCH_AGENT_GPUWRAP_ENABLED=1
+export RESEARCH_AGENT_GPUWRAP_RETRIES=2
+export RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS=8
+export RESEARCH_AGENT_GPUWRAP_GPUS_NEEDED=1
+export RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB=1500
+export RESEARCH_AGENT_GPUWRAP_MAX_UTILIZATION=40
+```
+
 ### OpenCode config not loading
 
 Make sure to use the full path:

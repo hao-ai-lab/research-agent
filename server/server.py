@@ -55,7 +55,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Configure logging — explicit handlers so uvicorn.run() can't override them
 _log_formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
@@ -348,6 +348,17 @@ class SessionModelUpdate(BaseModel):
 # - running: Command actively executing
 # - finished/failed/stopped: Terminal states
 
+class GpuwrapConfig(BaseModel):
+    enabled: Optional[bool] = None
+    gpus_needed: Optional[int] = Field(default=None, ge=1, le=64)
+    retries: Optional[int] = Field(default=None, ge=0, le=20)
+    retry_delay_seconds: Optional[float] = Field(default=None, gt=0, le=600)
+    max_memory_used_mb: Optional[int] = Field(default=None, ge=0, le=10_000_000)
+    max_utilization: Optional[int] = Field(default=None, ge=0, le=100)
+    lease_ttl_seconds: Optional[int] = Field(default=None, ge=30, le=86_400)
+    reservation_dir: Optional[str] = None
+
+
 class RunCreate(BaseModel):
     name: str
     command: str
@@ -357,6 +368,7 @@ class RunCreate(BaseModel):
     origin_alert_id: Optional[str] = None
     chat_session_id: Optional[str] = None  # Originating chat session for traceability
     auto_start: bool = False  # If True, skip ready and go straight to queued
+    gpuwrap_config: Optional[GpuwrapConfig] = None
 
 
 class RunStatusUpdate(BaseModel):
@@ -425,6 +437,7 @@ class RunRerunRequest(BaseModel):
     command: Optional[str] = None
     auto_start: bool = False
     origin_alert_id: Optional[str] = None
+    gpuwrap_config: Optional[GpuwrapConfig] = None
 
 
 # WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest
@@ -1999,6 +2012,29 @@ def get_or_create_session(session_name: Optional[str] = None):
         return None
 
 
+def _normalize_gpuwrap_config(config: Any) -> Optional[dict]:
+    """Validate and normalize per-run gpuwrap settings."""
+    if config is None:
+        return None
+
+    try:
+        validated = GpuwrapConfig.model_validate(config)
+    except Exception:
+        logger.warning("Ignoring invalid gpuwrap_config: %r", config)
+        return None
+
+    data = validated.model_dump(exclude_none=True)
+    reservation_dir = data.get("reservation_dir")
+    if isinstance(reservation_dir, str):
+        reservation_dir = reservation_dir.strip()
+        if reservation_dir:
+            data["reservation_dir"] = reservation_dir
+        else:
+            data.pop("reservation_dir", None)
+
+    return data or None
+
+
 def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     """Launch a run in a new tmux window with sidecar."""
     session = get_or_create_session()
@@ -2023,6 +2059,16 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     command_file = os.path.join(run_dir, "command.txt")
     with open(command_file, "w") as f:
         f.write(run_data["command"])
+
+    gpuwrap_config = _normalize_gpuwrap_config(run_data.get("gpuwrap_config"))
+    if gpuwrap_config:
+        run_data["gpuwrap_config"] = gpuwrap_config
+        gpuwrap_config_file = os.path.join(run_dir, "gpuwrap_config.json")
+        with open(gpuwrap_config_file, "w") as f:
+            json.dump(gpuwrap_config, f)
+    else:
+        run_data["gpuwrap_config"] = None
+        gpuwrap_config_file = None
     
     # Get sidecar path
     server_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2052,6 +2098,8 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
         )
     if USER_AUTH_TOKEN:
         sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
+    if gpuwrap_config_file:
+        sidecar_cmd += f" --gpuwrap_config_file {shlex.quote(gpuwrap_config_file)}"
     
     logger.info(f"Executing sidecar: {sidecar_cmd}")
     pane.send_keys(sidecar_cmd)
@@ -3590,6 +3638,7 @@ async def create_run(req: RunCreate):
         raise HTTPException(status_code=404, detail=f"Sweep not found: {req.sweep_id}")
     
     initial_status = "queued" if req.auto_start else "ready"
+    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
     
     run_data = {
         "name": req.name,
@@ -3602,6 +3651,7 @@ async def create_run(req: RunCreate):
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
         "chat_session_id": req.chat_session_id,
+        "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -3762,6 +3812,10 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
 
     new_run_id = uuid.uuid4().hex[:12]
     initial_status = "queued" if req and req.auto_start else "ready"
+    if req and req.gpuwrap_config is not None:
+        gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
+    else:
+        gpuwrap_config = _normalize_gpuwrap_config(source_run.get("gpuwrap_config"))
 
     new_run = {
         "name": f"{source_run.get('name', 'Run')} (Rerun)",
@@ -3773,6 +3827,7 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
         "sweep_id": source_run.get("sweep_id"),
         "parent_run_id": run_id,
         "origin_alert_id": req.origin_alert_id if req else None,
+        "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -5040,6 +5095,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
 
     run_id = uuid.uuid4().hex[:12]
     initial_status = "queued" if req.auto_start else "ready"
+    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
 
     run_data = {
         "name": req.name,
@@ -5051,6 +5107,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
         "sweep_id": sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
+        "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,

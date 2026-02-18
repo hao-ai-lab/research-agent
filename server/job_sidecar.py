@@ -679,6 +679,109 @@ def check_wandb_in_pane(pane_id: str, workdir: str = None) -> str | None:
     return None
 
 
+def _resolve_sidecar_script(name: str) -> str | None:
+    """Resolve helper script path in source and frozen modes."""
+    candidates = []
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(base_dir, name))
+    frozen_dir = getattr(sys, "_MEIPASS", None)
+    if frozen_dir:
+        candidates.append(os.path.join(frozen_dir, name))
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _gpuwrap_enabled() -> bool:
+    raw = os.environ.get("RESEARCH_AGENT_GPUWRAP_ENABLED", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(value)
+
+
+def build_gpuwrap_command(
+    command: str,
+    job_id: str,
+    server_url: str,
+    auth_token: str | None = None,
+    gpuwrap_config: dict | None = None,
+) -> str:
+    """Build gpuwrap invocation; fallback to original command if unavailable."""
+    config = gpuwrap_config if isinstance(gpuwrap_config, dict) else {}
+
+    if "enabled" in config:
+        if not _truthy(config.get("enabled")):
+            return command
+    elif not _gpuwrap_enabled():
+        return command
+
+    gpuwrap_path = _resolve_sidecar_script("gpuwrap.sh")
+    if not gpuwrap_path:
+        logger.info("gpuwrap.sh not found; running command directly")
+        return command
+
+    cmd_parts = [
+        "bash",
+        shlex.quote(gpuwrap_path),
+        "--command",
+        shlex.quote(command),
+        "--job-id",
+        shlex.quote(job_id),
+        "--server-url",
+        shlex.quote(server_url),
+    ]
+    if auth_token:
+        cmd_parts.extend(["--auth-token", shlex.quote(auth_token)])
+
+    # Per-run overrides (from Create Run form).
+    config_to_flag = {
+        "retries": "--retries",
+        "retry_delay_seconds": "--retry-delay-seconds",
+        "gpus_needed": "--gpus-needed",
+        "max_memory_used_mb": "--max-memory-used-mb",
+        "max_utilization": "--max-utilization",
+        "lease_ttl_seconds": "--lease-ttl-seconds",
+        "reservation_dir": "--reservation-dir",
+    }
+    for config_name, flag in config_to_flag.items():
+        value = config.get(config_name)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if not trimmed:
+                continue
+            value = trimmed
+        cmd_parts.extend([flag, shlex.quote(str(value))])
+
+    # Global env fallback when per-run override is not present.
+    env_to_flag = (
+        ("RESEARCH_AGENT_GPUWRAP_RETRIES", "--retries", "retries"),
+        ("RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS", "--retry-delay-seconds", "retry_delay_seconds"),
+        ("RESEARCH_AGENT_GPUWRAP_GPUS_NEEDED", "--gpus-needed", "gpus_needed"),
+        ("RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB", "--max-memory-used-mb", "max_memory_used_mb"),
+        ("RESEARCH_AGENT_GPUWRAP_MAX_UTILIZATION", "--max-utilization", "max_utilization"),
+        ("RESEARCH_AGENT_GPUWRAP_LEASE_TTL_SECONDS", "--lease-ttl-seconds", "lease_ttl_seconds"),
+        ("RESEARCH_AGENT_GPUWRAP_STATE_DIR", "--reservation-dir", "reservation_dir"),
+    )
+    for env_name, flag, config_name in env_to_flag:
+        if config_name in config:
+            continue
+        value = os.environ.get(env_name)
+        if value:
+            cmd_parts.extend([flag, shlex.quote(value)])
+
+    return " ".join(cmd_parts)
+
+
 def monitor_job(
     server_url: str,
     job_id: str,
@@ -686,6 +789,7 @@ def monitor_job(
     workdir: str,
     run_dir: str,
     auth_token: str | None = None,
+    gpuwrap_config: dict | None = None,
 ):
     """Main job monitoring loop."""
     # Persist sidecar logs to a file so they can be streamed to the frontend.
@@ -744,8 +848,17 @@ def monitor_job(
     time.sleep(0.1)
     logger.info(f"Set WANDB_DIR={wandb_data_dir}, WANDB_RUN_ID={job_id}")
     
-    # Execute command with exit code capture
-    wrapped_command = f"({command}); echo $? > {completion_file}"
+    # Execute command with exit code capture.
+    launch_command = build_gpuwrap_command(
+        command=command,
+        job_id=job_id,
+        server_url=server_url,
+        auth_token=auth_token,
+        gpuwrap_config=gpuwrap_config,
+    )
+    if launch_command != command:
+        logger.info("Running command through gpuwrap")
+    wrapped_command = f"({launch_command}); echo $? > {shlex.quote(completion_file)}"
     logger.info(f"Executing: {wrapped_command}")
     job_pane.send_keys(wrapped_command)
     
@@ -856,6 +969,7 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--command_file", required=True, help="Path to command file")
     parser.add_argument("--workdir", default=None, help="Working directory")
     parser.add_argument("--agent_run_dir", default=None, help="Run directory for logs")
+    parser.add_argument("--gpuwrap_config_file", default=None, help="Optional per-run gpuwrap config JSON path")
     parser.add_argument(
         "--auth_token",
         default=os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", ""),
@@ -877,6 +991,18 @@ def main(argv: list[str] | None = None):
             auth_token=args.auth_token or None,
         )
         return
+
+    gpuwrap_config = None
+    if args.gpuwrap_config_file:
+        try:
+            with open(args.gpuwrap_config_file, "r") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                gpuwrap_config = loaded
+            else:
+                logger.warning("Ignoring gpuwrap config (not an object): %s", args.gpuwrap_config_file)
+        except Exception as e:
+            logger.warning("Failed to load gpuwrap config file %s: %s", args.gpuwrap_config_file, e)
     
     # Run monitor
     monitor_job(
@@ -886,6 +1012,7 @@ def main(argv: list[str] | None = None):
         workdir=args.workdir or os.getcwd(),
         run_dir=args.agent_run_dir or "/tmp",
         auth_token=args.auth_token or None,
+        gpuwrap_config=gpuwrap_config,
     )
 
 
