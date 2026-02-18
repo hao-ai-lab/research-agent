@@ -5524,9 +5524,8 @@ def main():
     
     # Check required environment variables
     if not os.environ.get("RESEARCH_AGENT_KEY"):
-        logger.warning("⚠️  RESEARCH_AGENT_KEY environment variable is not set!")
-        logger.warning("   The Anthropic gateway requires this for authentication.")
-        logger.warning("   Set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+        logger.info("💡 Tip: Want free Anthropic credits? Ask the maintainer for a gateway key.")
+        logger.info("   Then set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
     
     if not USER_AUTH_TOKEN:
         logger.info("RESEARCH_AGENT_USER_AUTH_TOKEN is not set — running without server-side auth.")
