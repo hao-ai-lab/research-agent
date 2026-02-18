@@ -44,7 +44,7 @@ curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLG
 git clone https://github.com/GindaChen/v0-research-agent-mobile.git
 cd v0-research-agent-mobile
 bash install.sh --dev
-source ~/.bashrc          # or: source ~/.zshrc (if you use zsh)
+xf          # or: source ~/.zshrc (if you use zsh)
 npm install
 uv venv .ra-venv
 uv pip install --python .ra-venv/bin/python -r server/requirements.txt
@@ -64,7 +64,7 @@ Then in another terminal:
 ```bash
 cd v0-research-agent-mobile
 NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000
-```
+``
 
 ## Environment Variables
 

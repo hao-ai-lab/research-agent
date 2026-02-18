@@ -42,7 +42,7 @@ ensure_node() {
   # shellcheck disable=SC1091
   . "${NVM_DIR}/nvm.sh"
   nvm install "$required_major"
-  nvm use "$required_major"
+  nvm alias default "$required_major"
 
   local new_major
   new_major="$(node -e 'console.log(process.versions.node.split(".")[0])')"
