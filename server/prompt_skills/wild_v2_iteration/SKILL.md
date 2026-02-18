@@ -100,7 +100,7 @@ Create a sweep (if none exists):
 curl -X POST {{server_url}}/sweeps/wild \
   -H "Content-Type: application/json" \
   {{auth_header}} \
-  -d '{"name": "sweep-name", "goal": "what this tests"}'
+  -d '{"name": "sweep-name", "goal": "what this tests", "chat_session_id": "{{session_id}}"}'
 ```
 
 Create a run for each experiment trial:
@@ -108,7 +108,7 @@ Create a run for each experiment trial:
 curl -X POST {{server_url}}/runs \
   -H "Content-Type: application/json" \
   {{auth_header}} \
-  -d '{"name": "trial-name", "command": "cd {{workdir}} && python train.py --lr 0.001", "sweep_id": "<sweep_id>", "auto_start": true}'
+  -d '{"name": "trial-name", "command": "cd {{workdir}} && python train.py --lr 0.001", "sweep_id": "<sweep_id>", "chat_session_id": "{{session_id}}", "auto_start": true}'
 ```
 
 For grid search:

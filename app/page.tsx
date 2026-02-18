@@ -530,17 +530,17 @@ export default function ResearchChat() {
 
   const handleSaveSweep = useCallback(async (config: SweepConfig) => {
     try {
-      await saveDraftSweep(config)
+      await saveDraftSweep(config, currentSessionId)
       setShowSweepForm(false)
       setEditingSweepConfig(null)
     } catch (error) {
       console.error('Failed to save draft sweep:', error)
     }
-  }, [saveDraftSweep])
+  }, [saveDraftSweep, currentSessionId])
 
   const handleCreateSweep = useCallback(async (config: SweepConfig) => {
     try {
-      const draftSweep = await saveDraftSweep(config)
+      const draftSweep = await saveDraftSweep(config, currentSessionId)
       setActiveTab('chat')
       setChatDraftInsert({
         id: Date.now(),
@@ -551,18 +551,18 @@ export default function ResearchChat() {
     } catch (error) {
       console.error('Failed to create draft sweep:', error)
     }
-  }, [saveDraftSweep])
+  }, [saveDraftSweep, currentSessionId, apiUrl])
 
   const handleLaunchSweep = useCallback(async (config: SweepConfig) => {
     try {
-      await launchSweepFromConfig(config)
+      await launchSweepFromConfig(config, currentSessionId)
       await refetchRuns()
       setShowSweepForm(false)
       setEditingSweepConfig(null)
     } catch (error) {
       console.error('Failed to launch sweep:', error)
     }
-  }, [launchSweepFromConfig, refetchRuns])
+  }, [launchSweepFromConfig, currentSessionId, refetchRuns])
 
   const handleRefreshExperimentState = useCallback(async () => {
     await Promise.all([refetchRuns(), refetchSweeps(), refetchCluster()])
@@ -756,6 +756,7 @@ export default function ResearchChat() {
                 insertDraft={chatDraftInsert}
                 skills={promptSkills}
                 contextTokenCount={contextTokenCount}
+                onRefreshContext={handleRefreshExperimentState}
               />
             )}
             {activeTab === 'runs' && (

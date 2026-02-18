@@ -175,7 +175,7 @@ Step 1: Create a sweep
 curl -X POST {{server_url}}/sweeps/wild \
   -H "Content-Type: application/json" \
   {{auth_header}} \
-  -d '{"name": "descriptive-sweep-name", "goal": "what this sweep is testing"}'
+  -d '{"name": "descriptive-sweep-name", "goal": "what this sweep is testing", "chat_session_id": "{{session_id}}"}'
 ```
 Save the returned `id`.
 
@@ -184,7 +184,7 @@ Step 2: Create runs
 curl -X POST {{server_url}}/runs \
   -H "Content-Type: application/json" \
   {{auth_header}} \
-  -d '{"name": "trial-name", "command": "cd {{workdir}} && python train.py --lr 0.001", "sweep_id": "<sweep_id_from_step_1>", "auto_start": true}'
+  -d '{"name": "trial-name", "command": "cd {{workdir}} && python train.py --lr 0.001", "sweep_id": "<sweep_id_from_step_1>", "chat_session_id": "{{session_id}}", "auto_start": true}'
 ```
 The `command` field should use planned script/log paths.
 

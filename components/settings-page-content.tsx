@@ -12,7 +12,6 @@ import {
   LayoutGrid,
   Monitor,
   Moon,
-  Rows3,
   RotateCcw,
   Server,
   Clock,
@@ -280,15 +279,6 @@ export function SettingsPageContent({
           value: settings.appearance.buttonSize,
         },
         {
-          id: 'runItemInteractionMode',
-          label: 'Runs/Sweeps Click Mode',
-          description: 'Open detail page or expand inline details',
-          icon: Rows3,
-          type: 'select' as const,
-          options: ['detail-page', 'inline-expand'],
-          value: settings.appearance.runItemInteractionMode || 'detail-page',
-        },
-        {
           id: 'showRunItemMetadata',
           label: 'Run Item Metadata',
           description: 'Show Start, Created, and Runtime under each run name',
@@ -312,6 +302,14 @@ export function SettingsPageContent({
           type: 'select' as const,
           options: ['expert', 'novice'],
           value: settings.appearance.starterCardFlavor || 'novice',
+        },
+        {
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatContextPanel !== false,
         },
         {
           id: 'mobileEnterToNewline',
@@ -372,6 +370,14 @@ export function SettingsPageContent({
           type: 'toggle' as const,
           value: settings.developer?.showPlanPanel === true,
         },
+        {
+          id: 'showSidebarRunsSweepsPreview',
+          label: 'Sidebar Runs/Sweeps Preview',
+          description: 'Show or hide recent Runs and Sweeps preview blocks in the desktop sidebar',
+          icon: Eye,
+          type: 'toggle' as const,
+          value: settings.developer?.showSidebarRunsSweepsPreview !== false,
+        },
       ],
     },
     {
@@ -416,13 +422,6 @@ export function SettingsPageContent({
     onSettingsChange({
       ...settings,
       appearance: { ...settings.appearance, buttonSize },
-    })
-  }
-
-  const handleRunItemInteractionModeChange = (mode: 'detail-page' | 'inline-expand') => {
-    onSettingsChange({
-      ...settings,
-      appearance: { ...settings.appearance, runItemInteractionMode: mode },
     })
   }
 
@@ -819,7 +818,6 @@ export function SettingsPageContent({
                       if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
-                      if (item.id === 'runItemInteractionMode') handleRunItemInteractionModeChange(option as 'detail-page' | 'inline-expand')
                       if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
@@ -852,6 +850,7 @@ export function SettingsPageContent({
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'mobileEnterToNewline') updateAppearanceSettings({ mobileEnterToNewline: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
@@ -863,6 +862,12 @@ export function SettingsPageContent({
                   onSettingsChange({
                     ...settings,
                     developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
+                if (item.id === 'showSidebarRunsSweepsPreview') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showSidebarRunsSweepsPreview: checked },
                   })
                 }
               }}

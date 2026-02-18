@@ -28,6 +28,7 @@ export interface ExperimentRun {
   id: string;
   name: string;
   sweepId?: string;
+  chatSessionId?: string | null;
   sweepParams?: Record<string, unknown> | null;
   alias?: string;
   status: RunStatus;
@@ -102,6 +103,7 @@ export interface AppSettings {
     wildLoopHistoryBoxHeightPx?: number | null;
     showStarterCards?: boolean;
     starterCardFlavor?: "novice" | "expert";
+    showChatContextPanel?: boolean;
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
     mobileEnterToNewline?: boolean;
@@ -124,6 +126,7 @@ export interface AppSettings {
   developer?: {
     showWildLoopState?: boolean;
     showPlanPanel?: boolean;
+    showSidebarRunsSweepsPreview?: boolean;
     debugRefreshIntervalSeconds?: number;
     wildLoopDebugPanelWidthPx?: number;
   };
@@ -389,6 +392,7 @@ export interface Sweep {
   id: string;
   config: SweepConfig;
   creationContext: SweepCreationContext;
+  chatSessionId?: string | null;
   status: SweepStatus;
   runIds: string[];
   bestRunId?: string;

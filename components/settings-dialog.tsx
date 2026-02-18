@@ -319,6 +319,14 @@ export function SettingsDialog({
           value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatContextPanel !== false,
+        },
+        {
           id: 'appearanceAdvanced',
           label: 'Advanced Appearance',
           description: 'Set exact numeric sizes',
@@ -375,6 +383,14 @@ export function SettingsDialog({
           icon: FileText,
           type: 'toggle' as const,
           value: settings.developer?.showPlanPanel === true,
+        },
+        {
+          id: 'showSidebarRunsSweepsPreview',
+          label: 'Sidebar Runs/Sweeps Preview',
+          description: 'Show or hide recent Runs and Sweeps preview blocks in the desktop sidebar',
+          icon: Eye,
+          type: 'toggle' as const,
+          value: settings.developer?.showSidebarRunsSweepsPreview !== false,
         },
       ],
     },
@@ -866,6 +882,7 @@ export function SettingsDialog({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
                     ...settings,
@@ -876,6 +893,12 @@ export function SettingsDialog({
                   onSettingsChange({
                     ...settings,
                     developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
+                if (item.id === 'showSidebarRunsSweepsPreview') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showSidebarRunsSweepsPreview: checked },
                   })
                 }
               }}

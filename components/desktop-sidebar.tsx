@@ -178,6 +178,7 @@ export function DesktopSidebar({
   const { useMock: isDemoMode } = useApiConfig()
   const { settings } = useAppSettings()
   const showSidebarNewChatButton = settings.appearance.showSidebarNewChatButton === true
+  const showSidebarRunsSweepsPreview = settings.developer?.showSidebarRunsSweepsPreview !== false
   const [isResizing, setIsResizing] = useState(false)
   const resizeStartXRef = useRef(0)
   const resizeStartWidthRef = useRef(width)
@@ -644,7 +645,7 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!isIconRail && (
+            {!isIconRail && showSidebarRunsSweepsPreview && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -739,7 +740,7 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!isIconRail && (
+            {!isIconRail && showSidebarRunsSweepsPreview && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

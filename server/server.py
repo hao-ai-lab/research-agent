@@ -3229,7 +3229,7 @@ MODE_REGISTRY: Dict[str, ModeConfig] = {
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tuple:
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session_id: Optional[str] = None) -> tuple:
     """Build the full prompt for a chat turn, prepending mode-specific preamble.
 
     Returns (content: str, provenance: dict | None).
@@ -3275,10 +3275,23 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tupl
             "prompt_type": mode,
         }
 
-    content = f"{mode_note}[USER] {message}"
+    chat_linking_note = ""
+    if session_id:
+        chat_linking_note = (
+            "[CHAT LINKAGE]\n"
+            "For experiment API creations (`POST /runs`, `POST /sweeps`, "
+            "`POST /sweeps/wild`, `POST /sweeps/{id}/runs`), include "
+            f"`\"chat_session_id\": \"{session_id}\"` in JSON bodies.\n"
+            "Use `null` only when intentionally creating entities not tied to this chat.\n"
+            "[/CHAT LINKAGE]\n\n"
+        )
+
+    content = f"{chat_linking_note}{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
+    if provenance is not None:
+        provenance["rendered"] = content
     return content, provenance
 
 
@@ -3513,7 +3526,7 @@ async def chat_endpoint(req: ChatRequest):
         elif req.plan_mode:
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
-    content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
+    content, provenance = _build_chat_prompt(session, llm_input, effective_mode, session_id=session_id)
     runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it
@@ -4845,6 +4858,7 @@ async def create_sweep(req: SweepCreate):
             "is_archived": False,
             "sweep_id": sweep_id,
             "sweep_params": params,
+            "chat_session_id": req.chat_session_id,
             "tmux_window": None,
             "run_dir": None,
             "exit_code": None,
@@ -5051,6 +5065,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
         "sweep_id": sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
+        "chat_session_id": req.chat_session_id or sweeps[sweep_id].get("chat_session_id"),
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
