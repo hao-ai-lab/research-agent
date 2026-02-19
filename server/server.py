@@ -2771,7 +2771,6 @@ run_routes.init(
     slack_notifier=slack_notifier,
     get_or_create_session_fn=get_or_create_session,
     run_status_terminal_set=RUN_STATUS_TERMINAL,
-    run_status_active_set=RUN_STATUS_ACTIVE,
     load_run_metrics_fn=_load_run_metrics,
     find_wandb_dir_from_run_dir_fn=_find_wandb_dir_from_run_dir,
     get_wandb_curve_data_fn=_get_wandb_curve_data,

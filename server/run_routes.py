@@ -13,7 +13,6 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
 
 import config
 import state
@@ -51,7 +50,6 @@ _coerce_exit_code = None
 _slack_notifier = None
 _get_or_create_session = None
 _RUN_STATUS_TERMINAL = None
-_RUN_STATUS_ACTIVE = None
 _load_run_metrics = None
 _find_wandb_dir_from_run_dir = None
 _get_wandb_curve_data = None
@@ -66,7 +64,7 @@ def init(
     sync_run_membership_with_sweep_fn, record_journey_event_fn,
     normalize_gpuwrap_config_fn, coerce_exit_code_fn,
     slack_notifier, get_or_create_session_fn,
-    run_status_terminal_set, run_status_active_set,
+    run_status_terminal_set,
     load_run_metrics_fn, find_wandb_dir_from_run_dir_fn,
     get_wandb_curve_data_fn, wandb_metrics_cache_dict,
 ):
@@ -78,7 +76,7 @@ def init(
     global _sync_run_membership_with_sweep, _record_journey_event
     global _normalize_gpuwrap_config, _coerce_exit_code
     global _slack_notifier, _get_or_create_session
-    global _RUN_STATUS_TERMINAL, _RUN_STATUS_ACTIVE
+    global _RUN_STATUS_TERMINAL
     global _load_run_metrics, _find_wandb_dir_from_run_dir
     global _get_wandb_curve_data, _wandb_metrics_cache
 
@@ -99,7 +97,6 @@ def init(
     _slack_notifier = slack_notifier
     _get_or_create_session = get_or_create_session_fn
     _RUN_STATUS_TERMINAL = run_status_terminal_set
-    _RUN_STATUS_ACTIVE = run_status_active_set
     _load_run_metrics = load_run_metrics_fn
     _find_wandb_dir_from_run_dir = find_wandb_dir_from_run_dir_fn
     _get_wandb_curve_data = get_wandb_curve_data_fn
