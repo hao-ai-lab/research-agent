@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-import { getAuthToken, getResearchAgentKey } from '@/lib/api-config'
+import { getApiUrl, getAuthToken, getResearchAgentKey } from '@/lib/api-config'
 
 type ExplorerNodeType = 'file' | 'directory'
 
@@ -108,7 +108,10 @@ export function FileExplorerView({
     }
 
     try {
-      const headers: HeadersInit = { 'X-Auth-Token': getAuthToken() }
+      const headers: HeadersInit = {
+        'X-Auth-Token': getAuthToken(),
+        'X-Backend-Url': getApiUrl(),
+      }
       const researchAgentKey = getResearchAgentKey()
       if (researchAgentKey) {
         headers['X-Research-Agent-Key'] = researchAgentKey
@@ -154,7 +157,10 @@ export function FileExplorerView({
     setFileError(null)
 
     try {
-      const headers: HeadersInit = { 'X-Auth-Token': getAuthToken() }
+      const headers: HeadersInit = {
+        'X-Auth-Token': getAuthToken(),
+        'X-Backend-Url': getApiUrl(),
+      }
       const researchAgentKey = getResearchAgentKey()
       if (researchAgentKey) {
         headers['X-Research-Agent-Key'] = researchAgentKey

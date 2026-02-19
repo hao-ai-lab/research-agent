@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const workspaceRoot = await getWorkspaceRoot()
+    const workspaceRoot = await getWorkspaceRoot(request)
     const relativePath = normalizeExplorerPath(request.nextUrl.searchParams.get('path'))
     const absolutePath = resolveExplorerPath(relativePath, workspaceRoot)
     const dirEntries = await readdir(absolutePath, { withFileTypes: true })
@@ -59,4 +59,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status })
   }
 }
-

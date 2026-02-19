@@ -5,8 +5,8 @@ import type { NextRequest } from 'next/server'
  * Workspace root — the user's project directory.
  *
  * Resolution order:
- *  1. RESEARCH_AGENT_WORKDIR env var (set by the launcher script)
- *  2. Fetch from the Python backend's /health endpoint (returns { workdir })
+ *  1. Fetch from the active Python backend's /health endpoint (returns { workdir })
+ *  2. RESEARCH_AGENT_WORKDIR env var fallback (local/dev)
  *
  * If neither source provides a workdir, an error is thrown — we never
  * fall back to process.cwd() because that exposes the application
@@ -14,14 +14,45 @@ import type { NextRequest } from 'next/server'
  */
 
 let _cachedWorkspaceRoot = ''
+let _cachedBackendUrl = ''
 
-async function fetchWorkdirFromBackend(): Promise<string | null> {
+function resolveBackendUrl(request: NextRequest): string {
+  const fromHeader = (request.headers.get('X-Backend-Url') ?? '').trim()
+  if (fromHeader) {
+    try {
+      const parsed = new URL(fromHeader)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return `${parsed.protocol}//${parsed.host}`
+      }
+    } catch {
+      // Ignore malformed header and fall back to env/default.
+    }
+  }
+
+  return process.env.RESEARCH_AGENT_BACKEND_URL || 'http://127.0.0.1:10000'
+}
+
+async function fetchWorkdirFromBackend(request: NextRequest): Promise<string | null> {
   try {
-    const backendUrl = process.env.RESEARCH_AGENT_BACKEND_URL || 'http://127.0.0.1:10000'
-    const resp = await fetch(`${backendUrl}/health`, { signal: AbortSignal.timeout(2000) })
+    const backendUrl = resolveBackendUrl(request)
+    const headers: HeadersInit = {}
+    const authToken = (request.headers.get('X-Auth-Token') ?? '').trim()
+    if (authToken) {
+      headers['X-Auth-Token'] = authToken
+    }
+    const researchAgentKey = (request.headers.get('X-Research-Agent-Key') ?? '').trim()
+    if (researchAgentKey) {
+      headers['X-Research-Agent-Key'] = researchAgentKey
+    }
+
+    const resp = await fetch(`${backendUrl}/health`, {
+      headers,
+      signal: AbortSignal.timeout(2000),
+    })
     if (resp.ok) {
       const data = (await resp.json()) as { workdir?: string }
       if (data.workdir) {
+        _cachedBackendUrl = backendUrl
         return data.workdir
       }
     }
@@ -31,26 +62,30 @@ async function fetchWorkdirFromBackend(): Promise<string | null> {
   return null
 }
 
-export async function getWorkspaceRoot(): Promise<string> {
-  if (_cachedWorkspaceRoot) return _cachedWorkspaceRoot
-
-  // 1. Env var
-  const envWorkdir = process.env.RESEARCH_AGENT_WORKDIR
-  if (envWorkdir) {
-    _cachedWorkspaceRoot = path.resolve(envWorkdir)
+export async function getWorkspaceRoot(request: NextRequest): Promise<string> {
+  const backendUrl = resolveBackendUrl(request)
+  if (_cachedWorkspaceRoot && _cachedBackendUrl === backendUrl) {
     return _cachedWorkspaceRoot
   }
 
-  // 2. Backend /health
-  const backendWorkdir = await fetchWorkdirFromBackend()
+  // 1. Backend /health (authoritative current workdir)
+  const backendWorkdir = await fetchWorkdirFromBackend(request)
   if (backendWorkdir) {
     _cachedWorkspaceRoot = path.resolve(backendWorkdir)
     return _cachedWorkspaceRoot
   }
 
+  // 2. Env var fallback for local/dev configurations.
+  const envWorkdir = process.env.RESEARCH_AGENT_WORKDIR
+  if (envWorkdir) {
+    _cachedWorkspaceRoot = path.resolve(envWorkdir)
+    _cachedBackendUrl = backendUrl
+    return _cachedWorkspaceRoot
+  }
+
   // No fallback — refuse to serve the app directory by mistake
   throw new Error(
-    'Cannot determine workspace root. Set RESEARCH_AGENT_WORKDIR or ensure the backend is running.',
+    'Cannot determine workspace root from backend. Ensure the backend is running, or set RESEARCH_AGENT_WORKDIR.',
   )
 }
 
