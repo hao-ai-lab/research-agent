@@ -160,6 +160,13 @@ class WildV2Engine:
         self._session: Optional[WildV2Session] = None
         self._task: Optional[asyncio.Task] = None
 
+        # Pause/resume signaling — set = running, cleared = paused
+        self._resume_event: asyncio.Event = asyncio.Event()
+        self._resume_event.set()  # start unblocked
+
+        # Steer signaling — set when steer() is called to wake interruptible sleeps
+        self._steer_event: asyncio.Event = asyncio.Event()
+
         # Memory store — injected after construction by server.py
         self.memory_store = None  # type: ignore[assignment]
 
@@ -227,6 +234,10 @@ class WildV2Engine:
         logger.info("[wild-v2] send_chat_message callback: %s", "YES" if self._send_chat_message else "NO")
         logger.info("[wild-v2] chat_session_id: %s", chat_session_id)
 
+        # Reset event state for a fresh session
+        self._resume_event.set()    # start unblocked
+        self._steer_event.clear()   # no pending steer
+
         # Start the async loop
         try:
             loop = asyncio.get_event_loop()
@@ -249,6 +260,9 @@ class WildV2Engine:
         self._session.status = "done"
         self._session.finished_at = time.time()
 
+        # Unblock the loop if it's paused so it can observe the 'done' status and exit
+        self._resume_event.set()
+
         if self._task and not self._task.done():
             self._task.cancel()
             self._task = None
@@ -258,31 +272,33 @@ class WildV2Engine:
         return self._session.to_dict()
 
     def pause(self) -> dict:
-        if self._session:
+        """Pause the loop — the running coroutine suspends at the next check point."""
+        if self._session and self._session.status == "running":
             self._session.status = "paused"
+            self._resume_event.clear()  # block the loop coroutine
             self._save_state(self._session.session_id)
+            logger.info("[wild-v2] Paused session %s at iteration %d", self._session.session_id, self._session.iteration)
         return self._session.to_dict() if self._session else {}
 
     def resume(self) -> dict:
+        """Resume the loop — wakes the suspended coroutine in-place (no restart)."""
         if self._session and self._session.status == "paused":
             self._session.status = "running"
+            self._resume_event.set()  # unblock the loop coroutine
             self._save_state(self._session.session_id)
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running() and (not self._task or self._task.done()):
-                    self._task = loop.create_task(self._run_loop())
-            except RuntimeError:
-                pass
+            logger.info("[wild-v2] Resumed session %s at iteration %d", self._session.session_id, self._session.iteration)
         return self._session.to_dict() if self._session else {}
 
     def steer(self, context: str) -> dict:
-        """Inject user context for the next iteration."""
+        """Inject user context for the next iteration and wake the loop if sleeping."""
         if self._session:
             self._session.steer_context = context
             # Also save to file
             ctx_path = os.path.join(self._session_dir(self._session.session_id), "context.md")
             with open(ctx_path, "w") as f:
                 f.write(context)
+            # Wake the loop from any interruptible sleep so it picks up the steer immediately
+            self._steer_event.set()
         return {"ok": True}
 
     def get_status(self) -> dict:
@@ -442,6 +458,27 @@ class WildV2Engine:
             self._append_to_chat(session, prompt, full_text, session.iteration)
         return full_text
 
+    async def _interruptible_sleep(self, seconds: float):
+        """Sleep for up to `seconds`, waking early if steer or stop/pause occurs."""
+        self._steer_event.clear()
+        try:
+            await asyncio.wait_for(self._steer_event.wait(), timeout=seconds)
+            logger.debug("[wild-v2] Interruptible sleep woken early (steer or signal)")
+        except asyncio.TimeoutError:
+            pass  # Normal expiry
+
+    async def _check_pause(self, session: "WildV2Session") -> bool:
+        """If paused, suspend until resumed. Returns False if stopped while paused."""
+        if session.status == "paused":
+            logger.info("[wild-v2] Paused at iteration %d, waiting for resume...", session.iteration)
+            self._save_state(session.session_id)
+            await self._resume_event.wait()
+            if session.status != "running":
+                logger.info("[wild-v2] Stopped while paused")
+                return False
+            logger.info("[wild-v2] Resumed at iteration %d", session.iteration)
+        return session.status == "running"
+
     async def _run_loop(self):
         """The ralph-style main loop running as an async background task."""
         session = self._session
@@ -513,15 +550,17 @@ class WildV2Engine:
             self._save_state(session.session_id)
 
             logger.info("[wild-v2] ========== Iteration 0 (PLANNING) END (duration=%.1fs) ==========", plan_duration)
-            await asyncio.sleep(2)  # Brief pause before first execution iteration
+            await self._interruptible_sleep(2)  # Brief pause before first execution iteration
 
             # ============================================================
             # ITERATIONS 1+: EXECUTION
             # ============================================================
-            while (
-                session.status == "running"
-                and session.iteration < session.max_iterations
-            ):
+            while session.iteration < session.max_iterations:
+                # --- Pause/resume gate ---
+                if not await self._check_pause(session):
+                    break
+                if session.status != "running":
+                    break
                 iter_start = time.time()
                 session.iteration += 1
                 logger.info(
@@ -715,7 +754,7 @@ class WildV2Engine:
                         if should_continue:
                             logger.info("[wild-v2] Reflection decided to CONTINUE")
                             # Don't break — let the while loop continue to next iteration
-                            await asyncio.sleep(2)
+                            await self._interruptible_sleep(2)
                             continue
                         else:
                             logger.info("[wild-v2] Reflection decided to STOP")
@@ -731,11 +770,11 @@ class WildV2Engine:
                         "[wild-v2] Agent signaled WAITING, sleeping %ds",
                         int(session.wait_seconds),
                     )
-                    await asyncio.sleep(session.wait_seconds)
+                    await self._interruptible_sleep(session.wait_seconds)
                 else:
                     # Brief pause between iterations to avoid hammering
                     logger.debug("[wild-v2] Sleeping 2s before next iteration")
-                    await asyncio.sleep(2)
+                    await self._interruptible_sleep(2)
 
             # Max iterations reached
             if session.status == "running":
