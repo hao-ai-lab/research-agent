@@ -947,7 +947,11 @@ def monitor_job(
 
         launch_command = command
         if settings["enabled"] and cuda_visible_devices:
-            launch_command = f"CUDA_VISIBLE_DEVICES={shlex.quote(cuda_visible_devices)} ({command})"
+            job_pane.send_keys(f"export CUDA_VISIBLE_DEVICES={shlex.quote(cuda_visible_devices)}")
+            time.sleep(0.1)
+            logger.info(f"Set CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+
+            launch_command = f"{command}"
             logger.info(
                 "Attempt %d/%d with CUDA_VISIBLE_DEVICES=%s",
                 attempt,
