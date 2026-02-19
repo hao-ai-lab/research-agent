@@ -210,11 +210,6 @@ class WildV2Engine:
         os.makedirs(session_dir, exist_ok=True)
         logger.debug("[wild-v2] Session dir: %s", session_dir)
 
-        # Create tasks.md — the agent reads/writes this directly on disk
-        tasks_path = os.path.join(session_dir, "tasks.md")
-        with open(tasks_path, "w") as f:
-            f.write(f"# Tasks\n\n## Goal\n{goal}\n\n## Tasks\n- [ ] (Agent will decompose the goal into tasks on iteration 1)\n")
-
         # Create empty iteration log
         log_path = os.path.join(session_dir, "iteration_log.md")
         with open(log_path, "w") as f:
