@@ -408,6 +408,8 @@ class ChatRequest(BaseModel):
     # When provided, this is used for LLM prompt construction instead of message.
     # `message` is still stored as the user-visible content in the session history.
     prompt_override: Optional[str] = None
+    # Optional list of user-selected default skill IDs to inject into the prompt
+    skill_ids: Optional[List[str]] = None
     # Backward compat: accept old boolean fields and convert
     wild_mode: bool = False
     plan_mode: bool = False
@@ -3360,7 +3362,27 @@ MODE_REGISTRY: Dict[str, ModeConfig] = {
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session_id: Optional[str] = None) -> tuple:
+def _build_skills_block(skill_ids: List[str]) -> str:
+    """Build a prompt block describing user-selected default skills."""
+    entries = []
+    for sid in skill_ids:
+        skill = prompt_skill_manager.get(sid)
+        if skill:
+            name = skill.get("name", sid)
+            desc = skill.get("description", "")
+            entries.append(f"- **{name}** (id: `{sid}`)\n  {desc}")
+    if not entries:
+        return ""
+    return (
+        "[AVAILABLE SKILLS]\n"
+        "The user has the following skills loaded. When relevant, use these skills to guide your approach.\n"
+        "To retrieve the full skill content, call: GET /prompt-skills/<skill_id>\n\n"
+        + "\n".join(entries) + "\n"
+        "[/AVAILABLE SKILLS]\n\n"
+    )
+
+
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session_id: Optional[str] = None, skill_ids: Optional[List[str]] = None) -> tuple:
     """Build the full prompt for a chat turn, prepending mode-specific preamble.
 
     Returns (content: str, provenance: dict | None).
@@ -3417,7 +3439,11 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
             "[/CHAT LINKAGE]\n\n"
         )
 
-    content = f"{chat_linking_note}{mode_note}[USER] {message}"
+    skills_block = ""
+    if skill_ids:
+        skills_block = _build_skills_block(skill_ids)
+
+    content = f"{chat_linking_note}{skills_block}{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
@@ -3657,7 +3683,7 @@ async def chat_endpoint(req: ChatRequest):
         elif req.plan_mode:
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
-    content, provenance = _build_chat_prompt(session, llm_input, effective_mode, session_id=session_id)
+    content, provenance = _build_chat_prompt(session, llm_input, effective_mode, session_id=session_id, skill_ids=req.skill_ids)
     runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it

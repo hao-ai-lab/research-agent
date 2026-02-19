@@ -256,6 +256,7 @@ export async function* streamChat(
     mode: string = 'agent',
     signal?: AbortSignal,
     promptOverride?: string,
+    skillIds?: string[],
 ): AsyncGenerator<StreamEvent, void, unknown> {
     const body: Record<string, unknown> = {
         session_id: sessionId,
@@ -264,6 +265,9 @@ export async function* streamChat(
     }
     if (promptOverride) {
         body.prompt_override = promptOverride
+    }
+    if (skillIds?.length) {
+        body.skill_ids = skillIds
     }
     const response = await fetch(`${API_URL()}/chat`, {
         method: 'POST',

@@ -386,7 +386,7 @@ export function ConnectedChatView({
     }, [streamingState.isStreaming, wildLoop?.isActive, currentSessionId, selectSession])
 
     // Handle send - create session if needed, start wild loop if in wild mode
-    const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
+    const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode, skillIds?: string[]) => {
         let sessionId = currentSessionId
         if (!sessionId) {
             sessionId = await createNewSession()
@@ -430,7 +430,7 @@ export function ConnectedChatView({
 
         // Send the message normally — in wild mode (already running), the V2 backend
         // handles all subsequent iterations autonomously
-        await sendMessage(message, effectiveMode, sessionId)
+        await sendMessage(message, effectiveMode, sessionId, undefined, skillIds)
     }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage, selectSession])
 
     const handleReplyToSelection = useCallback((selectedText: string) => {

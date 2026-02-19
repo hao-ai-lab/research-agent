@@ -95,7 +95,7 @@ export interface UseChatSessionResult {
 
     // Send message - optional sessionId override for newly created sessions
     // promptOverride: when set, this full prompt is sent to the LLM while `content` is stored as the visible user message
-    sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string) => Promise<void>
+    sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string, skillIds?: string[]) => Promise<void>
     stopStreaming: () => Promise<void>
 
     // Message queue - for queuing messages during streaming
@@ -923,7 +923,7 @@ export function useChatSession(): UseChatSessionResult {
     }, [currentSessionId, selectedModel])
 
     // Send a message - accepts optional sessionIdOverride for newly created sessions
-    const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string) => {
+    const sendMessage = useCallback(async (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string, skillIds?: string[]) => {
         const targetSessionId = sessionIdOverride || currentSessionId
         if (!targetSessionId) {
             setError('No active session. Please create or select a chat.')
@@ -1004,7 +1004,7 @@ export function useChatSession(): UseChatSessionResult {
             }, 5_000)
 
             try {
-                for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal, promptOverride)) {
+                for await (const event of streamChat(targetSessionId, content, mode, streamController!.signal, promptOverride, skillIds)) {
                     lastEventTime = Date.now()
 
                     // Debug logging for stream events
