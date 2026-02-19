@@ -250,7 +250,7 @@ def _struggle_section(ctx: PromptContext) -> str:
 
 
 def _api_catalog(ctx: PromptContext) -> str:
-    """Build the full API catalog the agent can use via curl."""
+    """Build the full API catalog the agent can use via MCP tools or curl."""
     s = ctx.server_url
     sid = ctx.session_id
     auth_header = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
@@ -262,13 +262,23 @@ def _api_catalog(ctx: PromptContext) -> str:
 ```
 
 """ if ctx.auth_token else ""
-    return f"""{auth_note}### Sweeps (experiment groups)
-- `POST {s}/sweeps/wild` — Create a tracking sweep (body: `{{"name": "...", "goal": "..."}}`)
+    return f"""{auth_note}### Preferred Tool Calls (MCP)
+- `mcp__research-agent__create_run` — Fixed-schema run creation (`name`, `command`, `workdir`, `sweep_id`, `launch_policy`)
+- `mcp__research-agent__start_run` — Start a run by id
+- Prefer MCP tools for run creation/start to avoid ad-hoc command construction.
+
+### Chat linkage (required for create endpoints)
+- For this session, include `"chat_session_id": "{sid}"` in bodies for `POST /runs`, `POST /sweeps`, `POST /sweeps/wild`, and `POST /sweeps/{{id}}/runs`.
+- Use `null` only when intentionally creating entities not tied to this chat.
+
+### Sweeps (experiment groups)
+- `POST {s}/sweeps/wild` — Create a tracking sweep (body: `{{"name": "...", "goal": "...", "chat_session_id": "{sid}"}}`)
+- `POST {s}/sweeps` — Create a parameterized sweep (body includes `chat_session_id`)
 - `GET  {s}/sweeps` — List all sweeps
 - `GET  {s}/sweeps/{{id}}` — Get sweep details & progress
 
 ### Runs (individual jobs)
-- `POST {s}/runs` — Create a run (body: `{{"name": "...", "command": "...", "sweep_id": "...", "auto_start": true}}`)
+- `POST {s}/runs` — Create a run (body: `{{"name": "...", "command": "...", "sweep_id": "...", "chat_session_id": "{sid}", "auto_start": true}}`)
 - `POST {s}/runs/{{id}}/start` — Start a queued/ready run
 - `POST {s}/runs/{{id}}/stop` — Stop a running job
 - `GET  {s}/runs` — List all runs

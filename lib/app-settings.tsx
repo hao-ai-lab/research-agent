@@ -31,6 +31,10 @@ const STORAGE_KEY_APPEARANCE_CUSTOM_PRIMARY_COLOR =
   "research-agent-appearance-custom-primary-color";
 const STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR =
   "research-agent-appearance-custom-accent-color";
+const LEGACY_STORAGE_KEY_CHAT_SHOW_ARTIFACTS = "chatShowArtifacts";
+const LEGACY_STORAGE_KEY_CHAT_COLLAPSE_CHATS = "chatCollapseChats";
+const LEGACY_STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS =
+  "chatCollapseArtifactsInChat";
 
 export const defaultAppSettings: AppSettings = {
   appearance: {
@@ -50,9 +54,13 @@ export const defaultAppSettings: AppSettings = {
     wildLoopHistoryFontSizePx: null,
     wildLoopTasksBoxHeightPx: null,
     wildLoopHistoryBoxHeightPx: null,
-    showStarterCards: false,
-    starterCardFlavor: "expert",
-    showSidebarNewChatButton: false,
+    showStarterCards: true,
+    starterCardFlavor: "novice",
+    showChatContextPanel: true,
+    showChatArtifacts: false,
+    chatCollapseAllChats: false,
+    chatCollapseArtifactsInChat: false,
+    showSidebarNewChatButton: true,
     mobileEnterToNewline: false,
   },
   integrations: {},
@@ -69,6 +77,12 @@ export const defaultAppSettings: AppSettings = {
       { id: "insights", label: "Insights", visible: true, order: 3 },
       { id: "terminal", label: "Terminal", visible: true, order: 4 },
     ],
+  },
+  developer: {
+    showWildLoopState: true,
+    showPlanPanel: false,
+    showSidebarRunsSweepsPreview: true,
+    debugRefreshIntervalSeconds: 2,
   },
 };
 
@@ -310,6 +324,15 @@ function readStoredSettings(): AppSettings {
     const storedCustomAccentColor = sanitizeHexColor(
       localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR),
     );
+    const legacyShowArtifacts = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_SHOW_ARTIFACTS,
+    );
+    const legacyCollapseChats = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_COLLAPSE_CHATS,
+    );
+    const legacyCollapseArtifacts = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS,
+    );
 
     const resolvedTheme = isValidTheme(storedTheme)
       ? storedTheme
@@ -382,6 +405,24 @@ function readStoredSettings(): AppSettings {
           parsed?.appearance?.showStarterCards ??
           defaultAppSettings.appearance.showStarterCards,
         starterCardFlavor: resolvedStarterCardFlavor,
+        showChatContextPanel:
+          parsed?.appearance?.showChatContextPanel ??
+          defaultAppSettings.appearance.showChatContextPanel,
+        showChatArtifacts:
+          parsed?.appearance?.showChatArtifacts ??
+          (legacyShowArtifacts != null
+            ? legacyShowArtifacts === "true"
+            : defaultAppSettings.appearance.showChatArtifacts),
+        chatCollapseAllChats:
+          parsed?.appearance?.chatCollapseAllChats ??
+          (legacyCollapseChats != null
+            ? legacyCollapseChats === "true"
+            : defaultAppSettings.appearance.chatCollapseAllChats),
+        chatCollapseArtifactsInChat:
+          parsed?.appearance?.chatCollapseArtifactsInChat ??
+          (legacyCollapseArtifacts != null
+            ? legacyCollapseArtifacts === "true"
+            : defaultAppSettings.appearance.chatCollapseArtifactsInChat),
         showSidebarNewChatButton:
           parsed?.appearance?.showSidebarNewChatButton ??
           defaultAppSettings.appearance.showSidebarNewChatButton,
@@ -414,7 +455,10 @@ function readStoredSettings(): AppSettings {
           parsed?.notifications?.webNotificationsEnabled ??
           defaultAppSettings.notifications.webNotificationsEnabled,
       },
-      developer: parsed?.developer ?? defaultAppSettings.developer,
+      developer: {
+        ...defaultAppSettings.developer,
+        ...(parsed?.developer ?? {}),
+      },
       leftPanel: parsed?.leftPanel ?? defaultAppSettings.leftPanel,
     };
   } catch {

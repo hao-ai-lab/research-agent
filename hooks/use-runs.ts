@@ -87,6 +87,7 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         id: run.id,
         name: run.name,
         sweepId: run.sweep_id ?? undefined,
+        chatSessionId: run.chat_session_id ?? null,
         sweepParams: run.sweep_params ?? null,
         alias: metadata?.alias,
         command: run.command,

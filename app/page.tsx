@@ -47,9 +47,6 @@ const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
 const STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH = 'desktopSidebarWidth'
 const STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED = 'desktopSidebarCollapsed'
 const STORAGE_KEY_JOURNEY_SUB_TAB = 'journeySubTab'
-const STORAGE_KEY_CHAT_SHOW_ARTIFACTS = 'chatShowArtifacts'
-const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
-const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
 const DESKTOP_SIDEBAR_ICON_RAIL_TRIGGER_WIDTH = 136
 
 export default function ResearchChat() {
@@ -100,6 +97,7 @@ export default function ResearchChat() {
   // State for navigation
   const [selectedRun, setSelectedRun] = useState<ExperimentRun | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
+  const [runsViewDialogIntent, setRunsViewDialogIntent] = useState<'run' | 'sweep' | null>(null)
 
   // Event status is tracked locally for acknowledgement/dismissal UX.
   const [eventStatusOverrides, setEventStatusOverrides] = useState<Record<string, EventStatus>>({})
@@ -108,10 +106,9 @@ export default function ResearchChat() {
   const [showSweepForm, setShowSweepForm] = useState(false)
   const [editingSweepConfig, setEditingSweepConfig] = useState<SweepConfig | null>(null)
 
-  // Chat panel state
-  const [showArtifacts, setShowArtifacts] = useState(false)
-  const [collapseChats, setCollapseChats] = useState(false)
-  const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+  // Chat panel state from app settings (Appearance section)
+  const collapseChats = settings.appearance.chatCollapseAllChats === true
+  const collapseArtifactsInChat = settings.appearance.chatCollapseArtifactsInChat === true
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
@@ -142,20 +139,6 @@ export default function ResearchChat() {
       setJourneySubTab(storedJourneySubTab)
     }
 
-    const storedShowArtifacts = window.localStorage.getItem(STORAGE_KEY_CHAT_SHOW_ARTIFACTS)
-    if (storedShowArtifacts != null) {
-      setShowArtifacts(storedShowArtifacts === 'true')
-    }
-
-    const storedCollapseChats = window.localStorage.getItem(STORAGE_KEY_CHAT_COLLAPSE_CHATS)
-    if (storedCollapseChats != null) {
-      setCollapseChats(storedCollapseChats === 'true')
-    }
-
-    const storedCollapseArtifacts = window.localStorage.getItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS)
-    if (storedCollapseArtifacts != null) {
-      setCollapseArtifactsInChat(storedCollapseArtifacts === 'true')
-    }
   }, [])
 
   useEffect(() => {
@@ -169,18 +152,6 @@ export default function ResearchChat() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY_JOURNEY_SUB_TAB, journeySubTab)
   }, [journeySubTab])
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY_CHAT_SHOW_ARTIFACTS, String(showArtifacts))
-  }, [showArtifacts])
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_CHATS, String(collapseChats))
-  }, [collapseChats])
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS, String(collapseArtifactsInChat))
-  }, [collapseArtifactsInChat])
 
   useEffect(() => {
     return () => {
@@ -530,17 +501,17 @@ export default function ResearchChat() {
 
   const handleSaveSweep = useCallback(async (config: SweepConfig) => {
     try {
-      await saveDraftSweep(config)
+      await saveDraftSweep(config, currentSessionId)
       setShowSweepForm(false)
       setEditingSweepConfig(null)
     } catch (error) {
       console.error('Failed to save draft sweep:', error)
     }
-  }, [saveDraftSweep])
+  }, [saveDraftSweep, currentSessionId])
 
   const handleCreateSweep = useCallback(async (config: SweepConfig) => {
     try {
-      const draftSweep = await saveDraftSweep(config)
+      const draftSweep = await saveDraftSweep(config, currentSessionId)
       setActiveTab('chat')
       setChatDraftInsert({
         id: Date.now(),
@@ -551,18 +522,18 @@ export default function ResearchChat() {
     } catch (error) {
       console.error('Failed to create draft sweep:', error)
     }
-  }, [saveDraftSweep])
+  }, [saveDraftSweep, currentSessionId, apiUrl])
 
   const handleLaunchSweep = useCallback(async (config: SweepConfig) => {
     try {
-      await launchSweepFromConfig(config)
+      await launchSweepFromConfig(config, currentSessionId)
       await refetchRuns()
       setShowSweepForm(false)
       setEditingSweepConfig(null)
     } catch (error) {
       console.error('Failed to launch sweep:', error)
     }
-  }, [launchSweepFromConfig, refetchRuns])
+  }, [launchSweepFromConfig, currentSessionId, refetchRuns])
 
   const handleRefreshExperimentState = useCallback(async () => {
     await Promise.all([refetchRuns(), refetchSweeps(), refetchCluster()])
@@ -582,12 +553,6 @@ export default function ResearchChat() {
       console.error('Failed to update wild mode:', e)
     }
   }, [])
-
-  const handleOpenSweepCreator = useCallback(() => {
-    handleTabChange('chat')
-    setEditingSweepConfig(null)
-    setShowSweepForm(true)
-  }, [handleTabChange])
 
   const handleInsertChatReference = useCallback((text: string) => {
     handleTabChange('chat')
@@ -621,6 +586,20 @@ export default function ResearchChat() {
     }
 
     window.localStorage.setItem(STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH, String(sidebarWidthRef.current))
+  }, [])
+
+  const handleSidebarCreateRun = useCallback(() => {
+    handleTabChange('runs')
+    setRunsViewDialogIntent('run')
+  }, [handleTabChange])
+
+  const handleSidebarCreateSweep = useCallback(() => {
+    handleTabChange('runs')
+    setRunsViewDialogIntent('sweep')
+  }, [handleTabChange])
+
+  const handleRunsViewDialogIntentHandled = useCallback(() => {
+    setRunsViewDialogIntent(null)
   }, [])
 
   // Handle session change from FloatingNav
@@ -690,6 +669,8 @@ export default function ResearchChat() {
           onNavigateToRun={handleNavigateToRun}
           onNavigateToSweep={handleNavigateToSweep}
           onInsertReference={handleInsertChatReference}
+          onOpenCreateRun={handleSidebarCreateRun}
+          onOpenCreateSweep={handleSidebarCreateSweep}
           onSettingsClick={() => handleTabChange('settings')}
           onToggleCollapse={() => setDesktopSidebarHidden(true)}
           onWidthChange={handleSidebarWidthChange}
@@ -704,14 +685,6 @@ export default function ResearchChat() {
             onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
-            onCreateSweepClick={handleOpenSweepCreator}
-            onOpenContextualClick={() => router.push('/contextual')}
-            showArtifacts={showArtifacts}
-            onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
-            collapseChats={collapseChats}
-            onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
-            collapseArtifactsInChat={collapseArtifactsInChat}
-            onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
             sessionTitle={currentSession?.title || 'New Chat'}
             currentSessionId={currentSessionId}
             sessions={sessions}
@@ -756,6 +729,7 @@ export default function ResearchChat() {
                 insertDraft={chatDraftInsert}
                 skills={promptSkills}
                 contextTokenCount={contextTokenCount}
+                onRefreshContext={handleRefreshExperimentState}
               />
             )}
             {activeTab === 'runs' && (
@@ -787,6 +761,8 @@ export default function ResearchChat() {
                 onUpdateCluster={updateClusterSetup}
                 onNavigateToCharts={() => handleTabChange('charts')}
                 onRespondToAlert={async (alertId, choice) => { await respondAlert(alertId, choice) }}
+                openDialogIntent={runsViewDialogIntent}
+                onDialogIntentHandled={handleRunsViewDialogIntentHandled}
               />
             )}
             {activeTab === 'events' && (

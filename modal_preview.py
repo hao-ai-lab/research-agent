@@ -68,7 +68,7 @@ app = modal.App("research-agent-preview")
 OPENCODE_BIN = "/usr/local/bin/opencode"
 OPENCODE_PORT = "4096"
 MODAL_PREVIEW_OPENCODE_URL = os.environ.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
-# Captured at deploy time (CI injects a fresh token per run).
+# Captured at deploy time (CI injects a per-PR token).
 # The Modal Secret may also contain a stale RESEARCH_AGENT_USER_AUTH_TOKEN;
 # we store the deploy-time value here so functions can forcibly use it.
 _DEPLOY_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "").strip()
@@ -179,7 +179,16 @@ def preview_app():
     # NEXT_PUBLIC_API_URL=auto → resolves to window.location.origin in browser
     # Next.js rewrites in next.config.mjs proxy API calls to backend on 10000
     print("Starting frontend dev server on port 8080...")
-    frontend_env = {**env, "NEXT_PUBLIC_API_URL": "auto", "PORT": "8080"}
+    frontend_env = {
+        **env,
+        "NEXT_PUBLIC_API_URL": "auto",
+        "PORT": "8080",
+        # Server-side API routes need these to resolve the workspace root
+        # and validate auth tokens without depending on the backend.
+        "RESEARCH_AGENT_WORKDIR": workdir,
+        "RESEARCH_AGENT_USER_AUTH_TOKEN": auth_token,
+        "RESEARCH_AGENT_BACKEND_URL": "http://127.0.0.1:10000",
+    }
     subprocess.Popen(
         ["npx", "next", "dev", "-p", "8080"],
         env=frontend_env,

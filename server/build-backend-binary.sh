@@ -49,6 +49,7 @@ log "Building one-file backend binary"
   --workpath "${PYINSTALLER_WORK}" \
   --specpath "${PYINSTALLER_SPEC}" \
   --add-data "${SERVER_DIR}/opencode.json:." \
+  --add-data "${SERVER_DIR}/gpuwrap_detect.py:." \
   --hidden-import job_sidecar \
   "${SERVER_DIR}/server.py"
 

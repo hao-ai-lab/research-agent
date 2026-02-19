@@ -37,7 +37,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
-import { useApiConfig } from '@/lib/api-config'
+import { createSetupShareLink, useApiConfig } from '@/lib/api-config'
 import type { AppSettings } from '@/lib/types'
 import { LeftPanelConfig } from '@/components/left-panel-config'
 import { PromptSkillEditor } from '@/components/prompt-skill-editor'
@@ -68,13 +68,27 @@ export function SettingsDialog({
   const [showSlackApiKey, setShowSlackApiKey] = useState(false)
 
   // API Configuration
-  const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
+  const {
+    apiUrl,
+    useMock,
+    authToken,
+    researchAgentKey,
+    setApiUrl,
+    setUseMock,
+    setAuthToken,
+    setResearchAgentKey,
+    resetToDefaults,
+    testConnection,
+  } = useApiConfig()
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
   const [authTokenInput, setAuthTokenInput] = useState(authToken)
+  const [researchAgentKeyInput, setResearchAgentKeyInput] = useState(researchAgentKey)
   const [showAuthToken, setShowAuthToken] = useState(false)
+  const [showResearchAgentKey, setShowResearchAgentKey] = useState(false)
   const [authTokenCopied, setAuthTokenCopied] = useState(false)
+  const [researchAgentKeyCopied, setResearchAgentKeyCopied] = useState(false)
+  const [setupLinkCopied, setSetupLinkCopied] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
-  const [appearanceAdvancedOpen, setAppearanceAdvancedOpen] = useState(false)
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
 
   // Local state for advanced appearance inputs (only update settings on blur)
@@ -167,6 +181,10 @@ export function SettingsDialog({
     setAuthTokenInput(authToken)
   }, [authToken])
 
+  React.useEffect(() => {
+    setResearchAgentKeyInput(researchAgentKey)
+  }, [researchAgentKey])
+
   // Auto-focus auth token input when requested
   React.useEffect(() => {
     if (focusAuthToken && open) {
@@ -185,6 +203,7 @@ export function SettingsDialog({
     const isConnected = await testConnection({
       apiUrl: nextApiUrl,
       authToken: nextAuthToken,
+      researchAgentKey: researchAgentKeyInput.trim(),
     })
     if (isConnected) {
       setApiUrl(nextApiUrl)
@@ -207,6 +226,11 @@ export function SettingsDialog({
     onRefresh?.()
   }
 
+  const handleSaveResearchAgentKey = () => {
+    setResearchAgentKey(researchAgentKeyInput.trim())
+    onRefresh?.()
+  }
+
   const handleCopyAuthToken = async () => {
     if (!authTokenInput.trim()) return
     try {
@@ -215,6 +239,42 @@ export function SettingsDialog({
       setTimeout(() => setAuthTokenCopied(false), 1500)
     } catch (error) {
       console.error('Failed to copy auth token:', error)
+    }
+  }
+
+  const handleCopyResearchAgentKey = async () => {
+    if (!researchAgentKeyInput.trim()) return
+    try {
+      await navigator.clipboard.writeText(researchAgentKeyInput)
+      setResearchAgentKeyCopied(true)
+      setTimeout(() => setResearchAgentKeyCopied(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy RESEARCH_AGENT_KEY:', error)
+    }
+  }
+
+  const handleCopySetupLink = async () => {
+    const nextApiUrl = apiUrlInput.trim()
+    const nextAuthToken = authTokenInput.trim()
+    if (!nextApiUrl || !nextAuthToken) return
+
+    const confirmed = window.confirm(
+      'You are copying a setup link with the full auth token. Anyone with this link can access this entire session. Continue?'
+    )
+    if (!confirmed) return
+
+    const setupLink = createSetupShareLink({
+      apiUrl: nextApiUrl,
+      authToken: nextAuthToken,
+    })
+    if (!setupLink) return
+
+    try {
+      await navigator.clipboard.writeText(setupLink)
+      setSetupLinkCopied(true)
+      setTimeout(() => setSetupLinkCopied(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy setup link:', error)
     }
   }
 
@@ -291,7 +351,39 @@ export function SettingsDialog({
           icon: LayoutGrid,
           type: 'select' as const,
           options: ['expert', 'novice'],
-          value: settings.appearance.starterCardFlavor || 'expert',
+          value: settings.appearance.starterCardFlavor || 'novice',
+        },
+        {
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatContextPanel !== false,
+        },
+        {
+          id: 'showChatArtifacts',
+          label: 'Show Artifacts',
+          description: 'Show or hide artifacts panel in chat views',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatArtifacts === true,
+        },
+        {
+          id: 'chatCollapseAllChats',
+          label: 'Collapse All Chats',
+          description: 'Render chat history in collapsed mode by default',
+          icon: EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.chatCollapseAllChats === true,
+        },
+        {
+          id: 'chatCollapseArtifactsInChat',
+          label: 'Collapse Artifacts In Chat',
+          description: 'Render artifacts collapsed inside chat messages',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.chatCollapseArtifactsInChat === true,
         },
         {
           id: 'appearanceAdvanced',
@@ -350,6 +442,14 @@ export function SettingsDialog({
           icon: FileText,
           type: 'toggle' as const,
           value: settings.developer?.showPlanPanel === true,
+        },
+        {
+          id: 'showSidebarRunsSweepsPreview',
+          label: 'Sidebar Runs/Sweeps Preview',
+          description: 'Show or hide recent Runs and Sweeps preview blocks in the desktop sidebar',
+          icon: Eye,
+          type: 'toggle' as const,
+          value: settings.developer?.showSidebarRunsSweepsPreview !== false,
         },
       ],
     },
@@ -841,6 +941,10 @@ export function SettingsDialog({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
+                if (item.id === 'showChatArtifacts') updateAppearanceSettings({ showChatArtifacts: checked })
+                if (item.id === 'chatCollapseAllChats') updateAppearanceSettings({ chatCollapseAllChats: checked })
+                if (item.id === 'chatCollapseArtifactsInChat') updateAppearanceSettings({ chatCollapseArtifactsInChat: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
                     ...settings,
@@ -853,6 +957,12 @@ export function SettingsDialog({
                     developer: { ...settings.developer, showPlanPanel: checked },
                   })
                 }
+                if (item.id === 'showSidebarRunsSweepsPreview') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showSidebarRunsSweepsPreview: checked },
+                  })
+                }
               }}
             />
           </div>
@@ -861,25 +971,17 @@ export function SettingsDialog({
         if (item.id === 'appearanceAdvanced') {
           return (
             <div className="rounded-lg bg-secondary/50 p-4">
-              <button
-                type="button"
-                onClick={() => setAppearanceAdvancedOpen((prev) => !prev)}
-                className="flex w-full items-center justify-between text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
-                    <Square className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Advanced Appearance</p>
-                    <p className="text-xs text-muted-foreground">Numeric control for fonts and buttons</p>
-                  </div>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                  <Square className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${appearanceAdvancedOpen ? 'rotate-90' : ''}`} />
-              </button>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Advanced Appearance</p>
+                  <p className="text-xs text-muted-foreground">Numeric control for fonts and buttons</p>
+                </div>
+              </div>
 
-              {appearanceAdvancedOpen && (
-                <div className="mt-4 space-y-3 border-t border-border pt-4">
+              <div className="mt-4 space-y-3 border-t border-border pt-4">
                   <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
                     <div>
                       <Label htmlFor="sidebar-new-chat-toggle-dialog" className="text-xs">Sidebar New Chat Button</Label>
@@ -1109,7 +1211,6 @@ export function SettingsDialog({
                     </Button>
                   </div>
                 </div>
-              )}
             </div>
           )
         }
@@ -1212,6 +1313,69 @@ export function SettingsDialog({
                         Save
                       </Button>
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="research-agent-key" className="text-xs">RESEARCH_AGENT_KEY</Label>
+                    <p className="text-xs text-muted-foreground">Gateway key used by model provider requests</p>
+                    <div className="flex gap-2">
+                      <Input
+                        id="research-agent-key"
+                        type={showResearchAgentKey ? 'text' : 'password'}
+                        placeholder="Enter RESEARCH_AGENT_KEY..."
+                        value={researchAgentKeyInput}
+                        onChange={(e) => setResearchAgentKeyInput(e.target.value)}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowResearchAgentKey((prev) => !prev)}
+                        className="px-2"
+                        title={showResearchAgentKey ? 'Hide key' : 'Show key'}
+                      >
+                        {showResearchAgentKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        <span className="sr-only">{showResearchAgentKey ? 'Hide key' : 'Show key'}</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCopyResearchAgentKey}
+                        disabled={!researchAgentKeyInput.trim()}
+                        className="px-2"
+                        title="Copy RESEARCH_AGENT_KEY"
+                      >
+                        {researchAgentKeyCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSaveResearchAgentKey}
+                        disabled={researchAgentKeyInput.trim() === researchAgentKey}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                    <Label className="text-xs">Share Setup Link</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Copy a one-click setup link with this server URL and auth token.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopySetupLink}
+                      disabled={!apiUrlInput.trim() || !authTokenInput.trim()}
+                      className="w-full justify-center gap-2"
+                    >
+                      {setupLinkCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                      {setupLinkCopied ? 'Copied' : 'Copy Setup Link'}
+                    </Button>
+                    <p className="text-xs text-amber-700">
+                      Warning: This includes the full auth token. Anyone with the link gets full session access.
+                    </p>
                   </div>
 
                   {/* Connection Test */}

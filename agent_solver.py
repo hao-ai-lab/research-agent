@@ -44,7 +44,7 @@ def run_modal_solver(
             "apt-get update && apt-get install -y nodejs",
         )
         .pip_install("httpx")
-        .run_commands("npm install -g opencode || true")
+        .run_commands("npm install -g opencode-ai || true")
     )
 
     app = modal.App(f"research-agent-solver-{issue_number}")
@@ -253,7 +253,7 @@ def run_modal_pr_followup(
             "apt-get update && apt-get install -y nodejs",
         )
         .pip_install("httpx")
-        .run_commands("npm install -g opencode || true")
+        .run_commands("npm install -g opencode-ai || true")
     )
 
     app = modal.App(f"research-agent-pr-followup-{pr_number}")
