@@ -22,7 +22,7 @@ import {
 } from '@/lib/api-client'
 import type { MessagePartData } from '@/lib/api'
 import type { PromptProvenance } from '@/lib/types'
-import type { ChatMode } from '@/components/chat-input'
+import type { ChatMode } from '@/components/chat-input-simple'
 
 export interface ToolCallState {
     id: string

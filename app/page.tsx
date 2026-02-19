@@ -19,7 +19,7 @@ import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { TerminalView } from '@/components/terminal-view'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
-import type { ChatMode } from '@/components/chat-input'
+import type { ChatMode } from '@/components/chat-input-simple'
 import { mockMemoryRules, mockInsightCharts, defaultTags } from '@/lib/mock-data'
 import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
@@ -323,12 +323,7 @@ export default function ResearchChat() {
     })
   }, [alerts])
 
-  const handleTabChange = useCallback((tab: HomeTab | 'contextual') => {
-    if (tab === 'contextual') {
-      router.push('/contextual')
-      return
-    }
-
+  const handleTabChange = useCallback((tab: HomeTab) => {
     setActiveTab(tab)
     setSelectedRun(null)
     setShowVisibilityManage(false)
