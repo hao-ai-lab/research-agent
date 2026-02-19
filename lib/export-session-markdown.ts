@@ -1,10 +1,10 @@
-import type { ChatMessage } from '@/lib/types'
+import type { ChatMessageData } from '@/lib/api'
 
 /**
  * Convert a list of chat messages into a shareable Markdown string.
  */
 export function exportSessionToMarkdown(
-  messages: ChatMessage[],
+  messages: ChatMessageData[],
   sessionTitle?: string
 ): string {
   const title = sessionTitle?.trim() || 'Untitled Session'
@@ -21,7 +21,7 @@ export function exportSessionToMarkdown(
 
   for (const message of messages) {
     const roleLabel = message.role === 'user' ? '🧑 **You**' : '🤖 **Assistant**'
-    const time = message.timestamp.toLocaleString()
+    const time = new Date(message.timestamp * 1000).toLocaleString()
 
     lines.push(`## ${roleLabel}`)
     lines.push(`*${time}*`)
@@ -39,22 +39,22 @@ export function exportSessionToMarkdown(
           lines.push('</details>')
           lines.push('')
         } else if (part.type === 'tool') {
-          const toolLabel = part.toolName || 'Tool'
-          const status = part.toolState || 'unknown'
+          const toolLabel = part.tool_name || 'Tool'
+          const status = part.tool_state || 'unknown'
           lines.push('<details>')
           lines.push(`<summary>🔧 ${toolLabel} (${status})</summary>`)
           lines.push('')
-          if (part.toolInput) {
+          if (part.tool_input) {
             lines.push('**Input:**')
             lines.push('```')
-            lines.push(part.toolInput)
+            lines.push(part.tool_input)
             lines.push('```')
             lines.push('')
           }
-          if (part.toolOutput) {
+          if (part.tool_output) {
             lines.push('**Output:**')
             lines.push('```')
-            lines.push(part.toolOutput)
+            lines.push(part.tool_output)
             lines.push('```')
             lines.push('')
           }
