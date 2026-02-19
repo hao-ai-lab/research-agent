@@ -370,14 +370,6 @@ export function SettingsDialog({
           value: settings.appearance.showChatArtifacts === true,
         },
         {
-          id: 'chatCollapseAllChats',
-          label: 'Collapse All Chats',
-          description: 'Render chat history in collapsed mode by default',
-          icon: EyeOff,
-          type: 'toggle' as const,
-          value: settings.appearance.chatCollapseAllChats === true,
-        },
-        {
           id: 'chatCollapseArtifactsInChat',
           label: 'Collapse Artifacts In Chat',
           description: 'Render artifacts collapsed inside chat messages',
@@ -943,7 +935,6 @@ export function SettingsDialog({
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
                 if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'showChatArtifacts') updateAppearanceSettings({ showChatArtifacts: checked })
-                if (item.id === 'chatCollapseAllChats') updateAppearanceSettings({ chatCollapseAllChats: checked })
                 if (item.id === 'chatCollapseArtifactsInChat') updateAppearanceSettings({ chatCollapseArtifactsInChat: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
