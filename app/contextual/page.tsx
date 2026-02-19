@@ -14,21 +14,11 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  Rows3,
-  SlidersHorizontal,
   Sparkles,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { DesktopSidebar } from '@/components/desktop-sidebar'
 import { NavPage } from '@/components/nav-page'
 import { ConnectedChatView, useChatSession } from '@/components/connected-chat-view'
@@ -43,6 +33,7 @@ import { extractContextReferences } from '@/lib/contextual-chat'
 import type { ChatMode } from '@/components/chat-input'
 import type { Sweep as UiSweep } from '@/lib/types'
 import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
+import { useAppSettings } from '@/lib/app-settings'
 
 const DESKTOP_SIDEBAR_MIN_WIDTH = 72
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
@@ -50,6 +41,7 @@ const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
 
 export default function ContextualChatPage() {
   const router = useRouter()
+  const { settings } = useAppSettings()
   const { runs } = useRuns()
   const { alerts } = useAlerts()
   const chatSession = useChatSession()
@@ -71,8 +63,8 @@ export default function ContextualChatPage() {
   const [desktopSidebarHidden, setDesktopSidebarHidden] = useState(false)
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
   const [sweeps, setSweeps] = useState<ApiSweep[]>([])
-  const [collapseChats, setCollapseChats] = useState(true)
-  const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+  const collapseChats = settings.appearance.chatCollapseAllChats === true
+  const collapseArtifactsInChat = settings.appearance.chatCollapseArtifactsInChat === true
   const [showOpsPanel, setShowOpsPanel] = useState(true)
   const [showContextPanel, setShowContextPanel] = useState(true)
   const [diffExplorerOpen, setDiffExplorerOpen] = useState(false)
@@ -247,37 +239,6 @@ export default function ContextualChatPage() {
                   <FileText className="h-3.5 w-3.5" />
                   Git Explorer
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      title="Chat view settings"
-                    >
-                      <SlidersHorizontal className="h-4 w-4" />
-                      <span className="sr-only">Chat view settings</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuLabel>Chat View</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuCheckboxItem
-                      checked={collapseChats}
-                      onCheckedChange={(checked) => setCollapseChats(Boolean(checked))}
-                    >
-                      <Rows3 className="mr-1 h-3.5 w-3.5" />
-                      Collapse chats
-                    </DropdownMenuCheckboxItem>
-                    <DropdownMenuCheckboxItem
-                      checked={collapseArtifactsInChat}
-                      onCheckedChange={(checked) => setCollapseArtifactsInChat(Boolean(checked))}
-                    >
-                      <LayoutGrid className="mr-1 h-3.5 w-3.5" />
-                      Collapse artifacts
-                    </DropdownMenuCheckboxItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
               </div>
             </div>
 

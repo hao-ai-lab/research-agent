@@ -31,6 +31,10 @@ const STORAGE_KEY_APPEARANCE_CUSTOM_PRIMARY_COLOR =
   "research-agent-appearance-custom-primary-color";
 const STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR =
   "research-agent-appearance-custom-accent-color";
+const LEGACY_STORAGE_KEY_CHAT_SHOW_ARTIFACTS = "chatShowArtifacts";
+const LEGACY_STORAGE_KEY_CHAT_COLLAPSE_CHATS = "chatCollapseChats";
+const LEGACY_STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS =
+  "chatCollapseArtifactsInChat";
 
 export const defaultAppSettings: AppSettings = {
   appearance: {
@@ -53,6 +57,9 @@ export const defaultAppSettings: AppSettings = {
     showStarterCards: true,
     starterCardFlavor: "novice",
     showChatContextPanel: true,
+    showChatArtifacts: false,
+    chatCollapseAllChats: false,
+    chatCollapseArtifactsInChat: false,
     showSidebarNewChatButton: true,
     mobileEnterToNewline: false,
   },
@@ -317,6 +324,15 @@ function readStoredSettings(): AppSettings {
     const storedCustomAccentColor = sanitizeHexColor(
       localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR),
     );
+    const legacyShowArtifacts = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_SHOW_ARTIFACTS,
+    );
+    const legacyCollapseChats = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_COLLAPSE_CHATS,
+    );
+    const legacyCollapseArtifacts = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS,
+    );
 
     const resolvedTheme = isValidTheme(storedTheme)
       ? storedTheme
@@ -392,6 +408,21 @@ function readStoredSettings(): AppSettings {
         showChatContextPanel:
           parsed?.appearance?.showChatContextPanel ??
           defaultAppSettings.appearance.showChatContextPanel,
+        showChatArtifacts:
+          parsed?.appearance?.showChatArtifacts ??
+          (legacyShowArtifacts != null
+            ? legacyShowArtifacts === "true"
+            : defaultAppSettings.appearance.showChatArtifacts),
+        chatCollapseAllChats:
+          parsed?.appearance?.chatCollapseAllChats ??
+          (legacyCollapseChats != null
+            ? legacyCollapseChats === "true"
+            : defaultAppSettings.appearance.chatCollapseAllChats),
+        chatCollapseArtifactsInChat:
+          parsed?.appearance?.chatCollapseArtifactsInChat ??
+          (legacyCollapseArtifacts != null
+            ? legacyCollapseArtifacts === "true"
+            : defaultAppSettings.appearance.chatCollapseArtifactsInChat),
         showSidebarNewChatButton:
           parsed?.appearance?.showSidebarNewChatButton ??
           defaultAppSettings.appearance.showSidebarNewChatButton,

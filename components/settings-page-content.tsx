@@ -346,6 +346,30 @@ export function SettingsPageContent({
           value: settings.appearance.showChatContextPanel !== false,
         },
         {
+          id: 'showChatArtifacts',
+          label: 'Show Artifacts',
+          description: 'Show or hide artifacts panel in chat views',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatArtifacts === true,
+        },
+        {
+          id: 'chatCollapseAllChats',
+          label: 'Collapse All Chats',
+          description: 'Render chat history in collapsed mode by default',
+          icon: EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.chatCollapseAllChats === true,
+        },
+        {
+          id: 'chatCollapseArtifactsInChat',
+          label: 'Collapse Artifacts In Chat',
+          description: 'Render artifacts collapsed inside chat messages',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.chatCollapseArtifactsInChat === true,
+        },
+        {
           id: 'mobileEnterToNewline',
           label: 'Mobile Enter Key Insert New Line',
           description: 'On mobile, Enter inserts newline instead of sending (send button to send)',
@@ -885,6 +909,9 @@ export function SettingsPageContent({
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
                 if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
+                if (item.id === 'showChatArtifacts') updateAppearanceSettings({ showChatArtifacts: checked })
+                if (item.id === 'chatCollapseAllChats') updateAppearanceSettings({ chatCollapseAllChats: checked })
+                if (item.id === 'chatCollapseArtifactsInChat') updateAppearanceSettings({ chatCollapseArtifactsInChat: checked })
                 if (item.id === 'mobileEnterToNewline') updateAppearanceSettings({ mobileEnterToNewline: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
