@@ -2527,20 +2527,26 @@ export function RunsView({
           <div className="border-b border-border px-5 py-4">
             <div className="flex items-center justify-between gap-2">
               <DialogTitle className="text-sm font-semibold text-foreground">Create Run</DialogTitle>
-              {sortedRunsForCreate.length > 0 && (
-                <Select value={runCreateFromRunId ?? undefined} onValueChange={handleDuplicateRun}>
-                  <SelectTrigger className={`h-7 w-auto gap-1 px-2 text-[11px] border-none ${runCreateFromRunId
-                    ? 'bg-accent/20 text-accent hover:bg-accent/30'
-                    : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
-                    }`}>
-                    <Copy className="h-3 w-3" />
-                    <span className="hidden sm:inline"><SelectValue placeholder="Create from..." /></span>
-                  </SelectTrigger>
-                  <SelectContent align="end" className="max-w-[360px]">
-                    <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      Create from run...
-                    </div>
-                    {sortedRunsForCreate.map((run) => {
+              <Select
+                value={runCreateFromRunId ?? undefined}
+                onValueChange={handleDuplicateRun}
+                disabled={sortedRunsForCreate.length === 0}
+              >
+                <SelectTrigger className={`h-7 w-auto gap-1 px-2 text-[11px] border-none ${runCreateFromRunId
+                  ? 'bg-accent/20 text-accent hover:bg-accent/30'
+                  : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                  }`}>
+                  <Copy className="h-3 w-3" />
+                  <span className="hidden sm:inline"><SelectValue placeholder="Create from..." /></span>
+                </SelectTrigger>
+                <SelectContent align="end" className="max-w-[360px]">
+                  <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    Create from run...
+                  </div>
+                  {sortedRunsForCreate.length === 0 ? (
+                    <div className="px-2 py-2 text-xs text-muted-foreground">No previous runs yet.</div>
+                  ) : (
+                    sortedRunsForCreate.map((run) => {
                       const createdAt = run.createdAt || run.startTime
                       const createdAtLabel = createdAt
                         ? new Date(createdAt).toLocaleDateString(undefined, {
@@ -2562,10 +2568,10 @@ export function RunsView({
                           </div>
                         </SelectItem>
                       )
-                    })}
-                  </SelectContent>
-                </Select>
-              )}
+                    })
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Create a single run and optionally attach it to an existing sweep.
