@@ -62,6 +62,7 @@ export const defaultAppSettings: AppSettings = {
     chatCollapseArtifactsInChat: false,
     showSidebarNewChatButton: true,
     mobileEnterToNewline: false,
+    thinkingDisplayMode: 'collapsible',
   },
   integrations: {},
   notifications: {
@@ -442,6 +443,10 @@ function readStoredSettings(): AppSettings {
         mobileEnterToNewline:
           parsed?.appearance?.mobileEnterToNewline ??
           defaultAppSettings.appearance.mobileEnterToNewline,
+        thinkingDisplayMode:
+          (parsed?.appearance?.thinkingDisplayMode === 'collapsible' || parsed?.appearance?.thinkingDisplayMode === 'inline')
+            ? parsed.appearance.thinkingDisplayMode
+            : defaultAppSettings.appearance.thinkingDisplayMode,
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,
       notifications: {

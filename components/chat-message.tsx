@@ -21,6 +21,7 @@ import { SweepStatus } from './sweep-status'
 import { CodeOutputBox } from './code-output-box'
 import type { ExperimentRun } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
+import { useAppSettings } from '@/lib/app-settings'
 import {
   REFERENCE_TYPE_BACKGROUND_MAP,
   REFERENCE_TYPE_COLOR_MAP,
@@ -118,6 +119,8 @@ export function ChatMessage({
   onReplyToSelection,
   previousUserContent,
 }: ChatMessageProps) {
+  const { settings } = useAppSettings()
+  const thinkingInline = settings.appearance.thinkingDisplayMode === 'inline'
   const [isThinkingOpen, setIsThinkingOpen] = useState(false)
   const [isChartOpen, setIsChartOpen] = useState(true)
   const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false)
@@ -620,26 +623,42 @@ export function ChatMessage({
         ) : (
           // Legacy: single thinking block
           message.thinking && (
-            <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
-              <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-                {isThinkingOpen ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-                <Brain className="h-3 w-3" />
-                <span>Thinking process</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2">
-                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
+            thinkingInline ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Brain className="h-3 w-3" />
+                  <span>Thought</span>
+                </div>
+                <div className="px-1 py-1 text-xs leading-relaxed text-muted-foreground">
                   {message.thinking.split('\n').map((line, i) => (
                     <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                       {line}
                     </p>
                   ))}
                 </div>
-              </CollapsibleContent>
-            </Collapsible>
+              </div>
+            ) : (
+              <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
+                <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                  {isThinkingOpen ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
+                  <Brain className="h-3 w-3" />
+                  <span>Thinking process</span>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
+                    {message.thinking.split('\n').map((line, i) => (
+                      <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )
           )
         )}
 
@@ -753,9 +772,29 @@ function SavedPartRenderer({
   part: MessagePart
   renderMarkdown: (content: string) => React.ReactNode
 }) {
+  const { settings } = useAppSettings()
+  const thinkingInline = settings.appearance.thinkingDisplayMode === 'inline'
   const [isOpen, setIsOpen] = useState(false) // Default collapsed per user preference
 
   if (part.type === 'thinking') {
+    if (thinkingInline) {
+      return (
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Brain className="h-3 w-3" />
+            <span>Thought</span>
+          </div>
+          <div className="px-1 py-1 text-xs leading-relaxed text-muted-foreground">
+            {part.content.split('\n').map((line, i) => (
+              <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                {line}
+              </p>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
     return (
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">

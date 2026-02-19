@@ -110,6 +110,7 @@ export interface AppSettings {
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
     mobileEnterToNewline?: boolean;
+    thinkingDisplayMode?: 'collapsible' | 'inline';
   };
   integrations: {
     slack?: {

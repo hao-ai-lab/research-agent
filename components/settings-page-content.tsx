@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react'
 import {
   Bell,
+  Brain,
   Check,
   ChevronRight,
   Code,
@@ -376,6 +377,15 @@ export function SettingsPageContent({
           icon: Type,
           type: 'toggle' as const,
           value: settings.appearance.mobileEnterToNewline ?? false,
+        },
+        {
+          id: 'thinkingDisplayMode',
+          label: 'Thinking Display',
+          description: 'Show thinking as collapsible box or inline text',
+          icon: Brain,
+          type: 'select' as const,
+          options: ['collapsible', 'inline'],
+          value: settings.appearance.thinkingDisplayMode || 'collapsible',
         },
         {
           id: 'appearanceAdvanced',
@@ -877,6 +887,7 @@ export function SettingsPageContent({
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
                       if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
+                      if (item.id === 'thinkingDisplayMode') updateAppearanceSettings({ thinkingDisplayMode: option as 'collapsible' | 'inline' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
                       ? 'bg-accent text-accent-foreground'

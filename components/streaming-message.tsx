@@ -5,6 +5,7 @@ import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight }
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { CodeOutputBox } from '@/components/code-output-box'
+import { useAppSettings } from '@/lib/app-settings'
 
 interface StreamingMessageProps {
     streamingState: StreamingState
@@ -15,6 +16,8 @@ interface StreamingMessageProps {
  * Renders parts in order (thinking→tool→thinking→text) to show correct interleaving.
  */
 export function StreamingMessage({ streamingState }: StreamingMessageProps) {
+    const { settings } = useAppSettings()
+    const thinkingInline = settings.appearance.thinkingDisplayMode === 'inline'
     const { isStreaming, parts, thinkingContent, textContent, toolCalls } = streamingState
 
     if (!isStreaming) {
@@ -36,22 +39,39 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
                     // Legacy fallback: grouped thinking, tools, text
                     <>
                         {thinkingContent && (
-                            <>
-                                <div className="flex items-start gap-2">
-                                    <div className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                            thinkingInline ? (
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                         <Brain className="h-3 w-3 animate-pulse" />
                                         <span>Thinking...</span>
                                     </div>
+                                    <div className="px-1 py-1 text-xs leading-relaxed text-muted-foreground">
+                                        {thinkingContent.split('\n').map((line, i) => (
+                                            <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                                                {line}
+                                            </p>
+                                        ))}
+                                        <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
+                                    </div>
                                 </div>
-                                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
-                                    {thinkingContent.split('\n').map((line, i) => (
-                                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
-                                            {line}
-                                        </p>
-                                    ))}
-                                    <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
-                                </div>
-                            </>
+                            ) : (
+                                <>
+                                    <div className="flex items-start gap-2">
+                                        <div className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                                            <Brain className="h-3 w-3 animate-pulse" />
+                                            <span>Thinking...</span>
+                                        </div>
+                                    </div>
+                                    <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
+                                        {thinkingContent.split('\n').map((line, i) => (
+                                            <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                                                {line}
+                                            </p>
+                                        ))}
+                                        <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
+                                    </div>
+                                </>
+                            )
                         )}
                         {toolCalls.length > 0 && (
                             <div className="space-y-1">
@@ -110,6 +130,8 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
  * Detects "done" by checking if content has stopped changing.
  */
 function StreamingThinkingPart({ part }: { part: StreamingPart }) {
+    const { settings } = useAppSettings()
+    const thinkingInline = settings.appearance.thinkingDisplayMode === 'inline'
     const [isOpen, setIsOpen] = useState(true)
     const [isDone, setIsDone] = useState(false)
     const prevContentRef = useRef(part.content)
@@ -127,6 +149,25 @@ function StreamingThinkingPart({ part }: { part: StreamingPart }) {
         }, 400)
         return () => clearTimeout(timer)
     }, [part.content, isDone])
+
+    if (thinkingInline) {
+        return (
+            <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Brain className={`h-3 w-3 ${!isDone ? 'animate-pulse' : ''}`} />
+                    <span>{isDone ? 'Thought' : 'Thinking...'}</span>
+                </div>
+                <div className="px-1 py-1 text-xs leading-relaxed text-muted-foreground">
+                    {part.content.split('\n').map((line, i) => (
+                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                            {line}
+                        </p>
+                    ))}
+                    {!isDone && <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />}
+                </div>
+            </div>
+        )
+    }
 
     return (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
