@@ -21,6 +21,7 @@ import { SweepStatus } from './sweep-status'
 import { CodeOutputBox } from './code-output-box'
 import type { ExperimentRun } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
+import { useAppSettings } from '@/lib/app-settings'
 import {
   REFERENCE_TYPE_BACKGROUND_MAP,
   REFERENCE_TYPE_COLOR_MAP,
@@ -118,7 +119,9 @@ export function ChatMessage({
   onReplyToSelection,
   previousUserContent,
 }: ChatMessageProps) {
-  const [isThinkingOpen, setIsThinkingOpen] = useState(false)
+  const { settings } = useAppSettings()
+  const thinkingMode = settings.appearance.thinkingDisplayMode || 'inline'
+  const [isThinkingOpen, setIsThinkingOpen] = useState(thinkingMode === 'expand')
   const [isChartOpen, setIsChartOpen] = useState(true)
   const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false)
   const [selectionReplyUi, setSelectionReplyUi] = useState<{
@@ -620,26 +623,42 @@ export function ChatMessage({
         ) : (
           // Legacy: single thinking block
           message.thinking && (
-            <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
-              <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-                {isThinkingOpen ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-                <Brain className="h-3 w-3" />
-                <span>Thinking process</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2">
-                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground">
+            thinkingMode === 'inline' ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Brain className="h-3 w-3" />
+                  <span>Thought</span>
+                </div>
+                <div className="px-1 py-1 leading-relaxed text-muted-foreground" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
                   {message.thinking.split('\n').map((line, i) => (
                     <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                       {line}
                     </p>
                   ))}
                 </div>
-              </CollapsibleContent>
-            </Collapsible>
+              </div>
+            ) : (
+              <Collapsible open={isThinkingOpen} onOpenChange={setIsThinkingOpen}>
+                <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                  {isThinkingOpen ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
+                  <Brain className="h-3 w-3" />
+                  <span>Thinking process</span>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+                    {message.thinking.split('\n').map((line, i) => (
+                      <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )
           )
         )}
 
@@ -753,9 +772,34 @@ function SavedPartRenderer({
   part: MessagePart
   renderMarkdown: (content: string) => React.ReactNode
 }) {
-  const [isOpen, setIsOpen] = useState(false) // Default collapsed per user preference
+  const { settings } = useAppSettings()
+  const thinkingMode = settings.appearance.thinkingDisplayMode || 'inline'
+  const toolMode = settings.appearance.toolDisplayMode || 'expand'
+  const [isOpen, setIsOpen] = useState(() => {
+    if (part.type === 'thinking') return thinkingMode === 'expand'
+    if (part.type === 'tool') return toolMode === 'expand'
+    return false
+  })
 
   if (part.type === 'thinking') {
+    if (thinkingMode === 'inline') {
+      return (
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Brain className="h-3 w-3" />
+            <span>Thought</span>
+          </div>
+          <div className="px-1 py-1 leading-relaxed text-muted-foreground" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+            {part.content.split('\n').map((line, i) => (
+              <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                {line}
+              </p>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
     return (
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleTrigger className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
@@ -773,7 +817,7 @@ function SavedPartRenderer({
           )}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
-          <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
+          <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
             {part.content.split('\n').map((line, i) => (
               <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                 {line}
@@ -812,6 +856,50 @@ function SavedPartRenderer({
       }
     }
 
+    const toolContent = (part.toolInput || part.toolOutput || part.content) ? (
+      <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+        {part.toolInput && (
+          <div>
+            <span className="font-medium text-foreground/70">Input:</span>
+            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
+          </div>
+        )}
+        {part.toolOutput && (
+          <div>
+            <span className="font-medium text-foreground/70">Output:</span>
+            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
+          </div>
+        )}
+        {part.content && !part.toolInput && !part.toolOutput && (
+          <pre className="whitespace-pre-wrap break-all overflow-hidden">{part.content}</pre>
+        )}
+        {(part.toolStartedAt || part.toolEndedAt) && (
+          <div className="text-muted-foreground/80">
+            {part.toolStartedAt && <div>Start: {formatToolTimestamp(part.toolStartedAt)}</div>}
+            {part.toolEndedAt && <div>End: {formatToolTimestamp(part.toolEndedAt)}</div>}
+          </div>
+        )}
+      </div>
+    ) : null
+
+    if (toolMode === 'inline') {
+      return (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {getStatusIcon()}
+            <Wrench className="h-3 w-3" />
+            <span>{part.toolName || 'Tool'}</span>
+            <span className="text-muted-foreground/60">•</span>
+            <span className={part.toolState === 'completed' ? 'text-green-500' : part.toolState === 'error' ? 'text-red-500' : ''}>
+              {getStatusText()}
+            </span>
+            {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
+          </div>
+          {toolContent}
+        </div>
+      )
+    }
+
     return (
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleTrigger className="flex w-full items-center justify-start gap-2 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
@@ -831,31 +919,7 @@ function SavedPartRenderer({
           )}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2">
-          {(part.toolInput || part.toolOutput || part.content) && (
-            <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
-              {part.toolInput && (
-                <div>
-                  <span className="font-medium text-foreground/70">Input:</span>
-                  <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
-                </div>
-              )}
-              {part.toolOutput && (
-                <div>
-                  <span className="font-medium text-foreground/70">Output:</span>
-                  <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
-                </div>
-              )}
-              {part.content && !part.toolInput && !part.toolOutput && (
-                <pre className="whitespace-pre-wrap break-all overflow-hidden">{part.content}</pre>
-              )}
-              {(part.toolStartedAt || part.toolEndedAt) && (
-                <div className="text-muted-foreground/80">
-                  {part.toolStartedAt && <div>Start: {formatToolTimestamp(part.toolStartedAt)}</div>}
-                  {part.toolEndedAt && <div>End: {formatToolTimestamp(part.toolEndedAt)}</div>}
-                </div>
-              )}
-            </div>
-          )}
+          {toolContent}
         </CollapsibleContent>
       </Collapsible>
     )

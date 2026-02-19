@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react'
 import {
   Bell,
+  Brain,
   Check,
   ChevronRight,
   Code,
@@ -28,6 +29,7 @@ import {
   X,
   Bug,
   FileText,
+  Wrench,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -114,6 +116,9 @@ export function SettingsPageContent({
   )
   const [wildLoopHistoryBoxHeightInput, setWildLoopHistoryBoxHeightInput] = useState<string>(
     settings.appearance.wildLoopHistoryBoxHeightPx?.toString() ?? ''
+  )
+  const [thinkingToolFontSizeInput, setThinkingToolFontSizeInput] = useState<string>(
+    settings.appearance.thinkingToolFontSizePx?.toString() ?? ''
   )
 
   React.useEffect(() => {
@@ -329,16 +334,8 @@ export function SettingsPageContent({
           label: 'Starter Cards',
           description: 'Show contextual prompt cards on new chats',
           icon: LayoutGrid,
-          type: 'toggle' as const,
-          value: settings.appearance.showStarterCards !== false,
-        },
-        {
-          id: 'starterCardFlavor',
-          label: 'Starter Card Flavor',
-          description: 'Choose between expert context cards and novice quick-start prompts',
-          icon: LayoutGrid,
           type: 'select' as const,
-          options: ['expert', 'novice'],
+          options: ['none', 'novice', 'expert'],
           value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
@@ -380,6 +377,31 @@ export function SettingsPageContent({
           icon: Type,
           type: 'toggle' as const,
           value: settings.appearance.mobileEnterToNewline ?? false,
+        },
+        {
+          id: 'thinkingDisplayMode',
+          label: 'Thinking Display',
+          description: 'How thinking content is rendered',
+          icon: Brain,
+          type: 'select' as const,
+          options: ['collapse', 'expand', 'inline'],
+          value: settings.appearance.thinkingDisplayMode || 'inline',
+        },
+        {
+          id: 'toolDisplayMode',
+          label: 'Tool Display',
+          description: 'How tool call content is rendered',
+          icon: Wrench,
+          type: 'select' as const,
+          options: ['collapse', 'expand', 'inline'],
+          value: settings.appearance.toolDisplayMode || 'expand',
+        },
+        {
+          id: 'thinkingToolFontSize',
+          label: 'Thinking / Tool Font Size',
+          description: 'Font size in px for thinking and tool content (10–24)',
+          icon: Type,
+          type: 'custom' as const,
         },
         {
           id: 'appearanceAdvanced',
@@ -917,6 +939,9 @@ export function SettingsPageContent({
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
                       if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
+                      if (item.id === 'showStarterCards') updateAppearanceSettings({ starterCardFlavor: option as 'none' | 'novice' | 'expert' })
+                      if (item.id === 'thinkingDisplayMode') updateAppearanceSettings({ thinkingDisplayMode: option as 'collapse' | 'expand' | 'inline' })
+                      if (item.id === 'toolDisplayMode') updateAppearanceSettings({ toolDisplayMode: option as 'collapse' | 'expand' | 'inline' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
                       ? 'bg-accent text-accent-foreground'
@@ -952,7 +977,6 @@ export function SettingsPageContent({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
-                if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
                 if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'showChatArtifacts') updateAppearanceSettings({ showChatArtifacts: checked })
                 if (item.id === 'chatCollapseAllChats') updateAppearanceSettings({ chatCollapseAllChats: checked })
@@ -1005,21 +1029,58 @@ export function SettingsPageContent({
           </div>
         )
       case 'custom':
-        if (item.id === 'appearanceAdvanced') {
+        if (item.id === 'thinkingToolFontSize') {
           return (
             <div className="rounded-lg bg-secondary/50 p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
-                  <Square className="h-5 w-5 text-muted-foreground" />
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-3 md:min-w-0 md:flex-1">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                    <Type className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground md:truncate">{item.label}</p>
+                    <p className="text-xs text-muted-foreground md:truncate">{item.description}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">Advanced Appearance</p>
-                  <p className="text-xs text-muted-foreground">Numeric control for fonts and buttons</p>
-                </div>
+                <Input
+                  id="thinking-tool-font-size"
+                  type="number"
+                  min={10}
+                  max={24}
+                  value={thinkingToolFontSizeInput}
+                  onChange={(e) => {
+                    setThinkingToolFontSizeInput(e.target.value)
+                    const v = Number(e.target.value)
+                    if (Number.isFinite(v) && v >= 10 && v <= 24) {
+                      updateAppearanceSettings({ thinkingToolFontSizePx: v })
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value)
+                    if (Number.isFinite(v) && v >= 10 && v <= 24) {
+                      updateAppearanceSettings({ thinkingToolFontSizePx: v })
+                    } else {
+                      setThinkingToolFontSizeInput(settings.appearance.thinkingToolFontSizePx?.toString() ?? '14')
+                    }
+                  }}
+                  placeholder="14"
+                  className="h-8 w-24 text-xs"
+                />
+              </div>
+            </div>
+          )
+        }
+
+        if (item.id === 'appearanceAdvanced') {
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 px-1">
+                <Square className="h-4 w-4 text-muted-foreground" />
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Advanced</p>
               </div>
 
-              <div className="mt-4 space-y-3 border-t border-border pt-4">
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
+              <div className="rounded-lg bg-secondary/50 p-4">
+                  <div className="flex items-center justify-between gap-3 rounded-md px-1 py-1">
                     <div>
                       <Label htmlFor="sidebar-new-chat-toggle" className="text-xs">Sidebar New Chat Button</Label>
                       <p className="text-[11px] text-muted-foreground">Show or hide the New Chat button in the desktop sidebar</p>
@@ -1030,8 +1091,10 @@ export function SettingsPageContent({
                       onCheckedChange={(checked) => updateAppearanceSettings({ showSidebarNewChatButton: checked })}
                     />
                   </div>
+              </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="custom-font-size" className="text-xs">Font Size (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Overrides small/medium/large when set</p>
@@ -1048,8 +1111,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="custom-button-scale" className="text-xs">Button Scale (%) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Scales global button sizes</p>
@@ -1066,8 +1131,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="chat-toolbar-button-size" className="text-xs">Chat Bottom Buttons (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Mode/add/mention/command controls</p>
@@ -1084,8 +1151,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="chat-input-initial-height" className="text-xs">Chat Input Initial Height (px) <span className="font-normal text-muted-foreground">40–120</span></Label>
                       <p className="text-[11px] text-muted-foreground">Default one-line composer height before expansion</p>
@@ -1102,8 +1171,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="tool-box-height" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
@@ -1121,8 +1192,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="custom-primary-color" className="text-xs">Primary Color</Label>
                       <p className="text-[11px] text-muted-foreground">Hex color for --primary (example: #f59e0b)</p>
@@ -1136,8 +1209,27 @@ export function SettingsPageContent({
                       className="h-8 w-28 text-xs font-mono"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
+                      <Label htmlFor="custom-accent-color" className="text-xs">Accent Color</Label>
+                      <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
+                    </div>
+                    <Input
+                      id="custom-accent-color"
+                      value={accentColorInput}
+                      onChange={(e) => handleAccentColorChange(e.target.value)}
+                      onBlur={(e) => handleAccentColorBlur(e.target.value)}
+                      placeholder="#fb923c"
+                      className="h-8 w-28 text-xs font-mono"
+                    />
+                  </div>
+                  </div>
+
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-tasks-font-size" className="text-xs">Wild Loop Tasks Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
                       <p className="text-[11px] text-muted-foreground">tasks.md text size in the Wild Loop Debug panel</p>
@@ -1154,8 +1246,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-tasks-box-height" className="text-xs">Wild Loop Tasks Box Height (px) <span className="font-normal text-muted-foreground">160–1200</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of the tasks.md scroll area in the Wild Loop Debug panel</p>
@@ -1172,23 +1266,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
-
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="custom-accent-color" className="text-xs">Accent Color</Label>
-                      <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
-                    </div>
-                    <Input
-                      id="custom-accent-color"
-                      value={accentColorInput}
-                      onChange={(e) => handleAccentColorChange(e.target.value)}
-                      onBlur={(e) => handleAccentColorBlur(e.target.value)}
-                      placeholder="#fb923c"
-                      className="h-8 w-28 text-xs font-mono"
-                    />
                   </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-history-font-size" className="text-xs">Wild Loop History Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
                       <p className="text-[11px] text-muted-foreground">iteration history text size in the Wild Loop Debug panel</p>
@@ -1205,8 +1286,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-history-box-height" className="text-xs">Wild Loop History Box Height (px) <span className="font-normal text-muted-foreground">120–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of iteration history list in the Wild Loop Debug panel</p>
@@ -1222,6 +1305,7 @@ export function SettingsPageContent({
                       placeholder="300"
                       className="h-8 w-24 text-xs"
                     />
+                  </div>
                   </div>
 
                   <div className="flex justify-end">
@@ -1241,13 +1325,13 @@ export function SettingsPageContent({
                           wildLoopHistoryFontSizePx: null,
                           wildLoopTasksBoxHeightPx: null,
                           wildLoopHistoryBoxHeightPx: null,
+                          thinkingToolFontSizePx: null,
                         })
                       }
                     >
                       Reset Advanced
                     </Button>
                   </div>
-                </div>
             </div>
           )
         }

@@ -5,6 +5,7 @@ import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight }
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { CodeOutputBox } from '@/components/code-output-box'
+import { useAppSettings } from '@/lib/app-settings'
 
 interface StreamingMessageProps {
     streamingState: StreamingState
@@ -15,6 +16,8 @@ interface StreamingMessageProps {
  * Renders parts in order (thinking→tool→thinking→text) to show correct interleaving.
  */
 export function StreamingMessage({ streamingState }: StreamingMessageProps) {
+    const { settings } = useAppSettings()
+    const thinkingMode = settings.appearance.thinkingDisplayMode || 'inline'
     const { isStreaming, parts, thinkingContent, textContent, toolCalls } = streamingState
 
     if (!isStreaming) {
@@ -36,22 +39,39 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
                     // Legacy fallback: grouped thinking, tools, text
                     <>
                         {thinkingContent && (
-                            <>
-                                <div className="flex items-start gap-2">
-                                    <div className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                            thinkingMode === 'inline' ? (
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                         <Brain className="h-3 w-3 animate-pulse" />
                                         <span>Thinking...</span>
                                     </div>
+                                    <div className="px-1 py-1 leading-relaxed text-muted-foreground" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+                                        {thinkingContent.split('\n').map((line, i) => (
+                                            <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                                                {line}
+                                            </p>
+                                        ))}
+                                        <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
+                                    </div>
                                 </div>
-                                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
-                                    {thinkingContent.split('\n').map((line, i) => (
-                                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
-                                            {line}
-                                        </p>
-                                    ))}
-                                    <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
-                                </div>
-                            </>
+                            ) : (
+                                <>
+                                    <div className="flex items-start gap-2">
+                                        <div className="flex w-full items-center justify-start gap-1.5 rounded-lg bg-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                                            <Brain className="h-3 w-3 animate-pulse" />
+                                            <span>Thinking...</span>
+                                        </div>
+                                    </div>
+                                    <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
+                                        {thinkingContent.split('\n').map((line, i) => (
+                                            <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                                                {line}
+                                            </p>
+                                        ))}
+                                        <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />
+                                    </div>
+                                </>
+                            )
                         )}
                         {toolCalls.length > 0 && (
                             <div className="space-y-1">
@@ -110,7 +130,9 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
  * Detects "done" by checking if content has stopped changing.
  */
 function StreamingThinkingPart({ part }: { part: StreamingPart }) {
-    const [isOpen, setIsOpen] = useState(true)
+    const { settings } = useAppSettings()
+    const thinkingMode = settings.appearance.thinkingDisplayMode || 'inline'
+    const [isOpen, setIsOpen] = useState(thinkingMode !== 'collapse')
     const [isDone, setIsDone] = useState(false)
     const prevContentRef = useRef(part.content)
     const length_to_show = 150
@@ -122,11 +144,30 @@ function StreamingThinkingPart({ part }: { part: StreamingPart }) {
         const timer = setTimeout(() => {
             if (prevContentRef.current === part.content && part.content.length > 0) {
                 setIsDone(true)
-                setIsOpen(false)
+                if (thinkingMode !== 'inline') setIsOpen(false)
             }
         }, 400)
         return () => clearTimeout(timer)
-    }, [part.content, isDone])
+    }, [part.content, isDone, thinkingMode])
+
+    if (thinkingMode === 'inline') {
+        return (
+            <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Brain className={`h-3 w-3 ${!isDone ? 'animate-pulse' : ''}`} />
+                    <span>{isDone ? 'Thought' : 'Thinking...'}</span>
+                </div>
+                <div className="px-1 py-1 leading-relaxed text-muted-foreground" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+                    {part.content.split('\n').map((line, i) => (
+                        <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
+                            {line}
+                        </p>
+                    ))}
+                    {!isDone && <span className="inline-block w-1.5 h-3 bg-muted-foreground/50 animate-pulse ml-0.5" />}
+                </div>
+            </div>
+        )
+    }
 
     return (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -141,7 +182,7 @@ function StreamingThinkingPart({ part }: { part: StreamingPart }) {
                 )}
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
-                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
+                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
                     {part.content.split('\n').map((line, i) => (
                         <p key={i} className={line.trim() === '' ? 'h-2' : ''}>
                             {line}
@@ -155,19 +196,69 @@ function StreamingThinkingPart({ part }: { part: StreamingPart }) {
 }
 
 function StreamingToolPart({ part }: { part: StreamingPart }) {
-    const [isOpen, setIsOpen] = useState(true)
+    const { settings } = useAppSettings()
+    const toolMode = settings.appearance.toolDisplayMode || 'expand'
+    const [isOpen, setIsOpen] = useState(toolMode !== 'collapse')
     const state = part.toolState || 'pending'
     const durationLabel = formatDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
     const length_to_show = 150
 
-    // Auto-collapse when tool finishes (completed or error)
+    // Auto-collapse when tool finishes (completed or error) — only if in collapse/expand mode
     useEffect(() => {
+        if (toolMode === 'inline') return
         if (state === 'completed' || state === 'error') {
             // Small delay so user can briefly see the final state
             const timer = setTimeout(() => setIsOpen(false), 300)
             return () => clearTimeout(timer)
         }
-    }, [state])
+    }, [state, toolMode])
+
+    const toolContentBlock = (
+        <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+            {part.toolDescription && (
+                <div>
+                    <span className="font-medium text-foreground/70">Description:</span>{' '}
+                    <span>{part.toolDescription}</span>
+                </div>
+            )}
+            {part.toolInput && (
+                <div>
+                    <span className="font-medium text-foreground/70">Input:</span>
+                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
+                </div>
+            )}
+            {part.toolOutput && (
+                <div>
+                    <span className="font-medium text-foreground/70">Output:</span>
+                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
+                </div>
+            )}
+            {(part.toolStartedAt || part.toolEndedAt) && (
+                <div className="text-muted-foreground/80">
+                    {part.toolStartedAt && <div>Start: {formatTimestamp(part.toolStartedAt)}</div>}
+                    {part.toolEndedAt && <div>End: {formatTimestamp(part.toolEndedAt)}</div>}
+                </div>
+            )}
+        </div>
+    )
+
+    if (toolMode === 'inline') {
+        return (
+            <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <ToolStateIcon state={state} />
+                    <Wrench className="h-3 w-3" />
+                    <span>{part.toolName || 'Tool'}</span>
+                    <span className="text-muted-foreground/60">•</span>
+                    <span className={state === 'completed' ? 'text-green-500' : state === 'error' ? 'text-red-500' : ''}>
+                        {getToolStateLabel(state)}
+                    </span>
+                    {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
+                </div>
+                {toolContentBlock}
+            </div>
+        )
+    }
 
     return (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -188,32 +279,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                 )}
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2">
-                <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 text-xs leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto">
-                    {part.toolDescription && (
-                        <div>
-                            <span className="font-medium text-foreground/70">Description:</span>{' '}
-                            <span>{part.toolDescription}</span>
-                        </div>
-                    )}
-                    {part.toolInput && (
-                        <div>
-                            <span className="font-medium text-foreground/70">Input:</span>
-                            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
-                        </div>
-                    )}
-                    {part.toolOutput && (
-                        <div>
-                            <span className="font-medium text-foreground/70">Output:</span>
-                            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
-                        </div>
-                    )}
-                    {(part.toolStartedAt || part.toolEndedAt) && (
-                        <div className="text-muted-foreground/80">
-                            {part.toolStartedAt && <div>Start: {formatTimestamp(part.toolStartedAt)}</div>}
-                            {part.toolEndedAt && <div>End: {formatTimestamp(part.toolEndedAt)}</div>}
-                        </div>
-                    )}
-                </div>
+                {toolContentBlock}
             </CollapsibleContent>
         </Collapsible>
     )

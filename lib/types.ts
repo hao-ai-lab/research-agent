@@ -101,8 +101,8 @@ export interface AppSettings {
     wildLoopHistoryFontSizePx?: number | null;
     wildLoopTasksBoxHeightPx?: number | null;
     wildLoopHistoryBoxHeightPx?: number | null;
-    showStarterCards?: boolean;
-    starterCardFlavor?: "novice" | "expert";
+    showStarterCards?: boolean; // DEPRECATED: use starterCardFlavor 'none' instead
+    starterCardFlavor?: "none" | "novice" | "expert";
     showChatContextPanel?: boolean;
     showChatArtifacts?: boolean;
     chatCollapseAllChats?: boolean;
@@ -110,6 +110,9 @@ export interface AppSettings {
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
     mobileEnterToNewline?: boolean;
+    thinkingDisplayMode?: 'collapse' | 'expand' | 'inline';
+    toolDisplayMode?: 'collapse' | 'expand' | 'inline';
+    thinkingToolFontSizePx?: number | null;
   };
   integrations: {
     slack?: {

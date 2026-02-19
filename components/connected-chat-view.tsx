@@ -110,7 +110,7 @@ export function ConnectedChatView({
     const [excerptPreview, setExcerptPreview] = useState<{ fileName: string; text: string } | null>(null)
     const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
     const { settings, setSettings } = useAppSettings()
-    const showStarterCards = settings.appearance.showStarterCards !== false
+    const showStarterCards = settings.appearance.starterCardFlavor !== 'none'
     const showChatContextPanel = settings.appearance.showChatContextPanel !== false
     const starterCardFlavor = settings.appearance.starterCardFlavor || 'novice'
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
