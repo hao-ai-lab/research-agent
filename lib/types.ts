@@ -236,15 +236,6 @@ export interface WildModeSetup {
   evoSweepEnabled: boolean;
 }
 
-export interface WildLoopState {
-  phase: WildLoopPhase;
-  iteration: number;
-  goal: string | null;
-  sessionId: string | null;
-  startedAt: number | null;
-  isPaused: boolean;
-  termination: TerminationConditions;
-}
 
 export interface ChatMessage {
   id: string;

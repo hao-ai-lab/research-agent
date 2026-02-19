@@ -10,7 +10,6 @@ import {
   resumeWildV2,
   getWildV2Status,
   steerWildV2,
-  enqueueWildEvent,
 } from '@/lib/api'
 import type { WildV2Status, WildV2IterationHistory } from '@/lib/api'
 import type { Alert } from '@/lib/api'
@@ -186,17 +185,8 @@ export function useWildLoop(): UseWildLoopResult {
     console.warn('[wild-loop-v2] Queue remove not yet implemented')
   }, [])
 
-  const insertIntoQueue = useCallback(async (event: QueuedEvent, _index?: number) => {
-    try {
-      await enqueueWildEvent({
-        priority: event.priority,
-        title: event.title,
-        prompt: event.prompt,
-        type: event.type,
-      })
-    } catch (err) {
-      console.error('[wild-loop-v2] Insert into queue failed:', err)
-    }
+  const insertIntoQueue = useCallback(async (_event: QueuedEvent, _index?: number) => {
+    console.warn('[wild-loop-v2] Queue insert not yet implemented')
   }, [])
 
   // ---- Apply setup from WildModeSetupPanel ----
