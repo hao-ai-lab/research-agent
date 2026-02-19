@@ -209,8 +209,8 @@ export function useWildLoop(): UseWildLoopResult {
 
   // ---- Derive return values from V2 backend state ----
 
-  const isActive = status?.active ?? false
   const isPaused = status?.status === 'paused'
+  const isActive = (status?.active ?? false) || isPaused
   const v2Status = status?.status ?? null
   const iteration = status?.iteration ?? 0
   const maxIterations = status?.max_iterations ?? 25

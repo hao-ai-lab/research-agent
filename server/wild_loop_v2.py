@@ -307,7 +307,7 @@ class WildV2Engine:
             return {"active": False}
 
         d = self._session.to_dict()
-        d["active"] = self._session.status == "running"
+        d["active"] = self._session.status in ("running", "paused")
 
         # System health is served via /wild/v2/system-health endpoint
 

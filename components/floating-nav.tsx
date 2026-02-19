@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Pause, Play, Square, Target } from 'lucide-react'
+import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Pause, Play, Square, Target, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -53,6 +53,7 @@ interface WildLoopNavProps {
   onPause: () => void
   onResume: () => void
   onStop: () => void
+  onSteer?: (context: string) => void
 }
 
 interface FloatingNavProps {
@@ -312,8 +313,10 @@ function WildLoopNavDropdown({
   onPause,
   onResume,
   onStop,
+  onSteer,
 }: WildLoopNavProps) {
   const [elapsed, setElapsed] = useState('0:00')
+  const [steerText, setSteerText] = useState('')
 
   useEffect(() => {
     if (!startedAt) return
@@ -433,6 +436,37 @@ function WildLoopNavDropdown({
             Stop
           </Button>
         </div>
+        {/* Steer Input */}
+        {onSteer && (
+          <div className="border-t border-border/40 px-4 py-2.5">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (steerText.trim()) {
+                  onSteer(steerText.trim())
+                  setSteerText('')
+                }
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={steerText}
+                onChange={(e) => setSteerText(e.target.value)}
+                placeholder="Steer the agent…"
+                className="flex-1 rounded-md border border-border/60 bg-secondary/40 px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-violet-500/50 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!steerText.trim()}
+                className="h-7 w-7 p-0 bg-violet-600 hover:bg-violet-700 disabled:opacity-40"
+              >
+                <Send className="h-3 w-3" />
+              </Button>
+            </form>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   )

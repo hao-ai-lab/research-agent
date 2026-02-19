@@ -7,7 +7,7 @@ import { ChatInput, type ChatMode } from './chat-input-simple'
 import { StreamingMessage } from './streaming-message'
 import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
-import { AlertCircle, Loader2, PanelRightOpen, RefreshCw, WifiOff } from 'lucide-react'
+import { AlertCircle, Download, Loader2, PanelRightOpen, RefreshCw, Wifi, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
 import { WildModeSetupPanel } from '@/components/wild-mode-setup-panel'
 import { WildLoopDebugPanel } from '@/components/wild-loop-debug-panel'
@@ -21,6 +21,7 @@ import {
 import { useAppSettings } from '@/lib/app-settings'
 import { useChatSession } from '@/hooks/use-chat-session'
 import { useWebNotification } from '@/hooks/use-web-notification'
+import { useFavicon } from '@/hooks/use-favicon'
 import { useIsMobile } from '@/components/ui/use-mobile'
 import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
 import type {
@@ -144,6 +145,8 @@ export function ConnectedChatView({
         isConnected,
         isLoading,
         error,
+        retryState,
+        retryConnection,
         currentSessionId,
         currentSession,
         messages,
@@ -162,6 +165,9 @@ export function ConnectedChatView({
         provenanceMap,
         provenanceVersion,
     } = externalChatSession || internalChatSession
+
+    // Dynamic favicon indicator during retry
+    useFavicon(retryState?.isRetrying ?? false)
 
     // Always-current messages ref so streaming-end effect reads latest without re-triggering
     const messagesRef = useRef(messages)
@@ -353,7 +359,7 @@ export function ConnectedChatView({
         if (!wildReconnectRef.current) return  // wasn't streaming before
         wildReconnectRef.current = false  // reset
 
-        if (!wildLoop?.isActive) return  // not in wild mode
+        if (!wildLoop?.isActive && !wildLoop?.isPaused) return  // not in wild mode
         if (!currentSessionId) return
 
         let cancelled = false
@@ -450,39 +456,81 @@ export function ConnectedChatView({
 
     // Connection error state
     if (!isConnected && !isLoading) {
+        const isRetrying = retryState?.isRetrying ?? false
         return (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center">
-                <WifiOff className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold text-foreground">Cannot Connect to Backend</h3>
-                <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                    Make sure the backend server is running, or try Demo Mode to explore the app.
-                </p>
-                <code className="mt-4 rounded bg-secondary px-3 py-1 text-xs text-muted-foreground">
-                    python server.py --workdir /your/project/root
-                </code>
+                {isRetrying ? (
+                    <>
+                        <div className="relative mb-4">
+                            <Wifi className="h-12 w-12 text-amber-500 animate-pulse" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-foreground">Reconnecting…</h3>
+                        <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+                            Attempt {retryState!.attempt} of {retryState!.maxAttempts}
+                            {retryState!.nextRetryIn > 0 && (
+                                <> — retrying in {retryState!.nextRetryIn}s</>
+                            )}
+                            {retryState!.nextRetryIn === 0 && (
+                                <> — connecting…</>  
+                            )}
+                        </p>
+                        <div className="mt-4 w-48 rounded-full bg-secondary h-1.5 overflow-hidden">
+                            <div
+                                className="h-full bg-amber-500 transition-all duration-300"
+                                style={{ width: `${((retryState!.attempt - 1) / retryState!.maxAttempts) * 100}%` }}
+                            />
+                        </div>
+                        <div className="mt-6 flex flex-col gap-3">
+                            <button
+                                type="button"
+                                onClick={retryConnection}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                            >
+                                <RefreshCw className="h-4 w-4" />
+                                Retry Now
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onOpenSettings?.()}
+                                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                            >
+                                Configure Server URL
+                            </button>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <WifiOff className="h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-semibold text-foreground">Cannot Connect to Backend</h3>
+                        <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+                            Make sure the backend server is running, or try Demo Mode to explore the app.
+                        </p>
+                        <code className="mt-4 rounded bg-secondary px-3 py-1 text-xs text-muted-foreground">
+                            python server.py --workdir /your/project/root
+                        </code>
 
-                <div className="mt-6 flex flex-col gap-3">
-                    <button
-                        type="button"
-                        onClick={() => window.location.reload()}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-                    >
-                        <RefreshCw className="h-4 w-4" />
-                        Refresh
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onOpenSettings?.()
-                        }}
-                        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                    >
-                        Configure Server URL
-                    </button>
-                    <p className="text-xs text-muted-foreground">
-                        You can also change the server URL in Settings
-                    </p>
-                </div>
+                        <div className="mt-6 flex flex-col gap-3">
+                            <button
+                                type="button"
+                                onClick={retryConnection}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                            >
+                                <RefreshCw className="h-4 w-4" />
+                                Try Again
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onOpenSettings?.()}
+                                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                            >
+                                Configure Server URL
+                            </button>
+                            <p className="text-xs text-muted-foreground">
+                                You can also change the server URL in Settings
+                            </p>
+                        </div>
+                    </>
+                )}
             </div>
         )
     }
@@ -543,16 +591,9 @@ export function ConnectedChatView({
                 conversationKey={currentSessionId || 'new'}
                 layout={layout}
                 skills={skills}
-                isWildLoopActive={wildLoop?.isActive ?? false}
-                onSteer={wildLoop ? (msg, priority) => {
-                    wildLoop.insertIntoQueue({
-                        id: `steer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                        priority,
-                        title: msg.length > 50 ? msg.slice(0, 47) + '...' : msg,
-                        prompt: msg,
-                        type: 'steer',
-                        createdAt: Date.now(),
-                    }, 0) // Insert at front of queue
+                isWildLoopActive={(wildLoop?.isActive || wildLoop?.isPaused) ?? false}
+                onSteer={wildLoop ? (msg) => {
+                    wildLoop.steer(msg)
                 } : undefined}
                 onOpenReplyExcerpt={handleOpenReplyExcerpt}
                 contextTokenCount={contextTokenCount}
