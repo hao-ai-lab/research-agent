@@ -112,6 +112,7 @@ JOBS_DATA_FILE = ""
 ALERTS_DATA_FILE = ""
 SETTINGS_DATA_FILE = ""
 PLANS_DATA_FILE = ""
+JOURNEY_STATE_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
 FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
@@ -142,7 +143,7 @@ def requires_api_auth(path: str) -> bool:
 
 def init_paths(workdir: str):
     """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE, PLANS_DATA_FILE
+    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE, PLANS_DATA_FILE, JOURNEY_STATE_FILE
     WORKDIR = os.path.abspath(workdir)
     DATA_DIR = os.path.join(WORKDIR, ".agents")
     CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
@@ -150,6 +151,7 @@ def init_paths(workdir: str):
     ALERTS_DATA_FILE = os.path.join(DATA_DIR, "alerts.json")
     SETTINGS_DATA_FILE = os.path.join(DATA_DIR, "settings.json")
     PLANS_DATA_FILE = os.path.join(DATA_DIR, "plans.json")
+    JOURNEY_STATE_FILE = os.path.join(DATA_DIR, "journey_state.json")
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
     logger.info(f"Initialized with workdir: {WORKDIR}")
@@ -554,6 +556,55 @@ class JourneyNextActionsRequest(BaseModel):
     journey: dict
     max_actions: int = Field(default=3, ge=1, le=8)
 
+JOURNEY_ACTOR_VALUES = {"human", "agent", "system"}
+JOURNEY_REC_STATUS_VALUES = {"pending", "accepted", "rejected", "modified", "executed", "dismissed"}
+JOURNEY_PRIORITY_VALUES = {"low", "medium", "high", "critical"}
+JOURNEY_DECISION_STATUS_VALUES = {"recorded", "executed", "superseded"}
+
+
+class JourneyEventCreate(BaseModel):
+    kind: str
+    actor: str = "system"
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    chart_id: Optional[str] = None
+    recommendation_id: Optional[str] = None
+    decision_id: Optional[str] = None
+    note: Optional[str] = None
+    metadata: Optional[dict] = None
+    timestamp: Optional[float] = None
+
+
+class JourneyRecommendationCreate(BaseModel):
+    title: str
+    action: str
+    rationale: Optional[str] = None
+    source: str = "agent"
+    priority: str = "medium"
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    chart_id: Optional[str] = None
+    evidence_refs: List[str] = Field(default_factory=list)
+
+
+class JourneyRecommendationRespondRequest(BaseModel):
+    status: str
+    user_note: Optional[str] = None
+    modified_action: Optional[str] = None
+
+
+class JourneyDecisionCreate(BaseModel):
+    title: str
+    chosen_action: str
+    rationale: Optional[str] = None
+    outcome: Optional[str] = None
+    status: str = "recorded"
+    recommendation_id: Optional[str] = None
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    chart_id: Optional[str] = None
+
 
 # =============================================================================
 # Prompt Skill Manager
@@ -911,6 +962,9 @@ runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
 plans: Dict[str, dict] = {}
+journey_events: Dict[str, dict] = {}
+journey_recommendations: Dict[str, dict] = {}
+journey_decisions: Dict[str, dict] = {}
 wild_mode_enabled: bool = False
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
@@ -1148,6 +1202,90 @@ def load_plans_state():
                 }
         except Exception as e:
             logger.error(f"Error loading plans state: {e}")
+
+
+def save_journey_state():
+    """Persist journey events/recommendations/decisions to disk."""
+    try:
+        with open(JOURNEY_STATE_FILE, "w") as f:
+            json.dump(
+                {
+                    "events": list(journey_events.values()),
+                    "recommendations": list(journey_recommendations.values()),
+                    "decisions": list(journey_decisions.values()),
+                },
+                f,
+                indent=2,
+                default=str,
+            )
+    except Exception as e:
+        logger.error(f"Error saving journey state: {e}")
+
+
+def load_journey_state():
+    """Load journey events/recommendations/decisions from disk."""
+    global journey_events, journey_recommendations, journey_decisions
+    if os.path.exists(JOURNEY_STATE_FILE):
+        try:
+            with open(JOURNEY_STATE_FILE, "r") as f:
+                data = json.load(f)
+                loaded_events = data.get("events", [])
+                loaded_recommendations = data.get("recommendations", [])
+                loaded_decisions = data.get("decisions", [])
+                journey_events = {
+                    item["id"]: item
+                    for item in loaded_events
+                    if isinstance(item, dict) and item.get("id")
+                }
+                journey_recommendations = {
+                    item["id"]: item
+                    for item in loaded_recommendations
+                    if isinstance(item, dict) and item.get("id")
+                }
+                journey_decisions = {
+                    item["id"]: item
+                    for item in loaded_decisions
+                    if isinstance(item, dict) and item.get("id")
+                }
+        except Exception as e:
+            logger.error(f"Error loading journey state: {e}")
+
+
+def _journey_new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def _record_journey_event(
+    *,
+    kind: str,
+    actor: str = "system",
+    session_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    chart_id: Optional[str] = None,
+    recommendation_id: Optional[str] = None,
+    decision_id: Optional[str] = None,
+    note: Optional[str] = None,
+    metadata: Optional[dict] = None,
+    timestamp: Optional[float] = None,
+) -> dict:
+    safe_actor = actor if actor in JOURNEY_ACTOR_VALUES else "system"
+    event_id = _journey_new_id("jevt")
+    payload = {
+        "id": event_id,
+        "kind": str(kind or "unknown"),
+        "actor": safe_actor,
+        "session_id": session_id,
+        "run_id": run_id,
+        "chart_id": chart_id,
+        "recommendation_id": recommendation_id,
+        "decision_id": decision_id,
+        "note": note,
+        "metadata": metadata if isinstance(metadata, dict) else {},
+        "timestamp": float(timestamp if timestamp is not None else time.time()),
+    }
+    journey_events[event_id] = payload
+    save_journey_state()
+    return payload
 
 
 def _cluster_type_label(cluster_type: str) -> str:
@@ -2911,6 +3049,265 @@ async def journey_next_actions(req: JourneyNextActionsRequest):
         raise HTTPException(status_code=502, detail=f"Failed to generate next actions: {e}")
 
 
+def _journey_record_matches(item: dict, session_id: Optional[str], run_id: Optional[str]) -> bool:
+    if session_id and item.get("session_id") != session_id:
+        return False
+    if run_id and item.get("run_id") != run_id:
+        return False
+    return True
+
+
+def _journey_summary(filtered_events: List[dict], filtered_recommendations: List[dict], filtered_decisions: List[dict]) -> dict:
+    rec_total = len(filtered_recommendations)
+    accepted = sum(1 for r in filtered_recommendations if r.get("status") == "accepted")
+    executed = sum(1 for r in filtered_recommendations if r.get("status") == "executed")
+    rejected = sum(1 for r in filtered_recommendations if r.get("status") == "rejected")
+    return {
+        "events": len(filtered_events),
+        "recommendations": rec_total,
+        "decisions": len(filtered_decisions),
+        "accepted_recommendations": accepted,
+        "executed_recommendations": executed,
+        "rejected_recommendations": rejected,
+        "acceptance_rate": (accepted / rec_total) if rec_total > 0 else 0.0,
+    }
+
+
+@app.get("/journey/loop")
+async def get_journey_loop(
+    session_id: Optional[str] = Query(None, description="Filter by chat session id"),
+    run_id: Optional[str] = Query(None, description="Filter by run id"),
+    limit: int = Query(300, ge=1, le=2000, description="Max records per list"),
+):
+    """Return structured journey loop data for growth tracking."""
+    filtered_events = [
+        event for event in journey_events.values()
+        if _journey_record_matches(event, session_id, run_id)
+    ]
+    filtered_recommendations = [
+        rec for rec in journey_recommendations.values()
+        if _journey_record_matches(rec, session_id, run_id)
+    ]
+    filtered_decisions = [
+        decision for decision in journey_decisions.values()
+        if _journey_record_matches(decision, session_id, run_id)
+    ]
+
+    filtered_events.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    filtered_recommendations.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    filtered_decisions.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+
+    return {
+        "events": filtered_events[:limit],
+        "recommendations": filtered_recommendations[:limit],
+        "decisions": filtered_decisions[:limit],
+        "summary": _journey_summary(filtered_events, filtered_recommendations, filtered_decisions),
+    }
+
+
+@app.post("/journey/events")
+async def create_journey_event(req: JourneyEventCreate):
+    """Append a structured journey event."""
+    return _record_journey_event(
+        kind=req.kind,
+        actor=req.actor,
+        session_id=req.session_id,
+        run_id=req.run_id,
+        chart_id=req.chart_id,
+        recommendation_id=req.recommendation_id,
+        decision_id=req.decision_id,
+        note=req.note,
+        metadata=req.metadata,
+        timestamp=req.timestamp,
+    )
+
+
+@app.get("/journey/recommendations")
+async def list_journey_recommendations(
+    session_id: Optional[str] = Query(None, description="Filter by chat session id"),
+    run_id: Optional[str] = Query(None, description="Filter by run id"),
+    limit: int = Query(200, ge=1, le=2000),
+):
+    rows = [
+        row for row in journey_recommendations.values()
+        if _journey_record_matches(row, session_id, run_id)
+    ]
+    rows.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return rows[:limit]
+
+
+@app.post("/journey/recommendations")
+async def create_journey_recommendation(req: JourneyRecommendationCreate):
+    """Create a recommendation record for user/agent planning loop."""
+    priority = req.priority if req.priority in JOURNEY_PRIORITY_VALUES else "medium"
+    rec_id = _journey_new_id("jrec")
+    created_at = time.time()
+    payload = {
+        "id": rec_id,
+        "title": req.title.strip(),
+        "action": req.action.strip(),
+        "rationale": (req.rationale or "").strip() or None,
+        "source": (req.source or "agent").strip() or "agent",
+        "priority": priority,
+        "confidence": req.confidence,
+        "status": "pending",
+        "session_id": req.session_id,
+        "run_id": req.run_id,
+        "chart_id": req.chart_id,
+        "evidence_refs": [str(x) for x in req.evidence_refs[:20]],
+        "created_at": created_at,
+        "updated_at": created_at,
+        "responded_at": None,
+        "user_note": None,
+        "modified_action": None,
+    }
+    journey_recommendations[rec_id] = payload
+    save_journey_state()
+    _record_journey_event(
+        kind="agent_recommendation_issued",
+        actor="agent",
+        session_id=req.session_id,
+        run_id=req.run_id,
+        chart_id=req.chart_id,
+        recommendation_id=rec_id,
+        note=req.title,
+        metadata={"priority": priority, "source": payload["source"]},
+    )
+    return payload
+
+
+@app.post("/journey/recommendations/{recommendation_id}/respond")
+async def respond_journey_recommendation(recommendation_id: str, req: JourneyRecommendationRespondRequest):
+    """Update recommendation lifecycle status with user decision."""
+    recommendation = journey_recommendations.get(recommendation_id)
+    if recommendation is None:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+
+    next_status = (req.status or "").strip().lower()
+    if next_status not in JOURNEY_REC_STATUS_VALUES:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {req.status}")
+
+    recommendation["status"] = next_status
+    recommendation["responded_at"] = time.time()
+    recommendation["updated_at"] = recommendation["responded_at"]
+    recommendation["user_note"] = (req.user_note or "").strip() or None
+    recommendation["modified_action"] = (req.modified_action or "").strip() or None
+    save_journey_state()
+
+    event_kind = {
+        "accepted": "user_accepted_recommendation",
+        "rejected": "user_rejected_recommendation",
+        "modified": "user_modified_recommendation",
+        "executed": "recommendation_executed",
+        "dismissed": "recommendation_dismissed",
+    }.get(next_status, "recommendation_updated")
+
+    _record_journey_event(
+        kind=event_kind,
+        actor="human",
+        session_id=recommendation.get("session_id"),
+        run_id=recommendation.get("run_id"),
+        chart_id=recommendation.get("chart_id"),
+        recommendation_id=recommendation_id,
+        note=recommendation.get("title"),
+        metadata={"status": next_status},
+    )
+    return recommendation
+
+
+@app.post("/journey/recommendations/generate")
+async def generate_journey_recommendations(req: JourneyNextActionsRequest):
+    """Generate next actions with LLM, then persist them as recommendation records."""
+    generated = await journey_next_actions(req)
+    actions = generated.get("next_best_actions", []) if isinstance(generated, dict) else []
+    reasoning = generated.get("reasoning", "") if isinstance(generated, dict) else ""
+    source = generated.get("source", "llm") if isinstance(generated, dict) else "llm"
+
+    if not isinstance(actions, list):
+        actions = []
+
+    session_id = None
+    run_id = None
+    if isinstance(req.journey, dict):
+        session_id = req.journey.get("session_id") if isinstance(req.journey.get("session_id"), str) else None
+        run_id = req.journey.get("run_id") if isinstance(req.journey.get("run_id"), str) else None
+
+    created: list[dict] = []
+    for action in actions[: req.max_actions]:
+        text = str(action).strip()
+        if not text:
+            continue
+        recommendation = await create_journey_recommendation(
+            JourneyRecommendationCreate(
+                title=text[:120],
+                action=text,
+                rationale=reasoning or None,
+                source=str(source or "llm"),
+                priority="medium",
+                session_id=session_id,
+                run_id=run_id,
+                evidence_refs=[],
+            )
+        )
+        created.append(recommendation)
+
+    return {
+        "created": created,
+        "reasoning": reasoning,
+        "source": source,
+    }
+
+
+@app.get("/journey/decisions")
+async def list_journey_decisions(
+    session_id: Optional[str] = Query(None, description="Filter by chat session id"),
+    run_id: Optional[str] = Query(None, description="Filter by run id"),
+    limit: int = Query(200, ge=1, le=2000),
+):
+    rows = [
+        row for row in journey_decisions.values()
+        if _journey_record_matches(row, session_id, run_id)
+    ]
+    rows.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return rows[:limit]
+
+
+@app.post("/journey/decisions")
+async def create_journey_decision(req: JourneyDecisionCreate):
+    """Record a decision and optionally link it to a recommendation."""
+    status = req.status if req.status in JOURNEY_DECISION_STATUS_VALUES else "recorded"
+    decision_id = _journey_new_id("jdec")
+    created_at = time.time()
+    payload = {
+        "id": decision_id,
+        "title": req.title.strip(),
+        "chosen_action": req.chosen_action.strip(),
+        "rationale": (req.rationale or "").strip() or None,
+        "outcome": (req.outcome or "").strip() or None,
+        "status": status,
+        "recommendation_id": req.recommendation_id,
+        "session_id": req.session_id,
+        "run_id": req.run_id,
+        "chart_id": req.chart_id,
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    journey_decisions[decision_id] = payload
+    save_journey_state()
+    _record_journey_event(
+        kind="decision_recorded",
+        actor="human",
+        session_id=req.session_id,
+        run_id=req.run_id,
+        chart_id=req.chart_id,
+        recommendation_id=req.recommendation_id,
+        decision_id=decision_id,
+        note=req.title,
+        metadata={"status": status},
+    )
+    return payload
+
+
 # =============================================================================
 # Git Diff Endpoints
 # =============================================================================
@@ -3860,6 +4257,22 @@ async def create_run(req: RunCreate):
     runs[run_id] = run_data
     _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
+    _record_journey_event(
+        kind="run_created",
+        actor="system",
+        session_id=req.chat_session_id,
+        run_id=run_id,
+        note=req.name,
+        metadata={"status": initial_status, "sweep_id": req.sweep_id},
+    )
+    if initial_status == "queued":
+        _record_journey_event(
+            kind="run_queued",
+            actor="system",
+            session_id=req.chat_session_id,
+            run_id=run_id,
+            note=f"{req.name} queued",
+        )
     
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
 
@@ -3934,6 +4347,13 @@ async def queue_run(run_id: str):
     
     run["status"] = "queued"
     run["queued_at"] = time.time()
+    _record_journey_event(
+        kind="run_queued",
+        actor="system",
+        session_id=run.get("chat_session_id"),
+        run_id=run_id,
+        note=run.get("name") or run_id,
+    )
     if run.get("sweep_id"):
         recompute_sweep_state(run["sweep_id"])
     save_runs_state()
@@ -3955,9 +4375,24 @@ async def start_run(run_id: str):
     if run["status"] == "ready":
         run["status"] = "queued"
         run["queued_at"] = time.time()
+        _record_journey_event(
+            kind="run_queued",
+            actor="system",
+            session_id=run.get("chat_session_id"),
+            run_id=run_id,
+            note=run.get("name") or run_id,
+        )
     
     try:
         tmux_window = launch_run_in_tmux(run_id, run)
+        _record_journey_event(
+            kind="run_launched",
+            actor="system",
+            session_id=run.get("chat_session_id"),
+            run_id=run_id,
+            note=run.get("name") or run_id,
+            metadata={"tmux_window": tmux_window},
+        )
         if run.get("sweep_id"):
             recompute_sweep_state(run["sweep_id"])
         save_runs_state()
@@ -3989,6 +4424,13 @@ async def stop_run(run_id: str):
     
     run["status"] = "stopped"
     run["stopped_at"] = time.time()
+    _record_journey_event(
+        kind="run_stopped",
+        actor="system",
+        session_id=run.get("chat_session_id"),
+        run_id=run_id,
+        note=run.get("name") or run_id,
+    )
     if run.get("sweep_id"):
         recompute_sweep_state(run["sweep_id"])
     save_runs_state()
@@ -4024,6 +4466,7 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
         "sweep_id": source_run.get("sweep_id"),
         "parent_run_id": run_id,
         "origin_alert_id": req.origin_alert_id if req else None,
+        "chat_session_id": source_run.get("chat_session_id"),
         "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
@@ -4035,10 +4478,34 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
     runs[new_run_id] = new_run
     _sync_run_membership_with_sweep(new_run_id, new_run.get("sweep_id"))
     save_runs_state()
+    _record_journey_event(
+        kind="run_created",
+        actor="system",
+        session_id=new_run.get("chat_session_id"),
+        run_id=new_run_id,
+        note=new_run.get("name") or new_run_id,
+        metadata={"status": initial_status, "parent_run_id": run_id},
+    )
+    if initial_status == "queued":
+        _record_journey_event(
+            kind="run_queued",
+            actor="system",
+            session_id=new_run.get("chat_session_id"),
+            run_id=new_run_id,
+            note=f"{new_run.get('name') or new_run_id} queued",
+        )
 
     if initial_status == "queued":
         try:
             launch_run_in_tmux(new_run_id, new_run)
+            _record_journey_event(
+                kind="run_launched",
+                actor="system",
+                session_id=new_run.get("chat_session_id"),
+                run_id=new_run_id,
+                note=new_run.get("name") or new_run_id,
+                metadata={"rerun_of": run_id},
+            )
             if new_run.get("sweep_id"):
                 recompute_sweep_state(new_run["sweep_id"])
             save_runs_state()
@@ -4111,6 +4578,14 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
         run["started_at"] = time.time()
     elif next_status in RUN_STATUS_TERMINAL:
         run["ended_at"] = time.time()
+    _record_journey_event(
+        kind=f"run_{next_status}",
+        actor="system",
+        session_id=run.get("chat_session_id"),
+        run_id=run_id,
+        note=run.get("name") or run_id,
+        metadata={"exit_code": run.get("exit_code"), "error": run.get("error")},
+    )
 
 
     # Slack notifications for terminal run states
@@ -5772,6 +6247,7 @@ def main():
     load_runs_state()
     load_alerts_state()
     load_plans_state()
+    load_journey_state()
     load_settings_state()
     if cluster_state.get("source") == "unset":
         inferred = _infer_cluster_from_environment()

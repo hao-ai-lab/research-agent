@@ -35,6 +35,7 @@ import type { JourneySubTab } from './nav-page'
 type JourneyNodeType = 'question' | 'hypothesis' | 'experiment' | 'result' | 'decision' | 'artifact'
 type JourneyStatus = 'active' | 'completed' | 'failed' | 'blocked' | 'archived'
 type JourneyActor = 'human' | 'agent' | 'system'
+type JourneyLinkMethod = 'explicit' | 'inferred'
 
 interface JourneyNode {
   id: string
@@ -49,12 +50,14 @@ interface JourneyNode {
   why_stopped?: string
   parent_ids: string[]
   tags: string[]
+  source_ref?: string
 }
 
 interface JourneyEdge {
   from: string
   to: string
   relation: 'derived_from' | 'tests' | 'contradicts' | 'supersedes' | 'blocked_by' | 'informs' | 'depends_on'
+  link_method: JourneyLinkMethod
 }
 
 interface JourneyEvent {
@@ -64,6 +67,8 @@ interface JourneyEvent {
   actor: JourneyActor
   kind: string
   note: string
+  run_status?: string
+  run_progress?: number
 }
 
 interface JourneyReflections {
@@ -93,6 +98,11 @@ interface JourneyViewProps {
   currentSessionId: string | null
   currentMessages: ChatMessageData[]
 }
+
+type GraphFocus =
+  | { kind: 'edge'; key: string; from: string; to: string }
+  | { kind: 'node'; id: string }
+  | null
 
 function toIso(value: Date | number | undefined | null): string | null {
   if (value == null) return null
@@ -125,6 +135,41 @@ function computeEffortMinutes(run: ExperimentRun): number {
   const startMs = start.getTime()
   const endMs = end ? end.getTime() : Date.now()
   return Math.max(0, Math.round((endMs - startMs) / 60000))
+}
+
+function hasRunExecution(run: ExperimentRun): boolean {
+  return Boolean(
+    run.launchedAt ||
+      run.startedAt ||
+      run.endTime ||
+      run.stoppedAt ||
+      (typeof run.progress === 'number' && run.progress > 0) ||
+      run.status === 'running' ||
+      run.status === 'completed' ||
+      run.status === 'failed' ||
+      run.status === 'canceled'
+  )
+}
+
+function parseExplicitId(input: string, knownIds: Set<string>): string | null {
+  const value = input.trim()
+  if (!value) return null
+  if (knownIds.has(value)) return value
+  const normalized = value.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9_-]+$/g, '')
+  return knownIds.has(normalized) ? normalized : null
+}
+
+function extractChartExplicitRefs(
+  chart: InsightChart,
+  runIds: Set<string>,
+  sessionIds: Set<string>,
+): { runId: string | null; sessionId: string | null } {
+  const text = `${chart.id} ${chart.title} ${chart.description || ''}`
+  const runMatch = text.match(/(?:run(?:_id)?|run-id)\s*[:=#-]?\s*([a-zA-Z0-9_-]+)/i)
+  const sessionMatch = text.match(/(?:session(?:_id)?|chat(?:_id)?|chat-id)\s*[:=#-]?\s*([a-zA-Z0-9_-]+)/i)
+  const runId = runMatch ? parseExplicitId(runMatch[1], runIds) : null
+  const sessionId = sessionMatch ? parseExplicitId(sessionMatch[1], sessionIds) : null
+  return { runId, sessionId }
 }
 
 function computeDepths(nodes: JourneyNode[]) {
@@ -178,23 +223,11 @@ function buildJourneyData(
 
   const sortedSessions = [...sessions].sort((a, b) => a.created_at - b.created_at)
   const chatNodeIds = new Set(sortedSessions.map((s) => `chat:${s.id}`))
+  const sessionIds = new Set(sortedSessions.map((s) => s.id))
+  const executedRuns = runs.filter(hasRunExecution)
 
-  const runById = new Map(runs.map((r) => [r.id, r]))
-
-  const chartParentRun = (chart: InsightChart) => {
-    const chartTs = chart.createdAt.getTime()
-    const candidates = runs
-      .filter((run) => {
-        const runTs = (run.endTime || run.stoppedAt || run.startedAt || run.startTime || run.createdAt || run.queuedAt)?.getTime()
-        return typeof runTs === 'number' && runTs <= chartTs
-      })
-      .sort((a, b) => {
-        const aTs = (a.endTime || a.stoppedAt || a.startedAt || a.startTime || a.createdAt || a.queuedAt)?.getTime() || 0
-        const bTs = (b.endTime || b.stoppedAt || b.startedAt || b.startTime || b.createdAt || b.queuedAt)?.getTime() || 0
-        return bTs - aTs
-      })
-    return candidates[0]?.id || null
-  }
+  const runById = new Map(executedRuns.map((r) => [r.id, r]))
+  const runIds = new Set(executedRuns.map((r) => r.id))
 
   const nodes: JourneyNode[] = []
   const edges: JourneyEdge[] = []
@@ -217,6 +250,7 @@ function buildJourneyData(
       information_gain_score: Math.min(1, messageCount / 20),
       parent_ids: [],
       tags: ['chat', 'history'],
+      source_ref: `session:${session.id}`,
     })
 
     events.push({
@@ -241,18 +275,18 @@ function buildJourneyData(
     })
   }
 
-  for (const run of runs) {
+  for (const run of executedRuns) {
     const id = `run:${run.id}`
     const parentIds: string[] = []
     const chatParentId = run.chatSessionId ? `chat:${run.chatSessionId}` : null
     if (chatParentId && chatNodeIds.has(chatParentId)) {
       parentIds.push(chatParentId)
-      edges.push({ from: chatParentId, to: id, relation: 'tests' })
+      edges.push({ from: chatParentId, to: id, relation: 'tests', link_method: 'explicit' })
     }
     if (run.parentRunId && runById.has(run.parentRunId)) {
       const parentRunNodeId = `run:${run.parentRunId}`
       parentIds.push(parentRunNodeId)
-      edges.push({ from: parentRunNodeId, to: id, relation: 'derived_from' })
+      edges.push({ from: parentRunNodeId, to: id, relation: 'derived_from', link_method: 'explicit' })
     }
 
     const createdIso = firstAvailableIso(run.createdAt, run.queuedAt, run.launchedAt, run.startedAt, run.startTime)
@@ -272,6 +306,7 @@ function buildJourneyData(
       why_stopped: run.status === 'failed' ? (run.error || 'Run failed') : undefined,
       parent_ids: parentIds,
       tags: ['run', run.status],
+      source_ref: `run:${run.id}`,
     })
 
     events.push({
@@ -281,7 +316,51 @@ function buildJourneyData(
       actor: 'system',
       kind: 'run_created',
       note: run.command || 'Run created',
+      run_status: 'ready',
+      run_progress: 0,
     })
+
+    const queuedIso = toIso(run.queuedAt)
+    if (queuedIso) {
+      events.push({
+        id: `evt:${id}:queued`,
+        ts: queuedIso,
+        node_id: id,
+        actor: 'system',
+        kind: 'run_queued',
+        note: 'Run entered queue.',
+        run_status: 'queued',
+        run_progress: 0,
+      })
+    }
+
+    const launchedIso = toIso(run.launchedAt)
+    if (launchedIso) {
+      events.push({
+        id: `evt:${id}:launched`,
+        ts: launchedIso,
+        node_id: id,
+        actor: 'system',
+        kind: 'run_launched',
+        note: 'Run launched on compute.',
+        run_status: 'launched',
+        run_progress: Math.max(1, Math.min(100, run.progress || 0)),
+      })
+    }
+
+    const startedIso = toIso(run.startedAt || run.startTime)
+    if (startedIso) {
+      events.push({
+        id: `evt:${id}:started`,
+        ts: startedIso,
+        node_id: id,
+        actor: 'system',
+        kind: 'run_running',
+        note: 'Run started execution.',
+        run_status: 'running',
+        run_progress: Math.max(1, Math.min(100, run.progress || 0)),
+      })
+    }
 
     if (endedIso) {
       events.push({
@@ -291,6 +370,8 @@ function buildJourneyData(
         actor: 'system',
         kind: `run_${run.status}`,
         note: run.error || `${run.status} after ${effortMinutes}m`,
+        run_status: run.status,
+        run_progress: run.status === 'completed' ? 100 : Math.max(0, Math.min(100, run.progress || 0)),
       })
     }
   }
@@ -298,16 +379,24 @@ function buildJourneyData(
   for (const chart of charts) {
     const id = `chart:${chart.id}`
     const parentIds: string[] = []
+    let chartNoteSuffix = 'Provenance link unavailable.'
 
-    if (chart.source === 'chat' && currentSessionId && chatNodeIds.has(`chat:${currentSessionId}`)) {
-      parentIds.push(`chat:${currentSessionId}`)
-      edges.push({ from: `chat:${currentSessionId}`, to: id, relation: 'informs' })
-    } else {
-      const nearestRunId = chartParentRun(chart)
-      if (nearestRunId) {
-        parentIds.push(`run:${nearestRunId}`)
-        edges.push({ from: `run:${nearestRunId}`, to: id, relation: 'informs' })
-      }
+    const explicit = extractChartExplicitRefs(chart, runIds, sessionIds)
+    if (explicit.runId && runById.has(explicit.runId)) {
+      const runNodeId = `run:${explicit.runId}`
+      parentIds.push(runNodeId)
+      edges.push({ from: runNodeId, to: id, relation: 'informs', link_method: 'explicit' })
+      chartNoteSuffix = `Linked to run ${explicit.runId} from chart metadata.`
+    } else if (explicit.sessionId && chatNodeIds.has(`chat:${explicit.sessionId}`)) {
+      const chatNodeId = `chat:${explicit.sessionId}`
+      parentIds.push(chatNodeId)
+      edges.push({ from: chatNodeId, to: id, relation: 'informs', link_method: 'explicit' })
+      chartNoteSuffix = `Linked to chat ${explicit.sessionId} from chart metadata.`
+    } else if (chart.source === 'chat' && currentSessionId && chatNodeIds.has(`chat:${currentSessionId}`)) {
+      const chatNodeId = `chat:${currentSessionId}`
+      parentIds.push(chatNodeId)
+      edges.push({ from: chatNodeId, to: id, relation: 'informs', link_method: 'inferred' })
+      chartNoteSuffix = 'Linked to currently open chat (inferred).'
     }
 
     nodes.push({
@@ -322,6 +411,7 @@ function buildJourneyData(
       information_gain_score: 0.55,
       parent_ids: parentIds,
       tags: ['chart', chart.source, chart.type],
+      source_ref: `chart:${chart.id}`,
     })
 
     events.push({
@@ -330,26 +420,26 @@ function buildJourneyData(
       node_id: id,
       actor: 'system',
       kind: 'chart_created',
-      note: chart.description || `${chart.type} chart`,
+      note: `${chart.description || `${chart.type} chart`} ${chartNoteSuffix}`,
     })
   }
 
-  const failures = runs
+  const failures = executedRuns
     .filter((r) => r.status === 'failed')
     .sort((a, b) => computeEffortMinutes(b) - computeEffortMinutes(a))
 
-  const completed = runs
+  const completed = executedRuns
     .filter((r) => r.status === 'completed')
     .sort((a, b) => computeEffortMinutes(b) - computeEffortMinutes(a))
 
-  const costly = runs
+  const costly = executedRuns
     .slice()
     .sort((a, b) => computeEffortMinutes(b) - computeEffortMinutes(a))
     .slice(0, 3)
 
   const allTimestamps = [
     ...sortedSessions.map((s) => firstAvailableIso(s.created_at)),
-    ...runs.map((r) => firstAvailableIso(r.createdAt, r.queuedAt, r.launchedAt, r.startedAt, r.startTime)),
+    ...executedRuns.map((r) => firstAvailableIso(r.createdAt, r.queuedAt, r.launchedAt, r.startedAt, r.startTime)),
     ...charts.map((c) => c.createdAt.toISOString()),
   ].sort()
 
@@ -430,6 +520,40 @@ function relationStroke(relation: JourneyEdge['relation']): string {
   return '#94a3b8'
 }
 
+function relationStrokeDash(method: JourneyLinkMethod): string | undefined {
+  if (method === 'inferred') return '4 3'
+  return undefined
+}
+
+function edgeKey(edge: JourneyEdge): string {
+  return `${edge.from}-${edge.to}-${edge.relation}`
+}
+
+function collectConnectedComponent(startIds: string[], edges: JourneyEdge[]): Set<string> {
+  const adjacency = new Map<string, Set<string>>()
+  edges.forEach((edge) => {
+    if (!adjacency.has(edge.from)) adjacency.set(edge.from, new Set())
+    if (!adjacency.has(edge.to)) adjacency.set(edge.to, new Set())
+    adjacency.get(edge.from)!.add(edge.to)
+    adjacency.get(edge.to)!.add(edge.from)
+  })
+
+  const visited = new Set<string>()
+  const queue: string[] = [...startIds]
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (visited.has(current)) continue
+    visited.add(current)
+    const next = adjacency.get(current) || new Set<string>()
+    next.forEach((id) => {
+      if (!visited.has(id)) queue.push(id)
+    })
+  }
+
+  return visited
+}
+
 function nodeTypeAccent(type: JourneyNodeType): { border: string; chip: string } {
   if (type === 'question') return { border: '#60a5fa', chip: '#1d4ed8' }
   if (type === 'experiment') return { border: '#f59e0b', chip: '#b45309' }
@@ -446,6 +570,63 @@ function nodeTypeLabel(type: JourneyNodeType): string {
   if (type === 'decision') return 'Decision'
   if (type === 'hypothesis') return 'Idea'
   return 'Step'
+}
+
+function eventKindLabel(kind: string): string {
+  switch (kind) {
+    case 'chat_started':
+      return 'Chat started'
+    case 'user_message':
+      return 'User prompt'
+    case 'assistant_reply':
+      return 'Agent reply'
+    case 'run_created':
+      return 'Run created'
+    case 'run_queued':
+      return 'Run queued'
+    case 'run_launched':
+      return 'Run launched'
+    case 'run_running':
+      return 'Run started'
+    case 'run_completed':
+      return 'Run completed'
+    case 'run_failed':
+      return 'Run failed'
+    case 'run_canceled':
+      return 'Run canceled'
+    case 'chart_created':
+      return 'Chart created'
+    default:
+      return kind.replace(/_/g, ' ')
+  }
+}
+
+function actorLabel(actor: JourneyActor): string {
+  if (actor === 'human') return 'User'
+  if (actor === 'agent') return 'Agent'
+  return 'System'
+}
+
+function runStatusLabel(status?: string): string {
+  if (!status) return ''
+  switch (status) {
+    case 'queued':
+      return 'Queued'
+    case 'ready':
+      return 'Ready'
+    case 'launched':
+      return 'Launched'
+    case 'running':
+      return 'Running'
+    case 'completed':
+      return 'Succeeded'
+    case 'failed':
+      return 'Failed'
+    case 'canceled':
+      return 'Canceled'
+    default:
+      return status
+  }
 }
 
 function statusDot(status: JourneyStatus): string {
@@ -512,6 +693,8 @@ export function JourneyView({
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [uploadedJourney, setUploadedJourney] = useState<JourneyData | null>(null)
   const [graphZoom, setGraphZoom] = useState(1)
+  const [graphFocus, setGraphFocus] = useState<GraphFocus>(null)
+  const [graphHover, setGraphHover] = useState<GraphFocus>(null)
   const [visibleActors, setVisibleActors] = useState<JourneyActor[]>(['human', 'agent', 'system'])
   const [llmNextActions, setLlmNextActions] = useState<string[] | null>(null)
   const [llmReasoning, setLlmReasoning] = useState<string | null>(null)
@@ -579,13 +762,9 @@ export function JourneyView({
   const summary = useMemo(() => {
     const totalEffort = data.nodes.reduce((sum, n) => sum + n.effort_minutes, 0)
     const totalCost = data.nodes.reduce((sum, n) => sum + n.cost_usd, 0)
-    const failed = data.nodes.filter((n) => n.status === 'failed').length
-    const avgConfidence = data.nodes.reduce((sum, n) => sum + n.confidence, 0) / Math.max(1, data.nodes.length)
     return {
       totalEffort,
       totalCost,
-      failed,
-      avgConfidence,
       experiments: data.nodes.filter((n) => n.type === 'experiment').length,
     }
   }, [data.nodes])
@@ -619,6 +798,14 @@ export function JourneyView({
 
   const maxDepth = useMemo(() => Math.max(...Array.from(depths.values()), 0), [depths])
   const graph = useMemo(() => buildGraphLayout(data.nodes, data.edges, depths), [data.nodes, data.edges, depths])
+  const activeGraphFocus = graphFocus || graphHover
+  const focusNodeIds = useMemo<Set<string> | null>(() => {
+    if (!activeGraphFocus) return null
+    if (activeGraphFocus.kind === 'node') {
+      return collectConnectedComponent([activeGraphFocus.id], graph.visibleEdges)
+    }
+    return collectConnectedComponent([activeGraphFocus.from, activeGraphFocus.to], graph.visibleEdges)
+  }, [activeGraphFocus, graph.visibleEdges])
 
   const lifecycle = useMemo(() => {
     const searching = data.nodes.filter((n) => n.type === 'question').length
@@ -672,12 +859,25 @@ export function JourneyView({
     if (!file) return
     const text = await file.text()
     const parsed = JSON.parse(text) as JourneyData
-    setUploadedJourney(parsed)
+    const normalizedEdges: JourneyEdge[] = Array.isArray(parsed.edges)
+      ? parsed.edges.map((edge): JourneyEdge => ({
+          ...edge,
+          link_method: edge.link_method === 'explicit' ? 'explicit' : 'inferred',
+        }))
+      : []
+    setUploadedJourney({
+      ...parsed,
+      edges: normalizedEdges,
+    })
   }
 
   const handleZoomIn = () => setGraphZoom((z) => Math.min(1.8, Number((z + 0.1).toFixed(2))))
   const handleZoomOut = () => setGraphZoom((z) => Math.max(0.7, Number((z - 0.1).toFixed(2))))
   const handleZoomReset = () => setGraphZoom(1)
+  const clearGraphFocus = () => {
+    setGraphFocus(null)
+    setGraphHover(null)
+  }
   const toggleActor = (actor: JourneyActor) => {
     setVisibleActors((prev) => {
       if (prev.includes(actor)) {
@@ -773,7 +973,7 @@ export function JourneyView({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
             <div className="rounded-lg border border-border bg-card p-3">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Experiments</div>
               <div className="mt-1 text-xl font-semibold text-foreground">{summary.experiments}</div>
@@ -785,14 +985,6 @@ export function JourneyView({
             <div className="rounded-lg border border-border bg-card p-3">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Total Cost</div>
               <div className="mt-1 text-xl font-semibold text-foreground">{formatCurrency(summary.totalCost)}</div>
-            </div>
-            <div className="rounded-lg border border-border bg-card p-3">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Failure Rate</div>
-              <div className="mt-1 text-xl font-semibold text-foreground">{Math.round((summary.failed / Math.max(1, data.nodes.length)) * 100)}%</div>
-            </div>
-            <div className="rounded-lg border border-border bg-card p-3">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Avg Confidence</div>
-              <div className="mt-1 text-xl font-semibold text-foreground">{Math.round(summary.avgConfidence * 100)}%</div>
             </div>
           </div>
 
@@ -820,6 +1012,15 @@ export function JourneyView({
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={clearGraphFocus}
+                  className="h-7 border-slate-600/80 bg-slate-900/80 text-[10px] text-slate-200 hover:bg-slate-800"
+                >
+                  Clear focus
+                </Button>
               </div>
             </div>
 
@@ -832,7 +1033,19 @@ export function JourneyView({
               <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5"><span className="h-2 w-2 rounded-full bg-[#60a5fa]" />Chat</span>
               <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5"><span className="h-2 w-2 rounded-full bg-[#f59e0b]" />Run</span>
               <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5"><span className="h-2 w-2 rounded-full bg-[#22c55e]" />Chart</span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5"><span className="h-2 w-2 rounded-full bg-[#a78bfa]" />decision</span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5"><span className="h-2 w-2 rounded-full bg-[#a78bfa]" />Decision</span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5">
+                <svg width="16" height="2" viewBox="0 0 16 2" aria-hidden="true">
+                  <line x1="0" y1="1" x2="16" y2="1" stroke="#cbd5e1" strokeWidth="2" />
+                </svg>
+                explicit link
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5">
+                <svg width="16" height="2" viewBox="0 0 16 2" aria-hidden="true">
+                  <line x1="0" y1="1" x2="16" y2="1" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="4 3" />
+                </svg>
+                inferred link
+              </span>
             </div>
 
             <div className="overflow-auto rounded-lg border border-slate-700/70 bg-[#0b0d10] p-2">
@@ -853,24 +1066,45 @@ export function JourneyView({
                     const from = graph.positions.get(edge.from)
                     const to = graph.positions.get(edge.to)
                     if (!from || !to) return null
+                    const key = edgeKey(edge)
                     const sx = from.x + graph.nodeW
                     const sy = from.y + graph.nodeH / 2
                     const tx = to.x
                     const ty = to.y + graph.nodeH / 2
                     const cx1 = sx + 60
                     const cx2 = tx - 60
+                    const isFocusedEdge = activeGraphFocus?.kind === 'edge' && activeGraphFocus.key === key
+                    const isInFocusedPath = !!focusNodeIds?.has(edge.from) && !!focusNodeIds?.has(edge.to)
+                    const isActive = !activeGraphFocus || isFocusedEdge || isInFocusedPath
                     return (
-                      <g key={`${edge.from}-${edge.to}-${edge.relation}`}>
+                      <g
+                        key={key}
+                        onMouseEnter={() => setGraphHover({ kind: 'edge', key, from: edge.from, to: edge.to })}
+                        onMouseLeave={() => setGraphHover((prev) => (prev?.kind === 'edge' && prev.key === key ? null : prev))}
+                        onClick={() =>
+                          setGraphFocus((prev) =>
+                            prev?.kind === 'edge' && prev.key === key ? null : { kind: 'edge', key, from: edge.from, to: edge.to }
+                          )
+                        }
+                        className="cursor-pointer"
+                      >
                         <path
                           d={`M ${sx} ${sy} C ${cx1} ${sy}, ${cx2} ${ty}, ${tx} ${ty}`}
                           stroke={relationStroke(edge.relation)}
-                          strokeWidth={1.6}
+                          strokeWidth={isFocusedEdge ? 2.6 : isActive ? 1.9 : 1}
+                          strokeDasharray={relationStrokeDash(edge.link_method)}
                           fill="none"
-                          opacity={0.92}
+                          opacity={isActive ? 0.96 : 0.14}
                           markerEnd="url(#journey-arrow)"
                         />
-                        {index < 10 && (
-                          <circle cx={sx + (tx - sx) * 0.5} cy={sy + (ty - sy) * 0.5} r={1.6} fill={relationStroke(edge.relation)} opacity={0.85} />
+                        {(index < 10 || isFocusedEdge) && (
+                          <circle
+                            cx={sx + (tx - sx) * 0.5}
+                            cy={sy + (ty - sy) * 0.5}
+                            r={isFocusedEdge ? 2 : 1.6}
+                            fill={relationStroke(edge.relation)}
+                            opacity={isActive ? 0.9 : 0.15}
+                          />
                         )}
                       </g>
                     )
@@ -882,23 +1116,34 @@ export function JourneyView({
                     const isFresh = Date.now() - new Date(node.created_at).getTime() < 1000 * 60 * 60 * 24
                     const accent = nodeTypeAccent(node.type)
                     const dot = statusDot(node.status)
+                    const isFocusedNode = activeGraphFocus?.kind === 'node' && activeGraphFocus.id === node.id
+                    const isEdgeEndpoint = activeGraphFocus?.kind === 'edge' && (activeGraphFocus.from === node.id || activeGraphFocus.to === node.id)
+                    const isInFocusedPath = !!focusNodeIds?.has(node.id)
+                    const isActive = !activeGraphFocus || isFocusedNode || isEdgeEndpoint || isInFocusedPath
                     return (
-                      <g key={node.id} transform={`translate(${pos.x}, ${pos.y})`}>
+                      <g
+                        key={node.id}
+                        transform={`translate(${pos.x}, ${pos.y})`}
+                        onMouseEnter={() => setGraphHover({ kind: 'node', id: node.id })}
+                        onMouseLeave={() => setGraphHover((prev) => (prev?.kind === 'node' && prev.id === node.id ? null : prev))}
+                        onClick={() => setGraphFocus((prev) => (prev?.kind === 'node' && prev.id === node.id ? null : { kind: 'node', id: node.id }))}
+                        className="cursor-pointer"
+                      >
                         <rect
                           width={graph.nodeW}
                           height={graph.nodeH}
                           rx={10}
                           fill="#111827"
-                          stroke={isFresh ? '#f59e0b' : accent.border}
-                          strokeWidth={isFresh ? 2 : 1.4}
-                          opacity={0.98}
+                          stroke={isFocusedNode ? '#f8fafc' : isFresh ? '#f59e0b' : accent.border}
+                          strokeWidth={isFocusedNode ? 2.4 : isFresh ? 2 : 1.4}
+                          opacity={isActive ? 0.98 : 0.2}
                         />
-                        <rect x={8} y={8} width={56} height={12} rx={6} fill={accent.chip} opacity={0.95} />
-                        <circle cx={graph.nodeW - 10} cy={14} r={3.3} fill={dot} />
-                        <text x={14} y={17} fontSize={9} fill="#f8fafc" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
+                        <rect x={8} y={8} width={56} height={12} rx={6} fill={accent.chip} opacity={isActive ? 0.95 : 0.3} />
+                        <circle cx={graph.nodeW - 10} cy={14} r={3.3} fill={dot} opacity={isActive ? 1 : 0.35} />
+                        <text x={14} y={17} fontSize={9} fill="#f8fafc" opacity={isActive ? 1 : 0.45} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
                           {nodeTypeLabel(node.type)}
                         </text>
-                        <text x={10} y={31} fontSize={11} fill="#e2e8f0" style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
+                        <text x={10} y={31} fontSize={11} fill="#e2e8f0" opacity={isActive ? 1 : 0.45} style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
                           {node.title.slice(0, 22)}
                         </text>
                       </g>
@@ -983,7 +1228,8 @@ export function JourneyView({
                 <div className="grid gap-1">
                   {data.edges.slice(0, 12).map((edge) => (
                     <div key={`${edge.from}-${edge.to}-${edge.relation}`} className="text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{edge.to.slice(0, 18)}</span> {relationLabel(edge.relation)} <span className="font-medium text-foreground">{edge.from.slice(0, 18)}</span>
+                      <span className="font-medium text-foreground">{nodeById.get(edge.to)?.title || edge.to}</span> {relationLabel(edge.relation)} <span className="font-medium text-foreground">{nodeById.get(edge.from)?.title || edge.from}</span>{' '}
+                      <span className="text-[11px]">({edge.link_method})</span>
                     </div>
                   ))}
                   {data.edges.length > 12 && (
@@ -1037,14 +1283,14 @@ export function JourneyView({
               <h4 className="text-sm font-semibold text-foreground">Timeline (what happened and when)</h4>
             </div>
             <div className="mb-3 text-xs text-muted-foreground">
-              Click the <span className="font-medium text-foreground">Actor</span> column title to filter rows.
+              Click the <span className="font-medium text-foreground">Who did it</span> column title to filter rows.
             </div>
             <div className="overflow-auto rounded-md border border-border">
-              <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+              <table className="w-full min-w-[920px] border-collapse text-left text-xs">
                 <thead>
                   <tr className="border-b border-border bg-secondary/40">
-                    <th className="p-2">Time</th>
-                    <th className="p-2">Node</th>
+                    <th className="p-2">When</th>
+                    <th className="p-2">Step</th>
                     <th className="p-2">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -1052,7 +1298,7 @@ export function JourneyView({
                             type="button"
                             className="inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold text-foreground hover:bg-secondary"
                           >
-                            Actor
+                            Who did it
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-56">
@@ -1082,27 +1328,51 @@ export function JourneyView({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </th>
-                    <th className="p-2">Event</th>
-                    <th className="p-2">Note</th>
+                    <th className="p-2">What happened</th>
+                    <th className="p-2">Run status</th>
+                    <th className="p-2">Details</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredTimeline.map((event) => (
                     <tr key={event.id} className="border-b border-border/70 align-top transition-colors">
                       <td className="p-2 text-muted-foreground">{new Date(event.ts).toLocaleString()}</td>
-                      <td className="p-2 text-foreground">{nodeById.get(event.node_id)?.title || event.node_id}</td>
+                      <td className="p-2 text-foreground">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline" className="text-[10px]">
+                            {nodeTypeLabel(nodeById.get(event.node_id)?.type || 'artifact')}
+                          </Badge>
+                          <span>{nodeById.get(event.node_id)?.title || event.node_id}</span>
+                        </div>
+                      </td>
                       <td className="p-2">
                         <Badge variant="outline" className="text-[10px]">
-                          {event.actor}
+                          {actorLabel(event.actor)}
                         </Badge>
                       </td>
-                      <td className="p-2 text-foreground">{event.kind}</td>
+                      <td className="p-2 text-foreground">{eventKindLabel(event.kind)}</td>
+                      <td className="p-2">
+                        {event.run_status ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant="outline" className="text-[10px]">
+                              {runStatusLabel(event.run_status)}
+                            </Badge>
+                            {typeof event.run_progress === 'number' && (
+                              <span className="text-[11px] text-muted-foreground">
+                                {Math.round(event.run_progress)}%
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </td>
                       <td className="p-2 text-muted-foreground">{event.note}</td>
                     </tr>
                   ))}
                   {filteredTimeline.length === 0 && (
                     <tr>
-                      <td className="p-2 text-muted-foreground" colSpan={5}>
+                      <td className="p-2 text-muted-foreground" colSpan={6}>
                         No timeline rows match this actor filter.
                       </td>
                     </tr>
