@@ -36,6 +36,8 @@ export type ChatSessionStatus =
     | 'awaiting_human'
     | 'idle'
 
+export type SessionLocation = 'local' | 'worktree'
+
 export interface ChatSession {
     id: string
     title: string
@@ -44,6 +46,9 @@ export interface ChatSession {
     model_provider?: string
     model_id?: string
     status?: ChatSessionStatus
+    session_location?: SessionLocation
+    worktree_name?: string | null
+    workdir?: string
 }
 
 export interface SessionModelSelection {
@@ -144,7 +149,11 @@ export async function listSessions(): Promise<ChatSession[]> {
 /**
  * Create a new chat session
  */
-export async function createSession(title?: string, model?: SessionModelSelection): Promise<ChatSession> {
+export async function createSession(
+    title?: string,
+    model?: SessionModelSelection,
+    location?: SessionLocation,
+): Promise<ChatSession> {
     const body: Record<string, unknown> = {}
     if (title) {
         body.title = title
@@ -152,6 +161,9 @@ export async function createSession(title?: string, model?: SessionModelSelectio
     if (model) {
         body.model_provider = model.provider_id
         body.model_id = model.model_id
+    }
+    if (location) {
+        body.location = location
     }
     const response = await fetch(`${API_URL()}/sessions`, {
         method: 'POST',

@@ -288,7 +288,7 @@ class WildV2Engine:
         sid = self._session.session_id
         session_dir = self._session_dir(sid)
         d["session_dir"] = session_dir
-        d["workdir"] = self._get_workdir()
+        d["workdir"] = self._session_workdir(self._session)
         d["opencode_pwd"] = None
         d["opencode_pwd_note"] = "OpenCode does not expose a direct cwd endpoint; prompt assumes cd to workdir each iteration."
 
@@ -311,6 +311,16 @@ class WildV2Engine:
                 pass
 
         return d
+
+    def _session_workdir(self, session: Optional["WildV2Session"] = None) -> str:
+        candidate = session or self._session
+        if candidate and candidate.chat_session_id and self._chat_sessions:
+            chat = self._chat_sessions.get(candidate.chat_session_id)
+            if isinstance(chat, dict):
+                raw_workdir = chat.get("workdir")
+                if isinstance(raw_workdir, str) and raw_workdir.strip():
+                    return os.path.abspath(raw_workdir.strip())
+        return os.path.abspath(self._get_workdir())
 
     def _current_step_goal(self, session: "WildV2Session") -> str:
         """Best-effort next-step goal from tasks.md."""
@@ -384,7 +394,7 @@ class WildV2Engine:
             goal=session.goal,
             iteration=session.iteration,
             max_iterations=session.max_iterations,
-            workdir=self._get_workdir(),
+            workdir=self._session_workdir(session),
             tasks_path=os.path.join(session_dir, "tasks.md"),
             log_path=os.path.join(session_dir, "iteration_log.md"),
             server_url=self._server_url,
@@ -412,7 +422,7 @@ class WildV2Engine:
                 logger.info("[wild-v2] Chat message returned, response length=%d", len(full_text))
             except Exception as chat_err:
                 logger.error("[wild-v2] Chat message failed: %s, falling back to direct OpenCode", chat_err, exc_info=True)
-                oc_session_id = await self._create_opencode_session()
+                oc_session_id = await self._create_opencode_session(session)
                 if not oc_session_id:
                     logger.error("[wild-v2] Fallback OpenCode session creation also failed!")
                     raise
@@ -421,7 +431,7 @@ class WildV2Engine:
                 self._append_to_chat(session, prompt, full_text, session.iteration)
         else:
             logger.info("[wild-v2] No chat callback, using direct OpenCode")
-            oc_session_id = await self._create_opencode_session()
+            oc_session_id = await self._create_opencode_session(session)
             if not oc_session_id:
                 logger.error("[wild-v2] Failed to create OpenCode session")
                 raise RuntimeError("Failed to create OpenCode session")
@@ -518,7 +528,7 @@ class WildV2Engine:
                 )
 
                 # Snapshot files before iteration (for change detection)
-                files_before = self._snapshot_files()
+                files_before = self._snapshot_files(session)
 
                 # 1. Build the prompt
                 ctx = self._build_context(session)
@@ -562,7 +572,7 @@ class WildV2Engine:
 
                 # 5. Compute per-iteration metrics
                 iter_duration = time.time() - iter_start
-                files_after = self._snapshot_files()
+                files_after = self._snapshot_files(session)
                 files_modified = self._diff_files(files_before, files_after)
                 errors = self._extract_errors(full_text)
                 logger.info("[wild-v2] Iteration %d metrics: duration=%.1fs, files_modified=%d, errors=%d",
@@ -714,11 +724,11 @@ class WildV2Engine:
 
     # -- OpenCode interaction --
 
-    async def _create_opencode_session(self) -> Optional[str]:
+    async def _create_opencode_session(self, session: Optional[WildV2Session] = None) -> Optional[str]:
         """Create a fresh OpenCode session."""
         try:
             async with httpx.AsyncClient() as client:
-                workdir = os.path.abspath(self._get_workdir())
+                workdir = self._session_workdir(session)
                 resp = await client.post(
                     f"{self._opencode_url}/session",
                     params={"directory": workdir},
@@ -870,10 +880,11 @@ class WildV2Engine:
     async def _git_commit(self, session: WildV2Session):
         """Commit tracked changes after an iteration."""
         try:
+            workdir = self._session_workdir(session)
             # Check if there are changes
             result = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True, text=True, cwd=workdir, timeout=10,
             )
             if not result.stdout.strip():
                 logger.debug("[wild-v2] No changes to commit")
@@ -882,14 +893,14 @@ class WildV2Engine:
             # Stage all changes (respecting .gitignore)
             subprocess.run(
                 ["git", "add", "-A"],
-                capture_output=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True, cwd=workdir, timeout=10,
             )
 
             # Commit
             msg = f"wild-v2: iteration {session.iteration} — {session.goal[:50]}"
             subprocess.run(
                 ["git", "commit", "-m", msg, "--no-verify"],
-                capture_output=True, cwd=self._get_workdir(), timeout=30,
+                capture_output=True, cwd=workdir, timeout=30,
             )
             logger.info("[wild-v2] Git commit: %s", msg)
         except Exception as err:
@@ -897,13 +908,14 @@ class WildV2Engine:
 
     # -- File tracking (struggle detection) --
 
-    def _snapshot_files(self) -> dict:
+    def _snapshot_files(self, session: Optional[WildV2Session] = None) -> dict:
         """Capture git-tracked file hashes for change detection."""
         snapshot = {}
         try:
+            workdir = self._session_workdir(session)
             result = subprocess.run(
                 ["git", "ls-files", "-s"],
-                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True, text=True, cwd=workdir, timeout=10,
             )
             for line in result.stdout.strip().split("\n"):
                 if line:
@@ -913,7 +925,7 @@ class WildV2Engine:
             # Also include unstaged files
             result2 = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True, text=True, cwd=workdir, timeout=10,
             )
             for line in result2.stdout.strip().split("\n"):
                 if line:
@@ -979,8 +991,8 @@ class WildV2Engine:
 
     # -- File storage helpers --
 
-    def _session_dir(self, session_id: str) -> str:
-        return os.path.join(self._get_workdir(), ".agents", "wild", session_id)
+    def _session_dir(self, session_id: str, session: Optional[WildV2Session] = None) -> str:
+        return os.path.join(self._session_workdir(session), ".agents", "wild", session_id)
 
     def _save_state(self, session_id: str):
         path = os.path.join(self._session_dir(session_id), "state.json")
