@@ -1312,7 +1312,7 @@ export function ChatInput({
             placeholder="Ask me about your research"
             disabled={disabled}
             rows={1}
-            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
+            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
               minHeight: `var(--app-chat-input-initial-height, ${DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX}px)`,
               maxHeight: `${MAX_CHAT_INPUT_HEIGHT_PX}px`,
@@ -1320,26 +1320,6 @@ export function ChatInput({
               color: 'transparent',
             }}
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`chat-toolbar-icon absolute bottom-2 right-2 z-20 ${isRecording ? 'text-destructive bg-destructive/10' : ''}`}
-            onClick={toggleRecording}
-            disabled={!dictationSupported}
-            title={dictationSupported ? (isRecording ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported'}
-          >
-            {isRecording ? (
-              <MicOff className="h-4 w-4" />
-            ) : (
-              <Mic className="h-4 w-4" />
-            )}
-          </Button>
-          {isRecording && (
-            <span className="absolute bottom-4 right-12 z-20 flex items-center gap-1 text-[10px] text-destructive animate-pulse">
-              <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-              Rec
-            </span>
-          )}
         </div>
       </div>
 
@@ -1565,6 +1545,24 @@ export function ChatInput({
 
         {/* Stop + Send/Queue buttons */}
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
+          {/* Dictation mic button */}
+          <div className="relative flex items-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`chat-toolbar-icon ${isRecording ? 'bg-destructive/10 text-destructive' : ''}`}
+              onClick={toggleRecording}
+              disabled={!dictationSupported}
+              title={dictationSupported ? (isRecording ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported'}
+            >
+              {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
+            {isRecording && (
+              <span className="absolute -top-1 -right-1 flex items-center gap-0.5 text-[9px] text-destructive animate-pulse">
+                <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+              </span>
+            )}
+          </div>
           {/* Context token count - circular indicator */}
           <Tooltip>
             <TooltipTrigger asChild>
