@@ -17,10 +17,25 @@ import math
 import random
 import time
 import requests
+import pytest
 
 SERVER = "http://127.0.0.1:10000"
 HEADERS = {"Content-Type": "application/json"}
 EPOCHS = 3
+
+
+def _server_available() -> bool:
+    try:
+        requests.get(f"{SERVER}/health", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _server_available(),
+    reason=f"Integration test requires server running at {SERVER}",
+)
 
 
 # ---------------------------------------------------------------------------
