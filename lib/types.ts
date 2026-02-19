@@ -119,6 +119,10 @@ export interface AppSettings {
       enabled: boolean;
       apiKey?: string;
       channel?: string;
+      signingSecret?: string;
+      notifyOnComplete?: boolean;
+      notifyOnFailed?: boolean;
+      notifyOnAlert?: boolean;
     };
   };
   notifications: {

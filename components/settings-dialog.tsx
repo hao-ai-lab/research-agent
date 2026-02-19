@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import {
   Slack,
   Moon,
@@ -25,6 +25,8 @@ import {
   LayoutGrid,
   FileText,
   Bug,
+  ExternalLink,
+  Loader2,
 } from 'lucide-react'
 import {
   Dialog,
@@ -65,7 +67,15 @@ export function SettingsDialog({
   const [slackDialogOpen, setSlackDialogOpen] = useState(false)
   const [slackApiKey, setSlackApiKey] = useState(settings.integrations.slack?.apiKey || '')
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
+  const [slackSigningSecret, setSlackSigningSecret] = useState(settings.integrations.slack?.signingSecret || '')
+  const [slackNotifyComplete, setSlackNotifyComplete] = useState(settings.integrations.slack?.notifyOnComplete !== false)
+  const [slackNotifyFailed, setSlackNotifyFailed] = useState(settings.integrations.slack?.notifyOnFailed !== false)
+  const [slackNotifyAlert, setSlackNotifyAlert] = useState(settings.integrations.slack?.notifyOnAlert !== false)
   const [showSlackApiKey, setShowSlackApiKey] = useState(false)
+  const [slackLoading, setSlackLoading] = useState(false)
+  const [slackError, setSlackError] = useState<string | null>(null)
+  const [slackSuccess, setSlackSuccess] = useState<string | null>(null)
+  const [slackSetupOpen, setSlackSetupOpen] = useState(false)
 
   // API Configuration
   const {
@@ -785,32 +795,104 @@ export function SettingsDialog({
     })
   }
 
-  const handleSlackSave = () => {
-    onSettingsChange({
-      ...settings,
-      integrations: {
-        ...settings.integrations,
-        slack: {
-          enabled: true,
-          apiKey: slackApiKey,
+  const handleSlackSave = useCallback(async () => {
+    setSlackLoading(true)
+    setSlackError(null)
+    setSlackSuccess(null)
+    try {
+      const headers: HeadersInit = { 'Content-Type': 'application/json' }
+      if (authToken) headers['X-Auth-Token'] = authToken
+      const resp = await fetch(`${apiUrl}/integrations/slack/configure`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          bot_token: slackApiKey,
           channel: slackChannel,
+          signing_secret: slackSigningSecret,
+          notify_on_complete: slackNotifyComplete,
+          notify_on_failed: slackNotifyFailed,
+          notify_on_alert: slackNotifyAlert,
+        }),
+      })
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({ detail: 'Connection failed' }))
+        throw new Error(data.detail || `HTTP ${resp.status}`)
+      }
+      const result = await resp.json()
+      onSettingsChange({
+        ...settings,
+        integrations: {
+          ...settings.integrations,
+          slack: {
+            enabled: true,
+            apiKey: slackApiKey,
+            channel: slackChannel,
+            signingSecret: slackSigningSecret,
+            notifyOnComplete: slackNotifyComplete,
+            notifyOnFailed: slackNotifyFailed,
+            notifyOnAlert: slackNotifyAlert,
+          },
         },
-      },
-    })
-    setSlackDialogOpen(false)
-  }
+      })
+      setSlackSuccess(`Connected to ${result.team || 'Slack'}!`)
+    } catch (e: unknown) {
+      setSlackError(e instanceof Error ? e.message : 'Failed to configure Slack')
+    } finally {
+      setSlackLoading(false)
+    }
+  }, [apiUrl, authToken, slackApiKey, slackChannel, slackSigningSecret, slackNotifyComplete, slackNotifyFailed, slackNotifyAlert, settings, onSettingsChange])
 
-  const handleSlackDisconnect = () => {
-    onSettingsChange({
-      ...settings,
-      integrations: {
-        ...settings.integrations,
-        slack: undefined,
-      },
-    })
-    setSlackApiKey('')
-    setSlackChannel('')
-  }
+  const handleSlackDisconnect = useCallback(async () => {
+    setSlackLoading(true)
+    setSlackError(null)
+    setSlackSuccess(null)
+    try {
+      const headers: HeadersInit = {}
+      if (authToken) headers['X-Auth-Token'] = authToken
+      await fetch(`${apiUrl}/integrations/slack/configure`, {
+        method: 'DELETE',
+        headers,
+      })
+      onSettingsChange({
+        ...settings,
+        integrations: {
+          ...settings.integrations,
+          slack: undefined,
+        },
+      })
+      setSlackApiKey('')
+      setSlackChannel('')
+      setSlackSigningSecret('')
+      setSlackSuccess(null)
+    } catch {
+      setSlackError('Failed to disconnect')
+    } finally {
+      setSlackLoading(false)
+    }
+  }, [apiUrl, authToken, settings, onSettingsChange])
+
+  const handleSlackTest = useCallback(async () => {
+    setSlackLoading(true)
+    setSlackError(null)
+    setSlackSuccess(null)
+    try {
+      const headers: HeadersInit = {}
+      if (authToken) headers['X-Auth-Token'] = authToken
+      const resp = await fetch(`${apiUrl}/integrations/slack/test`, {
+        method: 'POST',
+        headers,
+      })
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({ detail: 'Test failed' }))
+        throw new Error(data.detail || `HTTP ${resp.status}`)
+      }
+      setSlackSuccess('Test message sent! Check your Slack channel.')
+    } catch (e: unknown) {
+      setSlackError(e instanceof Error ? e.message : 'Failed to send test')
+    } finally {
+      setSlackLoading(false)
+    }
+  }, [apiUrl, authToken])
 
   const renderSettingItem = (item: typeof settingsSections[0]['items'][0]) => {
     const Icon = item.icon
@@ -1461,8 +1543,8 @@ export function SettingsDialog({
       </Dialog>
 
       {/* Slack Integration Dialog */}
-      <Dialog open={slackDialogOpen} onOpenChange={setSlackDialogOpen}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={slackDialogOpen} onOpenChange={(open) => { setSlackDialogOpen(open); if (!open) { setSlackError(null); setSlackSuccess(null) } }}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Slack className="h-5 w-5" />
@@ -1471,6 +1553,17 @@ export function SettingsDialog({
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            {slackError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                <p className="text-xs text-red-400">{slackError}</p>
+              </div>
+            )}
+            {slackSuccess && (
+              <div className="rounded-lg border border-accent/30 bg-accent/10 p-3">
+                <p className="text-xs text-accent">{slackSuccess}</p>
+              </div>
+            )}
+
             {settings.integrations.slack?.enabled ? (
               <>
                 <div className="rounded-lg bg-accent/10 border border-accent/30 p-3">
@@ -1482,25 +1575,87 @@ export function SettingsDialog({
                     Channel: {settings.integrations.slack.channel || 'Not set'}
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  className="w-full bg-transparent"
-                  onClick={handleSlackDisconnect}
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Disconnect
-                </Button>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Notification Events</p>
+                  <div className="flex items-center justify-between rounded-md border border-border/50 px-3 py-2">
+                    <Label htmlFor="dlg-notify-complete" className="text-xs">Run Completed</Label>
+                    <Switch id="dlg-notify-complete" checked={slackNotifyComplete} onCheckedChange={setSlackNotifyComplete} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border/50 px-3 py-2">
+                    <Label htmlFor="dlg-notify-failed" className="text-xs">Run Failed</Label>
+                    <Switch id="dlg-notify-failed" checked={slackNotifyFailed} onCheckedChange={setSlackNotifyFailed} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border/50 px-3 py-2">
+                    <Label htmlFor="dlg-notify-alert" className="text-xs">Experiment Alerts</Label>
+                    <Switch id="dlg-notify-alert" checked={slackNotifyAlert} onCheckedChange={setSlackNotifyAlert} />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1 bg-transparent"
+                    onClick={handleSlackTest}
+                    disabled={slackLoading}
+                  >
+                    {slackLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
+                    Send Test
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 bg-transparent text-red-400 hover:text-red-300"
+                    onClick={handleSlackDisconnect}
+                    disabled={slackLoading}
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Disconnect
+                  </Button>
+                </div>
               </>
             ) : (
               <>
+                <div className="rounded-lg border border-border/50 bg-secondary/30">
+                  <button
+                    type="button"
+                    onClick={() => setSlackSetupOpen((prev) => !prev)}
+                    className="flex w-full items-center justify-between p-3 text-left"
+                  >
+                    <span className="text-xs font-medium text-muted-foreground">How to set up Slack integration</span>
+                    <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${slackSetupOpen ? 'rotate-90' : ''}`} />
+                  </button>
+                  {slackSetupOpen && (
+                    <div className="space-y-2 border-t border-border/50 px-3 pb-3 pt-2">
+                      <div className="space-y-1.5 text-xs text-muted-foreground">
+                        <p className="font-medium text-foreground">1. Create a Slack App</p>
+                        <p>Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline inline-flex items-center gap-0.5">api.slack.com/apps <ExternalLink className="h-3 w-3" /></a> and click &quot;Create New App&quot; &rarr; &quot;From scratch&quot;.</p>
+                        <p className="font-medium text-foreground pt-1">2. Add Bot Token Scopes</p>
+                        <p>Under <strong>OAuth &amp; Permissions</strong>: <code className="text-[11px]">chat:write, channels:read, groups:read</code></p>
+                        <p className="font-medium text-foreground pt-1">3. Install &amp; Copy Token</p>
+                        <p>Install to workspace, copy the <code className="text-[11px]">xoxb-</code> token.</p>
+                        <p className="font-medium text-foreground pt-1">4. Invite Bot to Channel</p>
+                        <p>Type <code className="text-[11px]">/invite @YourBotName</code> in channel.</p>
+                      </div>
+                      <a
+                        href="https://github.com/hao-ai-lab/research-agent/blob/main/docs/SLACK_INTEGRATION.md"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                      >
+                        Full setup guide <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-3">
                   <div>
-                    <Label htmlFor="slack-api" className="text-xs">
-                      Slack API Token
+                    <Label htmlFor="dlg-slack-api" className="text-xs">
+                      Bot Token
                     </Label>
                     <div className="mt-1.5 flex items-center gap-2">
                       <Input
-                        id="slack-api"
+                        id="dlg-slack-api"
                         type={showSlackApiKey ? 'text' : 'password'}
                         placeholder="xoxb-..."
                         value={slackApiKey}
@@ -1521,23 +1676,54 @@ export function SettingsDialog({
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="slack-channel" className="text-xs">
+                    <Label htmlFor="dlg-slack-channel" className="text-xs">
                       Default Channel
                     </Label>
                     <Input
-                      id="slack-channel"
+                      id="dlg-slack-channel"
                       placeholder="#ml-experiments"
                       value={slackChannel}
                       onChange={(e) => setSlackChannel(e.target.value)}
                       className="mt-1.5"
                     />
                   </div>
+                  <div>
+                    <Label htmlFor="dlg-slack-signing-secret" className="text-xs">
+                      Signing Secret <span className="font-normal text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      id="dlg-slack-signing-secret"
+                      type="password"
+                      placeholder="abc123..."
+                      value={slackSigningSecret}
+                      onChange={(e) => setSlackSigningSecret(e.target.value)}
+                      className="mt-1.5"
+                    />
+                  </div>
                 </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Notification Events</p>
+                  <div className="flex items-center justify-between rounded-md border border-border/50 px-3 py-2">
+                    <Label htmlFor="dlg-setup-complete" className="text-xs">Run Completed</Label>
+                    <Switch id="dlg-setup-complete" checked={slackNotifyComplete} onCheckedChange={setSlackNotifyComplete} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border/50 px-3 py-2">
+                    <Label htmlFor="dlg-setup-failed" className="text-xs">Run Failed</Label>
+                    <Switch id="dlg-setup-failed" checked={slackNotifyFailed} onCheckedChange={setSlackNotifyFailed} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border/50 px-3 py-2">
+                    <Label htmlFor="dlg-setup-alert" className="text-xs">Experiment Alerts</Label>
+                    <Switch id="dlg-setup-alert" checked={slackNotifyAlert} onCheckedChange={setSlackNotifyAlert} />
+                  </div>
+                </div>
+
                 <Button
                   className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
                   onClick={handleSlackSave}
-                  disabled={!slackApiKey.trim()}
+                  disabled={!slackApiKey.trim() || !slackChannel.trim() || slackLoading}
                 >
+                  {slackLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Slack className="mr-2 h-4 w-4" />}
                   Connect to Slack
                 </Button>
               </>
