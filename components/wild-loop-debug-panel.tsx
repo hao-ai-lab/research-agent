@@ -4,8 +4,8 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle, Settings, CheckCircle2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { getWildLoopStatus, getWildEventQueue, configureWildLoop, getWildV2Status } from '@/lib/api'
-import type { ChatMessageData, WildLoopStatus, WildEventQueueItem, WildV2Status } from '@/lib/api'
+import { getWildV2Status } from '@/lib/api'
+import type { ChatMessageData, WildV2Status } from '@/lib/api'
 import { useAppSettings } from '@/lib/app-settings'
 import type { ExperimentRun, PromptProvenance, Sweep } from '@/lib/types'
 
@@ -289,13 +289,8 @@ export function WildLoopDebugPanel({
     onRefreshData,
 }: WildLoopDebugPanelProps) {
     const { settings, setSettings } = useAppSettings()
-    const [status, setStatus] = useState<WildLoopStatus | null>(null)
-    const [queue, setQueue] = useState<{ queue_size: number; events: WildEventQueueItem[] } | null>(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [statusOpen, setStatusOpen] = useState(true)
-    const [queueOpen, setQueueOpen] = useState(true)
-    const [entitiesOpen, setEntitiesOpen] = useState(true)
     const [settingsOpen, setSettingsOpen] = useState(false)
     const [v2PlanOpen, setV2PlanOpen] = useState(true)
     const [v2TasksOpen, setV2TasksOpen] = useState(true)
@@ -317,7 +312,7 @@ export function WildLoopDebugPanel({
     const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null)
     const activePointerIdRef = useRef<number | null>(null)
     const settingsRef = useRef(settings)
-    const prevIterationRef = useRef<number | null>(null)
+
 
     const isMobileLayout = layout === 'mobile'
     const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 2
@@ -404,39 +399,21 @@ export function WildLoopDebugPanel({
         [provenanceEntries]
     )
     const panelTitle = mode === 'wild' ? 'Wild Context' : 'Chat Context'
-    const showWildDiagnostics = mode === 'wild' || status?.is_active === true || v2Status?.active === true
+    const showWildDiagnostics = mode === 'wild' || v2Status?.active === true
 
     const refresh = useCallback(async () => {
         setLoading(true)
         setError(null)
-        const [statusResult, queueResult, v2Result, contextResult] = await Promise.allSettled([
-            getWildLoopStatus(),
-            getWildEventQueue(),
+        const [v2Result, contextResult] = await Promise.allSettled([
             getWildV2Status().catch(() => ({ active: false } as WildV2Status)),
             onRefreshData ? onRefreshData() : Promise.resolve(),
         ])
 
         let nextError: string | null = null
 
-        if (statusResult.status === 'fulfilled') {
-            setStatus(statusResult.value)
-            if (prevIterationRef.current !== null && statusResult.value.iteration !== prevIterationRef.current) {
-                // Iteration changed — data is already fresh from this call.
-            }
-            prevIterationRef.current = statusResult.value.iteration
-        } else {
-            nextError = statusResult.reason instanceof Error ? statusResult.reason.message : 'Failed to fetch wild status'
-        }
-
-        if (queueResult.status === 'fulfilled') {
-            setQueue(queueResult.value)
-        } else if (!nextError) {
-            nextError = queueResult.reason instanceof Error ? queueResult.reason.message : 'Failed to fetch wild queue'
-        }
-
         if (v2Result.status === 'fulfilled') {
             setV2Status(v2Result.value)
-        } else if (!nextError) {
+        } else {
             nextError = v2Result.reason instanceof Error ? v2Result.reason.message : 'Failed to fetch wild v2 status'
         }
 
@@ -558,26 +535,7 @@ export function WildLoopDebugPanel({
         })
     }, [settings, setSettings])
 
-    const phaseColor = (phase: string) => {
-        switch (phase) {
-            case 'idle': return 'text-muted-foreground'
-            case 'exploring': return 'text-blue-400'
-            case 'monitoring': return 'text-green-400'
-            case 'analyzing': return 'text-yellow-400'
-            case 'fixing': return 'text-red-400'
-            case 'paused': return 'text-orange-400'
-            default: return 'text-foreground'
-        }
-    }
 
-    const priorityLabel = (p: number) => {
-        if (p <= 10) return { label: 'User', color: 'text-purple-400' }
-        if (p <= 20) return { label: 'Critical', color: 'text-red-400' }
-        if (p <= 30) return { label: 'Warning', color: 'text-yellow-400' }
-        if (p <= 50) return { label: 'Run', color: 'text-blue-400' }
-        if (p <= 70) return { label: 'Analysis', color: 'text-cyan-400' }
-        return { label: 'Explore', color: 'text-muted-foreground' }
-    }
 
     const statusColor = (s: string) => {
         switch (s) {
@@ -590,7 +548,6 @@ export function WildLoopDebugPanel({
         }
     }
 
-    const totalEntities = (status?.created_sweeps?.length ?? 0) + (status?.created_runs?.length ?? 0)
 
     return (
         <div
@@ -1256,260 +1213,6 @@ export function WildLoopDebugPanel({
                     </Collapsible>
                 )}
 
-                {/* Status Section */}
-                {showWildDiagnostics && (
-                    <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-                        {statusOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <span>Wild Status</span>
-                        {status && (
-                            <span className={`ml-auto text-[10px] ${phaseColor(status.phase)}`}>
-                                {status.phase}
-                            </span>
-                        )}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        {status ? (
-                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-2 text-xs">
-                                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
-                                    <span className="text-muted-foreground">Phase:</span>
-                                    <span className={`font-medium ${phaseColor(status.phase)}`}>{status.phase}</span>
-
-                                    <span className="text-muted-foreground">Active:</span>
-                                    <span className={status.is_active ? 'text-green-400' : 'text-muted-foreground'}>{String(status.is_active)}</span>
-
-                                    <span className="text-muted-foreground">Paused:</span>
-                                    <span className={status.is_paused ? 'text-orange-400' : 'text-muted-foreground'}>{String(status.is_paused)}</span>
-
-                                    <span className="text-muted-foreground">Stage:</span>
-                                    <span>{status.stage || '—'}</span>
-
-                                    <span className="text-muted-foreground">Iteration:</span>
-                                    <span>{status.iteration}</span>
-
-                                    <span className="text-muted-foreground">Goal:</span>
-                                    <span className="whitespace-pre-wrap break-words" title={status.goal || undefined}>{status.goal || '—'}</span>
-
-                                    <span className="text-muted-foreground">Session:</span>
-                                    <span className="font-mono text-[10px] truncate" title={status.session_id || undefined}>
-                                        {status.session_id ? status.session_id.slice(0, 12) + '…' : '—'}
-                                    </span>
-
-                                    <span className="text-muted-foreground">Sweep:</span>
-                                    <span className="font-mono text-[10px]">{status.sweep_id || '—'}</span>
-
-                                    <span className="text-muted-foreground">Queue:</span>
-                                    <span>{status.queue_size} events</span>
-
-                                    <span className="text-muted-foreground">Plan:</span>
-                                    <button
-                                        className={`text-left font-medium cursor-pointer hover:underline ${status.plan_autonomy === 'agent' ? 'text-green-400' : 'text-blue-400'
-                                            }`}
-                                        onClick={async () => {
-                                            const next = status.plan_autonomy === 'agent' ? 'collaborative' : 'agent'
-                                            try {
-                                                await configureWildLoop({ plan_autonomy: next })
-                                                refresh()
-                                            } catch { }
-                                        }}
-                                        title={`Click to switch to ${status.plan_autonomy === 'agent' ? 'collaborative' : 'agent'} mode`}
-                                    >
-                                        {status.plan_autonomy === 'agent' ? '🤖 Agent decides' : '🤝 Collaborative'}
-                                    </button>
-                                </div>
-
-                                {/* Run stats */}
-                                {status.run_stats && (
-                                    <div className="border-t border-border/30 pt-2">
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Run Stats</div>
-                                        <div className="flex flex-wrap gap-2 text-[10px]">
-                                            <span>Total: {status.run_stats.total}</span>
-                                            <span className="text-green-400">✓ {status.run_stats.completed}</span>
-                                            <span className="text-blue-400">▶ {status.run_stats.running}</span>
-                                            <span className="text-red-400">✗ {status.run_stats.failed}</span>
-                                            <span className="text-muted-foreground">⏳ {status.run_stats.queued}</span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Termination */}
-                                {status.termination && (
-                                    <div className="border-t border-border/30 pt-2">
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Termination</div>
-                                        <div className="text-[10px] space-y-0.5">
-                                            {status.termination.max_iterations != null && (
-                                                <div>Max iterations: {status.termination.max_iterations}</div>
-                                            )}
-                                            {status.termination.max_time_seconds != null && (
-                                                <div>Max time: {status.termination.max_time_seconds}s</div>
-                                            )}
-                                            {status.termination.max_tokens != null && (
-                                                <div>Max tokens: {status.termination.max_tokens}</div>
-                                            )}
-                                            {!status.termination.max_iterations && !status.termination.max_time_seconds && !status.termination.max_tokens && (
-                                                <div className="text-muted-foreground">No limits set</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Active alerts */}
-                                {status.active_alerts && status.active_alerts.length > 0 && (
-                                    <div className="border-t border-border/30 pt-2">
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Active Alerts ({status.active_alerts.length})</div>
-                                        <div className="space-y-1">
-                                            {status.active_alerts.slice(0, 5).map((alert, i) => (
-                                                <div key={i} className="text-[10px] flex items-start gap-1">
-                                                    <Circle className="h-2 w-2 mt-0.5 text-yellow-400 fill-yellow-400/30" />
-                                                    <span className="truncate">{alert.message}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="text-xs text-muted-foreground p-3">
-                                {loading ? 'Loading...' : 'No data'}
-                            </div>
-                        )}
-                    </CollapsibleContent>
-                    </Collapsible>
-                )}
-
-                {/* Created Entities Section */}
-                {showWildDiagnostics && (
-                    <Collapsible open={entitiesOpen} onOpenChange={setEntitiesOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-                        {entitiesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <span>Created Entities</span>
-                        <span className="ml-auto text-[10px] text-muted-foreground">
-                            {totalEntities} items
-                        </span>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        {totalEntities === 0 ? (
-                            <div className="text-xs text-muted-foreground p-3 text-center">
-                                No sweeps or runs created yet
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-3 text-xs">
-                                {/* Created Sweeps */}
-                                {status?.created_sweeps && status.created_sweeps.length > 0 && (
-                                    <div>
-                                        <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
-                                            Sweeps ({status.created_sweeps.length})
-                                        </div>
-                                        <div className="space-y-1">
-                                            {status.created_sweeps.map((sweep) => (
-                                                <div
-                                                    key={sweep.id}
-                                                    className="flex items-center gap-2 rounded border border-border/30 bg-secondary/10 px-2 py-1.5"
-                                                >
-                                                    <span className={`text-[10px] font-medium ${statusColor(sweep.status)}`}>
-                                                        {sweep.status}
-                                                    </span>
-                                                    <span className="truncate flex-1 text-[10px]" title={sweep.name}>
-                                                        {sweep.name}
-                                                    </span>
-                                                    <span className="text-[10px] text-muted-foreground/60 shrink-0">
-                                                        {sweep.run_count} runs
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Created Runs */}
-                                {status?.created_runs && status.created_runs.length > 0 && (
-                                    <div>
-                                        <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
-                                            Runs ({status.created_runs.length})
-                                        </div>
-                                        <div className="space-y-1">
-                                            {status.created_runs.map((run) => (
-                                                <div
-                                                    key={run.id}
-                                                    className="flex items-center gap-2 rounded border border-border/30 bg-secondary/10 px-2 py-1.5"
-                                                >
-                                                    <span className={`text-[10px] font-medium ${statusColor(run.status)}`}>
-                                                        {run.status}
-                                                    </span>
-                                                    <span className="truncate flex-1 text-[10px]" title={run.name}>
-                                                        {run.name}
-                                                    </span>
-                                                    <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">
-                                                        {run.id}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </CollapsibleContent>
-                    </Collapsible>
-                )}
-
-                {/* Queue Section */}
-                {showWildDiagnostics && (
-                    <Collapsible open={queueOpen} onOpenChange={setQueueOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-                        {queueOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <span>Event Queue</span>
-                        {queue && (
-                            <span className="ml-auto text-[10px] text-muted-foreground">
-                                {queue.queue_size} items
-                            </span>
-                        )}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        {queue ? (
-                            queue.events.length === 0 ? (
-                                <div className="text-xs text-muted-foreground p-3 text-center">
-                                    Queue is empty
-                                </div>
-                            ) : (
-                                <div className="space-y-1.5">
-                                    {queue.events.map((event, index) => {
-                                        const pl = priorityLabel(event.priority)
-                                        return (
-                                            <div
-                                                key={event.id}
-                                                className="rounded-lg border border-border/50 bg-secondary/20 p-2.5 text-xs space-y-1"
-                                            >
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] text-muted-foreground/60 w-4">#{index + 1}</span>
-                                                    <span className={`text-[10px] font-medium ${pl.color}`}>{pl.label}</span>
-                                                    <span className="text-muted-foreground/60">p{event.priority}</span>
-                                                    <span className="ml-auto text-[10px] text-muted-foreground/50">{event.type}</span>
-                                                </div>
-                                                <div className="font-medium text-foreground truncate" title={event.title}>
-                                                    {event.title}
-                                                </div>
-                                                {event.prompt && (
-                                                    <div className="text-[10px] text-muted-foreground/70 line-clamp-2" title={event.prompt}>
-                                                        {event.prompt.slice(0, 120)}{event.prompt.length > 120 ? '…' : ''}
-                                                    </div>
-                                                )}
-                                                <div className="text-[10px] text-muted-foreground/50">
-                                                    {new Date(event.created_at * 1000).toLocaleTimeString()}
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            )
-                        ) : (
-                            <div className="text-xs text-muted-foreground p-3">
-                                {loading ? 'Loading...' : 'No data'}
-                            </div>
-                        )}
-                    </CollapsibleContent>
-                    </Collapsible>
-                )}
 
                 {/* Raw JSON toggle */}
                 {showWildDiagnostics && (
@@ -1518,10 +1221,11 @@ export function WildLoopDebugPanel({
                         Raw JSON
                     </summary>
                     <pre className="mt-2 rounded-lg border border-border/30 bg-secondary/10 p-2 text-[10px] overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify({ status, queue }, null, 2)}
+                        {JSON.stringify({ v2Status }, null, 2)}
                     </pre>
                     </details>
                 )}
+
             </div>
         </div>
     )
