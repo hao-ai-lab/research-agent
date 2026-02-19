@@ -127,6 +127,40 @@
           }
         }
       }
+    },
+    "modal-glm5": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Modal GLM-5",
+      "options": {
+        "baseURL": "https://api.us-west-2.modal.direct/v1",
+        "apiKey": "{env:MODAL_GLM5_API_KEY}"
+      },
+      "models": {
+        "zai-org/GLM-5-FP8": {
+          "name": "GLM-5 FP8",
+          "limit": {
+            "context": 131072,
+            "output": 8192
+          }
+        }
+      }
+    },
+    "nvidia-kimi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "NVIDIA Kimi K2.5",
+      "options": {
+        "baseURL": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "{env:NVIDIA_API}"
+      },
+      "models": {
+        "moonshotai/kimi-k2.5": {
+          "name": "Kimi K2.5",
+          "limit": {
+            "context": 131072,
+            "output": 16384
+          }
+        }
+      }
     }
   },
   "command": {
