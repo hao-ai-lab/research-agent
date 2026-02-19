@@ -341,16 +341,8 @@ export function SettingsDialog({
           label: 'Starter Cards',
           description: 'Show contextual prompt cards on new chats',
           icon: LayoutGrid,
-          type: 'toggle' as const,
-          value: settings.appearance.showStarterCards !== false,
-        },
-        {
-          id: 'starterCardFlavor',
-          label: 'Starter Card Flavor',
-          description: 'Choose between expert context cards and novice quick-start prompts',
-          icon: LayoutGrid,
           type: 'select' as const,
-          options: ['expert', 'novice'],
+          options: ['none', 'novice', 'expert'],
           value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
@@ -909,7 +901,8 @@ export function SettingsDialog({
                       if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
-                      if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
+                      if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'none' | 'novice' | 'expert' })
+                      if (item.id === 'showStarterCards') updateAppearanceSettings({ starterCardFlavor: option as 'none' | 'novice' | 'expert' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
                       ? 'bg-accent text-accent-foreground'
@@ -940,7 +933,6 @@ export function SettingsDialog({
               onCheckedChange={(checked) => {
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
-                if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
                 if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'showChatArtifacts') updateAppearanceSettings({ showChatArtifacts: checked })
                 if (item.id === 'chatCollapseAllChats') updateAppearanceSettings({ chatCollapseAllChats: checked })

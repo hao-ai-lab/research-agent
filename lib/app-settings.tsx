@@ -62,7 +62,9 @@ export const defaultAppSettings: AppSettings = {
     chatCollapseArtifactsInChat: false,
     showSidebarNewChatButton: true,
     mobileEnterToNewline: false,
-    thinkingDisplayMode: 'collapsible',
+    thinkingDisplayMode: 'inline',
+    toolDisplayMode: 'expand',
+    thinkingToolFontSizePx: 14,
   },
   integrations: {},
   notifications: {
@@ -121,7 +123,13 @@ function isValidRunItemInteractionMode(
 function isValidStarterCardFlavor(
   value: unknown,
 ): value is NonNullable<AppSettings["appearance"]["starterCardFlavor"]> {
-  return value === "novice" || value === "expert";
+  return value === "none" || value === "novice" || value === "expert";
+}
+
+function isValidDisplayMode(
+  value: unknown,
+): value is 'collapse' | 'expand' | 'inline' {
+  return value === 'collapse' || value === 'expand' || value === 'inline';
 }
 
 function parseStoredNumber(value: string | null): number | null {
@@ -405,7 +413,11 @@ function readStoredSettings(): AppSettings {
         showStarterCards:
           parsed?.appearance?.showStarterCards ??
           defaultAppSettings.appearance.showStarterCards,
-        starterCardFlavor: resolvedStarterCardFlavor,
+        starterCardFlavor:
+          // Migration: if legacy showStarterCards was explicitly false, map to 'none'
+          parsed?.appearance?.showStarterCards === false && !isValidStarterCardFlavor(starterCardFlavorFromBlob)
+            ? 'none'
+            : resolvedStarterCardFlavor,
         showChatContextPanel:
           parsed?.appearance?.showChatContextPanel ??
           defaultAppSettings.appearance.showChatContextPanel,
@@ -444,9 +456,19 @@ function readStoredSettings(): AppSettings {
           parsed?.appearance?.mobileEnterToNewline ??
           defaultAppSettings.appearance.mobileEnterToNewline,
         thinkingDisplayMode:
-          (parsed?.appearance?.thinkingDisplayMode === 'collapsible' || parsed?.appearance?.thinkingDisplayMode === 'inline')
-            ? parsed.appearance.thinkingDisplayMode
-            : defaultAppSettings.appearance.thinkingDisplayMode,
+          isValidDisplayMode(parsed?.appearance?.thinkingDisplayMode)
+            ? parsed!.appearance.thinkingDisplayMode
+            // Migration: map old 'collapsible' to 'collapse'
+            : (parsed?.appearance as Record<string,unknown>)?.thinkingDisplayMode === 'collapsible'
+              ? 'collapse'
+              : defaultAppSettings.appearance.thinkingDisplayMode,
+        toolDisplayMode:
+          isValidDisplayMode(parsed?.appearance?.toolDisplayMode)
+            ? parsed!.appearance.toolDisplayMode
+            : defaultAppSettings.appearance.toolDisplayMode,
+        thinkingToolFontSizePx:
+          sanitizePositiveNumber(parsed?.appearance?.thinkingToolFontSizePx) ??
+          defaultAppSettings.appearance.thinkingToolFontSizePx,
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,
       notifications: {
@@ -602,6 +624,20 @@ export function AppSettingsProvider({
       root.style.setProperty('--accent', customAccentColor)
     } else {
       root.style.removeProperty('--accent')
+    }
+
+    const thinkingToolFontSizePx = settings.appearance.thinkingToolFontSizePx;
+    if (
+      typeof thinkingToolFontSizePx === "number" &&
+      Number.isFinite(thinkingToolFontSizePx) &&
+      thinkingToolFontSizePx > 0
+    ) {
+      root.style.setProperty(
+        "--app-thinking-tool-font-size",
+        `${thinkingToolFontSizePx}px`,
+      );
+    } else {
+      root.style.removeProperty("--app-thinking-tool-font-size");
     }
 
     const handleThemeChange = () => {
