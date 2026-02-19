@@ -68,7 +68,7 @@ app = modal.App("research-agent-preview")
 OPENCODE_BIN = "/usr/local/bin/opencode"
 OPENCODE_PORT = "4096"
 MODAL_PREVIEW_OPENCODE_URL = os.environ.get("MODAL_PREVIEW_OPENCODE_URL", "").strip()
-# Captured at deploy time (CI injects a fresh token per run).
+# Captured at deploy time (CI injects a per-PR token).
 # The Modal Secret may also contain a stale RESEARCH_AGENT_USER_AUTH_TOKEN;
 # we store the deploy-time value here so functions can forcibly use it.
 _DEPLOY_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "").strip()
