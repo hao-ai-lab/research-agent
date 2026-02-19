@@ -76,23 +76,23 @@ export function TmuxTerminalPanel({
             )}
 
             {/* Terminal Placeholder */}
-            <div className="bg-black/50 p-1">
+            <div className="bg-muted/50 p-1">
                 {/* Placeholder for future embedded terminal */}
-                <div className="rounded border border-dashed border-gray-700 bg-gray-900/50 p-6 text-center">
-                    <Monitor className="h-10 w-10 mx-auto mb-3 text-gray-600" />
-                    <p className="text-sm text-gray-400 mb-1">
+                <div className="rounded border border-dashed border-border bg-secondary/50 p-6 text-center">
+                    <Monitor className="h-10 w-10 mx-auto mb-3 text-muted-foreground/50" />
+                    <p className="text-sm text-muted-foreground mb-1">
                         Embedded Terminal
                     </p>
-                    <p className="text-[10px] text-gray-500">
+                    <p className="text-[10px] text-muted-foreground">
                         Coming soon - Interactive terminal access
                     </p>
                 </div>
 
                 {/* Manual attach instructions */}
-                <div className="mt-1 rounded bg-gray-800/50 p-2 min-w-0">
-                    <p className="text-[10px] text-gray-400 mb-1 min-w-0">To attach manually:</p>
+                <div className="mt-1 rounded bg-secondary/50 p-2 min-w-0">
+                    <p className="text-[10px] text-muted-foreground mb-1 min-w-0">To attach manually:</p>
                     <div className="flex items-center gap-1 min-w-0">
-                        <code className="text-[11px] font-mono text-green-400 bg-black/30 rounded overflow-hidden text-ellipsis ">
+                        <code className="text-[11px] font-mono text-foreground bg-muted/50 rounded overflow-hidden text-ellipsis ">
                             {attachCommand}
                         </code>
                         <Button
@@ -112,7 +112,7 @@ export function TmuxTerminalPanel({
 
                 {/* Pane info */}
                 {tmuxPane && (
-                    <p className="ml-1 mt-2 text-[10px] text-gray-500">
+                    <p className="ml-1 mt-2 text-[10px] text-muted-foreground">
                         Pane ID: {tmuxPane}
                     </p>
                 )}

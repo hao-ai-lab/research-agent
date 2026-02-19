@@ -692,67 +692,67 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
             <div id={`run-alerts-${run.id}`}>
               <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
                 <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-warning" />
-                      <span className={`text-xs font-medium ${runAlerts.length > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
-                        Alerts {runAlerts.length > 0 && `(${runAlerts.length})`}
-                      </span>
-                    </div>
-                    {alertsOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-3 pb-3">
-                    {runAlerts.length > 0 ? (
-                      <div className="mt-2 space-y-2">
-                        {runAlerts.map((alert) => {
-                          const severity = alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info'
-                          const badgeClass =
-                            severity === 'error'
-                              ? 'border-destructive/50 bg-destructive/10 text-destructive'
-                              : severity === 'warning'
-                              ? 'border-warning/50 bg-warning/10 text-warning'
-                              : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
-                          return (
-                            <div key={alert.id} className="rounded border border-border bg-secondary/40 p-2">
-                              <div className="flex items-start gap-2">
-                                <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 ${severity === 'error' ? 'text-destructive' : severity === 'warning' ? 'text-warning' : 'text-blue-400'}`} />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className={`text-[9px] h-4 ${badgeClass}`}>
-                                      {alert.severity}
-                                    </Badge>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {formatAlertTime(alert.timestamp)}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-foreground mt-1 leading-relaxed">
-                                    {alert.message}
-                                  </p>
-                                  {alert.response && (
-                                    <p className="text-[10px] text-muted-foreground mt-1">
-                                      Response: {alert.response}
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-warning" />
+                        <span className={`text-xs font-medium ${runAlerts.length > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+                          Alerts {runAlerts.length > 0 && `(${runAlerts.length})`}
+                        </span>
+                      </div>
+                      {alertsOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border px-3 pb-3">
+                      {runAlerts.length > 0 ? (
+                        <div className="mt-2 space-y-2">
+                          {runAlerts.map((alert) => {
+                            const severity = alert.severity === 'critical' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info'
+                            const badgeClass =
+                              severity === 'error'
+                                ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                                : severity === 'warning'
+                                  ? 'border-warning/50 bg-warning/10 text-warning'
+                                  : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
+                            return (
+                              <div key={alert.id} className="rounded border border-border bg-secondary/40 p-2">
+                                <div className="flex items-start gap-2">
+                                  <AlertTriangle className={`h-3.5 w-3.5 mt-0.5 ${severity === 'error' ? 'text-destructive' : severity === 'warning' ? 'text-warning' : 'text-blue-400'}`} />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className={`text-[9px] h-4 ${badgeClass}`}>
+                                        {alert.severity}
+                                      </Badge>
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {formatAlertTime(alert.timestamp)}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-foreground mt-1 leading-relaxed">
+                                      {alert.message}
                                     </p>
-                                  )}
+                                    {alert.response && (
+                                      <p className="text-[10px] text-muted-foreground mt-1">
+                                        Response: {alert.response}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div className="mt-2 py-4 text-center">
-                        <p className="text-xs text-muted-foreground">No alerts for this run</p>
-                      </div>
-                    )}
-                  </div>
-                </CollapsibleContent>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mt-2 py-4 text-center">
+                          <p className="text-xs text-muted-foreground">No alerts for this run</p>
+                        </div>
+                      )}
+                    </div>
+                  </CollapsibleContent>
                 </div>
               </Collapsible>
             </div>
@@ -990,8 +990,8 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
                         </>
                       ) : (
                         <>
-                          <div className="rounded bg-black/30 px-2 py-1.5">
-                            <code className="whitespace-pre-wrap break-all text-[11px] font-mono text-green-400">
+                          <div className="rounded bg-muted/50 px-2 py-1.5">
+                            <code className="whitespace-pre-wrap break-all text-[11px] font-mono text-foreground">
                               {run.command}
                             </code>
                           </div>

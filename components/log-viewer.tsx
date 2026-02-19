@@ -211,7 +211,7 @@ export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = tr
             {/* Log content */}
             <div
                 ref={scrollRef}
-                className={`${containerHeight} overflow-auto font-mono text-[11px] bg-black/50`}
+                className={`${containerHeight} overflow-auto font-mono text-[11px] bg-muted/50`}
                 onScroll={handleScroll}
             >
                 {/* Load more indicator */}
@@ -235,7 +235,7 @@ export function LogViewer({ runId, isFullPage = false, onExpand, showHeader = tr
                 ) : logs ? (
                     <pre
                         ref={logContainerRef}
-                        className="p-3 whitespace-pre-wrap break-all text-gray-300 leading-relaxed"
+                        className="p-3 whitespace-pre-wrap break-all text-foreground leading-relaxed"
                     >
                         {logs}
                     </pre>
