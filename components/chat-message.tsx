@@ -123,7 +123,7 @@ export function ChatMessage({
   const thinkingMode = settings.appearance.thinkingDisplayMode || 'inline'
   const [isThinkingOpen, setIsThinkingOpen] = useState(thinkingMode === 'expand')
   const [isChartOpen, setIsChartOpen] = useState(true)
-  const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false)
+
   const [selectionReplyUi, setSelectionReplyUi] = useState<{
     text: string
     x: number
@@ -560,14 +560,10 @@ export function ChatMessage({
     const hasExcerptCard = Boolean(parsedUserReply.excerpt)
     const userBody = hasExcerptCard ? parsedUserReply.body : message.content
     const excerptLineCount = parsedUserReply.excerpt ? parsedUserReply.excerpt.split('\n').length : 0
-    const collapsedPreviewSource = (userBody || parsedUserReply.excerpt || message.content)
-      .replace(/\s+/g, ' ')
-      .trim()
-    const collapsedPreview = collapsedPreviewSource || 'User message'
 
     return (
       <div className="px-0.5 py-2 min-w-0 overflow-hidden">
-        {isUserMessageExpanded && hasExcerptCard && parsedUserReply.excerpt && (
+        {hasExcerptCard && parsedUserReply.excerpt && (
           <div className="mb-2 flex justify-start">
             <div className="w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 shadow-sm">
               <p className="text-sm font-medium leading-tight text-foreground break-words">
@@ -583,25 +579,9 @@ export function ChatMessage({
           </div>
         )}
         <div className="border-l-4 border-primary px-3 py-1">
-          <button
-            type="button"
-            onClick={() => setIsUserMessageExpanded((prev) => !prev)}
-            className="flex w-full items-start gap-1.5 text-left"
-          >
-            {isUserMessageExpanded ? (
-              <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            )}
-            <span className={`${isUserMessageExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'} flex-1 text-base leading-relaxed text-foreground`}>
-              {collapsedPreview}
-            </span>
-          </button>
-          {isUserMessageExpanded && (
-            <div className="mt-1.5 space-y-1 text-base leading-relaxed text-foreground break-words">
-              {renderMarkdown(userBody)}
-            </div>
-          )}
+          <div className="text-base leading-relaxed text-foreground whitespace-pre-wrap break-words space-y-1">
+            {renderMarkdown(userBody)}
+          </div>
         </div>
       </div>
     )

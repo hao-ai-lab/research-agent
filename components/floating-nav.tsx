@@ -64,6 +64,8 @@ interface FloatingNavProps {
   eventCount?: number
   onAlertClick?: () => void
   onExportSession?: () => void
+  collapseChats?: boolean
+  onCollapseChatsChange?: (collapsed: boolean) => void
   // Session selector props (for chat tab)
   sessionTitle?: string
   currentSessionId?: string | null
@@ -86,6 +88,8 @@ export function FloatingNav({
   eventCount = 0,
   onAlertClick,
   onExportSession,
+  collapseChats = false,
+  onCollapseChatsChange,
   sessionTitle = 'New Chat',
   currentSessionId,
   sessions = [],
@@ -194,6 +198,19 @@ export function FloatingNav({
       {/* Right side buttons - only show in chat */}
       {isChat && (
         <div className="flex items-center gap-1 shrink-0">
+          {/* Collapse All Chats Button */}
+          {onCollapseChatsChange && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onCollapseChatsChange(!collapseChats)}
+              className={`h-8 w-8 ${collapseChats ? 'bg-secondary text-secondary-foreground' : ''}`}
+              title={collapseChats ? 'Expand all chats' : 'Collapse all chats'}
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+              <span className="sr-only">{collapseChats ? 'Expand all chats' : 'Collapse all chats'}</span>
+            </Button>
+          )}
           {/* Export Button */}
           {onExportSession && (
             <Button

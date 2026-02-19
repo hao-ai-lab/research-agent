@@ -710,6 +710,11 @@ export default function ResearchChat() {
               onResume: wildLoop.resume,
               onStop: wildLoop.stop,
             } : null}
+            collapseChats={collapseChats}
+            onCollapseChatsChange={(collapsed) => setSettings({
+              ...settings,
+              appearance: { ...settings.appearance, chatCollapseAllChats: collapsed },
+            })}
             reportIsPreviewMode={reportToolbar?.isPreviewMode ?? true}
             onReportPreviewModeChange={reportToolbar?.setPreviewMode}
             onReportAddCell={reportToolbar?.addCell}
