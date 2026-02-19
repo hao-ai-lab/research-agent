@@ -1812,3 +1812,277 @@ export async function deletePlan(planId: string): Promise<{ deleted: boolean; id
     }
     return response.json()
 }
+
+// =============================================================================
+// Journey AI Recommendations
+// =============================================================================
+
+export interface JourneyNextActionsRequest {
+    journey: Record<string, unknown>
+    max_actions?: number
+}
+
+export interface JourneyNextActionsResponse {
+    next_best_actions: string[]
+    reasoning?: string
+    source?: string
+}
+
+export interface JourneyLoopEvent {
+    id: string
+    kind: string
+    actor: 'human' | 'agent' | 'system' | string
+    session_id?: string | null
+    run_id?: string | null
+    chart_id?: string | null
+    recommendation_id?: string | null
+    decision_id?: string | null
+    note?: string | null
+    metadata?: Record<string, unknown>
+    timestamp: number
+}
+
+export interface JourneyRecommendation {
+    id: string
+    title: string
+    action: string
+    rationale?: string | null
+    source: string
+    priority: 'low' | 'medium' | 'high' | 'critical' | string
+    confidence?: number | null
+    status: 'pending' | 'accepted' | 'rejected' | 'modified' | 'executed' | 'dismissed' | string
+    session_id?: string | null
+    run_id?: string | null
+    chart_id?: string | null
+    evidence_refs: string[]
+    created_at: number
+    updated_at: number
+    responded_at?: number | null
+    user_note?: string | null
+    modified_action?: string | null
+}
+
+export interface JourneyDecision {
+    id: string
+    title: string
+    chosen_action: string
+    rationale?: string | null
+    outcome?: string | null
+    status: 'recorded' | 'executed' | 'superseded' | string
+    recommendation_id?: string | null
+    session_id?: string | null
+    run_id?: string | null
+    chart_id?: string | null
+    created_at: number
+    updated_at: number
+}
+
+export interface JourneyLoopSummary {
+    events: number
+    recommendations: number
+    decisions: number
+    accepted_recommendations: number
+    executed_recommendations: number
+    rejected_recommendations: number
+    acceptance_rate: number
+}
+
+export interface JourneyLoopResponse {
+    events: JourneyLoopEvent[]
+    recommendations: JourneyRecommendation[]
+    decisions: JourneyDecision[]
+    summary: JourneyLoopSummary
+}
+
+export interface JourneyEventCreateRequest {
+    kind: string
+    actor?: 'human' | 'agent' | 'system' | string
+    session_id?: string
+    run_id?: string
+    chart_id?: string
+    recommendation_id?: string
+    decision_id?: string
+    note?: string
+    metadata?: Record<string, unknown>
+    timestamp?: number
+}
+
+export interface JourneyRecommendationCreateRequest {
+    title: string
+    action: string
+    rationale?: string
+    source?: string
+    priority?: 'low' | 'medium' | 'high' | 'critical' | string
+    confidence?: number
+    session_id?: string
+    run_id?: string
+    chart_id?: string
+    evidence_refs?: string[]
+}
+
+export interface JourneyRecommendationRespondRequest {
+    status: 'pending' | 'accepted' | 'rejected' | 'modified' | 'executed' | 'dismissed' | string
+    user_note?: string
+    modified_action?: string
+}
+
+export interface JourneyDecisionCreateRequest {
+    title: string
+    chosen_action: string
+    rationale?: string
+    outcome?: string
+    status?: 'recorded' | 'executed' | 'superseded' | string
+    recommendation_id?: string
+    session_id?: string
+    run_id?: string
+    chart_id?: string
+}
+
+export interface JourneyGenerateRecommendationsResponse {
+    created: JourneyRecommendation[]
+    reasoning?: string
+    source?: string
+}
+
+export async function getJourneyNextActions(
+    request: JourneyNextActionsRequest
+): Promise<JourneyNextActionsResponse> {
+    const response = await fetch(`${API_URL()}/journey/next-actions`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const message = await response.text()
+        throw new Error(`Failed to get journey next actions: ${message || response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function getJourneyLoop(params?: {
+    session_id?: string
+    run_id?: string
+    limit?: number
+}): Promise<JourneyLoopResponse> {
+    const search = new URLSearchParams()
+    if (params?.session_id) search.set('session_id', params.session_id)
+    if (params?.run_id) search.set('run_id', params.run_id)
+    if (typeof params?.limit === 'number') search.set('limit', String(params.limit))
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    const response = await fetch(`${API_URL()}/journey/loop${suffix}`, {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to get journey loop: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function createJourneyEvent(
+    request: JourneyEventCreateRequest
+): Promise<JourneyLoopEvent> {
+    const response = await fetch(`${API_URL()}/journey/events`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create journey event: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function listJourneyRecommendations(params?: {
+    session_id?: string
+    run_id?: string
+    limit?: number
+}): Promise<JourneyRecommendation[]> {
+    const search = new URLSearchParams()
+    if (params?.session_id) search.set('session_id', params.session_id)
+    if (params?.run_id) search.set('run_id', params.run_id)
+    if (typeof params?.limit === 'number') search.set('limit', String(params.limit))
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    const response = await fetch(`${API_URL()}/journey/recommendations${suffix}`, {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list journey recommendations: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function createJourneyRecommendation(
+    request: JourneyRecommendationCreateRequest
+): Promise<JourneyRecommendation> {
+    const response = await fetch(`${API_URL()}/journey/recommendations`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create journey recommendation: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function respondJourneyRecommendation(
+    recommendationId: string,
+    request: JourneyRecommendationRespondRequest
+): Promise<JourneyRecommendation> {
+    const response = await fetch(`${API_URL()}/journey/recommendations/${encodeURIComponent(recommendationId)}/respond`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to respond journey recommendation: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function generateJourneyRecommendations(
+    request: JourneyNextActionsRequest
+): Promise<JourneyGenerateRecommendationsResponse> {
+    const response = await fetch(`${API_URL()}/journey/recommendations/generate`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to generate journey recommendations: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function listJourneyDecisions(params?: {
+    session_id?: string
+    run_id?: string
+    limit?: number
+}): Promise<JourneyDecision[]> {
+    const search = new URLSearchParams()
+    if (params?.session_id) search.set('session_id', params.session_id)
+    if (params?.run_id) search.set('run_id', params.run_id)
+    if (typeof params?.limit === 'number') search.set('limit', String(params.limit))
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    const response = await fetch(`${API_URL()}/journey/decisions${suffix}`, {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list journey decisions: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function createJourneyDecision(
+    request: JourneyDecisionCreateRequest
+): Promise<JourneyDecision> {
+    const response = await fetch(`${API_URL()}/journey/decisions`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to create journey decision: ${response.statusText}`)
+    }
+    return response.json()
+}

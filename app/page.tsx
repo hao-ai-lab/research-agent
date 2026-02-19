@@ -20,7 +20,7 @@ import { TerminalView } from '@/components/terminal-view'
 import { useRuns } from '@/hooks/use-runs'
 import { useAlerts } from '@/hooks/use-alerts'
 import type { ChatMode } from '@/components/chat-input'
-import { mockMemoryRules, mockInsightCharts, defaultTags } from '@/lib/mock-data'
+import { mockMemoryRules, defaultTags } from '@/lib/mock-data'
 import type { ExperimentRun, MemoryRule, InsightChart, TagDefinition, RunEvent, EventStatus, SweepConfig } from '@/lib/types'
 import { SweepForm } from '@/components/sweep-form'
 import {
@@ -91,7 +91,7 @@ export default function ResearchChat() {
   const { alerts, respond: respondAlert } = useAlerts()
 
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>(mockMemoryRules)
-  const [insightCharts, setInsightCharts] = useState<InsightChart[]>(mockInsightCharts)
+  const [insightCharts, setInsightCharts] = useState<InsightChart[]>([])
   const [chatMode, setChatMode] = useState<ChatMode>('agent')
   const [allTags, setAllTags] = useState<TagDefinition[]>(defaultTags)
 
@@ -831,6 +831,11 @@ export default function ResearchChat() {
               <JourneyView
                 onBack={() => handleTabChange('chat')}
                 subTab={journeySubTab}
+                sessions={sessions}
+                runs={runs}
+                charts={insightCharts}
+                currentSessionId={currentSessionId}
+                currentMessages={chatSession.messages}
               />
             )}
             {activeTab === 'settings' && (

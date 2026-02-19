@@ -27,6 +27,17 @@ import type {
     ClusterStatusResponse,
     ClusterUpdateRequest,
     ClusterDetectRequest,
+    JourneyNextActionsRequest,
+    JourneyNextActionsResponse,
+    JourneyLoopEvent,
+    JourneyRecommendation,
+    JourneyDecision,
+    JourneyLoopResponse,
+    JourneyEventCreateRequest,
+    JourneyRecommendationCreateRequest,
+    JourneyRecommendationRespondRequest,
+    JourneyDecisionCreateRequest,
+    JourneyGenerateRecommendationsResponse,
     RepoDiffFileStatus,
     RepoDiffLine,
     RepoDiffFile,
@@ -673,6 +684,10 @@ const mockRepoFileContents: Record<string, string> = {
     'server/server.py': 'def get_repo_diff():\n    return {"files": []}\n',
 }
 
+let mockJourneyEvents: JourneyLoopEvent[] = []
+let mockJourneyRecommendations: JourneyRecommendation[] = []
+let mockJourneyDecisions: JourneyDecision[] = []
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -687,6 +702,21 @@ function generateId(): string {
 
 function nowSeconds() {
     return Date.now() / 1000
+}
+
+function filterJourneyRecords<T extends { session_id?: string | null; run_id?: string | null }>(
+    rows: T[],
+    params?: { session_id?: string; run_id?: string; limit?: number }
+): T[] {
+    let filtered = rows
+    if (params?.session_id) {
+        filtered = filtered.filter((row) => row.session_id === params.session_id)
+    }
+    if (params?.run_id) {
+        filtered = filtered.filter((row) => row.run_id === params.run_id)
+    }
+    const limit = Math.max(1, Math.min(2000, Number(params?.limit ?? rows.length)))
+    return filtered.slice(0, limit)
 }
 
 function normalizeClusterType(input?: string | null): ClusterType {
@@ -1530,4 +1560,220 @@ export async function updateCluster(request: ClusterUpdateRequest): Promise<Clus
     }
 
     return buildClusterResponse()
+}
+
+export async function getJourneyNextActions(
+    request: JourneyNextActionsRequest
+): Promise<JourneyNextActionsResponse> {
+    await delay(120)
+    const maxActions = Math.max(1, Math.min(8, Number(request.max_actions || 3)))
+    const defaults = [
+        'Group recent failures by root cause, then run one constrained retry for the top failure cluster.',
+        'Pick one high-effort branch and run a smaller ablation to validate the main assumption first.',
+        'Add one chart tied to the latest successful run and capture the decision it supports.',
+        'Summarize the last 5 user prompts into explicit hypotheses before launching new runs.',
+    ]
+    return {
+        next_best_actions: defaults.slice(0, maxActions),
+        reasoning: 'Mock recommendation response based on recent journey signals.',
+        source: 'mock',
+    }
+}
+
+export async function getJourneyLoop(params?: {
+    session_id?: string
+    run_id?: string
+    limit?: number
+}): Promise<JourneyLoopResponse> {
+    await delay(100)
+    const events = filterJourneyRecords(
+        [...mockJourneyEvents].sort((a, b) => b.timestamp - a.timestamp),
+        params
+    )
+    const recommendations = filterJourneyRecords(
+        [...mockJourneyRecommendations].sort((a, b) => b.created_at - a.created_at),
+        params
+    )
+    const decisions = filterJourneyRecords(
+        [...mockJourneyDecisions].sort((a, b) => b.created_at - a.created_at),
+        params
+    )
+    const accepted = recommendations.filter((r) => r.status === 'accepted').length
+    const executed = recommendations.filter((r) => r.status === 'executed').length
+    const rejected = recommendations.filter((r) => r.status === 'rejected').length
+    return {
+        events,
+        recommendations,
+        decisions,
+        summary: {
+            events: events.length,
+            recommendations: recommendations.length,
+            decisions: decisions.length,
+            accepted_recommendations: accepted,
+            executed_recommendations: executed,
+            rejected_recommendations: rejected,
+            acceptance_rate: recommendations.length > 0 ? accepted / recommendations.length : 0,
+        },
+    }
+}
+
+export async function createJourneyEvent(
+    request: JourneyEventCreateRequest
+): Promise<JourneyLoopEvent> {
+    await delay(60)
+    const created: JourneyLoopEvent = {
+        id: `jevt_${generateId()}`,
+        kind: request.kind,
+        actor: request.actor || 'system',
+        session_id: request.session_id || null,
+        run_id: request.run_id || null,
+        chart_id: request.chart_id || null,
+        recommendation_id: request.recommendation_id || null,
+        decision_id: request.decision_id || null,
+        note: request.note || null,
+        metadata: request.metadata || {},
+        timestamp: typeof request.timestamp === 'number' ? request.timestamp : nowSeconds(),
+    }
+    mockJourneyEvents.unshift(created)
+    return created
+}
+
+export async function listJourneyRecommendations(params?: {
+    session_id?: string
+    run_id?: string
+    limit?: number
+}): Promise<JourneyRecommendation[]> {
+    await delay(80)
+    return filterJourneyRecords(
+        [...mockJourneyRecommendations].sort((a, b) => b.created_at - a.created_at),
+        params
+    )
+}
+
+export async function createJourneyRecommendation(
+    request: JourneyRecommendationCreateRequest
+): Promise<JourneyRecommendation> {
+    await delay(80)
+    const now = nowSeconds()
+    const created: JourneyRecommendation = {
+        id: `jrec_${generateId()}`,
+        title: request.title,
+        action: request.action,
+        rationale: request.rationale || null,
+        source: request.source || 'agent',
+        priority: request.priority || 'medium',
+        confidence: typeof request.confidence === 'number' ? request.confidence : null,
+        status: 'pending',
+        session_id: request.session_id || null,
+        run_id: request.run_id || null,
+        chart_id: request.chart_id || null,
+        evidence_refs: request.evidence_refs || [],
+        created_at: now,
+        updated_at: now,
+        responded_at: null,
+        user_note: null,
+        modified_action: null,
+    }
+    mockJourneyRecommendations.unshift(created)
+    await createJourneyEvent({
+        kind: 'agent_recommendation_issued',
+        actor: 'agent',
+        session_id: created.session_id || undefined,
+        run_id: created.run_id || undefined,
+        recommendation_id: created.id,
+        note: created.title,
+    })
+    return created
+}
+
+export async function respondJourneyRecommendation(
+    recommendationId: string,
+    request: JourneyRecommendationRespondRequest
+): Promise<JourneyRecommendation> {
+    await delay(80)
+    const existing = mockJourneyRecommendations.find((r) => r.id === recommendationId)
+    if (!existing) {
+        throw new Error('Recommendation not found')
+    }
+    const now = nowSeconds()
+    existing.status = request.status
+    existing.responded_at = now
+    existing.updated_at = now
+    existing.user_note = request.user_note || null
+    existing.modified_action = request.modified_action || null
+    await createJourneyEvent({
+        kind: `recommendation_${request.status}`,
+        actor: 'human',
+        session_id: existing.session_id || undefined,
+        run_id: existing.run_id || undefined,
+        recommendation_id: existing.id,
+        note: existing.title,
+    })
+    return existing
+}
+
+export async function generateJourneyRecommendations(
+    request: JourneyNextActionsRequest
+): Promise<JourneyGenerateRecommendationsResponse> {
+    const generated = await getJourneyNextActions(request)
+    const created: JourneyRecommendation[] = []
+    for (const action of generated.next_best_actions || []) {
+        const rec = await createJourneyRecommendation({
+            title: action.slice(0, 120),
+            action,
+            rationale: generated.reasoning,
+            source: generated.source || 'mock',
+            priority: 'medium',
+        })
+        created.push(rec)
+    }
+    return {
+        created,
+        reasoning: generated.reasoning,
+        source: generated.source || 'mock',
+    }
+}
+
+export async function listJourneyDecisions(params?: {
+    session_id?: string
+    run_id?: string
+    limit?: number
+}): Promise<JourneyDecision[]> {
+    await delay(70)
+    return filterJourneyRecords(
+        [...mockJourneyDecisions].sort((a, b) => b.created_at - a.created_at),
+        params
+    )
+}
+
+export async function createJourneyDecision(
+    request: JourneyDecisionCreateRequest
+): Promise<JourneyDecision> {
+    await delay(80)
+    const now = nowSeconds()
+    const created: JourneyDecision = {
+        id: `jdec_${generateId()}`,
+        title: request.title,
+        chosen_action: request.chosen_action,
+        rationale: request.rationale || null,
+        outcome: request.outcome || null,
+        status: request.status || 'recorded',
+        recommendation_id: request.recommendation_id || null,
+        session_id: request.session_id || null,
+        run_id: request.run_id || null,
+        chart_id: request.chart_id || null,
+        created_at: now,
+        updated_at: now,
+    }
+    mockJourneyDecisions.unshift(created)
+    await createJourneyEvent({
+        kind: 'decision_recorded',
+        actor: 'human',
+        session_id: created.session_id || undefined,
+        run_id: created.run_id || undefined,
+        recommendation_id: created.recommendation_id || undefined,
+        decision_id: created.id,
+        note: created.title,
+    })
+    return created
 }

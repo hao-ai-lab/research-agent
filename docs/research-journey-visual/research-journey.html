@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Research Journey Visualizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", "SF Mono", Consolas, monospace;
+    --bg: #f6f7f3;
+    --surface: #ffffff;
+    --surface-2: #edf3ee;
+    --surface-3: #e8f0eb;
+    --text: #1b2a22;
+    --text-dim: #5c7165;
+    --border: rgba(27, 42, 34, 0.13);
+    --accent: #0f766e;
+    --accent-2: #b45309;
+    --good: #166534;
+    --bad: #b91c1c;
+    --warn: #a16207;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121713;
+      --surface: #1a211d;
+      --surface-2: #202a24;
+      --surface-3: #27332b;
+      --text: #dfeae2;
+      --text-dim: #97afa0;
+      --border: rgba(223, 234, 226, 0.14);
+      --accent: #34d399;
+      --accent-2: #f59e0b;
+      --good: #4ade80;
+      --bad: #f87171;
+      --warn: #fbbf24;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 15% 0%, rgba(15, 118, 110, 0.08) 0%, transparent 45%),
+      radial-gradient(ellipse at 85% 100%, rgba(180, 83, 9, 0.08) 0%, transparent 40%);
+    color: var(--text);
+    font-family: var(--font-body);
+    line-height: 1.4;
+  }
+
+  .wrap {
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 28px;
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 32px;
+  }
+
+  .toc {
+    position: sticky;
+    top: 18px;
+    align-self: start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .toc h3 {
+    margin: 0 0 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+  }
+
+  .toc a {
+    display: block;
+    text-decoration: none;
+    color: var(--text-dim);
+    padding: 6px 8px;
+    border-left: 2px solid transparent;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .toc a:hover,
+  .toc a.active {
+    color: var(--text);
+    background: var(--surface-2);
+    border-left-color: var(--accent);
+  }
+
+  .main { min-width: 0; }
+
+  h1 {
+    margin: 0;
+    font-size: 34px;
+    letter-spacing: -0.8px;
+  }
+
+  .subtitle {
+    margin-top: 8px;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-family: var(--font-mono);
+  }
+
+  .toolbar {
+    margin-top: 16px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .toolbar input[type="file"] { max-width: 100%; }
+
+  .button {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    padding: 8px 10px;
+    cursor: pointer;
+  }
+
+  .section-title {
+    margin: 28px 0 12px;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    min-width: 0;
+  }
+
+  .kpi-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+  }
+
+  .kpi-value {
+    margin-top: 6px;
+    font-size: 24px;
+    font-weight: 700;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 14px;
+  }
+
+  .mermaid-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    overflow: auto;
+  }
+
+  .mermaid {
+    min-width: 780px;
+  }
+
+  .list {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .list li {
+    margin-bottom: 8px;
+    overflow-wrap: break-word;
+  }
+
+  .pill {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    margin-right: 6px;
+    margin-bottom: 6px;
+  }
+
+  .pill.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--border)); }
+  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    border-bottom: 1px solid var(--border);
+    padding: 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    position: sticky;
+    top: 0;
+  }
+
+  .table-wrap {
+    max-height: 340px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+
+  .small {
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .error {
+    margin-top: 10px;
+    color: var(--bad);
+    font-size: 13px;
+  }
+
+  @media (max-width: 1100px) {
+    .wrap {
+      grid-template-columns: 1fr;
+      padding: 18px;
+    }
+    .toc {
+      position: static;
+      display: flex;
+      overflow: auto;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .toc h3 { display: none; }
+    .toc a { border-left: none; border-bottom: 2px solid transparent; }
+    .toc a.active { border-bottom-color: var(--accent); }
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .two-col { grid-template-columns: 1fr; }
+    .mermaid { min-width: 620px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="toc" id="toc">
+    <h3>Contents</h3>
+    <a href="#overview">Overview</a>
+    <a href="#hierarchy">Hierarchy</a>
+    <a href="#timeline">Timeline</a>
+    <a href="#hotspots">Cost Hotspots</a>
+    <a href="#failures">Failures</a>
+    <a href="#decisions">Decisions</a>
+    <a href="#next">Next Directions</a>
+  </nav>
+
+  <main class="main">
+    <h1 id="title">Research Journey</h1>
+    <div class="subtitle" id="subtitle"></div>
+
+    <div class="toolbar">
+      <input id="fileInput" type="file" accept="application/json" />
+      <button id="reloadSample" class="button" type="button">Load sample</button>
+      <span class="small">Drop a `journey.json` file anywhere on the page to inspect it.</span>
+    </div>
+    <div id="error" class="error"></div>
+
+    <section id="overview">
+      <h2 class="section-title">Overview</h2>
+      <div class="kpi-grid" id="kpis"></div>
+      <div class="card" style="margin-top:10px">
+        <canvas id="trendChart" height="86"></canvas>
+      </div>
+    </section>
+
+    <section id="hierarchy">
+      <h2 class="section-title">Hierarchy (DAG)</h2>
+      <div class="mermaid-wrap"><div id="dag" class="mermaid"></div></div>
+      <div class="small" style="margin-top:8px">Nodes are colored by status. Edge labels show relationship types.</div>
+    </section>
+
+    <section id="timeline">
+      <h2 class="section-title">Time-Ordered Timeline</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Node</th><th>Actor</th><th>Event</th><th>Note</th></tr>
+          </thead>
+          <tbody id="timelineRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="hotspots">
+      <h2 class="section-title">Cost Hotspots</h2>
+      <div class="two-col">
+        <div class="card">
+          <div class="small" style="margin-bottom:8px">Low efficiency paths (efficiency = info_gain / (effort + 40 * cost))</div>
+          <div id="hotspotList"></div>
+        </div>
+        <div class="card">
+          <div class="small" style="margin-bottom:8px">Reflections: Costly Paths</div>
+          <ul class="list" id="costlyPaths"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="failures">
+      <h2 class="section-title">Failures and Dead Ends</h2>
+      <div class="two-col">
+        <div class="card">
+          <div id="failurePills"></div>
+          <div class="table-wrap" style="margin-top:8px; max-height: 260px;">
+            <table>
+              <thead>
+                <tr><th>Node</th><th>Why stopped</th><th>Effort</th><th>Cost</th></tr>
+              </thead>
+              <tbody id="failureRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="small" style="margin-bottom:8px">Reflections: Failures</div>
+          <ul class="list" id="failureReflection"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <h2 class="section-title">Decision Log</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Decision</th><th>Status</th><th>Confidence</th><th>Evidence links</th></tr>
+          </thead>
+          <tbody id="decisionRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="next">
+      <h2 class="section-title">Next Directions</h2>
+      <div class="two-col">
+        <div class="card">
+          <div class="small" style="margin-bottom:8px">Recommended next actions</div>
+          <ol class="list" id="nextActions"></ol>
+        </div>
+        <div class="card">
+          <div class="small" style="margin-bottom:8px">Wins to preserve</div>
+          <ul class="list" id="wins"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+let trendChart = null;
+
+function fmtDate(value) {
+  return new Date(value).toLocaleString();
+}
+
+function money(v) {
+  return `$${Number(v || 0).toFixed(2)}`;
+}
+
+function ratio(v) {
+  return `${Math.round((v || 0) * 100)}%`;
+}
+
+function text(el, value) {
+  el.textContent = value;
+}
+
+function html(el, value) {
+  el.innerHTML = value;
+}
+
+function escapeHtml(str) {
+  return (str || '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function setError(msg = '') {
+  text(document.getElementById('error'), msg);
+}
+
+function nodeIndex(nodes) {
+  const map = new Map();
+  for (const n of nodes) map.set(n.id, n);
+  return map;
+}
+
+function getKpiItems(data) {
+  const totalNodes = data.nodes.length;
+  const experiments = data.nodes.filter(n => n.type === 'experiment').length;
+  const failures = data.nodes.filter(n => n.status === 'failed').length;
+  const totalEffort = data.nodes.reduce((s, n) => s + Number(n.effort_minutes || 0), 0);
+  const totalCost = data.nodes.reduce((s, n) => s + Number(n.cost_usd || 0), 0);
+  const avgConfidence = data.nodes.reduce((s, n) => s + Number(n.confidence || 0), 0) / Math.max(totalNodes, 1);
+
+  return [
+    ['Nodes', String(totalNodes)],
+    ['Experiments', String(experiments)],
+    ['Failure rate', ratio(failures / Math.max(totalNodes, 1))],
+    ['Total effort', `${Math.round(totalEffort)} min`],
+    ['Total cost', money(totalCost)],
+    ['Avg confidence', ratio(avgConfidence)]
+  ];
+}
+
+function renderKpis(data) {
+  const rows = getKpiItems(data)
+    .map(([label, value]) => `<div class="card"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div></div>`)
+    .join('');
+  html(document.getElementById('kpis'), rows);
+}
+
+function renderChart(data) {
+  const ctx = document.getElementById('trendChart');
+  const byDate = new Map();
+  for (const n of data.nodes) {
+    const d = new Date(n.created_at).toISOString().slice(0, 10);
+    const cur = byDate.get(d) || { effort: 0, cost: 0 };
+    cur.effort += Number(n.effort_minutes || 0);
+    cur.cost += Number(n.cost_usd || 0);
+    byDate.set(d, cur);
+  }
+  const labels = [...byDate.keys()].sort();
+  let cumEffort = 0;
+  let cumCost = 0;
+  const effortSeries = labels.map(d => {
+    cumEffort += byDate.get(d).effort;
+    return cumEffort;
+  });
+  const costSeries = labels.map(d => {
+    cumCost += byDate.get(d).cost;
+    return Number(cumCost.toFixed(2));
+  });
+
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Cumulative effort (min)', data: effortSeries, yAxisID: 'y', borderColor: '#0f766e', tension: 0.25 },
+        { label: 'Cumulative cost (USD)', data: costSeries, yAxisID: 'y1', borderColor: '#b45309', tension: 0.25 }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        y: { type: 'linear', position: 'left' },
+        y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+}
+
+function toMermaid(data) {
+  const statusClass = {
+    active: 'active', completed: 'completed', failed: 'failed', blocked: 'blocked', archived: 'archived'
+  };
+  const lines = ['graph LR'];
+
+  for (const n of data.nodes) {
+    const label = `${n.type}: ${String(n.title || '').replace(/"/g, '\\"')}`;
+    lines.push(`${n.id}["${label}"]`);
+    lines.push(`class ${n.id} ${statusClass[n.status] || 'active'}`);
+  }
+
+  for (const e of data.edges) {
+    lines.push(`${e.from} -->|${e.relation}| ${e.to}`);
+  }
+
+  lines.push('classDef active fill:#93c5fd44,stroke:#2563eb,stroke-width:1.5px');
+  lines.push('classDef completed fill:#86efac44,stroke:#15803d,stroke-width:1.5px');
+  lines.push('classDef failed fill:#fca5a544,stroke:#b91c1c,stroke-width:1.5px');
+  lines.push('classDef blocked fill:#fde68a44,stroke:#a16207,stroke-width:1.5px');
+  lines.push('classDef archived fill:#d4d4d444,stroke:#525252,stroke-width:1.5px');
+
+  return lines.join('\n');
+}
+
+async function renderDag(data) {
+  const el = document.getElementById('dag');
+  el.textContent = toMermaid(data);
+  await mermaid.run({ nodes: [el] });
+}
+
+function renderTimeline(data) {
+  const nodes = nodeIndex(data.nodes);
+  const rows = [...data.events]
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts))
+    .map(e => `<tr>
+      <td>${escapeHtml(fmtDate(e.ts))}</td>
+      <td>${escapeHtml(nodes.get(e.node_id)?.title || e.node_id)}</td>
+      <td>${escapeHtml(e.actor)}</td>
+      <td>${escapeHtml(e.kind)}</td>
+      <td>${escapeHtml(e.note || '')}</td>
+    </tr>`)
+    .join('');
+  html(document.getElementById('timelineRows'), rows);
+}
+
+function renderHotspots(data) {
+  const scored = data.nodes
+    .map(n => {
+      const effort = Number(n.effort_minutes || 0);
+      const cost = Number(n.cost_usd || 0);
+      const infoGain = Number(n.information_gain_score || 0);
+      const efficiency = infoGain / Math.max(1, effort + cost * 40);
+      return { n, effort, cost, infoGain, efficiency };
+    })
+    .sort((a, b) => a.efficiency - b.efficiency)
+    .slice(0, 5);
+
+  const hotspotHtml = scored.map(s => `
+    <div class="card" style="margin-bottom:8px; background: var(--surface-2)">
+      <div><strong>${escapeHtml(s.n.title)}</strong></div>
+      <div class="small">efficiency=${s.efficiency.toFixed(4)} | info=${s.infoGain.toFixed(2)} | effort=${Math.round(s.effort)}m | cost=${money(s.cost)}</div>
+    </div>`).join('');
+  html(document.getElementById('hotspotList'), hotspotHtml || '<div class="small">No data.</div>');
+
+  html(
+    document.getElementById('costlyPaths'),
+    (data.reflections.costly_paths || []).map(v => `<li>${escapeHtml(v)}</li>`).join('') || '<li>No costly paths recorded.</li>'
+  );
+}
+
+function renderFailures(data) {
+  const fails = data.nodes.filter(n => n.status === 'failed' || n.outcome === 'failed');
+  const failRate = fails.length / Math.max(1, data.nodes.length);
+
+  html(document.getElementById('failurePills'), [
+    `<span class="pill bad">failed nodes: ${fails.length}</span>`,
+    `<span class="pill warn">failure rate: ${ratio(failRate)}</span>`,
+    `<span class="pill">total nodes: ${data.nodes.length}</span>`
+  ].join(''));
+
+  html(document.getElementById('failureRows'), fails.map(n => `
+    <tr>
+      <td>${escapeHtml(n.title)}</td>
+      <td>${escapeHtml(n.why_stopped || 'n/a')}</td>
+      <td>${Math.round(Number(n.effort_minutes || 0))} min</td>
+      <td>${money(n.cost_usd)}</td>
+    </tr>`).join('') || '<tr><td colspan="4">No failed paths recorded.</td></tr>');
+
+  html(
+    document.getElementById('failureReflection'),
+    (data.reflections.failures || []).map(v => `<li>${escapeHtml(v)}</li>`).join('') || '<li>No failure reflections.</li>'
+  );
+}
+
+function renderDecisions(data) {
+  const artifactByNode = new Map();
+  for (const a of data.artifacts) {
+    const list = artifactByNode.get(a.node_id) || [];
+    list.push(a);
+    artifactByNode.set(a.node_id, list);
+  }
+
+  const rows = data.nodes
+    .filter(n => n.type === 'decision')
+    .map(n => {
+      const artifacts = artifactByNode.get(n.id) || [];
+      const links = artifacts.length
+        ? artifacts.map(a => `<code>${escapeHtml(a.path)}</code>`).join('<br/>')
+        : '<span class="small">No direct artifact linked</span>';
+      return `<tr>
+        <td>${escapeHtml(n.title)}</td>
+        <td>${escapeHtml(n.status)}</td>
+        <td>${ratio(n.confidence)}</td>
+        <td>${links}</td>
+      </tr>`;
+    })
+    .join('');
+  html(document.getElementById('decisionRows'), rows || '<tr><td colspan="4">No decisions found.</td></tr>');
+}
+
+function renderNext(data) {
+  html(document.getElementById('nextActions'), (data.reflections.next_best_actions || []).map(v => `<li>${escapeHtml(v)}</li>`).join(''));
+  html(document.getElementById('wins'), (data.reflections.wins || []).map(v => `<li>${escapeHtml(v)}</li>`).join(''));
+}
+
+function renderHeader(data) {
+  text(document.getElementById('title'), data.title || 'Research Journey');
+  text(
+    document.getElementById('subtitle'),
+    `${data.journey_id} | ${fmtDate(data.started_at)} -> ${fmtDate(data.updated_at)} | nodes=${data.nodes.length} events=${data.events.length}`
+  );
+}
+
+async function render(data) {
+  setError('');
+  renderHeader(data);
+  renderKpis(data);
+  renderChart(data);
+  await renderDag(data);
+  renderTimeline(data);
+  renderHotspots(data);
+  renderFailures(data);
+  renderDecisions(data);
+  renderNext(data);
+}
+
+async function loadSample() {
+  const res = await fetch('./journey.sample.json');
+  if (!res.ok) throw new Error('Could not load journey.sample.json');
+  return res.json();
+}
+
+async function boot() {
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'base',
+    flowchart: { curve: 'basis' },
+    themeVariables: {
+      fontFamily: 'IBM Plex Sans',
+      primaryColor: '#dbeafe',
+      primaryBorderColor: '#1d4ed8',
+      lineColor: '#6b7280'
+    }
+  });
+
+  const sample = await loadSample();
+  await render(sample);
+}
+
+function setupFileLoading() {
+  const fileInput = document.getElementById('fileInput');
+  const reloadSample = document.getElementById('reloadSample');
+
+  async function readFile(file) {
+    const raw = await file.text();
+    const parsed = JSON.parse(raw);
+    await render(parsed);
+  }
+
+  fileInput.addEventListener('change', async (ev) => {
+    try {
+      const file = ev.target.files[0];
+      if (!file) return;
+      await readFile(file);
+    } catch (err) {
+      setError(`Invalid JSON: ${err.message}`);
+    }
+  });
+
+  reloadSample.addEventListener('click', async () => {
+    try {
+      await render(await loadSample());
+    } catch (err) {
+      setError(err.message);
+    }
+  });
+
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    try {
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      await readFile(file);
+    } catch (err) {
+      setError(`Invalid drop payload: ${err.message}`);
+    }
+  });
+}
+
+function setupScrollSpy() {
+  const toc = document.getElementById('toc');
+  const links = [...toc.querySelectorAll('a')];
+  const sections = links
+    .map(link => ({ link, el: document.querySelector(link.getAttribute('href')) }))
+    .filter(x => x.el);
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      links.forEach(l => l.classList.remove('active'));
+      const hit = sections.find(s => s.el === e.target);
+      if (hit) hit.link.classList.add('active');
+    }
+  }, { rootMargin: '-20% 0px -70% 0px' });
+
+  for (const s of sections) observer.observe(s.el);
+}
+
+boot().catch(err => setError(err.message));
+setupFileLoading();
+setupScrollSpy();
+</script>
+</body>
+</html>

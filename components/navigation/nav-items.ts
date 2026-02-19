@@ -5,6 +5,7 @@ import {
   FileText,
   FolderTree,
   FlaskConical,
+  GitBranch,
   Lightbulb,
   MessageSquare,
   Orbit,
@@ -14,7 +15,7 @@ import {
 } from 'lucide-react'
 import type { HomeTab } from '@/lib/navigation'
 
-export type PrimaryNavTarget = Exclude<HomeTab, 'settings' | 'journey'> | 'contextual'
+export type PrimaryNavTarget = Exclude<HomeTab, 'settings'> | 'contextual'
 
 export interface PrimaryNavItem {
   tab: PrimaryNavTarget
@@ -49,6 +50,11 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     icon: BarChart3,
   },
   {
+    tab: 'journey',
+    label: 'User Journey',
+    icon: GitBranch,
+  },
+  {
     tab: 'memory',
     label: 'Memory',
     icon: Lightbulb,
@@ -79,4 +85,3 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     icon: Orbit,
   },
 ]
-

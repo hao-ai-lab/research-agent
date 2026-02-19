@@ -47,6 +47,18 @@ export type {
     RepoDiffResponse,
     RepoFilesResponse,
     RepoFileResponse,
+    JourneyNextActionsRequest,
+    JourneyNextActionsResponse,
+    JourneyLoopEvent,
+    JourneyRecommendation,
+    JourneyDecision,
+    JourneyLoopSummary,
+    JourneyLoopResponse,
+    JourneyEventCreateRequest,
+    JourneyRecommendationCreateRequest,
+    JourneyRecommendationRespondRequest,
+    JourneyDecisionCreateRequest,
+    JourneyGenerateRecommendationsResponse,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -192,3 +204,30 @@ export const detectCluster = (...args: Parameters<typeof realApi.detectCluster>)
 
 export const updateCluster = (...args: Parameters<typeof realApi.updateCluster>) =>
     getApi().updateCluster(...args)
+
+export const getJourneyNextActions = (...args: Parameters<typeof realApi.getJourneyNextActions>) =>
+    getApi().getJourneyNextActions(...args)
+
+export const getJourneyLoop = (...args: Parameters<typeof realApi.getJourneyLoop>) =>
+    getApi().getJourneyLoop(...args)
+
+export const createJourneyEvent = (...args: Parameters<typeof realApi.createJourneyEvent>) =>
+    getApi().createJourneyEvent(...args)
+
+export const listJourneyRecommendations = (...args: Parameters<typeof realApi.listJourneyRecommendations>) =>
+    getApi().listJourneyRecommendations(...args)
+
+export const createJourneyRecommendation = (...args: Parameters<typeof realApi.createJourneyRecommendation>) =>
+    getApi().createJourneyRecommendation(...args)
+
+export const respondJourneyRecommendation = (...args: Parameters<typeof realApi.respondJourneyRecommendation>) =>
+    getApi().respondJourneyRecommendation(...args)
+
+export const generateJourneyRecommendations = (...args: Parameters<typeof realApi.generateJourneyRecommendations>) =>
+    getApi().generateJourneyRecommendations(...args)
+
+export const listJourneyDecisions = (...args: Parameters<typeof realApi.listJourneyDecisions>) =>
+    getApi().listJourneyDecisions(...args)
+
+export const createJourneyDecision = (...args: Parameters<typeof realApi.createJourneyDecision>) =>
+    getApi().createJourneyDecision(...args)
