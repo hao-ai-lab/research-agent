@@ -58,6 +58,11 @@ logger.propagate = False  # Don't depend on root logger (uvicorn resets it)
 # Configuration  (extracted to config.py)
 # =============================================================================
 
+import config  # noqa: E402
+
+# Re-export immutable constants and functions so existing code keeps working.
+# IMPORTANT: mutable path variables (config.WORKDIR, config.DATA_DIR, *_FILE) must be
+# accessed as config.VARNAME so they reflect post-init_paths() values.
 from config import (  # noqa: E402
     _SERVER_FILE_DIR,
     OPENCODE_CONFIG,
@@ -70,14 +75,6 @@ from config import (  # noqa: E402
     RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED,
     RUNTIME_RESEARCH_AGENT_KEY_LOCK,
     USER_AUTH_TOKEN,
-    WORKDIR,
-    DATA_DIR,
-    CHAT_DATA_FILE,
-    JOBS_DATA_FILE,
-    ALERTS_DATA_FILE,
-    SETTINGS_DATA_FILE,
-    PLANS_DATA_FILE,
-    JOURNEY_STATE_FILE,
     TMUX_SESSION_NAME,
     SERVER_CALLBACK_URL,
     FRONTEND_STATIC_DIR,
@@ -239,7 +236,7 @@ wild_v2_engine = WildV2Engine(
     opencode_url=OPENCODE_URL,
     model_provider=MODEL_PROVIDER,
     model_id=MODEL_ID,
-    get_workdir=lambda: WORKDIR,
+    get_workdir=lambda: config.WORKDIR,
     server_url=SERVER_CALLBACK_URL,
     auth_token=USER_AUTH_TOKEN,
     get_auth=get_auth,
@@ -249,7 +246,7 @@ wild_v2_engine = WildV2Engine(
 )
 
 # Memory store (persistent lessons / context)
-memory_store = MemoryStore(get_workdir=lambda: WORKDIR)
+memory_store = MemoryStore(get_workdir=lambda: config.WORKDIR)
 memory_store.load()
 
 # Inject memory store into V2 engine so reflections can write memories
@@ -315,7 +312,7 @@ cluster_state: dict = _default_cluster_state()
 def save_chat_state():
     """Persist chat sessions to disk."""
     try:
-        with open(CHAT_DATA_FILE, "w") as f:
+        with open(config.CHAT_DATA_FILE, "w") as f:
             json.dump({"chat_sessions": chat_sessions}, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving chat state: {e}")
@@ -324,9 +321,9 @@ def save_chat_state():
 def load_chat_state():
     """Load chat sessions from disk."""
     global chat_sessions
-    if os.path.exists(CHAT_DATA_FILE):
+    if os.path.exists(config.CHAT_DATA_FILE):
         try:
-            with open(CHAT_DATA_FILE, "r") as f:
+            with open(config.CHAT_DATA_FILE, "r") as f:
                 data = json.load(f)
                 chat_sessions = data.get("chat_sessions", {})
                 for session in chat_sessions.values():
@@ -343,7 +340,7 @@ def load_chat_state():
 def save_runs_state():
     """Persist runs and sweeps to disk."""
     try:
-        with open(JOBS_DATA_FILE, "w") as f:
+        with open(config.JOBS_DATA_FILE, "w") as f:
             json.dump({"runs": runs, "sweeps": sweeps}, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving runs state: {e}")
@@ -352,9 +349,9 @@ def save_runs_state():
 def load_runs_state():
     """Load runs and sweeps from disk."""
     global runs, sweeps
-    if os.path.exists(JOBS_DATA_FILE):
+    if os.path.exists(config.JOBS_DATA_FILE):
         try:
-            with open(JOBS_DATA_FILE, "r") as f:
+            with open(config.JOBS_DATA_FILE, "r") as f:
                 data = json.load(f)
                 runs = data.get("runs", {})
                 sweeps = data.get("sweeps", {})
@@ -373,7 +370,7 @@ def load_runs_state():
 def save_alerts_state():
     """Persist active alerts to disk."""
     try:
-        with open(ALERTS_DATA_FILE, "w") as f:
+        with open(config.ALERTS_DATA_FILE, "w") as f:
             json.dump({"alerts": list(active_alerts.values())}, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving alerts state: {e}")
@@ -382,9 +379,9 @@ def save_alerts_state():
 def load_alerts_state():
     """Load active alerts from disk."""
     global active_alerts
-    if os.path.exists(ALERTS_DATA_FILE):
+    if os.path.exists(config.ALERTS_DATA_FILE):
         try:
-            with open(ALERTS_DATA_FILE, "r") as f:
+            with open(config.ALERTS_DATA_FILE, "r") as f:
                 data = json.load(f)
                 loaded = data.get("alerts", [])
                 active_alerts = {
@@ -399,7 +396,7 @@ def load_alerts_state():
 def save_plans_state():
     """Persist plans to disk."""
     try:
-        with open(PLANS_DATA_FILE, "w") as f:
+        with open(config.PLANS_DATA_FILE, "w") as f:
             json.dump({"plans": list(plans.values())}, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving plans state: {e}")
@@ -408,9 +405,9 @@ def save_plans_state():
 def load_plans_state():
     """Load plans from disk."""
     global plans
-    if os.path.exists(PLANS_DATA_FILE):
+    if os.path.exists(config.PLANS_DATA_FILE):
         try:
-            with open(PLANS_DATA_FILE, "r") as f:
+            with open(config.PLANS_DATA_FILE, "r") as f:
                 data = json.load(f)
                 loaded = data.get("plans", [])
                 plans = {
@@ -425,7 +422,7 @@ def load_plans_state():
 def save_journey_state():
     """Persist journey events/recommendations/decisions to disk."""
     try:
-        with open(JOURNEY_STATE_FILE, "w") as f:
+        with open(config.JOURNEY_STATE_FILE, "w") as f:
             json.dump(
                 {
                     "events": list(journey_events.values()),
@@ -443,9 +440,9 @@ def save_journey_state():
 def load_journey_state():
     """Load journey events/recommendations/decisions from disk."""
     global journey_events, journey_recommendations, journey_decisions
-    if os.path.exists(JOURNEY_STATE_FILE):
+    if os.path.exists(config.JOURNEY_STATE_FILE):
         try:
-            with open(JOURNEY_STATE_FILE, "r") as f:
+            with open(config.JOURNEY_STATE_FILE, "r") as f:
                 data = json.load(f)
                 loaded_events = data.get("events", [])
                 loaded_recommendations = data.get("recommendations", [])
@@ -596,7 +593,7 @@ def save_settings_state():
         slack_cfg = slack_notifier.get_persisted_config()
         if slack_cfg:
             payload["slack"] = slack_cfg
-        with open(SETTINGS_DATA_FILE, "w") as f:
+        with open(config.SETTINGS_DATA_FILE, "w") as f:
             json.dump(payload, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving settings state: {e}")
@@ -605,9 +602,9 @@ def save_settings_state():
 def load_settings_state():
     """Load settings from disk."""
     global cluster_state
-    if os.path.exists(SETTINGS_DATA_FILE):
+    if os.path.exists(config.SETTINGS_DATA_FILE):
         try:
-            with open(SETTINGS_DATA_FILE, "r") as f:
+            with open(config.SETTINGS_DATA_FILE, "r") as f:
                 data = json.load(f)
                 cluster_state = _normalize_cluster_state(data.get("cluster"))
                 # Restore Slack configuration
@@ -679,7 +676,7 @@ def _resolve_metrics_file(wandb_dir: Optional[str]) -> Optional[str]:
 
     base_path = wandb_dir
     if not os.path.isabs(base_path):
-        base_path = os.path.join(WORKDIR, base_path)
+        base_path = os.path.join(config.WORKDIR, base_path)
 
     if os.path.isfile(base_path):
         return base_path if base_path.endswith(".jsonl") else None
@@ -1441,7 +1438,7 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     pane = window.active_pane
     
     # Setup run directory
-    run_dir = os.path.join(DATA_DIR, "runs", run_id)
+    run_dir = os.path.join(config.DATA_DIR, "runs", run_id)
     os.makedirs(run_dir, exist_ok=True)
     
     # Write command to file
@@ -1465,7 +1462,7 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     
     # Build sidecar command
     server_url = SERVER_CALLBACK_URL
-    run_workdir = run_data.get("workdir") or WORKDIR
+    run_workdir = run_data.get("workdir") or config.WORKDIR
     
     if getattr(sys, "frozen", False):
         sidecar_cmd = (
@@ -1520,7 +1517,7 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         # Bind new OpenCode sessions to this server's workdir to avoid stale project reuse.
         resp = await client.post(
             f"{OPENCODE_URL}/session",
-            params={"directory": os.path.abspath(WORKDIR)},
+            params={"directory": os.path.abspath(config.WORKDIR)},
             json={},
             auth=get_auth(),
         )
@@ -2097,13 +2094,13 @@ async def health():
         index_file = os.path.join(FRONTEND_STATIC_DIR, "index.html")
         if os.path.exists(index_file):
             return FileResponse(index_file)
-    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+    return {"status": "ok", "service": "research-agent-server", "workdir": config.WORKDIR}
 
 
 @app.get("/health")
 async def health_json():
     """JSON health endpoint."""
-    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+    return {"status": "ok", "service": "research-agent-server", "workdir": config.WORKDIR}
 
 
 def _extract_actions_from_text(raw_text: str, max_actions: int) -> list[str]:
@@ -2226,7 +2223,7 @@ async def journey_next_actions(req: JourneyNextActionsRequest):
             await apply_runtime_research_agent_key(client)
             session_resp = await client.post(
                 f"{OPENCODE_URL}/session",
-                params={"directory": os.path.abspath(WORKDIR)},
+                params={"directory": os.path.abspath(config.WORKDIR)},
                 json={},
                 auth=get_auth(),
             )
@@ -2539,7 +2536,7 @@ _HUNK_HEADER_RE = re.compile(r"^@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)
 
 def _run_git_command(args: List[str], timeout_seconds: int = 10) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", "-C", WORKDIR, *args],
+        ["git", "-C", config.WORKDIR, *args],
         capture_output=True,
         text=True,
         timeout=timeout_seconds,
@@ -2666,8 +2663,8 @@ def _parse_unified_diff(diff_text: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_
 
 
 def _build_untracked_file_lines(path: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> List[Dict[str, Any]]:
-    workdir_real = os.path.realpath(WORKDIR)
-    file_path = os.path.realpath(os.path.join(WORKDIR, path))
+    workdir_real = os.path.realpath(config.WORKDIR)
+    file_path = os.path.realpath(os.path.join(config.WORKDIR, path))
 
     if not (file_path == workdir_real or file_path.startswith(workdir_real + os.sep)):
         return [{"type": "hunk", "text": "Invalid path outside repository.", "oldLine": None, "newLine": None}]
@@ -2756,7 +2753,7 @@ def _build_file_diff(path: str, status: str, unified: int) -> Dict[str, Any]:
 
 
 def _resolve_repo_path(relative_path: str) -> Optional[str]:
-    """Resolve repository-relative file path and block traversal outside WORKDIR."""
+    """Resolve repository-relative file path and block traversal outside config.WORKDIR."""
     if not relative_path:
         return None
 
@@ -2764,8 +2761,8 @@ def _resolve_repo_path(relative_path: str) -> Optional[str]:
     if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
         return None
 
-    repo_root = os.path.realpath(WORKDIR)
-    target = os.path.realpath(os.path.join(WORKDIR, normalized))
+    repo_root = os.path.realpath(config.WORKDIR)
+    target = os.path.realpath(os.path.join(config.WORKDIR, normalized))
 
     if target == repo_root or target.startswith(repo_root + os.sep):
         return target
@@ -2779,7 +2776,7 @@ async def get_repo_diff(
 ):
     """Return the repository diff for changed files in the current workdir."""
     if not _is_git_repo():
-        return {"repo_path": WORKDIR, "head": None, "files": []}
+        return {"repo_path": config.WORKDIR, "head": None, "files": []}
 
     head_result = _run_git_command(["rev-parse", "--short", "HEAD"], timeout_seconds=5)
     head = head_result.stdout.strip() if head_result.returncode == 0 else None
@@ -2791,7 +2788,7 @@ async def get_repo_diff(
         raise HTTPException(status_code=500, detail="Failed to load repository diff")
 
     files = [_build_file_diff(item["path"], item["status"], unified) for item in changed_files]
-    return {"repo_path": WORKDIR, "head": head, "files": files}
+    return {"repo_path": config.WORKDIR, "head": head, "files": files}
 
 
 @app.get("/git/files")
@@ -2800,7 +2797,7 @@ async def get_repo_files(
 ):
     """Return repository files for file explorer mode."""
     if not _is_git_repo():
-        return {"repo_path": WORKDIR, "files": []}
+        return {"repo_path": config.WORKDIR, "files": []}
 
     files_result = _run_git_command(
         ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
@@ -2811,7 +2808,7 @@ async def get_repo_files(
         raise HTTPException(status_code=500, detail="Failed to list repository files")
 
     files = sorted({path for path in files_result.stdout.split("\x00") if path})
-    return {"repo_path": WORKDIR, "files": files[:limit]}
+    return {"repo_path": config.WORKDIR, "files": files[:limit]}
 
 
 @app.get("/git/file")
@@ -3456,7 +3453,7 @@ async def create_run(req: RunCreate):
     run_data = {
         "name": req.name,
         "command": req.command,
-        "workdir": req.workdir or WORKDIR,
+        "workdir": req.workdir or config.WORKDIR,
         "status": initial_status,
         "created_at": time.time(),
         "is_archived": False,
@@ -3677,7 +3674,7 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
     new_run = {
         "name": f"{source_run.get('name', 'Run')} (Rerun)",
         "command": new_command,
-        "workdir": source_run.get("workdir") or WORKDIR,
+        "workdir": source_run.get("workdir") or config.WORKDIR,
         "status": initial_status,
         "created_at": time.time(),
         "is_archived": False,
@@ -3877,7 +3874,7 @@ async def post_run_metrics(run_id: str, request: Request):
         raise HTTPException(status_code=400, detail="'rows' must be a non-empty array")
 
     run = runs[run_id]
-    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    run_dir = run.get("run_dir") or os.path.join(config.DATA_DIR, "runs", run_id)
     os.makedirs(run_dir, exist_ok=True)
     metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
 
@@ -3904,7 +3901,7 @@ async def get_run_metrics(run_id: str):
         raise HTTPException(status_code=404, detail="Run not found")
 
     run = runs[run_id]
-    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    run_dir = run.get("run_dir") or os.path.join(config.DATA_DIR, "runs", run_id)
     parsed = _load_run_metrics(run_dir)
 
     # Fallback to wandb files if no stored metrics
@@ -3946,7 +3943,7 @@ async def respond_to_alert(alert_id: str, req: RespondAlertRequest):
         save_alerts_state()
         return {"message": "Response recorded, run not found"}
 
-    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
+    run_dir = run.get("run_dir") or os.path.join(config.DATA_DIR, "runs", run_id)
     alerts_dir = os.path.join(run_dir, "alerts")
     os.makedirs(alerts_dir, exist_ok=True)
     response_file = os.path.join(alerts_dir, f"{alert_id}.response")
@@ -4431,7 +4428,7 @@ async def create_wild_sweep(req: WildSweepCreate):
     sweep_data = {
         "name": req.name,
         "base_command": "",
-        "workdir": WORKDIR,
+        "workdir": config.WORKDIR,
         "parameters": {},
         "run_ids": [],
         "status": "pending",
@@ -4497,7 +4494,7 @@ async def create_sweep(req: SweepCreate):
         sweep_data = {
             "name": req.name,
             "base_command": req.base_command,
-            "workdir": req.workdir or WORKDIR,
+            "workdir": req.workdir or config.WORKDIR,
             "parameters": req.parameters or {},
             "run_ids": [],
             "status": "draft",
@@ -4535,7 +4532,7 @@ async def create_sweep(req: SweepCreate):
         run_data = {
             "name": f"{req.name} #{i+1}",
             "command": command,
-            "workdir": req.workdir or WORKDIR,
+            "workdir": req.workdir or config.WORKDIR,
             "status": "queued" if requested_status == "running" else "ready",
             "created_at": time.time(),
             "is_archived": False,
@@ -4556,7 +4553,7 @@ async def create_sweep(req: SweepCreate):
     sweep_data = {
         "name": req.name,
         "base_command": req.base_command,
-        "workdir": req.workdir or WORKDIR,
+        "workdir": req.workdir or config.WORKDIR,
         "parameters": req.parameters,
         "run_ids": run_ids,
         "status": "running" if requested_status == "running" else "pending",
@@ -4739,7 +4736,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
     run_data = {
         "name": req.name,
         "command": req.command,
-        "workdir": req.workdir or WORKDIR,
+        "workdir": req.workdir or config.WORKDIR,
         "status": initial_status,
         "created_at": time.time(),
         "is_archived": False,
@@ -5245,7 +5242,7 @@ def main():
     maybe_mount_frontend_static()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
-    logger.info(f"Working directory: {WORKDIR}")
+    logger.info(f"Working directory: {config.WORKDIR}")
     
     uvicorn.run(app, host=args.host, port=args.port, log_config=None)
 
