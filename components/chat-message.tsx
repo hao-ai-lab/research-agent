@@ -579,11 +579,11 @@ export function ChatMessage({
             </div>
           </div>
         )}
-        <div className="border-l-4 border-primary px-3 py-1">
+        <div className="border-l-4 border-primary px-3 py-1 min-w-0 overflow-hidden">
           <button
             type="button"
             onClick={() => setIsUserMessageExpanded((prev) => !prev)}
-            className="flex w-full items-start gap-1.5 text-left"
+            className="flex w-full items-start gap-1.5 text-left min-w-0"
           >
             {isUserMessageExpanded ? (
               <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
