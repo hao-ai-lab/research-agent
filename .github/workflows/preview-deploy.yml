@@ -33,7 +33,7 @@ jobs:
 
       - name: Generate stable preview auth token
         env:
-          PREVIEW_TOKEN_SEED: ${{ secrets.PREVIEW_AUTH_TOKEN_SEED || secrets.GH_PAT || secrets.MODAL_TOKEN_SECRET || github.token }}
+          PREVIEW_TOKEN_SEED: ${{ secrets.PREVIEW_AUTH_TOKEN_SEED || secrets.GH_PAT || secrets.MODAL_TOKEN_SECRET }}
           PREVIEW_TOKEN_CONTEXT: ${{ format('{0}/{1}#{2}', github.repository_owner, github.event.repository.name, github.event.pull_request.number) }}
         run: |
           PREVIEW_AUTH_TOKEN="$(python - <<'PY'
@@ -42,6 +42,8 @@ jobs:
           import os
 
           seed = os.environ["PREVIEW_TOKEN_SEED"]
+          if not seed:
+              raise SystemExit("PREVIEW_TOKEN_SEED is empty; set PREVIEW_AUTH_TOKEN_SEED or ensure GH_PAT/MODAL_TOKEN_SECRET exists")
           context = os.environ["PREVIEW_TOKEN_CONTEXT"]
           print(hmac.new(seed.encode("utf-8"), context.encode("utf-8"), hashlib.sha256).hexdigest())
           PY
