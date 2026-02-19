@@ -350,13 +350,10 @@ class SessionModelUpdate(BaseModel):
 
 class GpuwrapConfig(BaseModel):
     enabled: Optional[bool] = None
-    gpus_needed: Optional[int] = Field(default=None, ge=1, le=64)
     retries: Optional[int] = Field(default=None, ge=0, le=20)
     retry_delay_seconds: Optional[float] = Field(default=None, gt=0, le=600)
     max_memory_used_mb: Optional[int] = Field(default=None, ge=0, le=10_000_000)
     max_utilization: Optional[int] = Field(default=None, ge=0, le=100)
-    lease_ttl_seconds: Optional[int] = Field(default=None, ge=30, le=86_400)
-    reservation_dir: Optional[str] = None
 
 
 class RunCreate(BaseModel):
@@ -2024,14 +2021,6 @@ def _normalize_gpuwrap_config(config: Any) -> Optional[dict]:
         return None
 
     data = validated.model_dump(exclude_none=True)
-    reservation_dir = data.get("reservation_dir")
-    if isinstance(reservation_dir, str):
-        reservation_dir = reservation_dir.strip()
-        if reservation_dir:
-            data["reservation_dir"] = reservation_dir
-        else:
-            data.pop("reservation_dir", None)
-
     return data or None
 
 

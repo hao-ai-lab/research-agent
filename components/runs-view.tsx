@@ -208,10 +208,10 @@ export function RunsView({
   const [runCreateSweepId, setRunCreateSweepId] = useState<string>('none')
   const [runCreateAutoStart, setRunCreateAutoStart] = useState(true)
   const [runCreateGpuwrapEnabled, setRunCreateGpuwrapEnabled] = useState(true)
-  const [runCreateGpuwrapGpusNeeded, setRunCreateGpuwrapGpusNeeded] = useState('1')
+  const [runCreateGpuwrapAdvancedOpen, setRunCreateGpuwrapAdvancedOpen] = useState(false)
   const [runCreateGpuwrapRetries, setRunCreateGpuwrapRetries] = useState('2')
   const [runCreateGpuwrapRetryDelaySeconds, setRunCreateGpuwrapRetryDelaySeconds] = useState('8')
-  const [runCreateGpuwrapMaxMemoryUsedMb, setRunCreateGpuwrapMaxMemoryUsedMb] = useState('1500')
+  const [runCreateGpuwrapMaxMemoryUsedMb, setRunCreateGpuwrapMaxMemoryUsedMb] = useState('200')
   const [runCreateGpuwrapMaxUtilization, setRunCreateGpuwrapMaxUtilization] = useState('40')
   const [runCreateError, setRunCreateError] = useState<string | null>(null)
   const [runCreateSubmitting, setRunCreateSubmitting] = useState(false)
@@ -761,10 +761,10 @@ export function RunsView({
     setRunCreateSweepId('none')
     setRunCreateAutoStart(true)
     setRunCreateGpuwrapEnabled(true)
-    setRunCreateGpuwrapGpusNeeded('1')
+    setRunCreateGpuwrapAdvancedOpen(false)
     setRunCreateGpuwrapRetries('2')
     setRunCreateGpuwrapRetryDelaySeconds('8')
-    setRunCreateGpuwrapMaxMemoryUsedMb('1500')
+    setRunCreateGpuwrapMaxMemoryUsedMb('200')
     setRunCreateGpuwrapMaxUtilization('40')
     setRunCreateError(null)
     setRunCreateSubmitting(false)
@@ -830,8 +830,6 @@ export function RunsView({
       enabled: runCreateGpuwrapEnabled,
     }
     if (runCreateGpuwrapEnabled) {
-      const gpusNeeded = parseIntField(runCreateGpuwrapGpusNeeded, 'GPUs Needed', 1, 64)
-      if (gpusNeeded == null) return
       const retries = parseIntField(runCreateGpuwrapRetries, 'GPU Retries', 0, 20)
       if (retries == null) return
       const retryDelaySeconds = parseFloatField(runCreateGpuwrapRetryDelaySeconds, 'Retry Delay', 0)
@@ -841,7 +839,6 @@ export function RunsView({
       const maxUtilization = parseIntField(runCreateGpuwrapMaxUtilization, 'Max Utilization', 0, 100)
       if (maxUtilization == null) return
 
-      gpuwrapConfig.gpus_needed = gpusNeeded
       gpuwrapConfig.retries = retries
       gpuwrapConfig.retry_delay_seconds = retryDelaySeconds
       gpuwrapConfig.max_memory_used_mb = maxMemoryUsedMb
@@ -875,7 +872,6 @@ export function RunsView({
     resetCreateRunForm,
     runCreateAutoStart,
     runCreateGpuwrapEnabled,
-    runCreateGpuwrapGpusNeeded,
     runCreateGpuwrapRetries,
     runCreateGpuwrapRetryDelaySeconds,
     runCreateGpuwrapMaxMemoryUsedMb,
@@ -2633,66 +2629,70 @@ export function RunsView({
                 <div>
                   <p className="text-xs font-medium text-foreground">Use GPU Wrap</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Sidecar auto-picks GPUs and retries on contention.
+                    Sidecar selects all currently available GPUs and retries on contention.
                   </p>
                 </div>
                 <Switch checked={runCreateGpuwrapEnabled} onCheckedChange={setRunCreateGpuwrapEnabled} />
               </div>
               {runCreateGpuwrapEnabled && (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">GPUs Needed</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={64}
-                      value={runCreateGpuwrapGpusNeeded}
-                      onChange={(event) => setRunCreateGpuwrapGpusNeeded(event.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">GPU Retries</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={20}
-                      value={runCreateGpuwrapRetries}
-                      onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Retry Delay (sec)</label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      min={0.1}
-                      value={runCreateGpuwrapRetryDelaySeconds}
-                      onChange={(event) => setRunCreateGpuwrapRetryDelaySeconds(event.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Max Memory Used (MB)</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={runCreateGpuwrapMaxMemoryUsedMb}
-                      onChange={(event) => setRunCreateGpuwrapMaxMemoryUsedMb(event.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-[11px] font-medium text-muted-foreground">Max Utilization (%)</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={runCreateGpuwrapMaxUtilization}
-                      onChange={(event) => setRunCreateGpuwrapMaxUtilization(event.target.value)}
-                      className="h-8 text-xs"
-                    />
+                <div className="rounded-md border border-border/60 bg-background/70 px-2 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setRunCreateGpuwrapAdvancedOpen((prev) => !prev)}
+                    className="flex w-full items-center justify-between text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    <span>Advanced GPU Wrap Settings</span>
+                    <span>{runCreateGpuwrapAdvancedOpen ? 'Hide' : 'Show'}</span>
+                  </button>
+                  {runCreateGpuwrapAdvancedOpen && (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">GPU Retries</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={20}
+                          value={runCreateGpuwrapRetries}
+                          onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">Retry Delay (sec)</label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min={0.1}
+                          value={runCreateGpuwrapRetryDelaySeconds}
+                          onChange={(event) => setRunCreateGpuwrapRetryDelaySeconds(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">Max Memory Used (MB)</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={runCreateGpuwrapMaxMemoryUsedMb}
+                          onChange={(event) => setRunCreateGpuwrapMaxMemoryUsedMb(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">Max Utilization (%)</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={runCreateGpuwrapMaxUtilization}
+                          onChange={(event) => setRunCreateGpuwrapMaxUtilization(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-2 text-[11px] text-muted-foreground">
+                    GPUs are considered available when memory used is at or below this threshold and utilization is at or below the max utilization threshold.
                   </div>
                 </div>
               )}

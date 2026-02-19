@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""GPU availability detector for gpuwrap.
+"""GPU availability detector for sidecar GPU scheduling.
 
 Uses NVML (pynvml) when available and falls back to nvidia-smi parsing.
-Outputs a JSON payload that includes a recommended CUDA_VISIBLE_DEVICES.
+Returns *all* currently available GPUs based on memory/utilization thresholds.
 """
 
 from __future__ import annotations
@@ -12,21 +12,6 @@ import json
 import os
 import subprocess
 from typing import Any
-
-
-def _parse_excluded(raw: str) -> set[int]:
-    excluded: set[int] = set()
-    if not raw:
-        return excluded
-    for token in raw.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        try:
-            excluded.add(int(token))
-        except ValueError:
-            continue
-    return excluded
 
 
 def _to_mb(value: int) -> int:
@@ -59,7 +44,7 @@ def _nvml_process_count(pynvml_mod, handle) -> int:
     return count
 
 
-def _collect_from_nvml(excluded: set[int]) -> tuple[list[dict[str, Any]], str | None]:
+def _collect_from_nvml() -> tuple[list[dict[str, Any]], str | None]:
     try:
         import pynvml  # type: ignore
     except ImportError:
@@ -74,8 +59,6 @@ def _collect_from_nvml(excluded: set[int]) -> tuple[list[dict[str, Any]], str | 
     try:
         count = pynvml.nvmlDeviceGetCount()
         for index in range(count):
-            if index in excluded:
-                continue
             try:
                 handle = pynvml.nvmlDeviceGetHandleByIndex(index)
                 memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -114,7 +97,7 @@ def _run_capture(cmd: list[str]) -> tuple[bool, str]:
     return True, res.stdout or ""
 
 
-def _collect_from_nvidia_smi(excluded: set[int]) -> tuple[list[dict[str, Any]], str | None]:
+def _collect_from_nvidia_smi() -> tuple[list[dict[str, Any]], str | None]:
     if not shutil_which("nvidia-smi"):
         return [], "nvidia_smi_not_found"
 
@@ -156,8 +139,6 @@ def _collect_from_nvidia_smi(excluded: set[int]) -> tuple[list[dict[str, Any]], 
             mem_total = int(float(parts[5]))
         except ValueError:
             continue
-        if index in excluded:
-            continue
         gpu_uuid = parts[1]
         rows.append(
             {
@@ -182,80 +163,78 @@ def shutil_which(binary: str) -> str | None:
     return None
 
 
-def _score_gpu(gpu: dict[str, Any]) -> float:
-    process_penalty = float(gpu.get("process_count", 0)) * 1_000_000.0
-    memory_penalty = float(gpu.get("memory_used_mb", 0)) * 100.0
-    util_penalty = float(gpu.get("utilization_gpu", 0)) * 10.0
-    return process_penalty + memory_penalty + util_penalty
-
-
-def _select_gpus(
-    gpus: list[dict[str, Any]],
-    gpus_needed: int,
+def _is_available(
+    gpu: dict[str, Any],
     max_memory_used_mb: int,
     max_utilization: int,
-) -> tuple[list[dict[str, Any]], str]:
-    if not gpus:
-        return [], "no_gpu_detected"
-
-    strict = [
-        gpu for gpu in gpus
-        if int(gpu.get("process_count", 0)) == 0
-        and int(gpu.get("memory_used_mb", 0)) <= max_memory_used_mb
+) -> bool:
+    return (
+        int(gpu.get("memory_used_mb", 0)) <= max_memory_used_mb
         and int(gpu.get("utilization_gpu", 0)) <= max_utilization
-    ]
-    if len(strict) >= gpus_needed:
-        return sorted(strict, key=_score_gpu)[:gpus_needed], "strict_idle"
+    )
 
-    sorted_gpus = sorted(gpus, key=_score_gpu)
-    return sorted_gpus[: min(gpus_needed, len(sorted_gpus))], "least_loaded"
+
+def _split_availability(
+    gpus: list[dict[str, Any]],
+    max_memory_used_mb: int,
+    max_utilization: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    available: list[dict[str, Any]] = []
+    occupied: list[dict[str, Any]] = []
+    for gpu in gpus:
+        if _is_available(gpu, max_memory_used_mb=max_memory_used_mb, max_utilization=max_utilization):
+            available.append(gpu)
+        else:
+            occupied.append(gpu)
+    available.sort(key=lambda row: int(row.get("index", 0)))
+    occupied.sort(key=lambda row: int(row.get("index", 0)))
+    return available, occupied
 
 
 def build_payload(
     gpus: list[dict[str, Any]],
     source: str,
-    gpus_needed: int,
     max_memory_used_mb: int,
     max_utilization: int,
 ) -> dict[str, Any]:
-    selected, reason = _select_gpus(
+    available, occupied = _split_availability(
         gpus=gpus,
-        gpus_needed=gpus_needed,
         max_memory_used_mb=max_memory_used_mb,
         max_utilization=max_utilization,
     )
-    selected_indices = [int(g["index"]) for g in selected]
+    selected_indices = [int(g["index"]) for g in available]
+    occupied_indices = [int(g["index"]) for g in occupied]
     cuda_visible_devices = ",".join(str(i) for i in selected_indices)
     return {
         "source": source,
-        "selection_reason": reason,
-        "gpus_needed": gpus_needed,
+        "selection_reason": "all_available_threshold_filtered",
         "total_gpu_count": len(gpus),
         "selected_gpu_indices": selected_indices,
-        "selected_gpu_details": selected,
+        "selected_gpu_details": available,
+        "occupied_gpu_indices": occupied_indices,
+        "occupied_gpu_details": occupied,
         "cuda_visible_devices": cuda_visible_devices,
         "all_gpu_details": gpus,
+        "thresholds": {
+            "max_memory_used_mb": max_memory_used_mb,
+            "max_utilization": max_utilization,
+        },
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Recommend CUDA_VISIBLE_DEVICES for shared GPU hosts")
-    parser.add_argument("--gpus-needed", type=int, default=1)
-    parser.add_argument("--max-memory-used-mb", type=int, default=1500)
+    parser = argparse.ArgumentParser(description="Detect currently available GPUs for shared hosts")
+    parser.add_argument("--max-memory-used-mb", type=int, default=200)
     parser.add_argument("--max-utilization", type=int, default=40)
-    parser.add_argument("--exclude-indices", default="")
     args = parser.parse_args()
 
-    gpus_needed = max(1, int(args.gpus_needed))
-    excluded = _parse_excluded(args.exclude_indices)
-
-    gpus, nvml_error = _collect_from_nvml(excluded)
+    gpus, nvml_error = _collect_from_nvml()
     source = "pynvml"
     errors: list[str] = []
     if nvml_error:
         errors.append(nvml_error)
     if not gpus:
-        gpus, smi_error = _collect_from_nvidia_smi(excluded)
+        gpus, smi_error = _collect_from_nvidia_smi()
         source = "nvidia-smi"
         if smi_error:
             errors.append(smi_error)
@@ -263,7 +242,6 @@ def main() -> int:
     payload = build_payload(
         gpus=gpus,
         source=source if gpus else "none",
-        gpus_needed=gpus_needed,
         max_memory_used_mb=max(0, int(args.max_memory_used_mb)),
         max_utilization=max(0, int(args.max_utilization)),
     )

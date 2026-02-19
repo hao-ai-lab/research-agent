@@ -184,9 +184,10 @@ The `/chat` endpoint returns NDJSON (newline-delimited JSON) with these event ty
 
 ### Shared GPU auto-selection (gpuwrap)
 
-The sidecar now routes run commands through `server/gpuwrap.sh` by default.
-`gpuwrap` selects `CUDA_VISIBLE_DEVICES` per command (without global export),
-detects likely GPU contention failures, emits alerts, and retries.
+The sidecar handles GPU selection/retry internally.
+Before each attempt it detects currently available GPUs and runs the command with
+per-process `CUDA_VISIBLE_DEVICES` (without global export).
+If execution fails due to likely GPU contention, it emits an alert and retries.
 You can override these settings per run from the frontend "Create Run" dialog.
 
 Useful env knobs:
@@ -195,8 +196,7 @@ Useful env knobs:
 export RESEARCH_AGENT_GPUWRAP_ENABLED=1
 export RESEARCH_AGENT_GPUWRAP_RETRIES=2
 export RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS=8
-export RESEARCH_AGENT_GPUWRAP_GPUS_NEEDED=1
-export RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB=1500
+export RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB=200
 export RESEARCH_AGENT_GPUWRAP_MAX_UTILIZATION=40
 ```
 

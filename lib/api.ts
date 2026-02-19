@@ -442,13 +442,10 @@ export interface Run {
 
 export interface GpuwrapConfig {
     enabled?: boolean
-    gpus_needed?: number
     retries?: number
     retry_delay_seconds?: number
     max_memory_used_mb?: number
     max_utilization?: number
-    lease_ttl_seconds?: number
-    reservation_dir?: string
 }
 
 export interface Alert {
