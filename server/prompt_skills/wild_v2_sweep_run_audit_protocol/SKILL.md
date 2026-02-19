@@ -26,6 +26,7 @@ Treat local direct execution as non-compliant.
 2. Create every experiment trial as a run attached to that sweep.
 3. Monitor run status via API endpoints.
 4. Keep commands reproducible (fixed script paths, seeds, log/output paths).
+5. Include `chat_session_id` in all sweep/run creation request bodies.
 
 ## Canonical flow
 
@@ -37,7 +38,8 @@ curl -X POST "$SERVER_URL/sweeps/wild" \
   -H "X-Auth-Token: $AUTH_TOKEN" \
   -d '{
     "name": "mnist-mlp-cpu-grid",
-    "goal": "one-layer MLP grid search on MNIST CPU"
+    "goal": "one-layer MLP grid search on MNIST CPU",
+    "chat_session_id": "$CHAT_SESSION_ID"
   }'
 ```
 
@@ -53,6 +55,7 @@ curl -X POST "$SERVER_URL/runs" \
     \"name\": \"mnist-mlp-lr1e-2-bs128-seed1\",
     \"command\": \"cd /path/to/workdir && python scripts/train_mnist_mlp.py --lr 1e-2 --batch-size 128 --seed 1 --device cpu --log-dir exp/logs --out-dir exp/outputs\",
     \"sweep_id\": \"${SWEEP_ID}\",
+    \"chat_session_id\": \"$CHAT_SESSION_ID\",
     \"auto_start\": true
   }"
 ```

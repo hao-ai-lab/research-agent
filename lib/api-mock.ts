@@ -64,7 +64,7 @@ const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
         name: 'Kimi K2.5 (Free)',
         context_limit: 200000,
         output_limit: 8192,
-        is_default: true,
+        is_default: false,
     },
     {
         provider_id: 'opencode',
@@ -88,7 +88,7 @@ const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
         provider_id: 'opencode',
         model_id: 'minimax-m2.5-free',
         name: 'minimax-m2.5-free',
-        is_default: false,
+        is_default: true,
     },
     {
         provider_id: 'opencode',
@@ -116,7 +116,7 @@ const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
 
 const DEFAULT_MODEL_SELECTION: SessionModelSelection = {
     provider_id: 'opencode',
-    model_id: 'kimi-k2.5-free',
+    model_id: 'minimax-m2.5-free',
 }
 
 const mockSessions: Map<string, SessionWithMessages> = new Map([

@@ -12,7 +12,6 @@ import {
   LayoutGrid,
   Monitor,
   Moon,
-  Rows3,
   RotateCcw,
   Server,
   Clock,
@@ -55,11 +54,25 @@ export function SettingsPageContent({
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
   const [showSlackApiKey, setShowSlackApiKey] = useState(false)
 
-  const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
+  const {
+    apiUrl,
+    useMock,
+    authToken,
+    researchAgentKey,
+    setApiUrl,
+    setUseMock,
+    setAuthToken,
+    setResearchAgentKey,
+    resetToDefaults,
+    testConnection,
+  } = useApiConfig()
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
   const [authTokenInput, setAuthTokenInput] = useState(authToken)
+  const [researchAgentKeyInput, setResearchAgentKeyInput] = useState(researchAgentKey)
   const [showAuthToken, setShowAuthToken] = useState(false)
+  const [showResearchAgentKey, setShowResearchAgentKey] = useState(false)
   const [authTokenCopied, setAuthTokenCopied] = useState(false)
+  const [researchAgentKeyCopied, setResearchAgentKeyCopied] = useState(false)
   const [setupLinkCopied, setSetupLinkCopied] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
@@ -106,6 +119,10 @@ export function SettingsPageContent({
   React.useEffect(() => {
     setAuthTokenInput(authToken)
   }, [authToken])
+
+  React.useEffect(() => {
+    setResearchAgentKeyInput(researchAgentKey)
+  }, [researchAgentKey])
 
   // Sync local inputs when settings change externally (e.g. reset)
   React.useEffect(() => {
@@ -167,6 +184,7 @@ export function SettingsPageContent({
     const isConnected = await testConnection({
       apiUrl: nextApiUrl,
       authToken: nextAuthToken,
+      researchAgentKey: researchAgentKeyInput.trim(),
     })
     if (isConnected) {
       setApiUrl(nextApiUrl)
@@ -185,6 +203,10 @@ export function SettingsPageContent({
     setAuthToken(authTokenInput)
   }
 
+  const handleSaveResearchAgentKey = () => {
+    setResearchAgentKey(researchAgentKeyInput.trim())
+  }
+
   const handleCopyAuthToken = async () => {
     if (!authTokenInput.trim()) return
     try {
@@ -193,6 +215,17 @@ export function SettingsPageContent({
       setTimeout(() => setAuthTokenCopied(false), 1500)
     } catch (error) {
       console.error('Failed to copy auth token:', error)
+    }
+  }
+
+  const handleCopyResearchAgentKey = async () => {
+    if (!researchAgentKeyInput.trim()) return
+    try {
+      await navigator.clipboard.writeText(researchAgentKeyInput)
+      setResearchAgentKeyCopied(true)
+      setTimeout(() => setResearchAgentKeyCopied(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy RESEARCH_AGENT_KEY:', error)
     }
   }
 
@@ -280,15 +313,6 @@ export function SettingsPageContent({
           value: settings.appearance.buttonSize,
         },
         {
-          id: 'runItemInteractionMode',
-          label: 'Runs/Sweeps Click Mode',
-          description: 'Open detail page or expand inline details',
-          icon: Rows3,
-          type: 'select' as const,
-          options: ['detail-page', 'inline-expand'],
-          value: settings.appearance.runItemInteractionMode || 'detail-page',
-        },
-        {
           id: 'showRunItemMetadata',
           label: 'Run Item Metadata',
           description: 'Show Start, Created, and Runtime under each run name',
@@ -312,6 +336,14 @@ export function SettingsPageContent({
           type: 'select' as const,
           options: ['expert', 'novice'],
           value: settings.appearance.starterCardFlavor || 'novice',
+        },
+        {
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatContextPanel !== false,
         },
         {
           id: 'mobileEnterToNewline',
@@ -372,6 +404,14 @@ export function SettingsPageContent({
           type: 'toggle' as const,
           value: settings.developer?.showPlanPanel === true,
         },
+        {
+          id: 'showSidebarRunsSweepsPreview',
+          label: 'Sidebar Runs/Sweeps Preview',
+          description: 'Show or hide recent Runs and Sweeps preview blocks in the desktop sidebar',
+          icon: Eye,
+          type: 'toggle' as const,
+          value: settings.developer?.showSidebarRunsSweepsPreview !== false,
+        },
       ],
     },
     {
@@ -416,13 +456,6 @@ export function SettingsPageContent({
     onSettingsChange({
       ...settings,
       appearance: { ...settings.appearance, buttonSize },
-    })
-  }
-
-  const handleRunItemInteractionModeChange = (mode: 'detail-page' | 'inline-expand') => {
-    onSettingsChange({
-      ...settings,
-      appearance: { ...settings.appearance, runItemInteractionMode: mode },
     })
   }
 
@@ -819,7 +852,6 @@ export function SettingsPageContent({
                       if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
-                      if (item.id === 'runItemInteractionMode') handleRunItemInteractionModeChange(option as 'detail-page' | 'inline-expand')
                       if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
@@ -852,6 +884,7 @@ export function SettingsPageContent({
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
                 if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'mobileEnterToNewline') updateAppearanceSettings({ mobileEnterToNewline: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
@@ -863,6 +896,12 @@ export function SettingsPageContent({
                   onSettingsChange({
                     ...settings,
                     developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
+                if (item.id === 'showSidebarRunsSweepsPreview') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showSidebarRunsSweepsPreview: checked },
                   })
                 }
               }}
@@ -1206,6 +1245,49 @@ export function SettingsPageContent({
                       size="sm"
                       onClick={handleSaveAuthToken}
                       disabled={authTokenInput === authToken}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="research-agent-key" className="text-xs">RESEARCH_AGENT_KEY</Label>
+                  <p className="text-xs text-muted-foreground">Gateway key used by model provider requests</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="research-agent-key"
+                      type={showResearchAgentKey ? 'text' : 'password'}
+                      placeholder="Enter RESEARCH_AGENT_KEY..."
+                      value={researchAgentKeyInput}
+                      onChange={(e) => setResearchAgentKeyInput(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowResearchAgentKey((prev) => !prev)}
+                      className="px-2"
+                      title={showResearchAgentKey ? 'Hide key' : 'Show key'}
+                    >
+                      {showResearchAgentKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      <span className="sr-only">{showResearchAgentKey ? 'Hide key' : 'Show key'}</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyResearchAgentKey}
+                      disabled={!researchAgentKeyInput.trim()}
+                      className="px-2"
+                      title="Copy RESEARCH_AGENT_KEY"
+                    >
+                      {researchAgentKeyCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSaveResearchAgentKey}
+                      disabled={researchAgentKeyInput.trim() === researchAgentKey}
                     >
                       Save
                     </Button>

@@ -1,6 +1,6 @@
 'use client'
 
-import { getApiUrl, getAuthToken } from './api-config'
+import { getApiUrl, getAuthToken, getResearchAgentKey } from './api-config'
 import type { PromptProvenance } from '@/lib/types'
 
 // Get API URL dynamically at runtime (supports localStorage override)
@@ -17,6 +17,11 @@ function getHeaders(includeContentType: boolean = false): HeadersInit {
     const authToken = getAuthToken()
     if (authToken) {
         headers['X-Auth-Token'] = authToken
+    }
+
+    const researchAgentKey = getResearchAgentKey()
+    if (researchAgentKey) {
+        headers['X-Research-Agent-Key'] = researchAgentKey
     }
 
     return headers
@@ -428,6 +433,7 @@ export interface Run {
     error?: string | null
     wandb_dir?: string | null
     sweep_id?: string | null
+    chat_session_id?: string | null
     sweep_params?: Record<string, unknown> | null
     gpuwrap_config?: GpuwrapConfig | null
     // Optional fields for metrics/charts (from mock or W&B)
@@ -469,6 +475,7 @@ export interface CreateRunRequest {
     sweep_id?: string
     parent_run_id?: string
     origin_alert_id?: string
+    chat_session_id?: string
     auto_start?: boolean
     gpuwrap_config?: GpuwrapConfig
 }
@@ -1767,6 +1774,7 @@ export interface Sweep {
     max_runs?: number
     goal?: string
     is_wild?: boolean
+    chat_session_id?: string | null
     ui_config?: Record<string, unknown> | null
     creation_context?: {
         name?: string | null
@@ -1806,6 +1814,7 @@ export interface CreateSweepRequest {
     goal?: string
     status?: 'draft' | 'pending' | 'running'
     ui_config?: Record<string, unknown>
+    chat_session_id?: string
 }
 
 export interface UpdateSweepRequest {
@@ -1897,11 +1906,15 @@ export async function startSweep(sweepId: string, parallel: number = 1): Promise
 /**
  * Create an empty sweep container for wild loop job tracking
  */
-export async function createWildSweep(name: string, goal: string): Promise<Sweep> {
+export async function createWildSweep(name: string, goal: string, chatSessionId?: string): Promise<Sweep> {
+    const request: Record<string, unknown> = { name, goal }
+    if (chatSessionId) {
+        request.chat_session_id = chatSessionId
+    }
     const response = await fetch(`${API_URL()}/sweeps/wild`, {
         method: 'POST',
         headers: getHeaders(true),
-        body: JSON.stringify({ name, goal }),
+        body: JSON.stringify(request),
     })
     if (!response.ok) {
         throw new Error(`Failed to create wild sweep: ${response.statusText}`)

@@ -27,6 +27,7 @@ If preflight fails, abort loop work immediately.
 
 - Every experiment trial must be a run created through `POST /runs`.
 - Runs must be attached to a sweep (`sweep_id`) created via `POST /sweeps/wild`.
+- For all create endpoints (`POST /runs`, `POST /sweeps`, `POST /sweeps/wild`, `POST /sweeps/{id}/runs`), include `chat_session_id` in the JSON body using the current chat session id.
 - Direct local execution without API run creation is non-compliant and not user-auditable.
 
 ## C. Grid Search Rule
