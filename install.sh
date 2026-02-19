@@ -404,6 +404,10 @@ maybe_cmd() {
   command -v "$cmd" >/dev/null 2>&1
 }
 
+run_tmux() {
+  env -u TMUX tmux "$@"
+}
+
 ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
@@ -829,13 +833,13 @@ load_runtime_file_if_exists() {
 }
 
 tmux_session_exists() {
-  tmux has-session -t "$1" >/dev/null 2>&1
+  run_tmux has-session -t "$1" >/dev/null 2>&1
 }
 
 tmux_window_exists() {
   local session="$1"
   local window="$2"
-  tmux list-windows -t "$session" -F '#W' | grep -Fxq "$window"
+  run_tmux list-windows -t "$session" -F '#W' | grep -Fxq "$window"
 }
 
 tmux_replace_window() {
@@ -844,15 +848,15 @@ tmux_replace_window() {
   local command="$3"
 
   if tmux_window_exists "$session" "$window"; then
-    tmux kill-window -t "${session}:${window}"
+    run_tmux kill-window -t "${session}:${window}"
   fi
 
-  tmux new-window -d -t "$session" -n "$window" "$command"
+  run_tmux new-window -d -t "$session" -n "$window" "$command"
 }
 
 ensure_tmux_session() {
   if ! tmux_session_exists "$TMUX_SESSION_NAME"; then
-    tmux new-session -d -s "$TMUX_SESSION_NAME" -n bootstrap "sleep infinity"
+    run_tmux new-session -d -s "$TMUX_SESSION_NAME" -n bootstrap "sleep infinity"
   fi
 }
 
@@ -962,7 +966,7 @@ start_services() {
 
   if [ -n "$frontend_static_dir" ]; then
     if tmux_window_exists "$TMUX_SESSION_NAME" "frontend"; then
-      tmux kill-window -t "${TMUX_SESSION_NAME}:frontend"
+      run_tmux kill-window -t "${TMUX_SESSION_NAME}:frontend"
     fi
     log "Using bundled frontend static files from ${frontend_static_dir}"
   elif [ "$has_frontend_source" -eq 1 ]; then
@@ -972,7 +976,7 @@ start_services() {
   fi
 
   if tmux_window_exists "$TMUX_SESSION_NAME" "bootstrap"; then
-    tmux kill-window -t "${TMUX_SESSION_NAME}:bootstrap"
+    run_tmux kill-window -t "${TMUX_SESSION_NAME}:bootstrap"
   fi
 
   wait_for_http_ok "http://127.0.0.1:${BACKEND_PORT}/" 30 "Backend" || true
@@ -1077,7 +1081,7 @@ start_tunnels() {
     FRONTEND_API_URL="$BACKEND_PUBLIC_URL"
     FRONTEND_PUBLIC_URL="$BACKEND_PUBLIC_URL"
     if tmux_window_exists "$TMUX_SESSION_NAME" "ngrok-frontend"; then
-      tmux kill-window -t "${TMUX_SESSION_NAME}:ngrok-frontend"
+      run_tmux kill-window -t "${TMUX_SESSION_NAME}:ngrok-frontend"
     fi
     log "Frontend is served by backend static files. Reusing backend public URL."
     return
@@ -1184,7 +1188,7 @@ Useful commands:
   research-agent status --project-root $(q "$PROJECT_ROOT")
   research-agent tunnel --project-root $(q "$PROJECT_ROOT")
   research-agent stop --project-root $(q "$PROJECT_ROOT")
-  tmux attach -t ${TMUX_SESSION_NAME}
+  env -u TMUX tmux attach -t ${TMUX_SESSION_NAME}
 EOF
 }
 
@@ -1563,7 +1567,7 @@ cmd_stop() {
   require_cmd tmux
 
   if tmux_session_exists "$TMUX_SESSION_NAME"; then
-    tmux kill-session -t "$TMUX_SESSION_NAME"
+    run_tmux kill-session -t "$TMUX_SESSION_NAME"
     log "Stopped tmux session ${TMUX_SESSION_NAME}"
   else
     log "No running session found for ${PROJECT_ROOT}"
@@ -1625,7 +1629,7 @@ cmd_status() {
 
   if tmux_session_exists "$TMUX_SESSION_NAME"; then
     printf 'Session up:   yes\n'
-    tmux list-windows -t "$TMUX_SESSION_NAME" -F '  - #W: #F'
+    run_tmux list-windows -t "$TMUX_SESSION_NAME" -F '  - #W: #F'
   else
     printf 'Session up:   no\n'
   fi
