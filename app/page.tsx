@@ -100,6 +100,7 @@ export default function ResearchChat() {
   // State for navigation
   const [selectedRun, setSelectedRun] = useState<ExperimentRun | null>(null)
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
+  const [runsViewDialogIntent, setRunsViewDialogIntent] = useState<'run' | 'sweep' | null>(null)
 
   // Event status is tracked locally for acknowledgement/dismissal UX.
   const [eventStatusOverrides, setEventStatusOverrides] = useState<Record<string, EventStatus>>({})
@@ -623,6 +624,20 @@ export default function ResearchChat() {
     window.localStorage.setItem(STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH, String(sidebarWidthRef.current))
   }, [])
 
+  const handleSidebarCreateRun = useCallback(() => {
+    handleTabChange('runs')
+    setRunsViewDialogIntent('run')
+  }, [handleTabChange])
+
+  const handleSidebarCreateSweep = useCallback(() => {
+    handleTabChange('runs')
+    setRunsViewDialogIntent('sweep')
+  }, [handleTabChange])
+
+  const handleRunsViewDialogIntentHandled = useCallback(() => {
+    setRunsViewDialogIntent(null)
+  }, [])
+
   // Handle session change from FloatingNav
   const handleSessionChange = useCallback(async (sessionId: string) => {
     if (sessionId === 'new') {
@@ -690,6 +705,8 @@ export default function ResearchChat() {
           onNavigateToRun={handleNavigateToRun}
           onNavigateToSweep={handleNavigateToSweep}
           onInsertReference={handleInsertChatReference}
+          onOpenCreateRun={handleSidebarCreateRun}
+          onOpenCreateSweep={handleSidebarCreateSweep}
           onSettingsClick={() => handleTabChange('settings')}
           onToggleCollapse={() => setDesktopSidebarHidden(true)}
           onWidthChange={handleSidebarWidthChange}
@@ -788,6 +805,8 @@ export default function ResearchChat() {
                 onUpdateCluster={updateClusterSetup}
                 onNavigateToCharts={() => handleTabChange('charts')}
                 onRespondToAlert={async (alertId, choice) => { await respondAlert(alertId, choice) }}
+                openDialogIntent={runsViewDialogIntent}
+                onDialogIntentHandled={handleRunsViewDialogIntentHandled}
               />
             )}
             {activeTab === 'events' && (
