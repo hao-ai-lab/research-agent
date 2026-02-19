@@ -38,6 +38,14 @@ AGENT_JUDGE_INTERVAL = 30
 AGENT_JUDGE_MAX_LINES = 5
 AGENT_JUDGE_MAX_BYTES = 8000
 ALERT_SIGNATURE_TTL_SECONDS = 180
+GPU_CONFLICT_PATTERNS = (
+    re.compile(r"all CUDA-capable devices are busy or unavailable", re.IGNORECASE),
+    re.compile(r"CUDA error:.*busy", re.IGNORECASE),
+    re.compile(r"device or resource busy", re.IGNORECASE),
+    re.compile(r"CUDA out of memory", re.IGNORECASE),
+    re.compile(r"CUBLAS_STATUS_ALLOC_FAILED", re.IGNORECASE),
+    re.compile(r"failed to allocate memory on device", re.IGNORECASE),
+)
 _last_metrics_pos: dict[str, int] = {}
 _last_judge_check: dict[str, float] = {}
 
@@ -679,6 +687,143 @@ def check_wandb_in_pane(pane_id: str, workdir: str = None) -> str | None:
     return None
 
 
+def _resolve_sidecar_script(name: str) -> str | None:
+    """Resolve helper script path in source and frozen modes."""
+    candidates = []
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(base_dir, name))
+    frozen_dir = getattr(sys, "_MEIPASS", None)
+    if frozen_dir:
+        candidates.append(os.path.join(frozen_dir, name))
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(value)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def resolve_gpuwrap_settings(gpuwrap_config: dict | None) -> dict:
+    config = gpuwrap_config if isinstance(gpuwrap_config, dict) else {}
+    enabled = _truthy(config["enabled"]) if "enabled" in config else _truthy(os.environ.get("RESEARCH_AGENT_GPUWRAP_ENABLED", "1"))
+    retries = int(config.get("retries", _env_int("RESEARCH_AGENT_GPUWRAP_RETRIES", 2)))
+    retry_delay_seconds = float(config.get("retry_delay_seconds", _env_float("RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS", 8.0)))
+    max_memory_used_mb = int(config.get("max_memory_used_mb", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB", 200)))
+    max_utilization = int(config.get("max_utilization", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_UTILIZATION", 40)))
+    return {
+        "enabled": enabled,
+        "retries": max(0, retries),
+        "retry_delay_seconds": max(0.1, retry_delay_seconds),
+        "max_memory_used_mb": max(0, max_memory_used_mb),
+        "max_utilization": min(100, max(0, max_utilization)),
+    }
+
+
+def detect_available_cuda_devices(settings: dict) -> tuple[str, dict | None]:
+    detect_script = _resolve_sidecar_script("gpuwrap_detect.py")
+    if not detect_script:
+        logger.warning("gpuwrap_detect.py not found; falling back to direct command execution")
+        return "", None
+
+    cmd = [
+        sys.executable,
+        detect_script,
+        "--max-memory-used-mb",
+        str(settings["max_memory_used_mb"]),
+        "--max-utilization",
+        str(settings["max_utilization"]),
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        logger.warning("Failed to run gpu detector: %s", e)
+        return "", None
+
+    if res.returncode != 0:
+        logger.warning("gpu detector failed: %s", (res.stderr or "").strip())
+        return "", None
+
+    try:
+        payload = json.loads((res.stdout or "").strip() or "{}")
+    except json.JSONDecodeError:
+        logger.warning("gpu detector returned non-json output")
+        return "", None
+
+    if not isinstance(payload, dict):
+        return "", None
+    cuda_visible_devices = str(payload.get("cuda_visible_devices", "")).strip()
+    return cuda_visible_devices, payload
+
+
+def _read_log_tail_since(log_file: str, start_offset: int, max_bytes: int = 60000) -> str:
+    if not os.path.isfile(log_file):
+        return ""
+    try:
+        with open(log_file, "rb") as f:
+            f.seek(start_offset)
+            chunk = f.read()
+    except Exception:
+        return ""
+    if len(chunk) > max_bytes:
+        chunk = chunk[-max_bytes:]
+    return chunk.decode("utf-8", errors="ignore")
+
+
+def _looks_like_gpu_conflict(log_tail: str) -> bool:
+    for pattern in GPU_CONFLICT_PATTERNS:
+        if pattern.search(log_tail):
+            return True
+    return False
+
+
+def emit_gpu_retry_alert(
+    server_url: str,
+    job_id: str,
+    attempt: int,
+    total_attempts: int,
+    reason: str,
+    auth_token: str | None = None,
+) -> None:
+    trigger_alert(
+        server_url=server_url,
+        job_id=job_id,
+        message=(
+            f"GPU contention detected ({reason}). "
+            f"Auto-retrying attempt {attempt + 1}/{total_attempts}."
+        ),
+        choices=["Acknowledge"],
+        severity="warning",
+        auth_token=auth_token,
+    )
+
+
 def monitor_job(
     server_url: str,
     job_id: str,
@@ -686,6 +831,7 @@ def monitor_job(
     workdir: str,
     run_dir: str,
     auth_token: str | None = None,
+    gpuwrap_config: dict | None = None,
 ):
     """Main job monitoring loop."""
     # Persist sidecar logs to a file so they can be streamed to the frontend.
@@ -744,99 +890,180 @@ def monitor_job(
     time.sleep(0.1)
     logger.info(f"Set WANDB_DIR={wandb_data_dir}, WANDB_RUN_ID={job_id}")
     
-    # Execute command with exit code capture
-    wrapped_command = f"({command}); echo $? > {completion_file}"
-    logger.info(f"Executing: {wrapped_command}")
-    job_pane.send_keys(wrapped_command)
-    
+    settings = resolve_gpuwrap_settings(gpuwrap_config)
+    logger.info("GPU settings: %s", settings)
+
     # Report running status
     report_status(server_url, job_id, "running", {"tmux_pane": job_pane.pane_id}, auth_token=auth_token)
     
-    # Monitoring loop
+    # Monitoring/retry state
     found_wandb_dir = None
     check_interval = 2
     alert_state: dict = {}
     metrics_lines_posted = 0
+    total_attempts = settings["retries"] + 1
+    attempt = 0
+    final_exit_code: str | None = None
+    final_error: str | None = None
 
-    while not os.path.exists(completion_file):
-        logger.debug("[metrics-loop] Monitoring job...")
+    while attempt < total_attempts:
+        attempt += 1
+        if os.path.exists(completion_file):
+            os.remove(completion_file)
+
+        attempt_log_start = 0
         try:
-            # Check if pane still exists
-            window = current_pane.window
-            pane_exists = any(p.pane_id == job_pane.pane_id for p in window.panes)
-            
-            if not pane_exists:
-                logger.error("Job pane disappeared")
-                report_status(server_url, job_id, "failed", {"error": "Pane disappeared"}, auth_token=auth_token)
-                return
-            
-            # Detect WandB — filesystem scan first, tmux fallback
-            if not found_wandb_dir:
-                logger.debug(f"[metrics-loop] Scanning for wandb dir: run_dir={run_dir}, job_id={job_id}")
-                found_wandb_dir = find_wandb_dir_in_rundir(run_dir, job_id)
-                if not found_wandb_dir:
-                    found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
-                if found_wandb_dir:
-                    logger.info(f"[metrics-loop] ✅ Detected WandB dir: {found_wandb_dir}")
-                    report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
-                else:
-                    logger.debug(f"[metrics-loop] WandB dir not found yet")
+            if os.path.exists(log_file):
+                attempt_log_start = os.path.getsize(log_file)
+        except Exception:
+            attempt_log_start = 0
 
-            # Manual alert trigger path (for testing and operations)
-            if maybe_trigger_manual_alert(server_url, job_id, workdir, run_dir, auth_token=auth_token):
-                logger.info("Stopping job due to manual alert response")
-                job_pane.cmd("kill-pane")
-                report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
-                return
-
-            # Rule-based alerts first, then LLM alert judge.
-            if found_wandb_dir:
-                rule_decision = rulebased_alerts(job_id, found_wandb_dir, alert_state)
-                if apply_alert_decision(server_url, job_id, run_dir, rule_decision, auth_token=auth_token):
-                    logger.info("Stopping job due to rulebased alert response")
-                    job_pane.cmd("kill-pane")
-                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
-                    return
-
-                judge_decision = alert_judge(job_id, found_wandb_dir, workdir, alert_state)
-                if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
-                    logger.info("Stopping job due to alert_judge response")
-                    job_pane.cmd("kill-pane")
-                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
-                    return
-
-                # POST new metric rows to server
-                logger.info(f"[metrics-loop] Calling post_metrics_delta (found_wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted})")
-                prev_lines = metrics_lines_posted
-                metrics_lines_posted = post_metrics_delta(
-                    server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token
+        cuda_visible_devices = ""
+        detector_payload = None
+        if settings["enabled"]:
+            cuda_visible_devices, detector_payload = detect_available_cuda_devices(settings)
+            logger.info("GPU detector payload: %s", detector_payload)
+            if detector_payload is None:
+                logger.warning("GPU detector unavailable; running without CUDA_VISIBLE_DEVICES pinning")
+            elif not cuda_visible_devices:
+                reason = (
+                    f"no GPUs available now "
+                    f"(memory<={settings['max_memory_used_mb']}MB, util<={settings['max_utilization']}%)"
                 )
-                if metrics_lines_posted != prev_lines:
-                    logger.info(f"[metrics-loop] lines_posted advanced: {prev_lines} → {metrics_lines_posted}")
-            else:
-                logger.debug(f"[metrics-loop] Skipping metrics POST — no wandb_dir found yet")
+                if attempt < total_attempts:
+                    emit_gpu_retry_alert(
+                        server_url=server_url,
+                        job_id=job_id,
+                        attempt=attempt,
+                        total_attempts=total_attempts,
+                        reason=reason,
+                        auth_token=auth_token,
+                    )
+                    time.sleep(settings["retry_delay_seconds"])
+                    continue
+                final_exit_code = "1"
+                final_error = reason
+                break
 
-        except Exception as e:
-            logger.error(f"Error in monitoring loop: {e}")
-        
-        time.sleep(check_interval)
-    
-    logger.info("Exited from monitoring loop")
-    # Job completed - read exit code
-    exit_code = "unknown"
-    try:
-        with open(completion_file, "r") as f:
-            exit_code = f.read().strip()
-    except Exception:
-        pass
+        launch_command = command
+        if settings["enabled"] and cuda_visible_devices:
+            launch_command = f"CUDA_VISIBLE_DEVICES={shlex.quote(cuda_visible_devices)} ({command})"
+            logger.info(
+                "Attempt %d/%d with CUDA_VISIBLE_DEVICES=%s",
+                attempt,
+                total_attempts,
+                cuda_visible_devices,
+            )
+        elif settings["enabled"]:
+            logger.info("Attempt %d/%d with GPU wrap enabled but no CUDA selection", attempt, total_attempts)
+        else:
+            logger.info("Attempt %d/%d with GPU wrap disabled", attempt, total_attempts)
+
+        wrapped_command = f"({launch_command}); echo $? > {shlex.quote(completion_file)}"
+        logger.info(f"Executing: {wrapped_command}")
+        job_pane.send_keys(wrapped_command)
+
+        while not os.path.exists(completion_file):
+            logger.debug("[metrics-loop] Monitoring job...")
+            try:
+                # Check if pane still exists
+                window = current_pane.window
+                pane_exists = any(p.pane_id == job_pane.pane_id for p in window.panes)
+                
+                if not pane_exists:
+                    logger.error("Job pane disappeared")
+                    report_status(server_url, job_id, "failed", {"error": "Pane disappeared"}, auth_token=auth_token)
+                    return
+                
+                # Detect WandB — filesystem scan first, tmux fallback
+                if not found_wandb_dir:
+                    logger.debug(f"[metrics-loop] Scanning for wandb dir: run_dir={run_dir}, job_id={job_id}")
+                    found_wandb_dir = find_wandb_dir_in_rundir(run_dir, job_id)
+                    if not found_wandb_dir:
+                        found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
+                    if found_wandb_dir:
+                        logger.info(f"[metrics-loop] ✅ Detected WandB dir: {found_wandb_dir}")
+                        report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
+                    else:
+                        logger.debug(f"[metrics-loop] WandB dir not found yet")
+
+                # Manual alert trigger path (for testing and operations)
+                if maybe_trigger_manual_alert(server_url, job_id, workdir, run_dir, auth_token=auth_token):
+                    logger.info("Stopping job due to manual alert response")
+                    job_pane.cmd("kill-pane")
+                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                    return
+
+                # Rule-based alerts first, then LLM alert judge.
+                if found_wandb_dir:
+                    rule_decision = rulebased_alerts(job_id, found_wandb_dir, alert_state)
+                    if apply_alert_decision(server_url, job_id, run_dir, rule_decision, auth_token=auth_token):
+                        logger.info("Stopping job due to rulebased alert response")
+                        job_pane.cmd("kill-pane")
+                        report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                        return
+
+                    judge_decision = alert_judge(job_id, found_wandb_dir, workdir, alert_state)
+                    if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
+                        logger.info("Stopping job due to alert_judge response")
+                        job_pane.cmd("kill-pane")
+                        report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                        return
+
+                    # POST new metric rows to server
+                    logger.info(f"[metrics-loop] Calling post_metrics_delta (found_wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted})")
+                    prev_lines = metrics_lines_posted
+                    metrics_lines_posted = post_metrics_delta(
+                        server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token
+                    )
+                    if metrics_lines_posted != prev_lines:
+                        logger.info(f"[metrics-loop] lines_posted advanced: {prev_lines} → {metrics_lines_posted}")
+                else:
+                    logger.debug(f"[metrics-loop] Skipping metrics POST — no wandb_dir found yet")
+
+            except Exception as e:
+                logger.error(f"Error in monitoring loop: {e}")
+            
+            time.sleep(check_interval)
+
+        # Attempt completed
+        attempt_exit_code = "unknown"
+        try:
+            with open(completion_file, "r") as f:
+                attempt_exit_code = f.read().strip()
+        except Exception:
+            attempt_exit_code = "unknown"
+
+        if attempt_exit_code == "0":
+            final_exit_code = "0"
+            break
+
+        final_exit_code = attempt_exit_code
+        tail = _read_log_tail_since(log_file, attempt_log_start)
+        retryable_conflict = settings["enabled"] and _looks_like_gpu_conflict(tail)
+        if retryable_conflict and attempt < total_attempts:
+            emit_gpu_retry_alert(
+                server_url=server_url,
+                job_id=job_id,
+                attempt=attempt,
+                total_attempts=total_attempts,
+                reason="command failed due to GPU contention",
+                auth_token=auth_token,
+            )
+            time.sleep(settings["retry_delay_seconds"])
+            continue
+        break
     
     # Final status
-    if exit_code == "0":
+    if final_exit_code == "0":
         logger.info("Job completed successfully")
         report_status(server_url, job_id, "finished", {"exit_code": 0}, auth_token=auth_token)
     else:
-        logger.error(f"Job failed with exit code: {exit_code}")
-        report_status(server_url, job_id, "failed", {"exit_code": exit_code}, auth_token=auth_token)
+        logger.error(f"Job failed with exit code: {final_exit_code}")
+        extra: dict = {"exit_code": final_exit_code}
+        if final_error:
+            extra["error"] = final_error
+        report_status(server_url, job_id, "failed", extra, auth_token=auth_token)
 
     # Final metrics flush
     if found_wandb_dir:
@@ -856,6 +1083,7 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--command_file", required=True, help="Path to command file")
     parser.add_argument("--workdir", default=None, help="Working directory")
     parser.add_argument("--agent_run_dir", default=None, help="Run directory for logs")
+    parser.add_argument("--gpuwrap_config_file", default=None, help="Optional per-run gpuwrap config JSON path")
     parser.add_argument(
         "--auth_token",
         default=os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", ""),
@@ -877,6 +1105,18 @@ def main(argv: list[str] | None = None):
             auth_token=args.auth_token or None,
         )
         return
+
+    gpuwrap_config = None
+    if args.gpuwrap_config_file:
+        try:
+            with open(args.gpuwrap_config_file, "r") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                gpuwrap_config = loaded
+            else:
+                logger.warning("Ignoring gpuwrap config (not an object): %s", args.gpuwrap_config_file)
+        except Exception as e:
+            logger.warning("Failed to load gpuwrap config file %s: %s", args.gpuwrap_config_file, e)
     
     # Run monitor
     monitor_job(
@@ -886,6 +1126,7 @@ def main(argv: list[str] | None = None):
         workdir=args.workdir or os.getcwd(),
         run_dir=args.agent_run_dir or "/tmp",
         auth_token=args.auth_token or None,
+        gpuwrap_config=gpuwrap_config,
     )
 
 

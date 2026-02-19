@@ -953,6 +953,7 @@ export async function createRun(request: CreateRunRequest): Promise<Run> {
         is_archived: false,
         parent_run_id: request.parent_run_id || null,
         origin_alert_id: request.origin_alert_id || null,
+        gpuwrap_config: request.gpuwrap_config,
         created_at: Date.now() / 1000,
         sweep_id: request.sweep_id,
     }
@@ -1028,6 +1029,7 @@ export async function rerunRun(runId: string, request: RunRerunRequest = {}): Pr
         is_archived: false,
         parent_run_id: runId,
         origin_alert_id: request.origin_alert_id || null,
+        gpuwrap_config: request.gpuwrap_config ?? run.gpuwrap_config,
         created_at: Date.now() / 1000,
         sweep_id: run.sweep_id,
     }

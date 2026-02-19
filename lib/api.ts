@@ -435,6 +435,7 @@ export interface Run {
     sweep_id?: string | null
     chat_session_id?: string | null
     sweep_params?: Record<string, unknown> | null
+    gpuwrap_config?: GpuwrapConfig | null
     // Optional fields for metrics/charts (from mock or W&B)
     progress?: number
     config?: Record<string, unknown>
@@ -443,6 +444,14 @@ export interface Run {
     metricSeries?: Record<string, { step: number; value: number }[]>
     metricKeys?: string[]
     color?: string
+}
+
+export interface GpuwrapConfig {
+    enabled?: boolean
+    retries?: number
+    retry_delay_seconds?: number
+    max_memory_used_mb?: number
+    max_utilization?: number
 }
 
 export interface Alert {
@@ -468,12 +477,14 @@ export interface CreateRunRequest {
     origin_alert_id?: string
     chat_session_id?: string
     auto_start?: boolean
+    gpuwrap_config?: GpuwrapConfig
 }
 
 export interface RunRerunRequest {
     command?: string
     auto_start?: boolean
     origin_alert_id?: string
+    gpuwrap_config?: GpuwrapConfig
 }
 
 export interface RunUpdateRequest {
