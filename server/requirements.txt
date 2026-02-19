@@ -7,3 +7,4 @@ libtmux>=0.32.0
 requests>=2.31.0
 pyyaml>=6.0
 fastmcp>=2.0.0
+nvidia-ml-py>=12.560.30

@@ -55,7 +55,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Configure logging — explicit handlers so uvicorn.run() can't override them
 _log_formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
@@ -113,7 +113,13 @@ OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 # MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
 # MODEL_ID = os.environ.get("MODEL_ID", "claude-sonnet-4-20250514")
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
-MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
+MODEL_ID = os.environ.get("MODEL_ID", "minimax-m2.5-free")
+
+# Runtime gateway key override from frontend (`X-Research-Agent-Key`).
+# When present, we use this value to update the running OpenCode config.
+RUNTIME_RESEARCH_AGENT_KEY = os.environ.get("RESEARCH_AGENT_KEY", "").strip()
+RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED = ""
+RUNTIME_RESEARCH_AGENT_KEY_LOCK = asyncio.Lock()
 
 # User authentication token - if set, all API requests must include X-Auth-Token header
 USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
@@ -174,6 +180,89 @@ def init_paths(workdir: str):
 def get_auth() -> Optional[httpx.BasicAuth]:
     """Get HTTP basic auth if password is configured."""
     return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else None
+
+
+def set_runtime_research_agent_key(raw_key: Optional[str]) -> None:
+    """Store a frontend-provided RESEARCH_AGENT_KEY for this backend process."""
+    global RUNTIME_RESEARCH_AGENT_KEY
+    normalized = str(raw_key or "").strip()
+    if not normalized:
+        return
+    if normalized == RUNTIME_RESEARCH_AGENT_KEY:
+        return
+    RUNTIME_RESEARCH_AGENT_KEY = normalized
+    os.environ["RESEARCH_AGENT_KEY"] = normalized
+
+
+async def apply_runtime_research_agent_key(client: Optional[httpx.AsyncClient] = None) -> None:
+    """Best-effort sync of runtime RESEARCH_AGENT_KEY into the running OpenCode config."""
+    global RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED
+
+    key = str(RUNTIME_RESEARCH_AGENT_KEY or "").strip()
+    if not key or key == RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED:
+        return
+
+    async with RUNTIME_RESEARCH_AGENT_KEY_LOCK:
+        key = str(RUNTIME_RESEARCH_AGENT_KEY or "").strip()
+        if not key or key == RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED:
+            return
+
+        close_client = False
+        active_client = client
+        if active_client is None:
+            active_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+            close_client = True
+
+        try:
+            patch_payloads = (
+                {"provider": {"opencode": {"options": {"apiKey": key}}}},
+                {"providers": {"opencode": {"options": {"apiKey": key}}}},
+                {"provider": {"research-agent": {"options": {"apiKey": key}}}},
+                {"providers": {"research-agent": {"options": {"apiKey": key}}}},
+            )
+
+            applied = False
+            for payload in patch_payloads:
+                try:
+                    response = await active_client.patch(
+                        f"{OPENCODE_URL}/config",
+                        json=payload,
+                        auth=get_auth(),
+                    )
+                    if response.is_success:
+                        applied = True
+                        break
+                except Exception:
+                    continue
+
+            if not applied:
+                auth_payloads = (
+                    {"apiKey": key},
+                    {"key": key},
+                    {"token": key},
+                )
+                for provider_id in ("opencode", "research-agent"):
+                    if applied:
+                        break
+                    for payload in auth_payloads:
+                        try:
+                            response = await active_client.put(
+                                f"{OPENCODE_URL}/auth/{provider_id}",
+                                json=payload,
+                                auth=get_auth(),
+                            )
+                            if response.is_success:
+                                applied = True
+                                break
+                        except Exception:
+                            continue
+
+            if applied:
+                RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED = key
+                logger.info("Applied runtime RESEARCH_AGENT_KEY to OpenCode config.")
+        finally:
+            if close_client and active_client is not None:
+                await active_client.aclose()
 
 
 def _parse_optional_int(value: Any) -> Optional[int]:
@@ -387,6 +476,9 @@ app.add_middleware(
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Validate X-Auth-Token header if USER_AUTH_TOKEN is configured."""
+    # Allow frontend to provide runtime RESEARCH_AGENT_KEY.
+    set_runtime_research_agent_key(request.headers.get("X-Research-Agent-Key"))
+
     # Skip auth for CORS preflight
     if request.method == "OPTIONS":
         return await call_next(request)
@@ -463,6 +555,14 @@ class SessionModelUpdate(BaseModel):
 # - running: Command actively executing
 # - finished/failed/stopped: Terminal states
 
+class GpuwrapConfig(BaseModel):
+    enabled: Optional[bool] = None
+    retries: Optional[int] = Field(default=None, ge=0, le=20)
+    retry_delay_seconds: Optional[float] = Field(default=None, gt=0, le=600)
+    max_memory_used_mb: Optional[int] = Field(default=None, ge=0, le=10_000_000)
+    max_utilization: Optional[int] = Field(default=None, ge=0, le=100)
+
+
 class RunCreate(BaseModel):
     name: str
     command: str
@@ -472,6 +572,7 @@ class RunCreate(BaseModel):
     origin_alert_id: Optional[str] = None
     chat_session_id: Optional[str] = None  # Originating chat session for traceability
     auto_start: bool = False  # If True, skip ready and go straight to queued
+    gpuwrap_config: Optional[GpuwrapConfig] = None
 
 
 class RunStatusUpdate(BaseModel):
@@ -540,6 +641,7 @@ class RunRerunRequest(BaseModel):
     command: Optional[str] = None
     auto_start: bool = False
     origin_alert_id: Optional[str] = None
+    gpuwrap_config: Optional[GpuwrapConfig] = None
 
 
 # WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest
@@ -2115,6 +2217,21 @@ def get_or_create_session(session_name: Optional[str] = None):
         return None
 
 
+def _normalize_gpuwrap_config(config: Any) -> Optional[dict]:
+    """Validate and normalize per-run gpuwrap settings."""
+    if config is None:
+        return None
+
+    try:
+        validated = GpuwrapConfig.model_validate(config)
+    except Exception:
+        logger.warning("Ignoring invalid gpuwrap_config: %r", config)
+        return None
+
+    data = validated.model_dump(exclude_none=True)
+    return data or None
+
+
 def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     """Launch a run in a new tmux window with sidecar."""
     session = get_or_create_session()
@@ -2139,6 +2256,16 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     command_file = os.path.join(run_dir, "command.txt")
     with open(command_file, "w") as f:
         f.write(run_data["command"])
+
+    gpuwrap_config = _normalize_gpuwrap_config(run_data.get("gpuwrap_config"))
+    if gpuwrap_config:
+        run_data["gpuwrap_config"] = gpuwrap_config
+        gpuwrap_config_file = os.path.join(run_dir, "gpuwrap_config.json")
+        with open(gpuwrap_config_file, "w") as f:
+            json.dump(gpuwrap_config, f)
+    else:
+        run_data["gpuwrap_config"] = None
+        gpuwrap_config_file = None
     
     # Get sidecar path
     server_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2168,6 +2295,8 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
         )
     if USER_AUTH_TOKEN:
         sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
+    if gpuwrap_config_file:
+        sidecar_cmd += f" --gpuwrap_config_file {shlex.quote(gpuwrap_config_file)}"
     
     logger.info(f"Executing sidecar: {sidecar_cmd}")
     pane.send_keys(sidecar_cmd)
@@ -2199,6 +2328,7 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
     
     async with httpx.AsyncClient() as client:
         # Bind new OpenCode sessions to the chat session's own working directory.
+        await apply_runtime_research_agent_key(client)
         resp = await client.post(
             f"{OPENCODE_URL}/session",
             params={"directory": session_workdir},
@@ -2244,6 +2374,7 @@ async def send_prompt_to_opencode(
     model_id: str,
 ):
     """Send a prompt to an OpenCode session using an explicit model."""
+    await apply_runtime_research_agent_key(client)
     prompt_payload = {
         "model": {"providerID": model_provider, "modelID": model_id},
         "parts": [{"type": "text", "text": content}]
@@ -3382,7 +3513,7 @@ MODE_REGISTRY: Dict[str, ModeConfig] = {
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tuple:
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session_id: Optional[str] = None) -> tuple:
     """Build the full prompt for a chat turn, prepending mode-specific preamble.
 
     Returns (content: str, provenance: dict | None).
@@ -3428,10 +3559,23 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tupl
             "prompt_type": mode,
         }
 
-    content = f"{mode_note}[USER] {message}"
+    chat_linking_note = ""
+    if session_id:
+        chat_linking_note = (
+            "[CHAT LINKAGE]\n"
+            "For experiment API creations (`POST /runs`, `POST /sweeps`, "
+            "`POST /sweeps/wild`, `POST /sweeps/{id}/runs`), include "
+            f"`\"chat_session_id\": \"{session_id}\"` in JSON bodies.\n"
+            "Use `null` only when intentionally creating entities not tied to this chat.\n"
+            "[/CHAT LINKAGE]\n\n"
+        )
+
+    content = f"{chat_linking_note}{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
+    if provenance is not None:
+        provenance["rendered"] = content
     return content, provenance
 
 
@@ -3666,7 +3810,7 @@ async def chat_endpoint(req: ChatRequest):
         elif req.plan_mode:
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
-    content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
+    content, provenance = _build_chat_prompt(session, llm_input, effective_mode, session_id=session_id)
     runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it
@@ -3744,6 +3888,7 @@ async def create_run(req: RunCreate):
     
     initial_status = "queued" if req.auto_start else "ready"
     resolved_workdir = req.workdir or _resolve_chat_session_workdir(req.chat_session_id) or WORKDIR
+    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
     
     run_data = {
         "name": req.name,
@@ -3756,6 +3901,7 @@ async def create_run(req: RunCreate):
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
         "chat_session_id": req.chat_session_id,
+        "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -3916,6 +4062,10 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
 
     new_run_id = uuid.uuid4().hex[:12]
     initial_status = "queued" if req and req.auto_start else "ready"
+    if req and req.gpuwrap_config is not None:
+        gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
+    else:
+        gpuwrap_config = _normalize_gpuwrap_config(source_run.get("gpuwrap_config"))
 
     new_run = {
         "name": f"{source_run.get('name', 'Run')} (Rerun)",
@@ -3927,6 +4077,7 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
         "sweep_id": source_run.get("sweep_id"),
         "parent_run_id": run_id,
         "origin_alert_id": req.origin_alert_id if req else None,
+        "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -5205,6 +5356,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
 
     run_id = uuid.uuid4().hex[:12]
     initial_status = "queued" if req.auto_start else "ready"
+    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
 
     run_data = {
         "name": req.name,
@@ -5216,7 +5368,8 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
         "sweep_id": sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
-        "chat_session_id": req.chat_session_id,
+        "gpuwrap_config": gpuwrap_config,
+        "chat_session_id": req.chat_session_id or sweeps[sweep_id].get("chat_session_id"),
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -5229,7 +5382,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
 
-    record_created_entity("run", run_id, chat_session_id=getattr(req, 'chat_session_id', None))
+    record_created_entity("run", run_id, chat_session_id=run_data.get("chat_session_id"))
     logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
     return {"id": run_id, **run_data}
 
@@ -5692,6 +5845,7 @@ def main():
     if not os.environ.get("RESEARCH_AGENT_KEY"):
         logger.info("💡 Tip: Want free Anthropic credits? Ask the maintainer for a gateway key.")
         logger.info("   Then set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+        logger.info("   Or set RESEARCH_AGENT_KEY in the frontend Settings page.")
     
     if not USER_AUTH_TOKEN:
         logger.info("RESEARCH_AGENT_USER_AUTH_TOKEN is not set — running without server-side auth.")

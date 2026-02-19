@@ -65,7 +65,7 @@ const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
         name: 'Kimi K2.5 (Free)',
         context_limit: 200000,
         output_limit: 8192,
-        is_default: true,
+        is_default: false,
     },
     {
         provider_id: 'opencode',
@@ -89,7 +89,7 @@ const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
         provider_id: 'opencode',
         model_id: 'minimax-m2.5-free',
         name: 'minimax-m2.5-free',
-        is_default: false,
+        is_default: true,
     },
     {
         provider_id: 'opencode',
@@ -117,7 +117,7 @@ const MOCK_MODEL_OPTIONS: ChatModelOption[] = [
 
 const DEFAULT_MODEL_SELECTION: SessionModelSelection = {
     provider_id: 'opencode',
-    model_id: 'kimi-k2.5-free',
+    model_id: 'minimax-m2.5-free',
 }
 const MOCK_WORKDIR = '/workspace/qwen-finetune'
 
@@ -971,6 +971,7 @@ export async function createRun(request: CreateRunRequest): Promise<Run> {
         is_archived: false,
         parent_run_id: request.parent_run_id || null,
         origin_alert_id: request.origin_alert_id || null,
+        gpuwrap_config: request.gpuwrap_config,
         created_at: Date.now() / 1000,
         sweep_id: request.sweep_id,
     }
@@ -1046,6 +1047,7 @@ export async function rerunRun(runId: string, request: RunRerunRequest = {}): Pr
         is_archived: false,
         parent_run_id: runId,
         origin_alert_id: request.origin_alert_id || null,
+        gpuwrap_config: request.gpuwrap_config ?? run.gpuwrap_config,
         created_at: Date.now() / 1000,
         sweep_id: run.sweep_id,
     }

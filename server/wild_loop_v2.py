@@ -122,7 +122,7 @@ class WildV2Engine:
         *,
         opencode_url: str = "http://127.0.0.1:4096",
         model_provider: str = "opencode",
-        model_id: str = "kimi-k2.5-free",
+        model_id: str = "minimax-m2.5-free",
         get_workdir: Optional[Callable[[], str]] = None,
         server_url: str = "http://127.0.0.1:10000",
         auth_token: Optional[str] = None,

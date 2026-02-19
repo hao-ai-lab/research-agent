@@ -6,6 +6,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 const STORAGE_KEY_API_URL = 'research-agent-api-url'
 const STORAGE_KEY_USE_MOCK = 'research-agent-use-mock'
 const STORAGE_KEY_AUTH_TOKEN = 'research-agent-auth-token'
+const STORAGE_KEY_RESEARCH_AGENT_KEY = 'research-agent-key'
 
 // Default values (can be overridden via env vars for CI)
 const DEFAULT_API_URL = process.env.NEXT_PUBLIC_DEFAULT_SERVER_URL || 'http://localhost:10000'
@@ -124,11 +125,13 @@ interface ApiConfig {
     apiUrl: string
     useMock: boolean
     authToken: string
+    researchAgentKey: string
     setApiUrl: (url: string) => void
     setUseMock: (useMock: boolean) => void
     setAuthToken: (token: string) => void
+    setResearchAgentKey: (key: string) => void
     resetToDefaults: () => void
-    testConnection: (overrides?: { apiUrl?: string; authToken?: string }) => Promise<boolean>
+    testConnection: (overrides?: { apiUrl?: string; authToken?: string; researchAgentKey?: string }) => Promise<boolean>
 }
 
 const ApiConfigContext = createContext<ApiConfig | null>(null)
@@ -174,10 +177,22 @@ export function getAuthToken(): string {
     return localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) || ''
 }
 
+/**
+ * Get the RESEARCH_AGENT_KEY from localStorage
+ * This can be called outside of React components
+ */
+export function getResearchAgentKey(): string {
+    if (typeof window === 'undefined') {
+        return ''
+    }
+    return localStorage.getItem(STORAGE_KEY_RESEARCH_AGENT_KEY) || ''
+}
+
 export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
     const [apiUrl, setApiUrlState] = useState<string>(DEFAULT_API_URL)
     const [useMock, setUseMockState] = useState<boolean>(DEFAULT_USE_MOCK)
     const [authToken, setAuthTokenState] = useState<string>(DEFAULT_AUTH_TOKEN)
+    const [researchAgentKey, setResearchAgentKeyState] = useState<string>('')
     const [isHydrated, setIsHydrated] = useState(false)
 
     // Load from localStorage on mount
@@ -185,6 +200,7 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         const storedUrl = localStorage.getItem(STORAGE_KEY_API_URL)
         const storedMock = localStorage.getItem(STORAGE_KEY_USE_MOCK)
         const storedToken = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN)
+        const storedResearchAgentKey = localStorage.getItem(STORAGE_KEY_RESEARCH_AGENT_KEY)
         const setupConfig = parseLinkSetupConfig()
 
         if (setupConfig?.apiUrl) {
@@ -223,6 +239,10 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, DEFAULT_AUTH_TOKEN)
         }
 
+        if (storedResearchAgentKey) {
+            setResearchAgentKeyState(storedResearchAgentKey)
+        }
+
         if (setupConfig) {
             clearLinkSetupHash()
         }
@@ -249,17 +269,28 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         }
     }, [])
 
+    const setResearchAgentKey = useCallback((key: string) => {
+        setResearchAgentKeyState(key)
+        if (key) {
+            localStorage.setItem(STORAGE_KEY_RESEARCH_AGENT_KEY, key)
+        } else {
+            localStorage.removeItem(STORAGE_KEY_RESEARCH_AGENT_KEY)
+        }
+    }, [])
+
     const resetToDefaults = useCallback(() => {
         localStorage.removeItem(STORAGE_KEY_API_URL)
         localStorage.removeItem(STORAGE_KEY_USE_MOCK)
         localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN)
+        localStorage.removeItem(STORAGE_KEY_RESEARCH_AGENT_KEY)
         setApiUrlState(resolveEnvApiUrl() || DEFAULT_API_URL)
         setUseMockState(DEFAULT_USE_MOCK)
         setAuthTokenState('')
+        setResearchAgentKeyState('')
     }, [])
 
     const testConnection = useCallback(async (
-        overrides?: { apiUrl?: string; authToken?: string }
+        overrides?: { apiUrl?: string; authToken?: string; researchAgentKey?: string }
     ): Promise<boolean> => {
         if (useMock) {
             return true // Mock is always "connected"
@@ -267,11 +298,15 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
 
         const targetApiUrl = (overrides?.apiUrl ?? apiUrl).trim()
         const targetAuthToken = overrides?.authToken ?? authToken
+        const targetResearchAgentKey = (overrides?.researchAgentKey ?? researchAgentKey).trim()
 
         try {
             const headers: HeadersInit = {}
             if (targetAuthToken) {
                 headers['X-Auth-Token'] = targetAuthToken
+            }
+            if (targetResearchAgentKey) {
+                headers['X-Research-Agent-Key'] = targetResearchAgentKey
             }
 
             const response = await fetch(`${targetApiUrl}/sessions`, {
@@ -283,7 +318,7 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
         } catch {
             return false
         }
-    }, [apiUrl, authToken, useMock])
+    }, [apiUrl, authToken, researchAgentKey, useMock])
 
     // Don't render children until hydrated to avoid hydration mismatch
     if (!isHydrated) {
@@ -295,9 +330,11 @@ export function ApiConfigProvider({ children }: { children: React.ReactNode }) {
             apiUrl,
             useMock,
             authToken,
+            researchAgentKey,
             setApiUrl,
             setUseMock,
             setAuthToken,
+            setResearchAgentKey,
             resetToDefaults,
             testConnection,
         }}>

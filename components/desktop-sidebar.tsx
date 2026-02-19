@@ -20,7 +20,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,6 +63,8 @@ interface DesktopSidebarProps {
   onNavigateToRun: (runId: string) => void
   onNavigateToSweep?: (sweepId: string) => void
   onInsertReference: (text: string) => void
+  onOpenCreateRun?: () => void
+  onOpenCreateSweep?: () => void
   onSettingsClick: () => void
   onToggleCollapse?: () => void
   onWidthChange?: (width: number) => void
@@ -109,6 +110,8 @@ export function DesktopSidebar({
   onNavigateToRun,
   onNavigateToSweep,
   onInsertReference,
+  onOpenCreateRun,
+  onOpenCreateSweep,
   onSettingsClick,
   onToggleCollapse,
   onWidthChange,
@@ -178,6 +181,7 @@ export function DesktopSidebar({
   const { useMock: isDemoMode } = useApiConfig()
   const { settings } = useAppSettings()
   const showSidebarNewChatButton = settings.appearance.showSidebarNewChatButton === true
+  const showSidebarRunsSweepsPreview = settings.developer?.showSidebarRunsSweepsPreview !== false
   const [isResizing, setIsResizing] = useState(false)
   const resizeStartXRef = useRef(0)
   const resizeStartWidthRef = useRef(width)
@@ -644,13 +648,28 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!isIconRail && (
+            {!isIconRail && showSidebarRunsSweepsPreview && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Runs
                   </p>
-                  <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                        onClick={() => onOpenCreateRun?.()}
+                        disabled={!onOpenCreateRun}
+                        title="Create run"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span className="sr-only">Create run</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Create run</TooltipContent>
+                  </Tooltip>
                 </div>
                 <div className="space-y-1">
                   {recentRuns.map((run) => {
@@ -739,13 +758,28 @@ export function DesktopSidebar({
               </section>
             )}
 
-            {!isIconRail && (
+            {!isIconRail && showSidebarRunsSweepsPreview && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Sweeps
                   </p>
-                  <span className="text-[10px] text-muted-foreground">Click @ to reference</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                        onClick={() => onOpenCreateSweep?.()}
+                        disabled={!onOpenCreateSweep}
+                        title="Create sweep"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span className="sr-only">Create sweep</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Create sweep</TooltipContent>
+                  </Tooltip>
                 </div>
                 <div className="space-y-1">
                   {recentSweeps.map((sweep) => {

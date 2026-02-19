@@ -52,6 +52,7 @@ export const defaultAppSettings: AppSettings = {
     wildLoopHistoryBoxHeightPx: null,
     showStarterCards: true,
     starterCardFlavor: "novice",
+    showChatContextPanel: true,
     showSidebarNewChatButton: true,
     mobileEnterToNewline: false,
   },
@@ -69,6 +70,12 @@ export const defaultAppSettings: AppSettings = {
       { id: "insights", label: "Insights", visible: true, order: 3 },
       { id: "terminal", label: "Terminal", visible: true, order: 4 },
     ],
+  },
+  developer: {
+    showWildLoopState: true,
+    showPlanPanel: false,
+    showSidebarRunsSweepsPreview: true,
+    debugRefreshIntervalSeconds: 2,
   },
 };
 
@@ -382,6 +389,9 @@ function readStoredSettings(): AppSettings {
           parsed?.appearance?.showStarterCards ??
           defaultAppSettings.appearance.showStarterCards,
         starterCardFlavor: resolvedStarterCardFlavor,
+        showChatContextPanel:
+          parsed?.appearance?.showChatContextPanel ??
+          defaultAppSettings.appearance.showChatContextPanel,
         showSidebarNewChatButton:
           parsed?.appearance?.showSidebarNewChatButton ??
           defaultAppSettings.appearance.showSidebarNewChatButton,
@@ -414,7 +424,10 @@ function readStoredSettings(): AppSettings {
           parsed?.notifications?.webNotificationsEnabled ??
           defaultAppSettings.notifications.webNotificationsEnabled,
       },
-      developer: parsed?.developer ?? defaultAppSettings.developer,
+      developer: {
+        ...defaultAppSettings.developer,
+        ...(parsed?.developer ?? {}),
+      },
       leftPanel: parsed?.leftPanel ?? defaultAppSettings.leftPanel,
     };
   } catch {

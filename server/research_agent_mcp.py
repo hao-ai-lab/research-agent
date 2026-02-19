@@ -97,6 +97,7 @@ def create_run(
     workdir: str | None = None,
     sweep_id: str | None = None,
     launch_policy: Literal["ready", "queued", "start_now"] = "ready",
+    gpuwrap_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a run using a fixed schema with explicit launch behavior.
 
@@ -109,6 +110,7 @@ def create_run(
             - "ready": create run in ready state
             - "queued": create run in queued state (not started yet)
             - "start_now": create run, then immediately call start
+        gpuwrap_config: Optional per-run gpuwrap settings passed to sidecar.
     """
     run_name = _normalize_non_empty(name, "name")
     run_command = _normalize_non_empty(command, "command")
@@ -124,6 +126,8 @@ def create_run(
         create_body["workdir"] = workdir.strip()
     if sweep_id and sweep_id.strip():
         create_body["sweep_id"] = sweep_id.strip()
+    if gpuwrap_config:
+        create_body["gpuwrap_config"] = gpuwrap_config
 
     created_run = _api_request("POST", "/runs", payload=create_body)
     if not isinstance(created_run, dict):
