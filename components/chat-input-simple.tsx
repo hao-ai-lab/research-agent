@@ -57,7 +57,7 @@ export interface MentionItem {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, attachments?: File[], mode?: ChatMode) => void
+  onSend: (message: string, attachments?: File[], mode?: ChatMode, skillIds?: string[]) => void
   onStop?: () => void
   disabled?: boolean
   mode: ChatMode
@@ -142,6 +142,8 @@ export function ChatInput({
   const { settings } = useAppSettings()
   const isMobile = useIsMobile()
 
+  const STORAGE_KEY_DEFAULT_SKILLS = 'defaultSkillIds'
+
   // ---- core state ----
   const [message, setMessage] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -149,8 +151,13 @@ export function ChatInput({
   const [isAttachOpen, setIsAttachOpen] = useState(false)
   const [isModeOpen, setIsModeOpen] = useState(false)
   const [isModelOpen, setIsModelOpen] = useState(false)
+  const [isSkillsOpen, setIsSkillsOpen] = useState(false)
   const [isQueueExpanded, setIsQueueExpanded] = useState(true)
   const [isRecording, setIsRecording] = useState(false)
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return []
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DEFAULT_SKILLS) || '[]') } catch { return [] }
+  })
   const [dictationSupported, setDictationSupported] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -163,6 +170,20 @@ export function ChatInput({
   const [mentionStartIndex, setMentionStartIndex] = useState<number | null>(null)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [mentionFilter, setMentionFilter] = useState<MentionType | 'all'>('all')
+
+  // Persist selected default skills to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_DEFAULT_SKILLS, JSON.stringify(selectedSkillIds))
+  }, [selectedSkillIds])
+
+  // Non-internal skills available for selection as defaults
+  const selectableSkills = useMemo(() => skills.filter(s => !s.internal), [skills])
+
+  const toggleSkillSelection = useCallback((skillId: string) => {
+    setSelectedSkillIds(prev =>
+      prev.includes(skillId) ? prev.filter(id => id !== skillId) : [...prev, skillId]
+    )
+  }, [])
 
   // ---- sweep mode redirect ----
   useEffect(() => {
@@ -524,7 +545,7 @@ export function ChatInput({
     } else if (isWildLoopActive && onSteer && message.trim()) {
       onSteer(message.trim(), 15)
     } else {
-      onSend(outgoing, attachments, mode)
+      onSend(outgoing, attachments, mode, selectedSkillIds.length > 0 ? selectedSkillIds : undefined)
     }
 
     setMessage('')
@@ -983,6 +1004,66 @@ export function ChatInput({
                     </div>
                   ))}
                 </div>
+              </PopoverContent>
+            </Popover>
+          )}
+
+          {/* Default skills selector */}
+          {selectableSkills.length > 0 && (
+            <Popover open={isSkillsOpen} onOpenChange={setIsSkillsOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    selectedSkillIds.length > 0
+                      ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
+                      : 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
+                  }`}
+                  title="Default skills"
+                >
+                  <Wand2 className="h-3 w-3" />
+                  {selectedSkillIds.length > 0 ? `${selectedSkillIds.length} skill${selectedSkillIds.length > 1 ? 's' : ''}` : 'Skills'}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="start" className="w-72 p-1.5">
+                <p className="px-2 pb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">Default Skills</p>
+                <p className="px-2 pb-2 text-[10px] text-muted-foreground">Selected skills are included in every prompt</p>
+                <div className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
+                  {selectableSkills.map((skill) => {
+                    const isSelected = selectedSkillIds.includes(skill.id)
+                    return (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        onClick={() => toggleSkillSelection(skill.id)}
+                        className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                          isSelected ? 'border border-violet-500/35 bg-violet-500/10 dark:bg-violet-500/18' : 'border border-transparent hover:bg-secondary/70'
+                        }`}
+                      >
+                        <div className="h-4 w-4 shrink-0 text-violet-500">
+                          {isSelected ? <Check className="h-4 w-4" /> : null}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-foreground">{skill.name}</p>
+                          {skill.description && (
+                            <p className="truncate text-[10px] text-muted-foreground">{skill.description}</p>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                {selectedSkillIds.length > 0 && (
+                  <div className="mt-1.5 border-t border-border/40 pt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSkillIds([])}
+                      className="w-full rounded-md px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-secondary/70 hover:text-foreground transition-colors"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                )}
               </PopoverContent>
             </Popover>
           )}
