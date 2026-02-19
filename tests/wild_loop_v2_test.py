@@ -624,3 +624,170 @@ def test_planning_display_message_uses_user_goal():
         assert "Explore the codebase and write a concrete task checklist in tasks.md." not in planning_display
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Pause / Resume / Steer — async tests
+# ---------------------------------------------------------------------------
+
+def test_pause_resume_continues_iteration():
+    """Pause after iteration 1 then resume — loop should continue from iteration 2."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=_mock_render,
+        )
+
+        call_count = 0
+        pause_triggered = False
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count, pause_triggered
+            call_count += 1
+            if call_count == 1:
+                return "Explored.\n<plan># Tasks\n- [ ] A\n- [ ] B\n- [ ] C</plan>\n<summary>Planned.</summary>"
+            if call_count == 2:
+                # After iteration 1 completes, pause mid-loop
+                if not pause_triggered:
+                    pause_triggered = True
+                    engine.pause()
+                    assert engine.session.status == "paused"
+                    # Schedule resume after a short delay
+                    async def _resume_later():
+                        await asyncio.sleep(0.05)
+                        engine.resume()
+                    asyncio.get_event_loop().create_task(_resume_later())
+                return "Did A.\n<summary>Step A.</summary>\n<plan># Tasks\n- [x] A\n- [ ] B\n- [ ] C</plan>"
+            if call_count == 3:
+                return "Did B.\n<summary>Step B.</summary>\n<plan># Tasks\n- [x] A\n- [x] B\n- [ ] C</plan>\n<promise>DONE</promise>"
+            # Reflection — stop
+            return "<reflection>All good.</reflection>\n<continue>no</continue>"
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+
+        engine.start(goal="Pause test", max_iterations=10)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert engine.session.status == "done"
+        # Should have completed iteration 2 (paused after 1, resumed, did 2)
+        assert engine.session.iteration == 2
+        # History: planning(0) + exec(1) + exec(2) + reflection
+        assert len(engine.session.history) == 4
+
+    asyncio.run(_run())
+
+
+def test_stop_while_paused():
+    """Stopping a paused loop should exit cleanly without hanging."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=_mock_render,
+        )
+
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "Explored.\n<plan># Tasks\n- [ ] A</plan>\n<summary>Planned.</summary>"
+            # After planning, pause immediately from within iteration 1
+            engine.pause()
+            # Schedule stop while paused
+            async def _stop_later():
+                await asyncio.sleep(0.05)
+                engine.stop()
+            asyncio.get_event_loop().create_task(_stop_later())
+            return "Did A.\n<summary>Step A.</summary>"
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+
+        engine.start(goal="Stop while paused", max_iterations=10)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        await engine._run_loop()
+
+        assert engine.session.status == "done"
+        # Should have only completed iteration 1 before stopping
+        assert engine.session.iteration == 1
+
+    asyncio.run(_run())
+
+
+def test_steer_wakes_sleeping_loop():
+    """Steering during a WAITING sleep should cut the wait short."""
+
+    async def _run():
+        tmpdir = tempfile.mkdtemp()
+        engine = WildV2Engine(
+            get_workdir=lambda: tmpdir,
+            server_url="http://localhost:10000",
+            render_fn=_mock_render,
+        )
+
+        call_count = 0
+
+        async def mock_run(session_id, prompt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "Explored.\n<plan># Tasks\n- [ ] Wait</plan>\n<summary>Planned.</summary>"
+            if call_count == 2:
+                # Return WAITING with a long sleep, then steer to wake it
+                async def _steer_later():
+                    await asyncio.sleep(0.05)
+                    engine.steer("Change direction!")
+                asyncio.get_event_loop().create_task(_steer_later())
+                return "Waiting for results.\n<summary>Waiting.</summary>\n<promise>WAITING</promise>"
+            if call_count == 3:
+                # After steer woke us, verify steer context was available
+                assert engine.session.steer_context == "Change direction!"
+                return "Changed direction.\n<summary>Done.</summary>\n<promise>DONE</promise>"
+            return "<reflection>Complete.</reflection>\n<continue>no</continue>"
+
+        engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
+        engine._run_opencode = mock_run
+        engine._git_commit = AsyncMock()
+
+        # Use a very long wait_seconds to prove steer wakes it early
+        engine.start(goal="Steer test", max_iterations=10, wait_seconds=300.0)
+        if engine._task:
+            engine._task.cancel()
+            try:
+                await engine._task
+            except asyncio.CancelledError:
+                pass
+
+        start = time.time()
+        await engine._run_loop()
+        elapsed = time.time() - start
+
+        assert engine.session.status == "done"
+        assert engine.session.iteration == 2
+        # The loop should NOT have waited the full 300s — steer woke it
+        assert elapsed < 10, f"Loop took {elapsed:.1f}s, should have been woken early by steer"
+
+    asyncio.run(_run())
