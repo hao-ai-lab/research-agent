@@ -41,6 +41,7 @@ import {
   type HomeTab,
   type JourneySubTab,
 } from '@/lib/navigation'
+import { exportSessionToMarkdown, downloadMarkdown } from '@/lib/export-session-markdown'
 const DESKTOP_SIDEBAR_MIN_WIDTH = 72
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520
 const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
@@ -685,6 +686,12 @@ export default function ResearchChat() {
             onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
+            onExportSession={currentSessionId ? () => {
+              const title = currentSession?.title?.trim() || 'Untitled Session'
+              const markdown = exportSessionToMarkdown(chatSession.messages, title)
+              const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)
+              downloadMarkdown(markdown, `${safeTitle}.md`)
+            } : undefined}
             sessionTitle={currentSession?.title || 'New Chat'}
             currentSessionId={currentSessionId}
             sessions={sessions}
