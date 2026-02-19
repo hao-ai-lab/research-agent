@@ -104,6 +104,9 @@ export interface AppSettings {
     showStarterCards?: boolean;
     starterCardFlavor?: "novice" | "expert";
     showChatContextPanel?: boolean;
+    showChatArtifacts?: boolean;
+    chatCollapseAllChats?: boolean;
+    chatCollapseArtifactsInChat?: boolean;
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
     mobileEnterToNewline?: boolean;

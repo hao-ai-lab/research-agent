@@ -47,9 +47,6 @@ const DESKTOP_SIDEBAR_DEFAULT_WIDTH = 300
 const STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH = 'desktopSidebarWidth'
 const STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED = 'desktopSidebarCollapsed'
 const STORAGE_KEY_JOURNEY_SUB_TAB = 'journeySubTab'
-const STORAGE_KEY_CHAT_SHOW_ARTIFACTS = 'chatShowArtifacts'
-const STORAGE_KEY_CHAT_COLLAPSE_CHATS = 'chatCollapseChats'
-const STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS = 'chatCollapseArtifactsInChat'
 const DESKTOP_SIDEBAR_ICON_RAIL_TRIGGER_WIDTH = 136
 
 export default function ResearchChat() {
@@ -108,10 +105,9 @@ export default function ResearchChat() {
   const [showSweepForm, setShowSweepForm] = useState(false)
   const [editingSweepConfig, setEditingSweepConfig] = useState<SweepConfig | null>(null)
 
-  // Chat panel state
-  const [showArtifacts, setShowArtifacts] = useState(false)
-  const [collapseChats, setCollapseChats] = useState(false)
-  const [collapseArtifactsInChat, setCollapseArtifactsInChat] = useState(false)
+  // Chat panel state from app settings (Appearance section)
+  const collapseChats = settings.appearance.chatCollapseAllChats === true
+  const collapseArtifactsInChat = settings.appearance.chatCollapseArtifactsInChat === true
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
@@ -142,20 +138,6 @@ export default function ResearchChat() {
       setJourneySubTab(storedJourneySubTab)
     }
 
-    const storedShowArtifacts = window.localStorage.getItem(STORAGE_KEY_CHAT_SHOW_ARTIFACTS)
-    if (storedShowArtifacts != null) {
-      setShowArtifacts(storedShowArtifacts === 'true')
-    }
-
-    const storedCollapseChats = window.localStorage.getItem(STORAGE_KEY_CHAT_COLLAPSE_CHATS)
-    if (storedCollapseChats != null) {
-      setCollapseChats(storedCollapseChats === 'true')
-    }
-
-    const storedCollapseArtifacts = window.localStorage.getItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS)
-    if (storedCollapseArtifacts != null) {
-      setCollapseArtifactsInChat(storedCollapseArtifacts === 'true')
-    }
   }, [])
 
   useEffect(() => {
@@ -169,18 +151,6 @@ export default function ResearchChat() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY_JOURNEY_SUB_TAB, journeySubTab)
   }, [journeySubTab])
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY_CHAT_SHOW_ARTIFACTS, String(showArtifacts))
-  }, [showArtifacts])
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_CHATS, String(collapseChats))
-  }, [collapseChats])
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS, String(collapseArtifactsInChat))
-  }, [collapseArtifactsInChat])
 
   useEffect(() => {
     return () => {
@@ -583,12 +553,6 @@ export default function ResearchChat() {
     }
   }, [])
 
-  const handleOpenSweepCreator = useCallback(() => {
-    handleTabChange('chat')
-    setEditingSweepConfig(null)
-    setShowSweepForm(true)
-  }, [handleTabChange])
-
   const handleInsertChatReference = useCallback((text: string) => {
     handleTabChange('chat')
     setChatDraftInsert({
@@ -704,14 +668,6 @@ export default function ResearchChat() {
             onDesktopSidebarToggle={() => setDesktopSidebarHidden(false)}
             eventCount={events.filter(e => e.status === 'new').length}
             onAlertClick={handleNavigateToEvents}
-            onCreateSweepClick={handleOpenSweepCreator}
-            onOpenContextualClick={() => router.push('/contextual')}
-            showArtifacts={showArtifacts}
-            onToggleArtifacts={() => setShowArtifacts(prev => !prev)}
-            collapseChats={collapseChats}
-            onToggleCollapseChats={() => setCollapseChats(prev => !prev)}
-            collapseArtifactsInChat={collapseArtifactsInChat}
-            onToggleCollapseArtifactsInChat={() => setCollapseArtifactsInChat(prev => !prev)}
             sessionTitle={currentSession?.title || 'New Chat'}
             currentSessionId={currentSessionId}
             sessions={sessions}
