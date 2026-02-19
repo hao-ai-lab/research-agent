@@ -212,23 +212,31 @@ export function ChatInput({
     setDictationSupported(true)
     const recognition = new SpeechRecognition()
     recognition.continuous = true
-    recognition.interimResults = false
+    recognition.interimResults = true
     recognition.lang = 'en-US'
 
     recognition.onresult = (event: any) => {
-      let transcript = ''
+      const chunks: string[] = []
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i]
-        if (result.isFinal) transcript += result[0]?.transcript || ''
+        const piece = event.results[i]?.[0]?.transcript
+        if (piece) chunks.push(piece)
       }
 
-      const normalized = transcript.trim()
+      const normalized = chunks.join(' ').trim()
       if (!normalized) return
       setMessage((prev) => (prev.trim().length > 0 ? `${prev} ${normalized}` : normalized))
+      setTimeout(() => {
+        if (!textareaRef.current) return
+        textareaRef.current.focus()
+        autoResize(textareaRef.current)
+      }, 0)
     }
 
     recognition.onend = () => setIsRecording(false)
-    recognition.onerror = () => setIsRecording(false)
+    recognition.onerror = (error: any) => {
+      console.error('Dictation error:', error)
+      setIsRecording(false)
+    }
     recognitionRef.current = recognition
 
     return () => {
@@ -444,6 +452,65 @@ export function ChatInput({
     [mentionStartIndex, message],
   )
 
+  const handleMentionNavigationKey = useCallback((e: { key: string; preventDefault: () => void }) => {
+    if (!isMentionOpen) return false
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      const currentFilterIndex = MENTION_FILTER_OPTIONS.indexOf(mentionFilter)
+      const offset = e.key === 'ArrowRight' ? 1 : -1
+      const nextFilterIndex = (currentFilterIndex + offset + MENTION_FILTER_OPTIONS.length) % MENTION_FILTER_OPTIONS.length
+      setMentionFilter(MENTION_FILTER_OPTIONS[nextFilterIndex])
+      setSelectedMentionIndex(0)
+      return true
+    }
+
+    if (filteredMentionItems.length > 0 && e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelectedMentionIndex((p) => (p < filteredMentionItems.length - 1 ? p + 1 : 0))
+      return true
+    }
+
+    if (filteredMentionItems.length > 0 && e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelectedMentionIndex((p) => (p > 0 ? p - 1 : filteredMentionItems.length - 1))
+      return true
+    }
+
+    if (filteredMentionItems.length > 0 && (e.key === 'Enter' || e.key === 'Tab')) {
+      e.preventDefault()
+      insertMention(filteredMentionItems[selectedMentionIndex])
+      return true
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setIsMentionOpen(false)
+      setMentionStartIndex(null)
+      setMentionQuery('')
+      return true
+    }
+
+    return false
+  }, [filteredMentionItems, insertMention, isMentionOpen, mentionFilter, selectedMentionIndex])
+
+  useEffect(() => {
+    if (!isMentionOpen) return
+
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (document.activeElement === textareaRef.current) return
+      const handled = handleMentionNavigationKey(event)
+      if (handled) {
+        event.stopPropagation()
+      }
+    }
+
+    window.addEventListener('keydown', onWindowKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', onWindowKeyDown, true)
+    }
+  }, [handleMentionNavigationKey, isMentionOpen])
+
   // =========================================================================
   // Submit
   // =========================================================================
@@ -475,39 +542,8 @@ export function ChatInput({
   // Keyboard
   // =========================================================================
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Navigate mention dropdown
-    if (isMentionOpen) {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-        e.preventDefault()
-        const currentFilterIndex = MENTION_FILTER_OPTIONS.indexOf(mentionFilter)
-        const offset = e.key === 'ArrowRight' ? 1 : -1
-        const nextFilterIndex = (currentFilterIndex + offset + MENTION_FILTER_OPTIONS.length) % MENTION_FILTER_OPTIONS.length
-        setMentionFilter(MENTION_FILTER_OPTIONS[nextFilterIndex])
-        setSelectedMentionIndex(0)
-        return
-      }
-      if (filteredMentionItems.length > 0 && e.key === 'ArrowDown') {
-        e.preventDefault()
-        setSelectedMentionIndex((p) => (p < filteredMentionItems.length - 1 ? p + 1 : 0))
-        return
-      }
-      if (filteredMentionItems.length > 0 && e.key === 'ArrowUp') {
-        e.preventDefault()
-        setSelectedMentionIndex((p) => (p > 0 ? p - 1 : filteredMentionItems.length - 1))
-        return
-      }
-      if (filteredMentionItems.length > 0 && (e.key === 'Enter' || e.key === 'Tab')) {
-        e.preventDefault()
-        insertMention(filteredMentionItems[selectedMentionIndex])
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setIsMentionOpen(false)
-        setMentionStartIndex(null)
-        setMentionQuery('')
-        return
-      }
+    if (handleMentionNavigationKey(e)) {
+      return
     }
 
     // Enter / Shift+Enter
