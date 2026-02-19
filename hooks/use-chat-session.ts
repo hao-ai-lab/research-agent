@@ -62,11 +62,20 @@ export interface StreamingState {
     toolCalls: ToolCallState[]
 }
 
+export interface RetryState {
+    isRetrying: boolean
+    attempt: number
+    maxAttempts: number
+    nextRetryIn: number // countdown seconds until next attempt
+}
+
 export interface UseChatSessionResult {
     // Connection state
     isConnected: boolean
     isLoading: boolean
     error: string | null
+    retryState: RetryState | null
+    retryConnection: () => void
 
     // Session management
     sessions: ChatSession[]
@@ -465,11 +474,14 @@ function buildStreamingStateFromActiveStream(activeStream: ActiveSessionStream):
     }
 }
 
+const RETRY_DELAYS = [2, 2, 4, 4, 8, 8] // seconds between retries
+
 export function useChatSession(): UseChatSessionResult {
     // Connection state
     const [isConnected, setIsConnected] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [retryState, setRetryState] = useState<RetryState | null>(null)
 
     // Session state
     const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -490,6 +502,9 @@ export function useChatSession(): UseChatSessionResult {
 
     // Abort controller for cancelling streams
     const abortControllerRef = useRef<AbortController | null>(null)
+
+    // Retry cancellation ref
+    const retryCancelledRef = useRef(false)
 
     // Prompt provenance: content-keyed map populated from SSE provenance events
     const provenanceMapRef = useRef<Map<string, PromptProvenance>>(new Map())
@@ -630,17 +645,74 @@ export function useChatSession(): UseChatSessionResult {
         return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false, provenance: undefined }
     }, [])
 
+    // Retry connection with schedule: 2-2-4-4-8-8 seconds
+    const runRetryLoop = useCallback(async () => {
+        retryCancelledRef.current = false
+        setError(null)
+
+        for (let attempt = 0; attempt < RETRY_DELAYS.length; attempt++) {
+            if (retryCancelledRef.current) return
+
+            const delaySec = RETRY_DELAYS[attempt]
+            setRetryState({
+                isRetrying: true,
+                attempt: attempt + 1,
+                maxAttempts: RETRY_DELAYS.length,
+                nextRetryIn: delaySec,
+            })
+
+            // Countdown timer
+            for (let sec = delaySec; sec > 0; sec--) {
+                if (retryCancelledRef.current) return
+                setRetryState(prev => prev ? { ...prev, nextRetryIn: sec } : prev)
+                await new Promise(r => setTimeout(r, 1000))
+            }
+            if (retryCancelledRef.current) return
+
+            setRetryState(prev => prev ? { ...prev, nextRetryIn: 0 } : prev)
+            const healthy = await checkApiHealth()
+            if (healthy) {
+                setIsConnected(true)
+                setRetryState(null)
+                setError(null)
+                return
+            }
+        }
+
+        // All retries exhausted
+        if (!retryCancelledRef.current) {
+            setRetryState(null)
+            setError('Cannot connect to backend server. All retry attempts exhausted.')
+        }
+    }, [])
+
+    const retryConnection = useCallback(() => {
+        retryCancelledRef.current = true // cancel any in-flight loop
+        setIsConnected(false)
+        setIsLoading(false)
+        // Start a new retry loop after a tick to allow state to settle
+        setTimeout(() => {
+            runRetryLoop()
+        }, 0)
+    }, [runRetryLoop])
+
     // Check API connection on mount
     useEffect(() => {
         const checkConnection = async () => {
             const healthy = await checkApiHealth()
             setIsConnected(healthy)
             if (!healthy) {
-                setError('Cannot connect to backend server at localhost:10000')
+                setError('Cannot connect to backend server')
+                // Start automatic retry loop
+                runRetryLoop()
             }
             setIsLoading(false)
         }
         checkConnection()
+        return () => {
+            retryCancelledRef.current = true
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     // Refresh sessions list
@@ -1126,6 +1198,8 @@ export function useChatSession(): UseChatSessionResult {
         isConnected,
         isLoading,
         error,
+        retryState,
+        retryConnection,
         sessions,
         savedSessionIds,
         currentSessionId,
