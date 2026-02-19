@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const workspaceRoot = await getWorkspaceRoot()
+    const workspaceRoot = await getWorkspaceRoot(request)
     const relativePath = normalizeExplorerPath(request.nextUrl.searchParams.get('path'))
     if (!relativePath) {
       return NextResponse.json({ error: 'A file path is required' }, { status: 400 })
@@ -96,4 +96,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status })
   }
 }
-
