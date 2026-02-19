@@ -4,6 +4,12 @@ import React from 'react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   Send,
+  Paperclip,
+  ImageIcon,
+  FileText,
+  AtSign,
+  Mic,
+  MicOff,
   X,
   Zap,
   Play,
@@ -98,6 +104,7 @@ function autoResize(textarea: HTMLTextAreaElement) {
 // Regex to detect @type:id reference tokens
 // ---------------------------------------------------------------------------
 const REFERENCE_REGEX = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat|skill):[A-Za-z0-9:._-]+/g
+const MENTION_FILTER_OPTIONS: Array<MentionType | 'all'> = ['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat', 'skill']
 
 // ---------------------------------------------------------------------------
 // Component
@@ -137,12 +144,18 @@ export function ChatInput({
 
   // ---- core state ----
   const [message, setMessage] = useState('')
+  const [attachments, setAttachments] = useState<File[]>([])
   const [replyExcerpt, setReplyExcerpt] = useState<{ text: string; fileName: string } | null>(null)
+  const [isAttachOpen, setIsAttachOpen] = useState(false)
   const [isModeOpen, setIsModeOpen] = useState(false)
   const [isModelOpen, setIsModelOpen] = useState(false)
   const [isQueueExpanded, setIsQueueExpanded] = useState(true)
+  const [isRecording, setIsRecording] = useState(false)
+  const [dictationSupported, setDictationSupported] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<any>(null)
 
   // ---- @mention autocomplete state ----
   const [isMentionOpen, setIsMentionOpen] = useState(false)
@@ -184,6 +197,49 @@ export function ChatInput({
 
   // ---- clear excerpt on conversation change ----
   useEffect(() => { setReplyExcerpt(null) }, [conversationKey])
+
+  // ---- dictation setup ----
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setDictationSupported(false)
+      recognitionRef.current = null
+      return
+    }
+
+    setDictationSupported(true)
+    const recognition = new SpeechRecognition()
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.lang = 'en-US'
+
+    recognition.onresult = (event: any) => {
+      let transcript = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i]
+        if (result.isFinal) transcript += result[0]?.transcript || ''
+      }
+
+      const normalized = transcript.trim()
+      if (!normalized) return
+      setMessage((prev) => (prev.trim().length > 0 ? `${prev} ${normalized}` : normalized))
+    }
+
+    recognition.onend = () => setIsRecording(false)
+    recognition.onerror = () => setIsRecording(false)
+    recognitionRef.current = recognition
+
+    return () => {
+      try {
+        recognition.stop()
+      } catch {
+        // Ignore stop errors during teardown.
+      }
+      recognitionRef.current = null
+    }
+  }, [])
 
   // =========================================================================
   // Mention items – built from runs / sweeps / alerts / artifacts / charts
@@ -393,7 +449,7 @@ export function ChatInput({
   // =========================================================================
   const handleSubmit = () => {
     const outgoing = buildOutgoingMessage()
-    const canSubmit = Boolean(message.trim() || replyExcerpt)
+    const canSubmit = Boolean(message.trim() || replyExcerpt || attachments.length > 0)
     if (!canSubmit) return
 
     if (isStreaming && onQueue && (message.trim() || replyExcerpt)) {
@@ -401,10 +457,11 @@ export function ChatInput({
     } else if (isWildLoopActive && onSteer && message.trim()) {
       onSteer(message.trim(), 15)
     } else {
-      onSend(outgoing, [], mode)
+      onSend(outgoing, attachments, mode)
     }
 
     setMessage('')
+    setAttachments([])
     setReplyExcerpt(null)
     setIsMentionOpen(false)
     setMentionStartIndex(null)
@@ -419,18 +476,27 @@ export function ChatInput({
   // =========================================================================
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Navigate mention dropdown
-    if (isMentionOpen && filteredMentionItems.length > 0) {
-      if (e.key === 'ArrowDown') {
+    if (isMentionOpen) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault()
+        const currentFilterIndex = MENTION_FILTER_OPTIONS.indexOf(mentionFilter)
+        const offset = e.key === 'ArrowRight' ? 1 : -1
+        const nextFilterIndex = (currentFilterIndex + offset + MENTION_FILTER_OPTIONS.length) % MENTION_FILTER_OPTIONS.length
+        setMentionFilter(MENTION_FILTER_OPTIONS[nextFilterIndex])
+        setSelectedMentionIndex(0)
+        return
+      }
+      if (filteredMentionItems.length > 0 && e.key === 'ArrowDown') {
         e.preventDefault()
         setSelectedMentionIndex((p) => (p < filteredMentionItems.length - 1 ? p + 1 : 0))
         return
       }
-      if (e.key === 'ArrowUp') {
+      if (filteredMentionItems.length > 0 && e.key === 'ArrowUp') {
         e.preventDefault()
         setSelectedMentionIndex((p) => (p > 0 ? p - 1 : filteredMentionItems.length - 1))
         return
       }
-      if (e.key === 'Enter' || e.key === 'Tab') {
+      if (filteredMentionItems.length > 0 && (e.key === 'Enter' || e.key === 'Tab')) {
         e.preventDefault()
         insertMention(filteredMentionItems[selectedMentionIndex])
         return
@@ -491,6 +557,64 @@ export function ChatInput({
     setMentionFilter('all')
   }
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setAttachments((prev) => [...prev, ...Array.from(e.target.files as FileList)])
+    }
+    e.target.value = ''
+    setIsAttachOpen(false)
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const openFilePicker = (accept?: string) => {
+    if (!fileInputRef.current) return
+    fileInputRef.current.accept = accept || ''
+    fileInputRef.current.click()
+    setIsAttachOpen(false)
+  }
+
+  const toggleRecording = () => {
+    if (!dictationSupported || !recognitionRef.current) return
+
+    if (isRecording) {
+      recognitionRef.current.stop()
+      setIsRecording(false)
+      return
+    }
+
+    try {
+      recognitionRef.current.start()
+      setIsRecording(true)
+    } catch {
+      setIsRecording(false)
+    }
+  }
+
+  const openMentionFromToolbar = (type: MentionType | 'all') => {
+    const textarea = textareaRef.current
+    const cursorPos = textarea?.selectionStart ?? message.length
+    const before = message.slice(0, cursorPos)
+    const after = message.slice(cursorPos)
+    const nextMessage = `${before}@${after}`
+
+    setMessage(nextMessage)
+    setMentionStartIndex(cursorPos)
+    setMentionQuery('')
+    setMentionFilter(type)
+    setIsMentionOpen(true)
+
+    setTimeout(() => {
+      if (!textareaRef.current) return
+      const nextCursorPos = cursorPos + 1
+      textareaRef.current.focus()
+      textareaRef.current.setSelectionRange(nextCursorPos, nextCursorPos)
+      autoResize(textareaRef.current)
+    }, 0)
+  }
+
   // =========================================================================
   // Model selector helpers
   // =========================================================================
@@ -528,24 +652,45 @@ export function ChatInput({
           : 'border-t border-border bg-background px-4 pb-4 pt-3'
       }
     >
-      {/* Reply excerpt chip */}
-      {replyExcerpt && (
+      {/* Reply excerpt / attachments */}
+      {(replyExcerpt || attachments.length > 0) && (
         <div className="mb-2 flex flex-wrap gap-2">
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpenReplyExcerpt?.(replyExcerpt)}
-            onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onOpenReplyExcerpt?.(replyExcerpt) } }}
-            className="group relative w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 text-left shadow-sm transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            title="Open excerpt preview"
-          >
-            <button type="button" onClick={(ev) => { ev.stopPropagation(); setReplyExcerpt(null) }} className="absolute right-2 top-2 z-10 text-muted-foreground hover:text-foreground" aria-label="Remove quoted excerpt">
-              <X className="h-3.5 w-3.5" />
-            </button>
-            <p className="pr-5 text-sm font-medium leading-tight text-foreground break-words group-hover:text-primary">{replyExcerpt.fileName}</p>
-            <p className="mt-2 text-xs text-muted-foreground">{replyExcerpt.text.split('\n').length} lines</p>
-            <span className="mt-2 inline-flex rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">TXT</span>
-          </div>
+          {replyExcerpt && (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenReplyExcerpt?.(replyExcerpt)}
+              onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onOpenReplyExcerpt?.(replyExcerpt) } }}
+              className="group relative w-[220px] rounded-2xl border border-border/80 bg-card/80 p-3 text-left shadow-sm transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              title="Open excerpt preview"
+            >
+              <button type="button" onClick={(ev) => { ev.stopPropagation(); setReplyExcerpt(null) }} className="absolute right-2 top-2 z-10 text-muted-foreground hover:text-foreground" aria-label="Remove quoted excerpt">
+                <X className="h-3.5 w-3.5" />
+              </button>
+              <p className="pr-5 text-sm font-medium leading-tight text-foreground break-words group-hover:text-primary">{replyExcerpt.fileName}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{replyExcerpt.text.split('\n').length} lines</p>
+              <span className="mt-2 inline-flex rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">TXT</span>
+            </div>
+          )}
+          {attachments.map((file, index) => {
+            const isFigure = file.type.startsWith('image/')
+            return (
+              <div key={`${file.name}-${index}`} className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs">
+                {isFigure ? (
+                  <ImageIcon className="h-3 w-3 text-muted-foreground" />
+                ) : (
+                  <FileText className="h-3 w-3 text-muted-foreground" />
+                )}
+                <span className="max-w-[120px] truncate">{file.name}</span>
+                {isFigure && (
+                  <span className="rounded border border-border px-1 py-0 text-[9px] font-semibold text-muted-foreground">FIG</span>
+                )}
+                <button type="button" onClick={() => removeAttachment(index)} className="text-muted-foreground hover:text-foreground" aria-label={`Remove ${file.name}`}>
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -627,7 +772,7 @@ export function ChatInput({
               <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
               <div className="flex-1 min-w-0 overflow-x-auto">
                 <div className="flex min-w-max items-center gap-1 pr-1">
-                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat', 'skill'] as const).map((type) => (
+                  {MENTION_FILTER_OPTIONS.map((type) => (
                     <button
                       key={type}
                       type="button"
@@ -652,7 +797,8 @@ export function ChatInput({
 
             <div className="px-2 py-1 border-t border-border bg-secondary/20">
               <p className="text-[10px] text-muted-foreground">
-                <kbd className="px-1 py-0.5 bg-secondary rounded text-[9px]">↑↓</kbd> navigate
+                <kbd className="px-1 py-0.5 bg-secondary rounded text-[9px]">↑↓</kbd> results
+                <kbd className="ml-2 px-1 py-0.5 bg-secondary rounded text-[9px]">←→</kbd> filter
                 <kbd className="ml-2 px-1 py-0.5 bg-secondary rounded text-[9px]">Enter</kbd> select
                 <kbd className="ml-2 px-1 py-0.5 bg-secondary rounded text-[9px]">Esc</kbd> close
               </p>
@@ -684,7 +830,7 @@ export function ChatInput({
             placeholder="Ask me about your research"
             disabled={disabled}
             rows={1}
-            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
+            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
               minHeight: `${INITIAL_HEIGHT_PX}px`,
               maxHeight: `${MAX_HEIGHT_PX}px`,
@@ -692,12 +838,48 @@ export function ChatInput({
               color: 'transparent',
             }}
           />
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`chat-toolbar-icon absolute bottom-2 right-2 z-20 ${isRecording ? 'bg-destructive/10 text-destructive' : ''}`}
+            onClick={toggleRecording}
+            disabled={!dictationSupported}
+            title={dictationSupported ? (isRecording ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported'}
+          >
+            {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          </Button>
         </div>
       </div>
 
       {/* Bottom controls */}
       <div className="flex flex-wrap items-center gap-1.5">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
+          {/* Attachments */}
+          <Popover open={isAttachOpen} onOpenChange={setIsAttachOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="chat-toolbar-icon" title="Attach">
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" className="w-44 p-1.5">
+              <div className="flex flex-col gap-0.5">
+                <button type="button" onClick={() => openFilePicker('image/*')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary">
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  <span>Attach figure</span>
+                </button>
+                <button type="button" onClick={() => openFilePicker()} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary">
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>Attach file</span>
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* @ menu trigger */}
+          <Button variant="ghost" size="icon" className="chat-toolbar-icon" onClick={() => openMentionFromToolbar('all')} title="Open @ menu">
+            <AtSign className="h-4 w-4" />
+          </Button>
+
           {/* Mode toggle */}
           <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
             <PopoverTrigger asChild>
@@ -779,7 +961,7 @@ export function ChatInput({
           )}
           <Button
             onClick={handleSubmit}
-            disabled={!message.trim() && !replyExcerpt}
+            disabled={!message.trim() && !replyExcerpt && attachments.length === 0}
             size="icon"
             className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${
               isStreaming && onQueue
@@ -804,6 +986,7 @@ export function ChatInput({
           </Button>
         </div>
       </div>
+      <input ref={fileInputRef} type="file" className="hidden" multiple onChange={handleFileSelect} />
     </div>
   )
 }
