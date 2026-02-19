@@ -55,278 +55,40 @@ logger.propagate = False  # Don't depend on root logger (uvicorn resets it)
 
 
 # =============================================================================
-# Configuration
+# Configuration  (extracted to config.py)
 # =============================================================================
 
-# OpenCode configuration
-_SERVER_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+import config  # noqa: E402
 
-
-def get_default_opencode_config() -> str:
-    """Resolve opencode.json path for source and frozen-binary execution."""
-    candidates: list[str] = []
-
-    if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", "")
-        if meipass:
-            candidates.append(os.path.join(meipass, "opencode.json"))
-        candidates.append(os.path.join(os.path.dirname(sys.executable), "opencode.json"))
-
-    candidates.append(os.path.join(_SERVER_FILE_DIR, "opencode.json"))
-
-    for path in candidates:
-        if path and os.path.exists(path):
-            return path
-
-    return candidates[-1]
-
-
-OPENCODE_CONFIG = os.environ.get("OPENCODE_CONFIG", get_default_opencode_config())
-OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://127.0.0.1:4096")
-OPENCODE_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
-OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
-
-# Model configuration - uses research-agent provider from opencode.json
-# This connects to the Anthropic gateway at Modal
-# MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
-# MODEL_ID = os.environ.get("MODEL_ID", "claude-3-5-haiku-latest")
-# MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
-# MODEL_ID = os.environ.get("MODEL_ID", "claude-sonnet-4-20250514")
-MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
-MODEL_ID = os.environ.get("MODEL_ID", "minimax-m2.5-free")
-
-# Runtime gateway key override from frontend (`X-Research-Agent-Key`).
-# When present, we use this value to update the running OpenCode config.
-RUNTIME_RESEARCH_AGENT_KEY = os.environ.get("RESEARCH_AGENT_KEY", "").strip()
-RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED = ""
-RUNTIME_RESEARCH_AGENT_KEY_LOCK = asyncio.Lock()
-
-# User authentication token - if set, all API requests must include X-Auth-Token header
-USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
-
-# Will be set by CLI args
-WORKDIR = os.getcwd()
-DATA_DIR = ""
-CHAT_DATA_FILE = ""
-JOBS_DATA_FILE = ""
-ALERTS_DATA_FILE = ""
-SETTINGS_DATA_FILE = ""
-PLANS_DATA_FILE = ""
-JOURNEY_STATE_FILE = ""
-TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
-SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
-FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
-
-AUTH_PROTECTED_PREFIXES = (
-    "/sessions",
-    "/models",
-    "/chat",
-    "/runs",
-    "/alerts",
-    "/wild",
-    "/sweeps",
-    "/cluster",
-    "/git",
-    "/plans",
-    "/integrations",
-    "/journey",
+# Re-export immutable constants and functions so existing code keeps working.
+# IMPORTANT: mutable path variables (config.WORKDIR, config.DATA_DIR, *_FILE) must be
+# accessed as config.VARNAME so they reflect post-init_paths() values.
+from config import (  # noqa: E402
+    _SERVER_FILE_DIR,
+    OPENCODE_CONFIG,
+    OPENCODE_URL,
+    OPENCODE_USERNAME,
+    OPENCODE_PASSWORD,
+    MODEL_PROVIDER,
+    MODEL_ID,
+    RUNTIME_RESEARCH_AGENT_KEY,
+    RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED,
+    RUNTIME_RESEARCH_AGENT_KEY_LOCK,
+    USER_AUTH_TOKEN,
+    TMUX_SESSION_NAME,
+    SERVER_CALLBACK_URL,
+    FRONTEND_STATIC_DIR,
+    AUTH_PROTECTED_PREFIXES,
+    requires_api_auth,
+    init_paths,
+    get_auth,
+    get_default_opencode_config,
+    set_runtime_research_agent_key,
+    apply_runtime_research_agent_key,
+    _parse_optional_int,
+    load_available_opencode_models,
+    get_session_model,
 )
-
-
-def requires_api_auth(path: str) -> bool:
-    """Only enforce auth token on API routes."""
-    for prefix in AUTH_PROTECTED_PREFIXES:
-        if path == prefix or path.startswith(prefix + "/"):
-            return True
-    return False
-
-
-def init_paths(workdir: str):
-    """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE, PLANS_DATA_FILE, JOURNEY_STATE_FILE
-    WORKDIR = os.path.abspath(workdir)
-    DATA_DIR = os.path.join(WORKDIR, ".agents")
-    CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
-    JOBS_DATA_FILE = os.path.join(DATA_DIR, "jobs.json")
-    ALERTS_DATA_FILE = os.path.join(DATA_DIR, "alerts.json")
-    SETTINGS_DATA_FILE = os.path.join(DATA_DIR, "settings.json")
-    PLANS_DATA_FILE = os.path.join(DATA_DIR, "plans.json")
-    JOURNEY_STATE_FILE = os.path.join(DATA_DIR, "journey_state.json")
-    os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(os.path.join(DATA_DIR, "runs"), exist_ok=True)
-    logger.info(f"Initialized with workdir: {WORKDIR}")
-    # Change the current working directory to the workdir
-    os.chdir(WORKDIR)
-
-
-def get_auth() -> Optional[httpx.BasicAuth]:
-    """Get HTTP basic auth if password is configured."""
-    return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else None
-
-
-def set_runtime_research_agent_key(raw_key: Optional[str]) -> None:
-    """Store a frontend-provided RESEARCH_AGENT_KEY for this backend process."""
-    global RUNTIME_RESEARCH_AGENT_KEY
-    normalized = str(raw_key or "").strip()
-    if not normalized:
-        return
-    if normalized == RUNTIME_RESEARCH_AGENT_KEY:
-        return
-    RUNTIME_RESEARCH_AGENT_KEY = normalized
-    os.environ["RESEARCH_AGENT_KEY"] = normalized
-
-
-async def apply_runtime_research_agent_key(client: Optional[httpx.AsyncClient] = None) -> None:
-    """Best-effort sync of runtime RESEARCH_AGENT_KEY into the running OpenCode config."""
-    global RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED
-
-    key = str(RUNTIME_RESEARCH_AGENT_KEY or "").strip()
-    if not key or key == RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED:
-        return
-
-    async with RUNTIME_RESEARCH_AGENT_KEY_LOCK:
-        key = str(RUNTIME_RESEARCH_AGENT_KEY or "").strip()
-        if not key or key == RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED:
-            return
-
-        close_client = False
-        active_client = client
-        if active_client is None:
-            active_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
-            close_client = True
-
-        try:
-            patch_payloads = (
-                {"provider": {"opencode": {"options": {"apiKey": key}}}},
-                {"providers": {"opencode": {"options": {"apiKey": key}}}},
-                {"provider": {"research-agent": {"options": {"apiKey": key}}}},
-                {"providers": {"research-agent": {"options": {"apiKey": key}}}},
-            )
-
-            applied = False
-            for payload in patch_payloads:
-                try:
-                    response = await active_client.patch(
-                        f"{OPENCODE_URL}/config",
-                        json=payload,
-                        auth=get_auth(),
-                    )
-                    if response.is_success:
-                        applied = True
-                        break
-                except Exception:
-                    continue
-
-            if not applied:
-                auth_payloads = (
-                    {"apiKey": key},
-                    {"key": key},
-                    {"token": key},
-                )
-                for provider_id in ("opencode", "research-agent"):
-                    if applied:
-                        break
-                    for payload in auth_payloads:
-                        try:
-                            response = await active_client.put(
-                                f"{OPENCODE_URL}/auth/{provider_id}",
-                                json=payload,
-                                auth=get_auth(),
-                            )
-                            if response.is_success:
-                                applied = True
-                                break
-                        except Exception:
-                            continue
-
-            if applied:
-                RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED = key
-                logger.info("Applied runtime RESEARCH_AGENT_KEY to OpenCode config.")
-        finally:
-            if close_client and active_client is not None:
-                await active_client.aclose()
-
-
-def _parse_optional_int(value: Any) -> Optional[int]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        text = value.strip()
-        if text.isdigit():
-            return int(text)
-    return None
-
-
-def load_available_opencode_models() -> list[dict[str, Any]]:
-    """Load model options from opencode.json providers and include current fallback."""
-    entries: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def add_entry(provider_id: str, model_id: str, data: Any = None) -> None:
-        provider = str(provider_id or "").strip()
-        model = str(model_id or "").strip()
-        if not provider or not model:
-            return
-        key = (provider, model)
-        if key in seen:
-            return
-        seen.add(key)
-
-        model_data = data if isinstance(data, dict) else {}
-        limit = model_data.get("limit") if isinstance(model_data.get("limit"), dict) else {}
-        context_limit = _parse_optional_int(limit.get("context"))
-        output_limit = _parse_optional_int(limit.get("output"))
-        display_name = model_data.get("name")
-        if not isinstance(display_name, str) or not display_name.strip():
-            display_name = model
-
-        entries.append({
-            "provider_id": provider,
-            "model_id": model,
-            "name": display_name.strip(),
-            "context_limit": context_limit,
-            "output_limit": output_limit,
-            "is_default": provider == MODEL_PROVIDER and model == MODEL_ID,
-        })
-
-    try:
-        with open(OPENCODE_CONFIG, "r", encoding="utf-8") as fh:
-            config = json.load(fh)
-    except Exception as e:
-        logger.warning("Failed to load OpenCode config %s: %s", OPENCODE_CONFIG, e)
-        config = {}
-
-    providers: dict[str, Any] = {}
-    for key in ("provider", "providers"):
-        section = config.get(key) if isinstance(config, dict) else None
-        if isinstance(section, dict):
-            providers.update(section)
-
-    for provider_id, provider_cfg in providers.items():
-        if not isinstance(provider_cfg, dict):
-            continue
-        models = provider_cfg.get("models")
-        if not isinstance(models, dict):
-            continue
-        for model_id, model_cfg in models.items():
-            add_entry(str(provider_id), str(model_id), model_cfg)
-
-    # Ensure currently configured model is always selectable.
-    add_entry(MODEL_PROVIDER, MODEL_ID)
-
-    entries.sort(key=lambda item: (str(item.get("provider_id", "")), str(item.get("model_id", ""))))
-    return entries
-
-
-def get_session_model(session: dict[str, Any]) -> tuple[str, str]:
-    """Resolve provider/model from session, falling back to global defaults."""
-    provider = str(session.get("model_provider") or MODEL_PROVIDER).strip() or MODEL_PROVIDER
-    model = str(session.get("model_id") or MODEL_ID).strip() or MODEL_ID
-    return provider, model
 
 
 # =============================================================================
@@ -374,600 +136,72 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 # =============================================================================
-# Models
+# Models  (extracted to models.py)
 # =============================================================================
 
-# Chat Models
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-    thinking: Optional[str] = None
-    timestamp: Optional[float] = None
-
-
-class ChatRequest(BaseModel):
-    session_id: str
-    message: str
-    mode: str = "agent"  # "agent" | "wild" | "plan" | "sweep"
-    # When provided, this is used for LLM prompt construction instead of message.
-    # `message` is still stored as the user-visible content in the session history.
-    prompt_override: Optional[str] = None
-    # Backward compat: accept old boolean fields and convert
-    wild_mode: bool = False
-    plan_mode: bool = False
-
-
-class CreateSessionRequest(BaseModel):
-    title: Optional[str] = None
-    model_provider: Optional[str] = None
-    model_id: Optional[str] = None
-
-
-class UpdateSessionRequest(BaseModel):
-    title: str
-
-
-class SystemPromptUpdate(BaseModel):
-    system_prompt: str = ""
-
-
-class SessionModelUpdate(BaseModel):
-    provider_id: str
-    model_id: str
-
-
-# Run Models
-# Run State Machine: ready -> queued -> launching -> running -> finished/failed/stopped
-# - ready: Created but not submitted for execution
-# - queued: Submitted, waiting to be picked up
-# - launching: Tmux window being created
-# - running: Command actively executing
-# - finished/failed/stopped: Terminal states
-
-class GpuwrapConfig(BaseModel):
-    enabled: Optional[bool] = None
-    retries: Optional[int] = Field(default=None, ge=0, le=20)
-    retry_delay_seconds: Optional[float] = Field(default=None, gt=0, le=600)
-    max_memory_used_mb: Optional[int] = Field(default=None, ge=0, le=10_000_000)
-    max_utilization: Optional[int] = Field(default=None, ge=0, le=100)
-
-
-class RunCreate(BaseModel):
-    name: str
-    command: str
-    workdir: Optional[str] = None
-    sweep_id: Optional[str] = None  # If part of a sweep
-    parent_run_id: Optional[str] = None
-    origin_alert_id: Optional[str] = None
-    chat_session_id: Optional[str] = None  # Originating chat session for traceability
-    auto_start: bool = False  # If True, skip ready and go straight to queued
-    gpuwrap_config: Optional[GpuwrapConfig] = None
-
-
-class RunStatusUpdate(BaseModel):
-    status: str  # launching, running, finished, failed, stopped
-    exit_code: Optional[int] = None
-    error: Optional[str] = None
-    tmux_pane: Optional[str] = None
-    wandb_dir: Optional[str] = None
-
-
-class RunUpdate(BaseModel):
-    name: Optional[str] = None
-    command: Optional[str] = None
-    workdir: Optional[str] = None
-
-
-class SweepCreate(BaseModel):
-    name: str
-    base_command: str
-    workdir: Optional[str] = None
-    parameters: dict  # e.g., {"lr": [0.001, 0.01], "batch_size": [32, 64]}
-    max_runs: int = 10
-    auto_start: bool = False
-    goal: Optional[str] = None
-    status: Optional[str] = None  # draft, pending, running
-    ui_config: Optional[dict] = None
-    chat_session_id: Optional[str] = None  # Originating chat session for traceability
-
-
-class SweepUpdate(BaseModel):
-    name: Optional[str] = None
-    base_command: Optional[str] = None
-    workdir: Optional[str] = None
-    parameters: Optional[dict] = None
-    max_runs: Optional[int] = None
-    goal: Optional[str] = None
-    status: Optional[str] = None  # draft, pending, running, completed, failed, canceled
-    ui_config: Optional[dict] = None
-
-
-class AlertRecord(BaseModel):
-    id: str
-    run_id: str
-    timestamp: float
-    severity: str = "warning"
-    message: str
-    choices: List[str]
-    status: str = "pending"  # pending, resolved
-    response: Optional[str] = None
-    responded_at: Optional[float] = None
-    session_id: Optional[str] = None
-    auto_session: bool = False
-
-
-class CreateAlertRequest(BaseModel):
-    message: str
-    choices: List[str]
-    severity: str = "warning"
-
-
-class RespondAlertRequest(BaseModel):
-    choice: str
-
-
-class RunRerunRequest(BaseModel):
-    command: Optional[str] = None
-    auto_start: bool = False
-    origin_alert_id: Optional[str] = None
-    gpuwrap_config: Optional[GpuwrapConfig] = None
-
-
-class WildModeRequest(BaseModel):
-    enabled: bool
-
-
-
-# Plan Models
-PLAN_STATUSES = {"draft", "approved", "executing", "completed", "archived"}
-
-
-class PlanCreate(BaseModel):
-    title: str
-    goal: str
-    session_id: Optional[str] = None
-    sections: Optional[dict] = None  # structured sections parsed from LLM output
-    raw_markdown: str = ""  # full LLM response markdown
-
-
-class PlanUpdate(BaseModel):
-    title: Optional[str] = None
-    status: Optional[str] = None  # draft, approved, executing, completed, archived
-    sections: Optional[dict] = None
-    raw_markdown: Optional[str] = None
-
-
-class ClusterUpdateRequest(BaseModel):
-    type: Optional[str] = None
-    status: Optional[str] = None
-    source: Optional[str] = None
-    head_node: Optional[str] = None
-    node_count: Optional[int] = None
-    gpu_count: Optional[int] = None
-    notes: Optional[str] = None
-    details: Optional[dict] = None
-
-
-class ClusterDetectRequest(BaseModel):
-    preferred_type: Optional[str] = None
-
-
-class JourneyNextActionsRequest(BaseModel):
-    journey: dict
-    max_actions: int = Field(default=3, ge=1, le=8)
-
-JOURNEY_ACTOR_VALUES = {"human", "agent", "system"}
-JOURNEY_REC_STATUS_VALUES = {"pending", "accepted", "rejected", "modified", "executed", "dismissed"}
-JOURNEY_PRIORITY_VALUES = {"low", "medium", "high", "critical"}
-JOURNEY_DECISION_STATUS_VALUES = {"recorded", "executed", "superseded"}
-
-
-class JourneyEventCreate(BaseModel):
-    kind: str
-    actor: str = "system"
-    session_id: Optional[str] = None
-    run_id: Optional[str] = None
-    chart_id: Optional[str] = None
-    recommendation_id: Optional[str] = None
-    decision_id: Optional[str] = None
-    note: Optional[str] = None
-    metadata: Optional[dict] = None
-    timestamp: Optional[float] = None
-
-
-class JourneyRecommendationCreate(BaseModel):
-    title: str
-    action: str
-    rationale: Optional[str] = None
-    source: str = "agent"
-    priority: str = "medium"
-    confidence: Optional[float] = Field(default=None, ge=0, le=1)
-    session_id: Optional[str] = None
-    run_id: Optional[str] = None
-    chart_id: Optional[str] = None
-    evidence_refs: List[str] = Field(default_factory=list)
-
-
-class JourneyRecommendationRespondRequest(BaseModel):
-    status: str
-    user_note: Optional[str] = None
-    modified_action: Optional[str] = None
-
-
-class JourneyDecisionCreate(BaseModel):
-    title: str
-    chosen_action: str
-    rationale: Optional[str] = None
-    outcome: Optional[str] = None
-    status: str = "recorded"
-    recommendation_id: Optional[str] = None
-    session_id: Optional[str] = None
-    run_id: Optional[str] = None
-    chart_id: Optional[str] = None
+from models import (  # noqa: E402
+    ChatMessage, ChatRequest, CreateSessionRequest, UpdateSessionRequest,
+    SystemPromptUpdate, SessionModelUpdate,
+    GpuwrapConfig, RunCreate, RunStatusUpdate, RunUpdate,
+    SweepCreate, SweepUpdate,
+    AlertRecord, CreateAlertRequest, RespondAlertRequest,
+    RunRerunRequest, WildModeRequest,
+    PLAN_STATUSES, PlanCreate, PlanUpdate,
+    ClusterUpdateRequest, ClusterDetectRequest,
+    JourneyNextActionsRequest,
+    JOURNEY_ACTOR_VALUES, JOURNEY_REC_STATUS_VALUES,
+    JOURNEY_PRIORITY_VALUES, JOURNEY_DECISION_STATUS_VALUES,
+    JourneyEventCreate, JourneyRecommendationCreate,
+    JourneyRecommendationRespondRequest, JourneyDecisionCreate,
+    MemoryCreateRequest, MemoryUpdateRequest,
+)
 
 
 # =============================================================================
-# Prompt Skill Manager
+# Prompt Skill Manager  (extracted to skills_manager.py)
 # =============================================================================
 
-import yaml
-import shutil
-import subprocess
-
-# Skills that ship with the server and cannot be deleted.
-# Keep explicit IDs for one-offs and reserve prefixes for families of
-# system-managed skills.
-INTERNAL_SKILL_IDS = {
-    "ra_mode_plan",
-}
-INTERNAL_SKILL_PREFIXES = ("ra_mode_",)
-
-
-def _is_internal_skill(skill_id: str) -> bool:
-    return skill_id in INTERNAL_SKILL_IDS or skill_id.startswith(INTERNAL_SKILL_PREFIXES)
-
-class PromptSkillManager:
-    """Manages prompt template files (markdown with YAML frontmatter).
-    
-    Skills are Codex-standard folders: prompt_skills/<name>/SKILL.md
-    with YAML frontmatter and {{variable}} placeholders.
-    """
-
-    def __init__(self, skills_dir: Optional[str] = None):
-        self.skills_dir = skills_dir or os.path.join(_SERVER_FILE_DIR, "prompt_skills")
-        self._skills: Dict[str, dict] = {}
-        self.load_all()
-
-    def load_all(self) -> None:
-        """Load all SKILL.md files from skill subdirectories."""
-        self._skills.clear()
-        if not os.path.isdir(self.skills_dir):
-            logger.warning(f"Prompt skills directory not found: {self.skills_dir}")
-            return
-        for entry in sorted(os.listdir(self.skills_dir)):
-            skill_dir = os.path.join(self.skills_dir, entry)
-            if not os.path.isdir(skill_dir):
-                continue
-            skill_md = os.path.join(skill_dir, "SKILL.md")
-            if not os.path.isfile(skill_md):
-                continue
-            try:
-                skill = self._parse_file(skill_md, entry)
-                self._skills[skill["id"]] = skill
-            except Exception as e:
-                logger.error(f"Failed to parse prompt skill {entry}: {e}")
-
-    def _parse_file(self, filepath: str, folder_name: str) -> dict:
-        """Parse a SKILL.md file with YAML frontmatter."""
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # Split YAML frontmatter from body
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                frontmatter = yaml.safe_load(parts[1]) or {}
-                template = parts[2].strip()
-            else:
-                frontmatter = {}
-                template = content
-        else:
-            frontmatter = {}
-            template = content
-
-        skill_id = folder_name
-        return {
-            "id": skill_id,
-            "name": frontmatter.get("name", skill_id),
-            "description": frontmatter.get("description", ""),
-            "template": template,
-            "variables": frontmatter.get("variables", []),
-            "category": frontmatter.get("category", "prompt"),  # "prompt" | "skill"
-            "built_in": True,
-            "internal": _is_internal_skill(skill_id),
-            "filepath": filepath,
-            "folder": os.path.dirname(filepath),
-        }
-
-    def list(self) -> list:
-        """Return all skills (without internal paths)."""
-        exclude = {"filepath", "folder"}
-        return [
-            {k: v for k, v in skill.items() if k not in exclude}
-            for skill in self._skills.values()
-        ]
-
-    def create(
-        self,
-        name: str,
-        description: str = "",
-        template: str = "",
-        category: str = "skill",
-        variables: Optional[list] = None,
-    ) -> dict:
-        """Create a new skill folder with SKILL.md.
-
-        Returns the new skill dict.  Raises ValueError if the ID already exists.
-        """
-        import re as _re
-        skill_id = _re.sub(r"[^a-zA-Z0-9_-]", "_", name.strip().lower().replace(" ", "_"))
-        if skill_id in self._skills:
-            raise ValueError(f"Skill '{skill_id}' already exists")
-
-        folder = os.path.join(self.skills_dir, skill_id)
-        os.makedirs(folder, exist_ok=True)
-
-        frontmatter = {
-            "name": name,
-            "description": description,
-            "category": category,
-        }
-        if variables:
-            frontmatter["variables"] = variables
-
-        fm_text = yaml.dump(frontmatter, default_flow_style=False).strip()
-        file_content = f"---\n{fm_text}\n---\n{template}\n"
-
-        filepath = os.path.join(folder, "SKILL.md")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(file_content)
-
-        skill = self._parse_file(filepath, skill_id)
-        self._skills[skill_id] = skill
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def delete(self, skill_id: str) -> bool:
-        """Delete a user-created skill.
-
-        Raises ValueError for internal skills.  Returns True on success.
-        """
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            raise KeyError(f"Skill '{skill_id}' not found")
-        if skill.get("internal"):
-            raise ValueError(f"Cannot delete internal skill '{skill_id}'")
-
-        folder = skill["folder"]
-        if os.path.isdir(folder):
-            shutil.rmtree(folder)
-        del self._skills[skill_id]
-        return True
-
-    def install_from_git(self, url: str, name: Optional[str] = None) -> dict:
-        """Clone a skill from a git URL.
-
-        If *name* is not provided, derive it from the repo name.
-        Returns the parsed skill dict.
-        """
-        if not name:
-            # Derive from URL: https://github.com/user/my-skill.git -> my-skill
-            name = url.rstrip("/").rstrip(".git").rsplit("/", 1)[-1]
-        import re as _re
-        skill_id = _re.sub(r"[^a-zA-Z0-9_-]", "_", name.strip().lower().replace(" ", "_"))
-        if skill_id in self._skills:
-            raise ValueError(f"Skill '{skill_id}' already exists")
-
-        dest = os.path.join(self.skills_dir, skill_id)
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", url, dest],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
-
-        skill_md = os.path.join(dest, "SKILL.md")
-        if not os.path.isfile(skill_md):
-            shutil.rmtree(dest)
-            raise FileNotFoundError("Repository does not contain a SKILL.md file")
-
-        skill = self._parse_file(skill_md, skill_id)
-        self._skills[skill_id] = skill
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def search(self, query: str, limit: int = 20) -> list:
-        """Search skills by name, description, and template content.
-
-        Returns a list of skill dicts sorted by relevance score.
-        """
-        if not query or not query.strip():
-            return self.list()[:limit]
-
-        q = query.strip().lower()
-        scored: list[tuple[float, dict]] = []
-        exclude = {"filepath", "folder"}
-
-        for skill in self._skills.values():
-            score = 0.0
-            name = skill.get("name", "").lower()
-            desc = skill.get("description", "").lower()
-            tmpl = skill.get("template", "").lower()
-
-            # Exact name match is strongest signal
-            if q == name:
-                score += 100
-            elif q in name:
-                score += 60
-
-            # Description match
-            if q in desc:
-                score += 30
-
-            # Template body match (weakest signal)
-            if q in tmpl:
-                score += 10
-
-            if score > 0:
-                clean = {k: v for k, v in skill.items() if k not in exclude}
-                clean["_score"] = score
-                scored.append((score, clean))
-
-        scored.sort(key=lambda t: t[0], reverse=True)
-        return [s[1] for s in scored[:limit]]
-
-    def get(self, skill_id: str) -> Optional[dict]:
-        """Get a single skill by ID."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def update(self, skill_id: str, template: str) -> Optional[dict]:
-        """Update a skill's template and write back to disk."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-
-        # Rebuild the file content with original frontmatter + new template
-        filepath = skill["filepath"]
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # Extract original frontmatter
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                frontmatter_text = parts[1]
-            else:
-                frontmatter_text = ""
-        else:
-            frontmatter_text = ""
-
-        # Write back
-        new_content = f"---{frontmatter_text}---\n{template}\n"
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(new_content)
-
-        # Update in-memory cache
-        skill["template"] = template
-        exclude = {"filepath", "folder"}
-        return {k: v for k, v in skill.items() if k not in exclude}
-
-    def list_files(self, skill_id: str) -> Optional[list]:
-        """List all files in a skill's folder."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        folder = skill["folder"]
-        entries = []
-        for root, dirs, files in os.walk(folder):
-            rel_root = os.path.relpath(root, folder)
-            if rel_root == ".":
-                rel_root = ""
-            for d in sorted(dirs):
-                entries.append({
-                    "name": d,
-                    "path": os.path.join(rel_root, d) if rel_root else d,
-                    "type": "directory",
-                })
-            for fname in sorted(files):
-                fpath = os.path.join(root, fname)
-                entries.append({
-                    "name": fname,
-                    "path": os.path.join(rel_root, fname) if rel_root else fname,
-                    "type": "file",
-                    "size": os.path.getsize(fpath),
-                })
-        return entries
-
-    def read_file(self, skill_id: str, file_path: str) -> Optional[str]:
-        """Read a file from a skill's folder."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        full_path = os.path.join(skill["folder"], file_path)
-        # Security: ensure path doesn't escape skill folder
-        real_folder = os.path.realpath(skill["folder"])
-        real_path = os.path.realpath(full_path)
-        if not real_path.startswith(real_folder):
-            return None
-        if not os.path.isfile(real_path):
-            return None
-        with open(real_path, "r", encoding="utf-8") as f:
-            return f.read()
-
-    def write_file(self, skill_id: str, file_path: str, content: str) -> Optional[bool]:
-        """Write a file in a skill's folder."""
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        full_path = os.path.join(skill["folder"], file_path)
-        # Security: ensure path doesn't escape skill folder
-        real_folder = os.path.realpath(skill["folder"])
-        real_path = os.path.realpath(full_path)
-        if not real_path.startswith(real_folder):
-            return None
-        os.makedirs(os.path.dirname(real_path), exist_ok=True)
-        with open(real_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        # Re-parse if SKILL.md was updated
-        if os.path.basename(file_path) == "SKILL.md":
-            try:
-                updated = self._parse_file(real_path, skill_id)
-                self._skills[skill_id] = updated
-            except Exception as e:
-                logger.error(f"Failed to re-parse SKILL.md for {skill_id}: {e}")
-        return True
-
-    def render(self, skill_id: str, variables: Dict[str, str]) -> Optional[str]:
-        """Render a skill template with the given variables.
-        
-        Replaces {{variable_name}} with the provided value.
-        Missing variables are left as empty strings.
-        """
-        skill = self._skills.get(skill_id)
-        if skill is None:
-            return None
-        result = skill["template"]
-        for var_name, value in variables.items():
-            result = result.replace("{{" + var_name + "}}", str(value))
-        # Clean up any remaining unreplaced variables
-        import re as _re
-        result = _re.sub(r"\{\{[a-zA-Z_]+\}\}", "", result)
-        return result
-
+from skills_manager import PromptSkillManager, INTERNAL_SKILL_IDS, INTERNAL_SKILL_PREFIXES, _is_internal_skill  # noqa: E402
+import skills_routes  # noqa: E402
 
 # Initialize the prompt skill manager
 prompt_skill_manager = PromptSkillManager()
 
 
 # =============================================================================
-# State
+# State  (extracted to state.py)
 # =============================================================================
 
-chat_sessions: Dict[str, dict] = {}
-runs: Dict[str, dict] = {}
-sweeps: Dict[str, dict] = {}
-active_alerts: Dict[str, dict] = {}
-plans: Dict[str, dict] = {}
-journey_events: Dict[str, dict] = {}
-journey_recommendations: Dict[str, dict] = {}
-journey_decisions: Dict[str, dict] = {}
-wild_mode_enabled: bool = False
-session_stop_flags: Dict[str, bool] = {}
-active_chat_tasks: Dict[str, asyncio.Task] = {}
+import state as _state  # noqa: E402
+from state import (  # noqa: E402
+    # Global state dicts — these are mutable references, so server.py and state.py
+    # share the same dict objects. Mutations like chat_sessions["x"] = y propagate.
+    chat_sessions, runs, sweeps, active_alerts, plans,
+    journey_events, journey_recommendations, journey_decisions,
+    wild_mode_enabled, session_stop_flags, active_chat_tasks,
+    active_chat_streams, _wandb_metrics_cache,
+    # Cluster
+    CLUSTER_TYPE_VALUES, CLUSTER_STATUS_VALUES, CLUSTER_SOURCE_VALUES,
+    cluster_state, _default_cluster_state,
+    _cluster_type_label, _cluster_type_description,
+    _normalize_cluster_type, _normalize_cluster_status,
+    _normalize_cluster_source, _normalize_cluster_state,
+    # Metrics constants
+    STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS, STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS,
+    STREAM_RUNTIME_RETENTION_SECONDS,
+    LOSS_KEYS, VAL_LOSS_KEYS, ACCURACY_KEYS, EPOCH_KEYS, STEP_KEYS,
+    MAX_HISTORY_POINTS, MAX_METRIC_SERIES_KEYS, IGNORED_METRIC_KEYS,
+    # Save/load functions
+    save_chat_state, load_chat_state,
+    save_runs_state,
+    save_alerts_state, load_alerts_state,
+    save_plans_state, load_plans_state,
+    save_journey_state, load_journey_state,
+    # Helpers
+    _journey_new_id,
+    _to_float, _first_numeric, _extract_step, _is_metric_key,
+    _find_wandb_dir_from_run_dir, _resolve_metrics_file, _downsample_history,
+)
 
 
 def _get_run_log_content(run_id: str) -> str:
@@ -1021,7 +255,7 @@ wild_v2_engine = WildV2Engine(
     opencode_url=OPENCODE_URL,
     model_provider=MODEL_PROVIDER,
     model_id=MODEL_ID,
-    get_workdir=lambda: WORKDIR,
+    get_workdir=lambda: config.WORKDIR,
     server_url=SERVER_CALLBACK_URL,
     auth_token=USER_AUTH_TOKEN,
     get_auth=get_auth,
@@ -1031,228 +265,11 @@ wild_v2_engine = WildV2Engine(
 )
 
 # Memory store (persistent lessons / context)
-memory_store = MemoryStore(get_workdir=lambda: WORKDIR)
+memory_store = MemoryStore(get_workdir=lambda: config.WORKDIR)
 memory_store.load()
 
 # Inject memory store into V2 engine so reflections can write memories
 wild_v2_engine.memory_store = memory_store
-
-active_chat_streams: Dict[str, "ChatStreamRuntime"] = {}
-
-STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS = 0.75
-STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS = 20
-STREAM_RUNTIME_RETENTION_SECONDS = 120.0
-
-_wandb_metrics_cache: Dict[str, dict] = {}
-
-LOSS_KEYS = ("loss", "train/loss", "train_loss", "training_loss")
-VAL_LOSS_KEYS = ("val/loss", "val_loss", "validation/loss", "eval/loss", "valid/loss")
-ACCURACY_KEYS = ("accuracy", "val/accuracy", "eval/accuracy", "train/accuracy", "acc")
-EPOCH_KEYS = ("epoch", "train/epoch")
-STEP_KEYS = ("step", "_step", "global_step", "trainer/global_step")
-MAX_HISTORY_POINTS = 400
-MAX_METRIC_SERIES_KEYS = 200
-IGNORED_METRIC_KEYS = set(STEP_KEYS) | {
-    "_runtime",
-    "_timestamp",
-    "_wall_time",
-    "_timestamp_step",
-}
-
-
-CLUSTER_TYPE_VALUES = {
-    "unknown",
-    "slurm",
-    "local_gpu",
-    "kubernetes",
-    "ray",
-    "shared_head_node",
-}
-CLUSTER_STATUS_VALUES = {"unknown", "healthy", "degraded", "offline"}
-CLUSTER_SOURCE_VALUES = {"unset", "manual", "detected"}
-
-
-def _default_cluster_state() -> dict:
-    now = time.time()
-    return {
-        "type": "unknown",
-        "status": "unknown",
-        "source": "unset",
-        "label": "Unknown",
-        "description": "Cluster has not been configured yet.",
-        "head_node": None,
-        "node_count": None,
-        "gpu_count": None,
-        "notes": None,
-        "confidence": None,
-        "details": {},
-        "last_detected_at": None,
-        "updated_at": now,
-    }
-
-
-cluster_state: dict = _default_cluster_state()
-
-
-def save_chat_state():
-    """Persist chat sessions to disk."""
-    try:
-        with open(CHAT_DATA_FILE, "w") as f:
-            json.dump({"chat_sessions": chat_sessions}, f, indent=2, default=str)
-    except Exception as e:
-        logger.error(f"Error saving chat state: {e}")
-
-
-def load_chat_state():
-    """Load chat sessions from disk."""
-    global chat_sessions
-    if os.path.exists(CHAT_DATA_FILE):
-        try:
-            with open(CHAT_DATA_FILE, "r") as f:
-                data = json.load(f)
-                chat_sessions = data.get("chat_sessions", {})
-                for session in chat_sessions.values():
-                    if not isinstance(session, dict):
-                        continue
-                    active_stream = session.get("active_stream")
-                    if isinstance(active_stream, dict) and active_stream.get("status") == "running":
-                        # Streaming workers are in-memory only; mark stale snapshots as interrupted on restart.
-                        active_stream["status"] = "interrupted"
-        except Exception as e:
-            logger.error(f"Error loading chat state: {e}")
-
-
-def save_runs_state():
-    """Persist runs and sweeps to disk."""
-    try:
-        with open(JOBS_DATA_FILE, "w") as f:
-            json.dump({"runs": runs, "sweeps": sweeps}, f, indent=2, default=str)
-    except Exception as e:
-        logger.error(f"Error saving runs state: {e}")
-
-
-def load_runs_state():
-    """Load runs and sweeps from disk."""
-    global runs, sweeps
-    if os.path.exists(JOBS_DATA_FILE):
-        try:
-            with open(JOBS_DATA_FILE, "r") as f:
-                data = json.load(f)
-                runs = data.get("runs", {})
-                sweeps = data.get("sweeps", {})
-                sweeps_backfilled = False
-                for sweep in sweeps.values():
-                    sweep["status"] = _normalize_sweep_status(sweep.get("status"))
-                    if _ensure_sweep_creation_context(sweep):
-                        sweeps_backfilled = True
-                recompute_all_sweep_states()
-                if sweeps_backfilled:
-                    save_runs_state()
-        except Exception as e:
-            logger.error(f"Error loading runs state: {e}")
-
-
-def save_alerts_state():
-    """Persist active alerts to disk."""
-    try:
-        with open(ALERTS_DATA_FILE, "w") as f:
-            json.dump({"alerts": list(active_alerts.values())}, f, indent=2, default=str)
-    except Exception as e:
-        logger.error(f"Error saving alerts state: {e}")
-
-
-def load_alerts_state():
-    """Load active alerts from disk."""
-    global active_alerts
-    if os.path.exists(ALERTS_DATA_FILE):
-        try:
-            with open(ALERTS_DATA_FILE, "r") as f:
-                data = json.load(f)
-                loaded = data.get("alerts", [])
-                active_alerts = {
-                    alert["id"]: alert
-                    for alert in loaded
-                    if isinstance(alert, dict) and alert.get("id")
-                }
-        except Exception as e:
-            logger.error(f"Error loading alerts state: {e}")
-
-
-def save_plans_state():
-    """Persist plans to disk."""
-    try:
-        with open(PLANS_DATA_FILE, "w") as f:
-            json.dump({"plans": list(plans.values())}, f, indent=2, default=str)
-    except Exception as e:
-        logger.error(f"Error saving plans state: {e}")
-
-
-def load_plans_state():
-    """Load plans from disk."""
-    global plans
-    if os.path.exists(PLANS_DATA_FILE):
-        try:
-            with open(PLANS_DATA_FILE, "r") as f:
-                data = json.load(f)
-                loaded = data.get("plans", [])
-                plans = {
-                    plan["id"]: plan
-                    for plan in loaded
-                    if isinstance(plan, dict) and plan.get("id")
-                }
-        except Exception as e:
-            logger.error(f"Error loading plans state: {e}")
-
-
-def save_journey_state():
-    """Persist journey events/recommendations/decisions to disk."""
-    try:
-        with open(JOURNEY_STATE_FILE, "w") as f:
-            json.dump(
-                {
-                    "events": list(journey_events.values()),
-                    "recommendations": list(journey_recommendations.values()),
-                    "decisions": list(journey_decisions.values()),
-                },
-                f,
-                indent=2,
-                default=str,
-            )
-    except Exception as e:
-        logger.error(f"Error saving journey state: {e}")
-
-
-def load_journey_state():
-    """Load journey events/recommendations/decisions from disk."""
-    global journey_events, journey_recommendations, journey_decisions
-    if os.path.exists(JOURNEY_STATE_FILE):
-        try:
-            with open(JOURNEY_STATE_FILE, "r") as f:
-                data = json.load(f)
-                loaded_events = data.get("events", [])
-                loaded_recommendations = data.get("recommendations", [])
-                loaded_decisions = data.get("decisions", [])
-                journey_events = {
-                    item["id"]: item
-                    for item in loaded_events
-                    if isinstance(item, dict) and item.get("id")
-                }
-                journey_recommendations = {
-                    item["id"]: item
-                    for item in loaded_recommendations
-                    if isinstance(item, dict) and item.get("id")
-                }
-                journey_decisions = {
-                    item["id"]: item
-                    for item in loaded_decisions
-                    if isinstance(item, dict) and item.get("id")
-                }
-        except Exception as e:
-            logger.error(f"Error loading journey state: {e}")
-
-
-def _journey_new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
 def _record_journey_event(
@@ -1288,86 +305,6 @@ def _record_journey_event(
     return payload
 
 
-def _cluster_type_label(cluster_type: str) -> str:
-    mapping = {
-        "unknown": "Unknown",
-        "slurm": "Slurm",
-        "local_gpu": "Local GPU",
-        "kubernetes": "Kubernetes",
-        "ray": "Ray",
-        "shared_head_node": "Shared GPU Head Node",
-    }
-    return mapping.get(cluster_type, "Unknown")
-
-
-def _cluster_type_description(cluster_type: str) -> str:
-    mapping = {
-        "unknown": "Cluster has not been configured yet.",
-        "slurm": "Slurm-managed cluster scheduler detected.",
-        "local_gpu": "Single-host GPU workstation/cluster detected.",
-        "kubernetes": "Kubernetes cluster control plane detected.",
-        "ray": "Ray cluster runtime detected.",
-        "shared_head_node": "Head node with SSH fan-out to worker nodes.",
-    }
-    return mapping.get(cluster_type, "Cluster has not been configured yet.")
-
-
-def _normalize_cluster_type(raw_type: Optional[str]) -> str:
-    if not raw_type:
-        return "unknown"
-    value = raw_type.strip().lower().replace("-", "_")
-    aliases = {
-        "localgpu": "local_gpu",
-        "local_gpu_cluster": "local_gpu",
-        "shared_gpu_head_node": "shared_head_node",
-        "shared_gpu": "shared_head_node",
-        "head_node": "shared_head_node",
-        "k8s": "kubernetes",
-    }
-    value = aliases.get(value, value)
-    return value if value in CLUSTER_TYPE_VALUES else "unknown"
-
-
-def _normalize_cluster_status(raw_status: Optional[str]) -> str:
-    if not raw_status:
-        return "unknown"
-    value = raw_status.strip().lower()
-    return value if value in CLUSTER_STATUS_VALUES else "unknown"
-
-
-def _normalize_cluster_source(raw_source: Optional[str]) -> str:
-    if not raw_source:
-        return "unset"
-    value = raw_source.strip().lower()
-    return value if value in CLUSTER_SOURCE_VALUES else "unset"
-
-
-def _normalize_cluster_state(raw_state: Any) -> dict:
-    normalized = _default_cluster_state()
-    if not isinstance(raw_state, dict):
-        return normalized
-
-    cluster_type = _normalize_cluster_type(raw_state.get("type"))
-    normalized.update(
-        {
-            "type": cluster_type,
-            "status": _normalize_cluster_status(raw_state.get("status")),
-            "source": _normalize_cluster_source(raw_state.get("source")),
-            "label": _cluster_type_label(cluster_type),
-            "description": _cluster_type_description(cluster_type),
-            "head_node": raw_state.get("head_node"),
-            "node_count": raw_state.get("node_count"),
-            "gpu_count": raw_state.get("gpu_count"),
-            "notes": raw_state.get("notes"),
-            "confidence": raw_state.get("confidence"),
-            "details": raw_state.get("details") if isinstance(raw_state.get("details"), dict) else {},
-            "last_detected_at": raw_state.get("last_detected_at"),
-            "updated_at": raw_state.get("updated_at") or time.time(),
-        }
-    )
-    return normalized
-
-
 def save_settings_state():
     """Persist settings to disk."""
     try:
@@ -1378,7 +315,7 @@ def save_settings_state():
         slack_cfg = slack_notifier.get_persisted_config()
         if slack_cfg:
             payload["slack"] = slack_cfg
-        with open(SETTINGS_DATA_FILE, "w") as f:
+        with open(config.SETTINGS_DATA_FILE, "w") as f:
             json.dump(payload, f, indent=2, default=str)
     except Exception as e:
         logger.error(f"Error saving settings state: {e}")
@@ -1387,9 +324,9 @@ def save_settings_state():
 def load_settings_state():
     """Load settings from disk."""
     global cluster_state
-    if os.path.exists(SETTINGS_DATA_FILE):
+    if os.path.exists(config.SETTINGS_DATA_FILE):
         try:
-            with open(SETTINGS_DATA_FILE, "r") as f:
+            with open(config.SETTINGS_DATA_FILE, "r") as f:
                 data = json.load(f)
                 cluster_state = _normalize_cluster_state(data.get("cluster"))
                 # Restore Slack configuration
@@ -1398,96 +335,28 @@ def load_settings_state():
             logger.error(f"Error loading settings state: {e}")
 
 
-def _to_float(value: object) -> Optional[float]:
-    """Convert primitive numeric values to float."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        converted = float(value)
-        return converted if math.isfinite(converted) else None
-    if isinstance(value, str):
+def load_runs_state():
+    """Load runs and sweeps from disk."""
+    global runs, sweeps
+    if os.path.exists(config.JOBS_DATA_FILE):
         try:
-            converted = float(value.strip())
-            return converted if math.isfinite(converted) else None
-        except ValueError:
-            return None
-    return None
+            with open(config.JOBS_DATA_FILE, "r") as f:
+                data = json.load(f)
+                runs = data.get("runs", {})
+                sweeps = data.get("sweeps", {})
+                sweeps_backfilled = False
+                for sweep in sweeps.values():
+                    sweep["status"] = _normalize_sweep_status(sweep.get("status"))
+                    if _ensure_sweep_creation_context(sweep):
+                        sweeps_backfilled = True
+                recompute_all_sweep_states()
+                if sweeps_backfilled:
+                    save_runs_state()
+        except Exception as e:
+            logger.error(f"Error loading runs state: {e}")
 
 
-def _first_numeric(row: dict, keys: tuple[str, ...]) -> Optional[float]:
-    for key in keys:
-        if key in row:
-            value = _to_float(row.get(key))
-            if value is not None:
-                return value
-    return None
 
-
-def _extract_step(row: dict, fallback_step: int) -> int:
-    step = _first_numeric(row, STEP_KEYS)
-    if step is None:
-        return fallback_step
-    if step < 0:
-        return fallback_step
-    return int(step)
-
-
-def _is_metric_key(key: object) -> bool:
-    if not isinstance(key, str) or not key:
-        return False
-    if key in IGNORED_METRIC_KEYS:
-        return False
-    # W&B internal metadata keys are usually underscore-prefixed.
-    if key.startswith("_"):
-        return False
-    return True
-
-
-def _find_wandb_dir_from_run_dir(run_dir: Optional[str]) -> Optional[str]:
-    """Scan the predictable wandb_data/ path inside run_dir for a WandB run directory."""
-    if not run_dir:
-        return None
-    wandb_base = os.path.join(run_dir, "wandb_data", "wandb")
-    if not os.path.isdir(wandb_base):
-        return None
-    matches = sorted(glob.glob(os.path.join(wandb_base, "run-*")))
-    return matches[-1] if matches else None
-
-
-def _resolve_metrics_file(wandb_dir: Optional[str]) -> Optional[str]:
-    """Resolve likely metrics file paths from a wandb run directory."""
-    if not wandb_dir:
-        return None
-
-    base_path = wandb_dir
-    if not os.path.isabs(base_path):
-        base_path = os.path.join(WORKDIR, base_path)
-
-    if os.path.isfile(base_path):
-        return base_path if base_path.endswith(".jsonl") else None
-    if not os.path.isdir(base_path):
-        return None
-
-    candidates = [
-        os.path.join(base_path, "metrics.jsonl"),
-        os.path.join(base_path, "files", "metrics.jsonl"),
-        os.path.join(base_path, "wandb-history.jsonl"),
-        os.path.join(base_path, "files", "wandb-history.jsonl"),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    return None
-
-
-def _downsample_history(history: list[dict], max_points: int = MAX_HISTORY_POINTS) -> list[dict]:
-    if len(history) <= max_points:
-        return history
-    stride = max(1, math.ceil(len(history) / max_points))
-    sampled = history[::stride]
-    if sampled[-1] != history[-1]:
-        sampled.append(history[-1])
-    return sampled[:max_points]
 
 
 def _parse_metrics_history(metrics_file: str) -> dict:
@@ -2223,7 +1092,7 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     pane = window.active_pane
     
     # Setup run directory
-    run_dir = os.path.join(DATA_DIR, "runs", run_id)
+    run_dir = os.path.join(config.DATA_DIR, "runs", run_id)
     os.makedirs(run_dir, exist_ok=True)
     
     # Write command to file
@@ -2247,7 +1116,7 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     
     # Build sidecar command
     server_url = SERVER_CALLBACK_URL
-    run_workdir = run_data.get("workdir") or WORKDIR
+    run_workdir = run_data.get("workdir") or config.WORKDIR
     
     if getattr(sys, "frozen", False):
         sidecar_cmd = (
@@ -2302,7 +1171,7 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         # Bind new OpenCode sessions to this server's workdir to avoid stale project reuse.
         resp = await client.post(
             f"{OPENCODE_URL}/session",
-            params={"directory": os.path.abspath(WORKDIR)},
+            params={"directory": os.path.abspath(config.WORKDIR)},
             json={},
             auth=get_auth(),
         )
@@ -2879,13 +1748,13 @@ async def health():
         index_file = os.path.join(FRONTEND_STATIC_DIR, "index.html")
         if os.path.exists(index_file):
             return FileResponse(index_file)
-    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+    return {"status": "ok", "service": "research-agent-server", "workdir": config.WORKDIR}
 
 
 @app.get("/health")
 async def health_json():
     """JSON health endpoint."""
-    return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+    return {"status": "ok", "service": "research-agent-server", "workdir": config.WORKDIR}
 
 
 def _extract_actions_from_text(raw_text: str, max_actions: int) -> list[str]:
@@ -3008,7 +1877,7 @@ async def journey_next_actions(req: JourneyNextActionsRequest):
             await apply_runtime_research_agent_key(client)
             session_resp = await client.post(
                 f"{OPENCODE_URL}/session",
-                params={"directory": os.path.abspath(WORKDIR)},
+                params={"directory": os.path.abspath(config.WORKDIR)},
                 json={},
                 auth=get_auth(),
             )
@@ -3309,336 +2178,13 @@ async def create_journey_decision(req: JourneyDecisionCreate):
 
 
 # =============================================================================
-# Git Diff Endpoints
+# Git Diff / File Browser Endpoints  (extracted to git_routes.py)
 # =============================================================================
 
-GIT_DIFF_MAX_LINES_PER_FILE = 400
-GIT_DIFF_DEFAULT_FILE_LIMIT = 200
-GIT_FILES_DEFAULT_LIMIT = 5000
-GIT_FILE_MAX_BYTES = 120000
-_HUNK_HEADER_RE = re.compile(r"^@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)? @@")
+import git_routes  # noqa: E402
+app.include_router(git_routes.router)
 
 
-def _run_git_command(args: List[str], timeout_seconds: int = 10) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", WORKDIR, *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-    )
-
-
-def _is_git_repo() -> bool:
-    try:
-        result = _run_git_command(["rev-parse", "--is-inside-work-tree"], timeout_seconds=5)
-    except Exception:
-        return False
-    return result.returncode == 0 and result.stdout.strip() == "true"
-
-
-def _collect_changed_files(limit: int) -> List[Dict[str, str]]:
-    files_by_path: Dict[str, str] = {}
-
-    diff_names = _run_git_command(["diff", "--name-status", "-z", "HEAD", "--"], timeout_seconds=15)
-    if diff_names.returncode != 0:
-        raise RuntimeError(diff_names.stderr.strip() or "Failed to list git diff files")
-
-    tokens = [token for token in diff_names.stdout.split("\x00") if token]
-    index = 0
-    while index < len(tokens):
-        status_token = tokens[index]
-        status_code = status_token[:1] if status_token else "M"
-        index += 1
-
-        path = ""
-        if status_code in {"R", "C"}:
-            if index + 1 >= len(tokens):
-                break
-            index += 1  # Skip old path
-            path = tokens[index]
-            index += 1
-            status_code = "M"
-        else:
-            if index >= len(tokens):
-                break
-            path = tokens[index]
-            index += 1
-
-        if not path:
-            continue
-
-        status = "modified"
-        if status_code == "A":
-            status = "added"
-        elif status_code == "D":
-            status = "deleted"
-        files_by_path[path] = status
-
-    untracked = _run_git_command(["ls-files", "--others", "--exclude-standard", "-z"], timeout_seconds=10)
-    if untracked.returncode == 0:
-        for path in untracked.stdout.split("\x00"):
-            if path:
-                files_by_path[path] = "added"
-
-    changed = [
-        {"path": path, "status": files_by_path[path]}
-        for path in sorted(files_by_path.keys())
-    ]
-    return changed[:limit]
-
-
-def _parse_unified_diff(diff_text: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> List[Dict[str, Any]]:
-    parsed: List[Dict[str, Any]] = []
-    old_line: Optional[int] = None
-    new_line: Optional[int] = None
-
-    for raw_line in diff_text.splitlines():
-        if raw_line.startswith(("diff --git ", "index ", "--- ", "+++ ")):
-            continue
-
-        if raw_line.startswith("Binary files "):
-            parsed.append(
-                {"type": "hunk", "text": "Binary file changed.", "oldLine": None, "newLine": None}
-            )
-            break
-
-        if raw_line.startswith("\\ No newline at end of file"):
-            continue
-
-        if raw_line.startswith("@@"):
-            match = _HUNK_HEADER_RE.match(raw_line)
-            if match:
-                old_line = int(match.group("old"))
-                new_line = int(match.group("new"))
-            else:
-                old_line = None
-                new_line = None
-
-            parsed.append({"type": "hunk", "text": raw_line, "oldLine": None, "newLine": None})
-
-        elif raw_line.startswith("+"):
-            parsed.append({"type": "add", "text": raw_line[1:], "oldLine": None, "newLine": new_line})
-            if new_line is not None:
-                new_line += 1
-
-        elif raw_line.startswith("-"):
-            parsed.append({"type": "remove", "text": raw_line[1:], "oldLine": old_line, "newLine": None})
-            if old_line is not None:
-                old_line += 1
-
-        elif raw_line.startswith(" "):
-            parsed.append({"type": "context", "text": raw_line[1:], "oldLine": old_line, "newLine": new_line})
-            if old_line is not None:
-                old_line += 1
-            if new_line is not None:
-                new_line += 1
-
-        if len(parsed) >= max_lines:
-            parsed.append(
-                {
-                    "type": "hunk",
-                    "text": f"... diff truncated to {max_lines} lines ...",
-                    "oldLine": None,
-                    "newLine": None,
-                }
-            )
-            break
-
-    return parsed
-
-
-def _build_untracked_file_lines(path: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> List[Dict[str, Any]]:
-    workdir_real = os.path.realpath(WORKDIR)
-    file_path = os.path.realpath(os.path.join(WORKDIR, path))
-
-    if not (file_path == workdir_real or file_path.startswith(workdir_real + os.sep)):
-        return [{"type": "hunk", "text": "Invalid path outside repository.", "oldLine": None, "newLine": None}]
-
-    if not os.path.exists(file_path):
-        return [{"type": "hunk", "text": "File not found in working tree.", "oldLine": None, "newLine": None}]
-
-    try:
-        with open(file_path, "rb") as handle:
-            content = handle.read()
-    except Exception as exc:
-        return [{"type": "hunk", "text": f"Unable to read file: {exc}", "oldLine": None, "newLine": None}]
-
-    if b"\x00" in content:
-        return [{"type": "hunk", "text": "Binary file added.", "oldLine": None, "newLine": None}]
-
-    lines = content.decode("utf-8", errors="replace").splitlines()
-    parsed: List[Dict[str, Any]] = [
-        {"type": "hunk", "text": f"@@ -0,0 +1,{len(lines)} @@", "oldLine": None, "newLine": None}
-    ]
-
-    if not lines:
-        parsed.append({"type": "add", "text": "", "oldLine": None, "newLine": 1})
-        return parsed
-
-    for line_number, line_text in enumerate(lines[:max_lines], start=1):
-        parsed.append({"type": "add", "text": line_text, "oldLine": None, "newLine": line_number})
-
-    if len(lines) > max_lines:
-        parsed.append(
-            {
-                "type": "hunk",
-                "text": f"... file truncated to {max_lines} lines ...",
-                "oldLine": None,
-                "newLine": None,
-            }
-        )
-
-    return parsed
-
-
-def _build_file_diff(path: str, status: str, unified: int) -> Dict[str, Any]:
-    lines: List[Dict[str, Any]] = []
-
-    if status == "added":
-        tracked_check = _run_git_command(["ls-files", "--error-unmatch", "--", path], timeout_seconds=5)
-        if tracked_check.returncode == 0:
-            diff_result = _run_git_command(
-                ["diff", "--no-color", f"--unified={unified}", "HEAD", "--", path],
-                timeout_seconds=20,
-            )
-            if diff_result.returncode == 0:
-                lines = _parse_unified_diff(diff_result.stdout)
-            else:
-                lines = [{"type": "hunk", "text": "Unable to render file diff.", "oldLine": None, "newLine": None}]
-        else:
-            lines = _build_untracked_file_lines(path)
-    else:
-        diff_result = _run_git_command(
-            ["diff", "--no-color", f"--unified={unified}", "HEAD", "--", path],
-            timeout_seconds=20,
-        )
-        if diff_result.returncode == 0:
-            lines = _parse_unified_diff(diff_result.stdout)
-        else:
-            lines = [{"type": "hunk", "text": "Unable to render file diff.", "oldLine": None, "newLine": None}]
-
-    if not lines:
-        if status == "deleted":
-            lines = [{"type": "hunk", "text": "File deleted with no textual hunks.", "oldLine": None, "newLine": None}]
-        elif status == "added":
-            lines = [{"type": "hunk", "text": "New file with no textual content.", "oldLine": None, "newLine": None}]
-        else:
-            lines = [{"type": "hunk", "text": "No textual diff available.", "oldLine": None, "newLine": None}]
-
-    additions = sum(1 for line in lines if line.get("type") == "add")
-    deletions = sum(1 for line in lines if line.get("type") == "remove")
-
-    return {
-        "path": path,
-        "status": status,
-        "additions": additions,
-        "deletions": deletions,
-        "lines": lines,
-    }
-
-
-def _resolve_repo_path(relative_path: str) -> Optional[str]:
-    """Resolve repository-relative file path and block traversal outside WORKDIR."""
-    if not relative_path:
-        return None
-
-    normalized = relative_path.strip().replace("\\", "/")
-    if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
-        return None
-
-    repo_root = os.path.realpath(WORKDIR)
-    target = os.path.realpath(os.path.join(WORKDIR, normalized))
-
-    if target == repo_root or target.startswith(repo_root + os.sep):
-        return target
-    return None
-
-
-@app.get("/git/diff")
-async def get_repo_diff(
-    unified: int = Query(3, ge=0, le=12, description="Unified context lines per diff hunk"),
-    limit: int = Query(GIT_DIFF_DEFAULT_FILE_LIMIT, ge=1, le=500, description="Maximum number of files to return"),
-):
-    """Return the repository diff for changed files in the current workdir."""
-    if not _is_git_repo():
-        return {"repo_path": WORKDIR, "head": None, "files": []}
-
-    head_result = _run_git_command(["rev-parse", "--short", "HEAD"], timeout_seconds=5)
-    head = head_result.stdout.strip() if head_result.returncode == 0 else None
-
-    try:
-        changed_files = _collect_changed_files(limit)
-    except Exception as exc:
-        logger.error(f"Failed to collect git diff files: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to load repository diff")
-
-    files = [_build_file_diff(item["path"], item["status"], unified) for item in changed_files]
-    return {"repo_path": WORKDIR, "head": head, "files": files}
-
-
-@app.get("/git/files")
-async def get_repo_files(
-    limit: int = Query(GIT_FILES_DEFAULT_LIMIT, ge=1, le=20000, description="Maximum number of files to return"),
-):
-    """Return repository files for file explorer mode."""
-    if not _is_git_repo():
-        return {"repo_path": WORKDIR, "files": []}
-
-    files_result = _run_git_command(
-        ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        timeout_seconds=20,
-    )
-    if files_result.returncode != 0:
-        logger.error(f"Failed to list git files: {files_result.stderr.strip()}")
-        raise HTTPException(status_code=500, detail="Failed to list repository files")
-
-    files = sorted({path for path in files_result.stdout.split("\x00") if path})
-    return {"repo_path": WORKDIR, "files": files[:limit]}
-
-
-@app.get("/git/file")
-async def get_repo_file(
-    path: str = Query(..., description="Repository-relative file path"),
-    max_bytes: int = Query(
-        GIT_FILE_MAX_BYTES,
-        ge=1024,
-        le=500000,
-        description="Maximum bytes to read",
-    ),
-):
-    """Return text content for a repository file."""
-    if not _is_git_repo():
-        raise HTTPException(status_code=404, detail="Not a git repository")
-
-    resolved = _resolve_repo_path(path)
-    if not resolved:
-        raise HTTPException(status_code=400, detail="Invalid file path")
-
-    if not os.path.exists(resolved):
-        raise HTTPException(status_code=404, detail="File not found")
-    if os.path.isdir(resolved):
-        raise HTTPException(status_code=400, detail="Path is a directory")
-
-    try:
-        with open(resolved, "rb") as handle:
-            data = handle.read(max_bytes + 1)
-    except Exception as exc:
-        logger.error(f"Failed to read file {path}: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to read file")
-
-    truncated = len(data) > max_bytes
-    if truncated:
-        data = data[:max_bytes]
-
-    if b"\x00" in data:
-        return {"path": path, "content": "", "binary": True, "truncated": truncated}
-
-    return {
-        "path": path,
-        "content": data.decode("utf-8", errors="replace"),
-        "binary": False,
-        "truncated": truncated,
-    }
 
 
 @app.get("/sessions")
@@ -4203,918 +2749,83 @@ async def stop_session(session_id: str):
 
 
 # =============================================================================
-# Run Endpoints
+# Run, Alert, Metrics, Wild Mode Endpoints  (extracted to run_routes.py)
 # =============================================================================
 
-@app.get("/runs")
-async def list_runs(
-    archived: bool = Query(False, description="Include archived runs"),
-    limit: int = Query(100, description="Max runs to return")
-):
-    """List all runs."""
-    _reconcile_all_run_terminal_states()
-    result = []
-    for run_id, run in runs.items():
-        if not archived and run.get("is_archived", False):
-            continue
-        result.append(_run_response_payload(run_id, run))
-    
-    # Sort by created_at descending
-    result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-    return result[:limit]
+import run_routes  # noqa: E402
+run_routes.init(
+    runs_dict=runs,
+    sweeps_dict=sweeps,
+    active_alerts_dict=active_alerts,
+    save_runs_state_fn=save_runs_state,
+    save_alerts_state_fn=save_alerts_state,
+    save_settings_state_fn=save_settings_state,
+    launch_run_in_tmux_fn=launch_run_in_tmux,
+    recompute_sweep_state_fn=recompute_sweep_state,
+    reconcile_all_run_terminal_states_fn=_reconcile_all_run_terminal_states,
+    run_response_payload_fn=_run_response_payload,
+    sync_run_membership_with_sweep_fn=_sync_run_membership_with_sweep,
+    record_journey_event_fn=_record_journey_event,
+    normalize_gpuwrap_config_fn=_normalize_gpuwrap_config,
+    coerce_exit_code_fn=_coerce_exit_code,
+    slack_notifier=slack_notifier,
+    get_or_create_session_fn=get_or_create_session,
+    run_status_terminal_set=RUN_STATUS_TERMINAL,
+    load_run_metrics_fn=_load_run_metrics,
+    find_wandb_dir_from_run_dir_fn=_find_wandb_dir_from_run_dir,
+    get_wandb_curve_data_fn=_get_wandb_curve_data,
+    wandb_metrics_cache_dict=_wandb_metrics_cache,
+)
+app.include_router(run_routes.router)
 
 
-@app.post("/runs")
-async def create_run(req: RunCreate):
-    """Create a new run. Starts in 'ready' state unless auto_start=True."""
-    run_id = uuid.uuid4().hex[:12]
 
-    if req.sweep_id and req.sweep_id not in sweeps:
-        raise HTTPException(status_code=404, detail=f"Sweep not found: {req.sweep_id}")
-    
-    initial_status = "queued" if req.auto_start else "ready"
-    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
-    
-    run_data = {
-        "name": req.name,
-        "command": req.command,
-        "workdir": req.workdir or WORKDIR,
-        "status": initial_status,
-        "created_at": time.time(),
-        "is_archived": False,
-        "sweep_id": req.sweep_id,
-        "parent_run_id": req.parent_run_id,
-        "origin_alert_id": req.origin_alert_id,
-        "chat_session_id": req.chat_session_id,
-        "gpuwrap_config": gpuwrap_config,
-        "tmux_window": None,
-        "run_dir": None,
-        "exit_code": None,
-        "error": None,
-        "wandb_dir": None,
-    }
-    
-    runs[run_id] = run_data
-    _sync_run_membership_with_sweep(run_id, req.sweep_id)
-    save_runs_state()
-    _record_journey_event(
-        kind="run_created",
-        actor="system",
-        session_id=req.chat_session_id,
-        run_id=run_id,
-        note=req.name,
-        metadata={"status": initial_status, "sweep_id": req.sweep_id},
-    )
-    if initial_status == "queued":
-        _record_journey_event(
-            kind="run_queued",
-            actor="system",
-            session_id=req.chat_session_id,
-            run_id=run_id,
-            note=f"{req.name} queued",
-        )
-    
-    logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
-
-    # If auto_start is requested, actually launch the run in tmux
-    if initial_status == "queued":
-        try:
-            launch_run_in_tmux(run_id, run_data)
-            if run_data.get("sweep_id"):
-                recompute_sweep_state(run_data["sweep_id"])
-            save_runs_state()
-        except Exception as e:
-            logger.error(f"Failed to auto-start run {run_id}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    return _run_response_payload(run_id, run_data)
-
-
-@app.get("/runs/{run_id}")
-async def get_run(run_id: str):
-    """Get run details."""
-    _reconcile_all_run_terminal_states()
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return _run_response_payload(run_id, runs[run_id])
-
-
-@app.put("/runs/{run_id}")
-async def update_run(run_id: str, req: RunUpdate):
-    """Update mutable run fields."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    run = runs[run_id]
-    current_status = str(run.get("status", "")).strip().lower()
-
-    if req.command is not None:
-        next_command = req.command.strip()
-        if not next_command:
-            raise HTTPException(status_code=400, detail="Run command cannot be empty")
-        if current_status in {"launching", "running"} and next_command != str(run.get("command", "")).strip():
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot edit command while run is active. Stop the run first.",
-            )
-        run["command"] = next_command
-
-    if req.name is not None:
-        next_name = req.name.strip()
-        if not next_name:
-            raise HTTPException(status_code=400, detail="Run name cannot be empty")
-        run["name"] = next_name
-
-    if req.workdir is not None:
-        next_workdir = req.workdir.strip()
-        if not next_workdir:
-            raise HTTPException(status_code=400, detail="Run workdir cannot be empty")
-        run["workdir"] = next_workdir
-
-    save_runs_state()
-    return _run_response_payload(run_id, run)
-
-
-@app.post("/runs/{run_id}/queue")
-async def queue_run(run_id: str):
-    """Queue a ready run for execution."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    run = runs[run_id]
-    if run["status"] != "ready":
-        raise HTTPException(status_code=400, detail=f"Run is not ready (status: {run['status']})")
-    
-    run["status"] = "queued"
-    run["queued_at"] = time.time()
-    _record_journey_event(
-        kind="run_queued",
-        actor="system",
-        session_id=run.get("chat_session_id"),
-        run_id=run_id,
-        note=run.get("name") or run_id,
-    )
-    if run.get("sweep_id"):
-        recompute_sweep_state(run["sweep_id"])
-    save_runs_state()
-    
-    return {"message": "Run queued", "id": run_id, **run}
-
-
-@app.post("/runs/{run_id}/start")
-async def start_run(run_id: str):
-    """Start a queued run."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    run = runs[run_id]
-    if run["status"] not in ["queued", "ready"]:
-        raise HTTPException(status_code=400, detail=f"Run cannot be started (status: {run['status']})")
-    
-    # If ready, move to queued first
-    if run["status"] == "ready":
-        run["status"] = "queued"
-        run["queued_at"] = time.time()
-        _record_journey_event(
-            kind="run_queued",
-            actor="system",
-            session_id=run.get("chat_session_id"),
-            run_id=run_id,
-            note=run.get("name") or run_id,
-        )
-    
-    try:
-        tmux_window = launch_run_in_tmux(run_id, run)
-        _record_journey_event(
-            kind="run_launched",
-            actor="system",
-            session_id=run.get("chat_session_id"),
-            run_id=run_id,
-            note=run.get("name") or run_id,
-            metadata={"tmux_window": tmux_window},
-        )
-        if run.get("sweep_id"):
-            recompute_sweep_state(run["sweep_id"])
-        save_runs_state()
-        return {"message": "Run started", "tmux_window": tmux_window}
-    except Exception as e:
-        logger.error(f"Failed to start run {run_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/runs/{run_id}/stop")
-async def stop_run(run_id: str):
-    """Stop a running job."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    run = runs[run_id]
-    if run["status"] not in ["launching", "running"]:
-        raise HTTPException(status_code=400, detail=f"Run is not active (status: {run['status']})")
-    
-    # Kill tmux window
-    tmux_window = run.get("tmux_window")
-    if tmux_window:
-        session = get_or_create_session()
-        if session:
-            window = session.windows.get(window_name=tmux_window, default=None)
-            if window:
-                window.kill()
-                logger.info(f"Killed tmux window {tmux_window}")
-    
-    run["status"] = "stopped"
-    run["stopped_at"] = time.time()
-    _record_journey_event(
-        kind="run_stopped",
-        actor="system",
-        session_id=run.get("chat_session_id"),
-        run_id=run_id,
-        note=run.get("name") or run_id,
-    )
-    if run.get("sweep_id"):
-        recompute_sweep_state(run["sweep_id"])
-    save_runs_state()
-    
-    return {"message": "Run stopped"}
-
-
-@app.post("/runs/{run_id}/rerun")
-async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
-    """Create a new run based on an existing run."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    source_run = runs[run_id]
-    new_command = req.command if req and req.command else source_run.get("command")
-    if not new_command:
-        raise HTTPException(status_code=400, detail="Command is required for rerun")
-
-    new_run_id = uuid.uuid4().hex[:12]
-    initial_status = "queued" if req and req.auto_start else "ready"
-    if req and req.gpuwrap_config is not None:
-        gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
-    else:
-        gpuwrap_config = _normalize_gpuwrap_config(source_run.get("gpuwrap_config"))
-
-    new_run = {
-        "name": f"{source_run.get('name', 'Run')} (Rerun)",
-        "command": new_command,
-        "workdir": source_run.get("workdir") or WORKDIR,
-        "status": initial_status,
-        "created_at": time.time(),
-        "is_archived": False,
-        "sweep_id": source_run.get("sweep_id"),
-        "parent_run_id": run_id,
-        "origin_alert_id": req.origin_alert_id if req else None,
-        "chat_session_id": source_run.get("chat_session_id"),
-        "gpuwrap_config": gpuwrap_config,
-        "tmux_window": None,
-        "run_dir": None,
-        "exit_code": None,
-        "error": None,
-        "wandb_dir": None,
-    }
-
-    runs[new_run_id] = new_run
-    _sync_run_membership_with_sweep(new_run_id, new_run.get("sweep_id"))
-    save_runs_state()
-    _record_journey_event(
-        kind="run_created",
-        actor="system",
-        session_id=new_run.get("chat_session_id"),
-        run_id=new_run_id,
-        note=new_run.get("name") or new_run_id,
-        metadata={"status": initial_status, "parent_run_id": run_id},
-    )
-    if initial_status == "queued":
-        _record_journey_event(
-            kind="run_queued",
-            actor="system",
-            session_id=new_run.get("chat_session_id"),
-            run_id=new_run_id,
-            note=f"{new_run.get('name') or new_run_id} queued",
-        )
-
-    if initial_status == "queued":
-        try:
-            launch_run_in_tmux(new_run_id, new_run)
-            _record_journey_event(
-                kind="run_launched",
-                actor="system",
-                session_id=new_run.get("chat_session_id"),
-                run_id=new_run_id,
-                note=new_run.get("name") or new_run_id,
-                metadata={"rerun_of": run_id},
-            )
-            if new_run.get("sweep_id"):
-                recompute_sweep_state(new_run["sweep_id"])
-            save_runs_state()
-        except Exception as e:
-            logger.error(f"Failed to launch rerun {new_run_id}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    return {"id": new_run_id, **new_run}
-
-
-@app.post("/runs/{run_id}/archive")
-async def archive_run(run_id: str):
-    """Archive a run."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    runs[run_id]["is_archived"] = True
-    runs[run_id]["archived_at"] = time.time()
-    save_runs_state()
-    return {"message": "Run archived", "run": {"id": run_id, **runs[run_id]}}
-
-
-@app.post("/runs/{run_id}/unarchive")
-async def unarchive_run(run_id: str):
-    """Unarchive a run."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    runs[run_id]["is_archived"] = False
-    runs[run_id].pop("archived_at", None)
-    save_runs_state()
-    return {"message": "Run unarchived", "run": {"id": run_id, **runs[run_id]}}
-
-
-@app.post("/runs/{run_id}/status")
-async def update_run_status(run_id: str, update: RunStatusUpdate):
-    """Update run status (called by sidecar)."""
-    logger.info(f"Status update for {run_id}: {update.status}")
-    
-    if run_id not in runs:
-        # Create minimal entry if doesn't exist
-        runs[run_id] = {"created_at": time.time()}
-    
-    run = runs[run_id]
-    
-    # Update fields
-    next_status = update.status.strip().lower()
-    if update.exit_code is not None:
-        run["exit_code"] = _coerce_exit_code(update.exit_code)
-    if update.error:
-        run["error"] = update.error
-    if update.tmux_pane:
-        run["tmux_pane"] = update.tmux_pane
-    if update.wandb_dir:
-        run["wandb_dir"] = update.wandb_dir
-
-    effective_exit_code = _coerce_exit_code(run.get("exit_code"))
-    if run.get("exit_code") != effective_exit_code:
-        run["exit_code"] = effective_exit_code
-
-    if next_status == "finished" and effective_exit_code not in (None, 0):
-        next_status = "failed"
-        if not run.get("error"):
-            run["error"] = f"Process exited with code {effective_exit_code}"
-
-    run["status"] = next_status
-    
-    # Track timestamps
-    if next_status == "running" and not run.get("started_at"):
-        run["started_at"] = time.time()
-    elif next_status in RUN_STATUS_TERMINAL:
-        run["ended_at"] = time.time()
-    _record_journey_event(
-        kind=f"run_{next_status}",
-        actor="system",
-        session_id=run.get("chat_session_id"),
-        run_id=run_id,
-        note=run.get("name") or run_id,
-        metadata={"exit_code": run.get("exit_code"), "error": run.get("error")},
-    )
-
-
-    # Slack notifications for terminal run states
-    if slack_notifier.is_enabled and next_status in RUN_STATUS_TERMINAL:
-        run_data = {"id": run_id, **run}
-        if next_status == "finished":
-            slack_notifier.send_run_completed(run_data)
-        elif next_status in ("failed", "stopped"):
-            slack_notifier.send_run_failed(run_data)
-
-    if run.get("sweep_id"):
-        recompute_sweep_state(run["sweep_id"])
-    save_runs_state()
-    return {"message": "Status updated"}
-
-
-@app.post("/runs/{run_id}/alerts")
-async def create_alert(run_id: str, req: CreateAlertRequest):
-    """Create a new alert for a run (called by sidecar)."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    if not req.choices:
-        raise HTTPException(status_code=400, detail="At least one choice is required")
-
-    severity = (req.severity or "warning").strip().lower()
-    if severity not in ["info", "warning", "critical"]:
-        severity = "warning"
-
-    alert_id = uuid.uuid4().hex
-    alert = AlertRecord(
-        id=alert_id,
-        run_id=run_id,
-        timestamp=time.time(),
-        severity=severity,
-        message=req.message,
-        choices=req.choices,
-        status="pending",
-    )
-
-    alert_payload = alert.model_dump()
-
-    # Slack notification for alert
-    if slack_notifier.is_enabled:
-        slack_notifier.send_alert(
-            alert=alert_payload,
-            run=runs.get(run_id),
-        )
-
-    active_alerts[alert_id] = alert_payload
-    save_alerts_state()
-    logger.info(f"Created alert {alert_id} for run {run_id}: {req.message}")
-    return {"alert_id": alert_id}
-
-
-# ---- Metrics Endpoints (sidecar-pushed) ----
-
-@app.post("/runs/{run_id}/metrics")
-async def post_run_metrics(run_id: str, request: Request):
-    """Accept metrics rows from the sidecar and append to stored metrics file.
-
-    Body should be JSON with a 'rows' array of metric dictionaries, e.g.:
-    {"rows": [{"step": 1, "train/loss": 0.5, "accuracy": 0.6}, ...]}
-    """
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    body = await request.json()
-    rows = body.get("rows", [])
-    if not isinstance(rows, list) or len(rows) == 0:
-        raise HTTPException(status_code=400, detail="'rows' must be a non-empty array")
-
-    run = runs[run_id]
-    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
-    os.makedirs(run_dir, exist_ok=True)
-    metrics_file = os.path.join(run_dir, "agent_metrics.jsonl")
-
-    try:
-        with open(metrics_file, "a") as f:
-            for row in rows:
-                if isinstance(row, dict):
-                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except OSError as e:
-        logger.error(f"Failed to write metrics for run {run_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to write metrics")
-
-    # Invalidate cache for this file
-    _wandb_metrics_cache.pop(metrics_file, None)
-
-    logger.debug(f"Received {len(rows)} metric rows for run {run_id}")
-    return {"appended": len(rows)}
-
-
-@app.get("/runs/{run_id}/metrics")
-async def get_run_metrics(run_id: str):
-    """Return parsed metrics for a run from stored metrics file."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    run = runs[run_id]
-    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
-    parsed = _load_run_metrics(run_dir)
-
-    # Fallback to wandb files if no stored metrics
-    if not parsed or not parsed.get("metricSeries"):
-        wandb_dir = run.get("wandb_dir") or _find_wandb_dir_from_run_dir(run_dir)
-        wandb_parsed = _get_wandb_curve_data(wandb_dir)
-        if wandb_parsed:
-            parsed = wandb_parsed
-
-    return parsed or {}
-
-
-@app.get("/alerts")
-async def list_alerts():
-    """List alerts ordered by newest first."""
-    alerts = list(active_alerts.values())
-    alerts.sort(key=lambda a: a.get("timestamp", 0), reverse=True)
-    return alerts
-
-
-@app.post("/alerts/{alert_id}/respond")
-async def respond_to_alert(alert_id: str, req: RespondAlertRequest):
-    """Resolve an alert and persist the response for sidecar consumption."""
-    if alert_id not in active_alerts:
-        raise HTTPException(status_code=404, detail="Alert not found")
-
-    alert = active_alerts[alert_id]
-    if req.choice not in alert.get("choices", []):
-        raise HTTPException(status_code=400, detail="Invalid choice")
-
-    alert["status"] = "resolved"
-    alert["response"] = req.choice
-    alert["responded_at"] = time.time()
-
-    run_id = alert.get("run_id")
-    run = runs.get(run_id) if run_id else None
-
-    if not run:
-        save_alerts_state()
-        return {"message": "Response recorded, run not found"}
-
-    run_dir = run.get("run_dir") or os.path.join(DATA_DIR, "runs", run_id)
-    alerts_dir = os.path.join(run_dir, "alerts")
-    os.makedirs(alerts_dir, exist_ok=True)
-    response_file = os.path.join(alerts_dir, f"{alert_id}.response")
-
-    try:
-        with open(response_file, "w") as f:
-            f.write(req.choice)
-    except Exception as e:
-        logger.error(f"Failed writing alert response file for {alert_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to write response file: {e}")
-
-    save_alerts_state()
-    logger.info(f"Recorded alert response for {alert_id}: {req.choice}")
-    return {"message": "Response recorded"}
-
-
-@app.get("/wild-mode")
-async def get_wild_mode():
-    """Get current wild mode state."""
-    return {"enabled": wild_mode_enabled}
-
-
-@app.post("/wild-mode")
-async def set_wild_mode(req: WildModeRequest):
-    """Enable or disable wild mode."""
-    global wild_mode_enabled
-    wild_mode_enabled = bool(req.enabled)
-    save_settings_state()
-    return {"enabled": wild_mode_enabled}
 
 
 
 
 # =============================================================================
-# Wild Loop V2 Endpoints (Ralph-style)
+# Wild Loop V2 + Evolutionary Sweep Endpoints  (extracted to wild_routes.py)
 # =============================================================================
 
-class WildV2StartRequest(BaseModel):
-    goal: str
-    chat_session_id: Optional[str] = None
-    max_iterations: int = 25
-    wait_seconds: float = 30.0
-    evo_sweep_enabled: bool = False
-
-class WildV2SteerRequest(BaseModel):
-    context: str
-
-class WildV2ResolveRequest(BaseModel):
-    event_ids: list
+import wild_routes  # noqa: E402
+wild_routes.init(wild_v2_engine, active_alerts, runs, WildV2Engine)
+app.include_router(wild_routes.router)
 
 
-@app.post("/wild/v2/start")
-async def wild_v2_start(req: WildV2StartRequest):
-    """Start a new V2 wild session (ralph-style loop)."""
-    result = wild_v2_engine.start(
-        goal=req.goal,
-        chat_session_id=req.chat_session_id,
-        max_iterations=req.max_iterations,
-        wait_seconds=req.wait_seconds,
-        evo_sweep_enabled=req.evo_sweep_enabled,
-    )
-    return result
-
-
-@app.post("/wild/v2/stop")
-async def wild_v2_stop():
-    """Stop the active V2 wild session."""
-    return wild_v2_engine.stop()
-
-
-@app.post("/wild/v2/pause")
-async def wild_v2_pause():
-    """Pause the V2 wild session."""
-    return wild_v2_engine.pause()
-
-
-@app.post("/wild/v2/resume")
-async def wild_v2_resume():
-    """Resume the V2 wild session."""
-    return wild_v2_engine.resume()
-
-
-@app.get("/wild/v2/status")
-async def wild_v2_status():
-    """Get current V2 session state, plan, and history."""
-    return wild_v2_engine.get_status()
-
-
-@app.get("/wild/v2/events/{session_id}")
-async def wild_v2_events(session_id: str):
-    """Get pending events for a V2 session (agent calls this).
-    
-    Events are now managed server-side in active_alerts and runs dicts.
-    """
-    events = []
-    # Collect pending alerts
-    for alert_id, alert in active_alerts.items():
-        if alert.get("status") == "pending":
-            events.append({
-                "id": alert_id,
-                "type": "alert",
-                "title": f"Alert: {alert.get('type', 'unknown')}",
-                "detail": alert.get("message", ""),
-                "run_id": alert.get("run_id"),
-                "created_at": alert.get("created_at", time.time()),
-            })
-    # Collect completed/failed runs
-    for rid, run in runs.items():
-        if run.get("status") in ("finished", "failed"):
-            events.append({
-                "id": f"run-{rid}-{run.get('status')}",
-                "type": "run_complete",
-                "title": f"Run {run.get('status')}: {run.get('name', rid)}",
-                "detail": f"Status: {run.get('status')}",
-                "run_id": rid,
-                "created_at": time.time(),
-            })
-    return events
-
-
-@app.post("/wild/v2/events/{session_id}/resolve")
-async def wild_v2_resolve_events(session_id: str, req: WildV2ResolveRequest):
-    """Mark events as resolved (agent calls this after handling)."""
-    resolved = 0
-    ids_to_resolve = set(req.event_ids)
-    for alert_id in list(active_alerts.keys()):
-        if alert_id in ids_to_resolve:
-            active_alerts[alert_id]["status"] = "resolved"
-            resolved += 1
-    return {"resolved": resolved}
-
-
-@app.get("/wild/v2/system-health")
-async def wild_v2_system_health():
-    """Get system utilization (agent calls this to check resources)."""
-    return WildV2Engine.get_system_health_from_runs(runs)
-
-
-@app.get("/wild/v2/plan/{session_id}")
-async def wild_v2_plan(session_id: str):
-    """Get the current tasks/plan markdown (reads tasks.md from disk)."""
-    return {"plan": wild_v2_engine.get_plan()}
-
-
-@app.get("/wild/v2/iteration-log/{session_id}")
-async def wild_v2_iteration_log(session_id: str):
-    """Get the iteration log markdown."""
-    return {"log": wild_v2_engine.get_iteration_log()}
-
-
-@app.post("/wild/v2/steer")
-async def wild_v2_steer(req: WildV2SteerRequest):
-    """Inject user context for the next iteration."""
-    return wild_v2_engine.steer(req.context)
 
 
 # =============================================================================
-# Evolutionary Sweep Endpoints
+# Memory Bank Endpoints  (extracted to memory_routes.py)
 # =============================================================================
 
-@app.get("/wild/v2/evo-sweep/{session_id}")
-async def wild_v2_evo_sweep_status(session_id: str):
-    """Get the current evolutionary sweep status for a session."""
-    session = wild_v2_engine._session  # type: ignore[attr-defined]
-    if not session or session.session_id != session_id:
-        return {"active": False, "message": "No active session matches"}
-    controller = getattr(session, "_evo_controller", None)
-    if controller is None:
-        return {"active": False, "sweep_id": None}
-    return {
-        "active": True,
-        "sweep_id": controller.sweep_id,
-        "evo_sweep_enabled": session.evo_sweep_enabled,
-    }
+import memory_routes  # noqa: E402
+memory_routes.init(memory_store)
+app.include_router(memory_routes.router)
 
 
-@app.post("/wild/v2/evo-sweep/{session_id}/stop")
-async def wild_v2_evo_sweep_stop(session_id: str):
-    """Stop an in-progress evolutionary sweep."""
-    session = wild_v2_engine._session  # type: ignore[attr-defined]
-    if not session or session.session_id != session_id:
-        return {"stopped": False, "message": "No active session matches"}
-    controller = getattr(session, "_evo_controller", None)
-    if controller is None:
-        return {"stopped": False, "message": "No evo sweep in progress"}
-    controller.cancel()
-    return {"stopped": True, "sweep_id": controller.sweep_id}
 
 
 # =============================================================================
-# Memory Bank Endpoints
+# Cluster Endpoints  (extracted to cluster_routes.py)
 # =============================================================================
 
-class MemoryCreateRequest(BaseModel):
-    title: str
-    content: str
-    source: str = "user"  # "user" | "agent" | "reflection"
-    tags: list = []
-    session_id: str = ""
-
-class MemoryUpdateRequest(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    is_active: Optional[bool] = None
-    tags: Optional[list] = None
+import cluster_routes  # noqa: E402
+cluster_routes.init(cluster_state, save_settings_state, _current_run_summary, _infer_cluster_from_environment)
+app.include_router(cluster_routes.router)
 
 
-@app.get("/memories")
-async def list_memories(active_only: bool = False, source: Optional[str] = None):
-    """List all memories, optionally filtered."""
-    entries = memory_store.list(active_only=active_only, source=source)
-    return [{"id": m.id, "title": m.title, "content": m.content,
-             "source": m.source, "tags": m.tags, "session_id": m.session_id,
-             "created_at": m.created_at, "is_active": m.is_active}
-            for m in entries]
-
-
-@app.post("/memories")
-async def create_memory(req: MemoryCreateRequest):
-    """Create a new memory entry."""
-    entry = memory_store.add(
-        title=req.title,
-        content=req.content,
-        source=req.source,
-        tags=req.tags,
-        session_id=req.session_id,
-    )
-    return entry.to_dict()
-
-
-@app.patch("/memories/{memory_id}")
-async def update_memory(memory_id: str, req: MemoryUpdateRequest):
-    """Update a memory (toggle, edit title/content)."""
-    updates = {k: v for k, v in req.dict().items() if v is not None}
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    entry = memory_store.update(memory_id, **updates)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    return entry.to_dict()
-
-
-@app.delete("/memories/{memory_id}")
-async def delete_memory(memory_id: str):
-    """Delete a memory."""
-    deleted = memory_store.delete(memory_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    return {"deleted": True, "id": memory_id}
-
-
-@app.get("/cluster")
-async def get_cluster_state():
-    """Get the persisted cluster state and current run summary."""
-    return {"cluster": cluster_state, "run_summary": _current_run_summary()}
-
-
-@app.post("/cluster/detect")
-async def detect_cluster(req: Optional[ClusterDetectRequest] = None):
-    """Auto-detect cluster setup, or apply a user-specified preferred type."""
-    global cluster_state
-
-    detected = _infer_cluster_from_environment()
-    preferred_type = _normalize_cluster_type(req.preferred_type) if req else "unknown"
-
-    if preferred_type != "unknown":
-        now = time.time()
-        detected["type"] = preferred_type
-        detected["source"] = "manual"
-        detected["status"] = "healthy"
-        detected["label"] = _cluster_type_label(preferred_type)
-        detected["description"] = _cluster_type_description(preferred_type)
-        detected["confidence"] = 1.0
-        detected["updated_at"] = now
-        detected["last_detected_at"] = now
-
-    cluster_state = _normalize_cluster_state(detected)
-    save_settings_state()
-    return {"cluster": cluster_state, "run_summary": _current_run_summary()}
-
-
-@app.post("/cluster")
-async def update_cluster_state(req: ClusterUpdateRequest):
-    """Update persisted cluster metadata with user-provided values."""
-    global cluster_state
-
-    now = time.time()
-    payload = req.model_dump(exclude_unset=True)
-    next_state = dict(cluster_state)
-
-    if "type" in payload:
-        raw_type = payload.get("type")
-        normalized_type = _normalize_cluster_type(raw_type)
-        if raw_type and normalized_type == "unknown" and raw_type.strip().lower() not in {"unknown", "unset"}:
-            raise HTTPException(status_code=400, detail=f"Unsupported cluster type: {raw_type}")
-        next_state["type"] = normalized_type
-        next_state["label"] = _cluster_type_label(normalized_type)
-        next_state["description"] = _cluster_type_description(normalized_type)
-
-    if "status" in payload:
-        raw_status = payload.get("status")
-        normalized_status = _normalize_cluster_status(raw_status)
-        if raw_status and normalized_status == "unknown" and raw_status.strip().lower() != "unknown":
-            raise HTTPException(status_code=400, detail=f"Unsupported cluster status: {raw_status}")
-        next_state["status"] = normalized_status
-
-    if "source" in payload:
-        raw_source = payload.get("source")
-        normalized_source = _normalize_cluster_source(raw_source)
-        if raw_source and normalized_source == "unset" and raw_source.strip().lower() != "unset":
-            raise HTTPException(status_code=400, detail=f"Unsupported cluster source: {raw_source}")
-        next_state["source"] = normalized_source
-    else:
-        next_state["source"] = "manual"
-
-    if "head_node" in payload:
-        next_state["head_node"] = payload.get("head_node")
-    if "node_count" in payload:
-        next_state["node_count"] = payload.get("node_count")
-    if "gpu_count" in payload:
-        next_state["gpu_count"] = payload.get("gpu_count")
-    if "notes" in payload:
-        next_state["notes"] = payload.get("notes")
-    if "details" in payload:
-        next_state["details"] = payload.get("details") if isinstance(payload.get("details"), dict) else {}
-
-    next_state["updated_at"] = now
-    cluster_state = _normalize_cluster_state(next_state)
-    save_settings_state()
-    return {"cluster": cluster_state, "run_summary": _current_run_summary()}
 
 
 # =============================================================================
-# Slack Integration Endpoints
+# Slack Integration Endpoints  (extracted to slack_routes.py)
 # =============================================================================
 
-class SlackConfigRequest(BaseModel):
-    bot_token: str
-    channel: str
-    signing_secret: str = ""
-    notify_on_complete: bool = True
-    notify_on_failed: bool = True
-    notify_on_alert: bool = True
+import slack_routes  # noqa: E402
+slack_routes.init(slack_notifier, save_settings_state)
+app.include_router(slack_routes.router)
 
 
-@app.post("/integrations/slack/configure")
-async def configure_slack(req: SlackConfigRequest):
-    """Configure Slack integration with bot token and channel."""
-    try:
-        result = slack_notifier.configure(
-            bot_token=req.bot_token,
-            channel=req.channel,
-            signing_secret=req.signing_secret,
-            notify_on_complete=req.notify_on_complete,
-            notify_on_failed=req.notify_on_failed,
-            notify_on_alert=req.notify_on_alert,
-        )
-        save_settings_state()
-        return result
-    except (ValueError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/integrations/slack/status")
-async def get_slack_status():
-    """Return current Slack integration status."""
-    return slack_notifier.get_status()
-
-
-@app.post("/integrations/slack/test")
-async def test_slack():
-    """Send a test notification to Slack."""
-    if not slack_notifier.is_enabled:
-        raise HTTPException(status_code=400, detail="Slack is not configured")
-    result = slack_notifier.send_test()
-    if not result["ok"]:
-        raise HTTPException(status_code=500, detail=result.get("error", "Send failed"))
-    return result
-
-
-@app.delete("/integrations/slack/configure")
-async def disconnect_slack():
-    """Disconnect Slack integration."""
-    slack_notifier.disconnect()
-    save_settings_state()
-    return {"ok": True, "message": "Slack disconnected"}
 
 
 def _build_experiment_context() -> str:
@@ -5155,835 +2866,45 @@ def _build_experiment_context() -> str:
 
 
 # =============================================================================
-# Prompt Skill Endpoints
+# Prompt Skill Endpoints  (extracted to skills_routes.py)
 # =============================================================================
 
-class PromptSkillUpdate(BaseModel):
-    template: str
-
-
-class PromptSkillCreate(BaseModel):
-    name: str
-    description: str = ""
-    template: str = ""
-    category: str = "skill"
-    variables: Optional[List[str]] = None
-
-
-class PromptSkillInstall(BaseModel):
-    source: str = "git"  # "git" for now; "zip" later
-    url: str
-    name: Optional[str] = None
-
-
-@app.get("/prompt-skills")
-async def list_prompt_skills():
-    """List all available prompt skills."""
-    return prompt_skill_manager.list()
-
-
-@app.get("/prompt-skills/search")
-async def search_prompt_skills(q: str = "", limit: int = 20):
-    """Search prompt skills by name, description, or template content.
-
-    Agents can call this endpoint to discover available skills.
-    Results are sorted by relevance score (_score field).
-    """
-    return prompt_skill_manager.search(q, limit)
-
-
-@app.post("/prompt-skills")
-async def create_prompt_skill(req: PromptSkillCreate):
-    """Create a new prompt skill.
-
-    Creates a new skill directory with SKILL.md under prompt_skills/.
-    """
-    try:
-        skill = prompt_skill_manager.create(
-            name=req.name,
-            description=req.description,
-            template=req.template,
-            category=req.category,
-            variables=req.variables,
-        )
-        return skill
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-
-
-@app.post("/prompt-skills/reload")
-async def reload_prompt_skills():
-    """Reload all prompt skills from disk."""
-    prompt_skill_manager.load_all()
-    return {"message": "Prompt skills reloaded", "count": len(prompt_skill_manager.list())}
-
-
-@app.post("/prompt-skills/install")
-async def install_prompt_skill(req: PromptSkillInstall):
-    """Install a skill from an external source (git clone).
-
-    Clones the repository into prompt_skills/<name>/ and parses SKILL.md.
-    """
-    if req.source != "git":
-        raise HTTPException(status_code=400, detail=f"Unsupported install source: {req.source}")
-    try:
-        skill = prompt_skill_manager.install_from_git(req.url, req.name)
-        return skill
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-@app.get("/prompt-skills/{skill_id}")
-async def get_prompt_skill(skill_id: str):
-    """Get a single prompt skill by ID."""
-    skill = prompt_skill_manager.get(skill_id)
-    if skill is None:
-        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
-    return skill
-
-
-@app.put("/prompt-skills/{skill_id}")
-async def update_prompt_skill(skill_id: str, req: PromptSkillUpdate):
-    """Update a prompt skill's template."""
-    updated = prompt_skill_manager.update(skill_id, req.template)
-    if updated is None:
-        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
-    return updated
-
-
-@app.delete("/prompt-skills/{skill_id}")
-async def delete_prompt_skill(skill_id: str):
-    """Delete a user-created skill.
-
-    Internal skills (wild_*, ra_mode_plan) cannot be deleted (403).
-    """
-    try:
-        prompt_skill_manager.delete(skill_id)
-        return {"message": f"Skill '{skill_id}' deleted"}
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-
-@app.post("/prompt-skills/{skill_id}/render")
-async def render_prompt_skill(skill_id: str, variables: Dict[str, str]):
-    """Render a prompt skill template with the given variables."""
-    rendered = prompt_skill_manager.render(skill_id, variables)
-    if rendered is None:
-        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
-    return {"rendered": rendered}
-
-
-class SkillFileWrite(BaseModel):
-    content: str
-
-
-@app.get("/prompt-skills/{skill_id}/files")
-async def list_skill_files(skill_id: str):
-    """List all files in a skill's folder."""
-    files = prompt_skill_manager.list_files(skill_id)
-    if files is None:
-        raise HTTPException(status_code=404, detail=f"Prompt skill '{skill_id}' not found")
-    return files
-
-
-@app.get("/prompt-skills/{skill_id}/files/{file_path:path}")
-async def read_skill_file(skill_id: str, file_path: str):
-    """Read a file from a skill's folder."""
-    content = prompt_skill_manager.read_file(skill_id, file_path)
-    if content is None:
-        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-    return {"path": file_path, "content": content}
-
-
-@app.put("/prompt-skills/{skill_id}/files/{file_path:path}")
-async def write_skill_file(skill_id: str, file_path: str, req: SkillFileWrite):
-    """Write a file in a skill's folder."""
-    result = prompt_skill_manager.write_file(skill_id, file_path, req.content)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"Skill or path not found: {skill_id}/{file_path}")
-    return {"message": "File saved", "path": file_path}
+skills_routes.init(prompt_skill_manager)
+app.include_router(skills_routes.router)
 
 
 # =============================================================================
-# Sweep Endpoints
+# Sweep Endpoints  (extracted to sweep_routes.py)
 # =============================================================================
 
-def expand_parameter_grid(parameters: dict, max_runs: int) -> list:
-    """Expand parameter dict into list of parameter combinations."""
-    import itertools
-    
-    keys = list(parameters.keys())
-    values = [parameters[k] if isinstance(parameters[k], list) else [parameters[k]] for k in keys]
-    
-    combinations = list(itertools.product(*values))[:max_runs]
-    
-    return [dict(zip(keys, combo)) for combo in combinations]
+import sweep_routes  # noqa: E402
+sweep_routes.init(
+    sweeps_dict=sweeps,
+    runs_dict=runs,
+    save_runs_state_fn=save_runs_state,
+    recompute_sweep_state_fn=recompute_sweep_state,
+    recompute_all_sweep_states_fn=recompute_all_sweep_states,
+    normalize_sweep_status_fn=_normalize_sweep_status,
+    ensure_sweep_creation_context_fn=_ensure_sweep_creation_context,
+    derive_sweep_creation_context_fn=_derive_sweep_creation_context,
+    normalize_gpuwrap_config_fn=_normalize_gpuwrap_config,
+    launch_run_in_tmux_fn=launch_run_in_tmux,
+    run_status_active_set=RUN_STATUS_ACTIVE,
+)
+app.include_router(sweep_routes.router)
 
 
-def build_command_with_params(base_command: str, params: dict) -> str:
-    """Insert parameters into command string."""
-    # Simple approach: append as CLI args
-    param_str = " ".join([f"--{k}={v}" for k, v in params.items()])
-    return f"{base_command} {param_str}".strip()
-
-
-@app.get("/sweeps")
-async def list_sweeps(
-    limit: int = Query(50, description="Max sweeps to return")
-):
-    """List all sweeps."""
-    recompute_all_sweep_states()
-    backfilled = False
-    result = []
-    for sweep_id, sweep in sweeps.items():
-        if _ensure_sweep_creation_context(sweep):
-            backfilled = True
-        result.append({"id": sweep_id, **sweep})
-
-    if backfilled:
-        save_runs_state()
-    
-    result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-    return result[:limit]
-
-
-class WildSweepCreate(BaseModel):
-    name: str = "Wild Loop Sweep"
-    goal: str = ""
-    chat_session_id: Optional[str] = None  # Originating chat session
-
-@app.post("/sweeps/wild")
-async def create_wild_sweep(req: WildSweepCreate):
-    """Create an empty sweep container for wild loop tracking.
-    
-    Unlike the regular /sweeps endpoint, this doesn't require parameter grids.
-    Runs are added to this sweep via sweep_id when the agent creates them.
-    """
-    sweep_id = uuid.uuid4().hex[:12]
-    
-    created_at = time.time()
-    sweep_data = {
-        "name": req.name,
-        "base_command": "",
-        "workdir": WORKDIR,
-        "parameters": {},
-        "run_ids": [],
-        "status": "pending",
-        "created_at": created_at,
-        "goal": req.goal,
-        "is_wild": True,
-        "chat_session_id": req.chat_session_id,
-        "ui_config": None,
-        "creation_context": _derive_sweep_creation_context(
-            name=req.name,
-            base_command="",
-            goal=req.goal,
-            max_runs=None,
-            ui_config=None,
-            parameters={},
-            created_at=created_at,
-        ),
-        "progress": {
-            "total": 0,
-            "completed": 0,
-            "failed": 0,
-            "running": 0,
-            "launching": 0,
-            "ready": 0,
-            "queued": 0,
-            "canceled": 0,
-        },
-    }
-    
-    sweeps[sweep_id] = sweep_data
-    recompute_sweep_state(sweep_id)
-    save_runs_state()
-    
-    logger.info(f"Created wild sweep {sweep_id}: {req.name} (goal: {req.goal[:80]})")
-    return {"id": sweep_id, **sweep_data}
-
-
-@app.post("/sweeps")
-async def create_sweep(req: SweepCreate):
-    """Create a sweep in draft/pending/running mode, optionally with generated runs."""
-    sweep_id = uuid.uuid4().hex[:12]
-    requested_status = _normalize_sweep_status(req.status)
-    if req.auto_start and requested_status == "pending":
-        # auto_start implies immediate queue/launch intent
-        requested_status = "running"
-
-    if requested_status not in {"draft", "pending", "running"}:
-        raise HTTPException(status_code=400, detail=f"Unsupported sweep status: {requested_status}")
-
-    created_at = time.time()
-    creation_context = _derive_sweep_creation_context(
-        name=req.name,
-        base_command=req.base_command,
-        goal=req.goal,
-        max_runs=req.max_runs,
-        ui_config=req.ui_config,
-        parameters=req.parameters,
-        created_at=created_at,
-    )
-
-    # Create draft sweep without materializing runs
-    if requested_status == "draft":
-        sweep_data = {
-            "name": req.name,
-            "base_command": req.base_command,
-            "workdir": req.workdir or WORKDIR,
-            "parameters": req.parameters or {},
-            "run_ids": [],
-            "status": "draft",
-            "created_at": created_at,
-            "goal": req.goal,
-            "max_runs": req.max_runs,
-            "ui_config": req.ui_config,
-            "chat_session_id": req.chat_session_id,
-            "creation_context": creation_context,
-            "progress": {
-                "total": 0,
-                "completed": 0,
-                "failed": 0,
-                "running": 0,
-                "launching": 0,
-                "ready": 0,
-                "queued": 0,
-                "canceled": 0,
-            },
-        }
-        sweeps[sweep_id] = sweep_data
-        save_runs_state()
-        logger.info(f"Created draft sweep {sweep_id}: {req.name}")
-        return {"id": sweep_id, **sweep_data}
-    
-    # Expand parameters into run configurations
-    param_combinations = expand_parameter_grid(req.parameters or {}, req.max_runs)
-    
-    # Create runs for each combination
-    run_ids = []
-    for i, params in enumerate(param_combinations):
-        run_id = uuid.uuid4().hex[:12]
-        command = build_command_with_params(req.base_command, params)
-        
-        run_data = {
-            "name": f"{req.name} #{i+1}",
-            "command": command,
-            "workdir": req.workdir or WORKDIR,
-            "status": "queued" if requested_status == "running" else "ready",
-            "created_at": time.time(),
-            "is_archived": False,
-            "sweep_id": sweep_id,
-            "sweep_params": params,
-            "chat_session_id": req.chat_session_id,
-            "tmux_window": None,
-            "run_dir": None,
-            "exit_code": None,
-            "error": None,
-            "wandb_dir": None,
-        }
-        
-        runs[run_id] = run_data
-        run_ids.append(run_id)
-    
-    # Create sweep record
-    sweep_data = {
-        "name": req.name,
-        "base_command": req.base_command,
-        "workdir": req.workdir or WORKDIR,
-        "parameters": req.parameters,
-        "run_ids": run_ids,
-        "status": "running" if requested_status == "running" else "pending",
-        "created_at": created_at,
-        "goal": req.goal,
-        "max_runs": req.max_runs,
-        "ui_config": req.ui_config,
-        "chat_session_id": req.chat_session_id,
-        "creation_context": creation_context,
-        "progress": {
-            "total": len(run_ids),
-            "completed": 0,
-            "failed": 0,
-            "running": 0,
-            "launching": 0,
-            "ready": len(run_ids) if requested_status != "running" else 0,
-            "queued": len(run_ids) if requested_status == "running" else 0,
-            "canceled": 0,
-        },
-    }
-    
-    sweeps[sweep_id] = sweep_data
-    recompute_sweep_state(sweep_id)
-    save_runs_state()
-    
-    logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
-    return {"id": sweep_id, **sweep_data}
-
-
-@app.put("/sweeps/{sweep_id}")
-async def update_sweep(sweep_id: str, req: SweepUpdate):
-    """Update an existing sweep configuration/state."""
-    if sweep_id not in sweeps:
-        raise HTTPException(status_code=404, detail="Sweep not found")
-
-    sweep = sweeps[sweep_id]
-    current_status = _normalize_sweep_status(sweep.get("status"))
-    base_command_update_requested = req.base_command is not None
-    non_command_structural_update_requested = any(
-        field is not None
-        for field in [req.parameters, req.max_runs]
-    )
-    structural_update_requested = base_command_update_requested or non_command_structural_update_requested
-
-    # Keep running sweeps immutable to avoid mutating active experiments in place.
-    if current_status == "running" and structural_update_requested:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Cannot modify base command/parameters/max_runs while sweep is running. "
-                "Create a draft revision and launch it as a new sweep."
-            ),
-        )
-
-    if sweep.get("run_ids") and non_command_structural_update_requested:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Cannot mutate structure for a sweep that already has runs. "
-                "Create a draft revision instead."
-            ),
-        )
-
-    if req.status is not None:
-        next_status = _normalize_sweep_status(req.status)
-        if next_status == "draft" and sweep.get("run_ids"):
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot move a sweep with existing runs back to draft.",
-            )
-        sweep["status"] = next_status
-
-    if req.name is not None:
-        sweep["name"] = req.name
-    if req.base_command is not None:
-        next_base_command = req.base_command.strip()
-        if not next_base_command:
-            raise HTTPException(status_code=400, detail="Sweep base command cannot be empty")
-        sweep["base_command"] = next_base_command
-
-        ui_config = sweep.get("ui_config")
-        if isinstance(ui_config, dict):
-            ui_config["command"] = next_base_command
-            ui_config["updatedAt"] = int(time.time())
-
-        creation_context = sweep.get("creation_context")
-        if isinstance(creation_context, dict):
-            creation_context["command"] = next_base_command
-
-        run_ids = sweep.get("run_ids") or []
-        for run_id in run_ids:
-            run = runs.get(run_id)
-            if not run:
-                continue
-            params = run.get("sweep_params")
-            if not isinstance(params, dict):
-                params = {}
-            run["command"] = build_command_with_params(next_base_command, params)
-    if req.workdir is not None:
-        sweep["workdir"] = req.workdir
-    if req.parameters is not None:
-        sweep["parameters"] = req.parameters
-    if req.goal is not None:
-        sweep["goal"] = req.goal
-    if req.ui_config is not None:
-        sweep["ui_config"] = req.ui_config
-
-    if req.max_runs is not None and req.max_runs > 0:
-        sweep["max_runs"] = req.max_runs
-
-    recompute_sweep_state(sweep_id)
-    save_runs_state()
-    return {"id": sweep_id, **sweep}
-
-
-@app.get("/sweeps/{sweep_id}")
-async def get_sweep(sweep_id: str):
-    """Get sweep details with run status summary."""
-    if sweep_id not in sweeps:
-        raise HTTPException(status_code=404, detail="Sweep not found")
-
-    sweep = recompute_sweep_state(sweep_id) or sweeps[sweep_id]
-    if _ensure_sweep_creation_context(sweep):
-        save_runs_state()
-    return {"id": sweep_id, **sweep}
-
-
-@app.post("/sweeps/{sweep_id}/start")
-async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max parallel runs")):
-    """Start all ready/queued runs in a sweep."""
-    if sweep_id not in sweeps:
-        raise HTTPException(status_code=404, detail="Sweep not found")
-    
-    sweep = sweeps[sweep_id]
-    if _normalize_sweep_status(sweep.get("status")) == "draft":
-        raise HTTPException(status_code=400, detail="Draft sweep has no runnable jobs yet")
-    started = 0
-    attempted = 0
-    
-    for run_id in sweep.get("run_ids", []):
-        if run_id in runs:
-            run = runs[run_id]
-            if run["status"] in ["ready", "queued"] and started < parallel:
-                attempted += 1
-                try:
-                    # Queue if ready
-                    if run["status"] == "ready":
-                        run["status"] = "queued"
-                        run["queued_at"] = time.time()
-                    
-                    launch_run_in_tmux(run_id, run)
-                    started += 1
-                except Exception as e:
-                    logger.error(f"Failed to start run {run_id}: {e}")
-
-    recompute_sweep_state(sweep_id)
-    save_runs_state()
-    
-    return {"message": f"Started {started}/{attempted} runs", "sweep_id": sweep_id}
-
-
-@app.post("/sweeps/{sweep_id}/runs")
-async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
-    """Create a new run and attach it to a sweep in one call.
-
-    This allows adding runs to a sweep even if they are outside the original
-    parameter/hyperparameter grid (e.g. a one-off baseline, a manual rerun
-    with custom flags, etc.).
-    """
-    if sweep_id not in sweeps:
-        raise HTTPException(status_code=404, detail="Sweep not found")
-
-    # Force sweep_id on the run regardless of what was provided
-    req.sweep_id = sweep_id
-
-    run_id = uuid.uuid4().hex[:12]
-    initial_status = "queued" if req.auto_start else "ready"
-    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
-
-    run_data = {
-        "name": req.name,
-        "command": req.command,
-        "workdir": req.workdir or WORKDIR,
-        "status": initial_status,
-        "created_at": time.time(),
-        "is_archived": False,
-        "sweep_id": sweep_id,
-        "parent_run_id": req.parent_run_id,
-        "origin_alert_id": req.origin_alert_id,
-        "gpuwrap_config": gpuwrap_config,
-        "chat_session_id": req.chat_session_id or sweeps[sweep_id].get("chat_session_id"),
-        "tmux_window": None,
-        "run_dir": None,
-        "exit_code": None,
-        "error": None,
-        "wandb_dir": None,
-    }
-
-    runs[run_id] = run_data
-    sweeps[sweep_id].setdefault("run_ids", []).append(run_id)
-    recompute_sweep_state(sweep_id)
-    save_runs_state()
-
-    logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
-    return {"id": run_id, **run_data}
-
-
-@app.post("/runs/{run_id}/add-to-sweep")
-async def add_run_to_sweep(run_id: str, sweep_id: str = Query(..., description="Sweep ID to add the run to")):
-    """Add an existing standalone run to a sweep."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    if sweep_id not in sweeps:
-        raise HTTPException(status_code=404, detail="Sweep not found")
-
-    run = runs[run_id]
-    old_sweep_id = run.get("sweep_id")
-    if old_sweep_id == sweep_id:
-        return {"message": f"Run {run_id} is already in sweep {sweep_id}"}
-
-    if old_sweep_id and old_sweep_id in sweeps and run.get("status") in RUN_STATUS_ACTIVE.union({"queued"}):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Cannot move an active/queued run between sweeps. "
-                "Stop it first or rerun into a new sweep."
-            ),
-        )
-
-    if old_sweep_id and old_sweep_id in sweeps:
-        old_ids = sweeps[old_sweep_id].get("run_ids", [])
-        sweeps[old_sweep_id]["run_ids"] = [rid for rid in old_ids if rid != run_id]
-        recompute_sweep_state(old_sweep_id)
-
-    run["sweep_id"] = sweep_id
-    if run_id not in sweeps[sweep_id].get("run_ids", []):
-        sweeps[sweep_id].setdefault("run_ids", []).append(run_id)
-    recompute_sweep_state(sweep_id)
-    save_runs_state()
-    return {"message": f"Run {run_id} added to sweep {sweep_id}"}
 
 
 # =============================================================================
-# Log Endpoints
+# Log & Artifact Endpoints  (extracted to log_routes.py)
 # =============================================================================
 
-@app.get("/runs/{run_id}/logs")
-async def get_run_logs(
-    run_id: str,
-    offset: int = Query(-10000, description="Byte offset. Negative = from end."),
-    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
-):
-    """Get run logs with byte-offset pagination."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    run = runs[run_id]
-    run_dir = run.get("run_dir")
-    
-    if not run_dir:
-        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
-    
-    log_file = os.path.join(run_dir, "run.log")
-    if not os.path.exists(log_file):
-        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
-    
-    # Cap limit at 100KB
-    limit = min(limit, 100 * 1024)
-    
-    try:
-        total_size = os.path.getsize(log_file)
-        
-        # Calculate actual offset
-        if offset < 0:
-            actual_offset = max(0, total_size + offset)
-        else:
-            actual_offset = min(offset, total_size)
-        
-        with open(log_file, "r", errors="replace") as f:
-            f.seek(actual_offset)
-            content = f.read(limit)
-        
-        bytes_read = len(content.encode('utf-8'))
-        end_offset = actual_offset + bytes_read
-        
-        return {
-            "content": content,
-            "offset": actual_offset,
-            "total_size": total_size,
-            "has_more_before": actual_offset > 0,
-            "has_more_after": end_offset < total_size
-        }
-    except Exception as e:
-        logger.error(f"Error reading logs for {run_id}: {e}")
-        return {"content": f"Error reading logs: {e}", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
+import log_routes  # noqa: E402
+log_routes.init(runs)
+app.include_router(log_routes.router)
 
 
-@app.get("/runs/{run_id}/logs/stream")
-async def stream_run_logs(run_id: str):
-    """Stream run logs via SSE."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    run = runs[run_id]
-    run_dir = run.get("run_dir")
-    
-    async def log_generator():
-        if not run_dir:
-            yield f"data: {json.dumps({'error': 'No run directory'})}\n\n"
-            return
-        
-        log_file = os.path.join(run_dir, "run.log")
-        last_size = 0
-        
-        # Send initial content
-        if os.path.exists(log_file):
-            with open(log_file, "r", errors="replace") as f:
-                content = f.read()
-                last_size = len(content.encode('utf-8'))
-                yield f"data: {json.dumps({'type': 'initial', 'content': content})}\n\n"
-        
-        # Stream updates
-        while True:
-            await asyncio.sleep(0.5)
-            
-            # Check if run is still active
-            current_run = runs.get(run_id, {})
-            if current_run.get("status") in ["finished", "failed", "stopped"]:
-                # Send final content and close
-                if os.path.exists(log_file):
-                    with open(log_file, "r", errors="replace") as f:
-                        f.seek(last_size)
-                        new_content = f.read()
-                        if new_content:
-                            yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'status': current_run.get('status')})}\n\n"
-                break
-            
-            # Check for new content
-            if os.path.exists(log_file):
-                current_size = os.path.getsize(log_file)
-                if current_size > last_size:
-                    with open(log_file, "r", errors="replace") as f:
-                        f.seek(last_size)
-                        new_content = f.read()
-                        last_size = current_size
-                        yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
-    
-    return StreamingResponse(log_generator(), media_type="text/event-stream")
-
-
-@app.get("/runs/{run_id}/sidecar-logs")
-async def get_sidecar_logs(
-    run_id: str,
-    offset: int = Query(-10000, description="Byte offset. Negative = from end."),
-    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
-):
-    """Get sidecar logs with byte-offset pagination."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    run = runs[run_id]
-    run_dir = run.get("run_dir")
-
-    if not run_dir:
-        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
-
-    log_file = os.path.join(run_dir, "sidecar.log")
-    if not os.path.exists(log_file):
-        return {"content": "", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
-
-    limit = min(limit, 100 * 1024)
-
-    try:
-        total_size = os.path.getsize(log_file)
-
-        if offset < 0:
-            actual_offset = max(0, total_size + offset)
-        else:
-            actual_offset = min(offset, total_size)
-
-        with open(log_file, "r", errors="replace") as f:
-            f.seek(actual_offset)
-            content = f.read(limit)
-
-        bytes_read = len(content.encode('utf-8'))
-        end_offset = actual_offset + bytes_read
-
-        return {
-            "content": content,
-            "offset": actual_offset,
-            "total_size": total_size,
-            "has_more_before": actual_offset > 0,
-            "has_more_after": end_offset < total_size
-        }
-    except Exception as e:
-        logger.error(f"Error reading sidecar logs for {run_id}: {e}")
-        return {"content": f"Error reading logs: {e}", "offset": 0, "total_size": 0, "has_more_before": False, "has_more_after": False}
-
-
-@app.get("/runs/{run_id}/sidecar-logs/stream")
-async def stream_sidecar_logs(run_id: str):
-    """Stream sidecar logs via SSE."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    run = runs[run_id]
-    run_dir = run.get("run_dir")
-
-    async def log_generator():
-        if not run_dir:
-            yield f"data: {json.dumps({'error': 'No run directory'})}\n\n"
-            return
-
-        log_file = os.path.join(run_dir, "sidecar.log")
-        last_size = 0
-
-        # Send initial content
-        if os.path.exists(log_file):
-            with open(log_file, "r", errors="replace") as f:
-                content = f.read()
-                last_size = len(content.encode('utf-8'))
-                yield f"data: {json.dumps({'type': 'initial', 'content': content})}\n\n"
-
-        # Stream updates
-        while True:
-            await asyncio.sleep(0.5)
-
-            current_run = runs.get(run_id, {})
-            if current_run.get("status") in ["finished", "failed", "stopped"]:
-                if os.path.exists(log_file):
-                    with open(log_file, "r", errors="replace") as f:
-                        f.seek(last_size)
-                        new_content = f.read()
-                        if new_content:
-                            yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'status': current_run.get('status')})}\n\n"
-                break
-
-            if os.path.exists(log_file):
-                current_size = os.path.getsize(log_file)
-                if current_size > last_size:
-                    with open(log_file, "r", errors="replace") as f:
-                        f.seek(last_size)
-                        new_content = f.read()
-                        last_size = current_size
-                        yield f"data: {json.dumps({'type': 'delta', 'content': new_content})}\n\n"
-
-    return StreamingResponse(log_generator(), media_type="text/event-stream")
-
-
-# =============================================================================
-# Artifact Endpoints
-# =============================================================================
-
-@app.get("/runs/{run_id}/artifacts")
-async def list_artifacts(run_id: str):
-    """List artifacts for a run."""
-    if run_id not in runs:
-        raise HTTPException(status_code=404, detail="Run not found")
-    
-    run = runs[run_id]
-    run_dir = run.get("run_dir")
-    artifacts = []
-    
-    if run_dir:
-        artifacts_dir = os.path.join(run_dir, "artifacts")
-        if os.path.exists(artifacts_dir):
-            for name in os.listdir(artifacts_dir):
-                path = os.path.join(artifacts_dir, name)
-                # Resolve symlinks to get actual path
-                actual_path = os.path.realpath(path) if os.path.islink(path) else path
-                artifacts.append({
-                    "name": name,
-                    "path": actual_path,
-                    "type": "other"  # TODO: detect type
-                })
-    
-    # Add wandb_dir if present
-    if run.get("wandb_dir"):
-        artifacts.append({
-            "name": "wandb",
-            "path": run["wandb_dir"],
-            "type": "wandb"
-        })
-    
-    return artifacts
 
 
 # =============================================================================
@@ -6004,120 +2925,14 @@ def start_opencode_server_subprocess(args):
 
 
 # =============================================================================
-# Plan Endpoints
+# Plan Endpoints  (extracted to plan_routes.py)
 # =============================================================================
 
-@app.get("/plans")
-async def list_plans(status: Optional[str] = None, session_id: Optional[str] = None):
-    """List all plans, optionally filtered by status or session."""
-    result = list(plans.values())
-    if status:
-        result = [p for p in result if p.get("status") == status]
-    if session_id:
-        result = [p for p in result if p.get("session_id") == session_id]
-    # Sort by created_at descending (newest first)
-    result.sort(key=lambda p: p.get("created_at", 0), reverse=True)
-    return result
+import plan_routes  # noqa: E402
+plan_routes.init(plans, save_plans_state)
+app.include_router(plan_routes.router)
 
 
-@app.get("/plans/{plan_id}")
-async def get_plan(plan_id: str):
-    """Get a single plan by ID."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    return plan
-
-
-@app.post("/plans")
-async def create_plan(req: PlanCreate):
-    """Create a new plan."""
-    now = time.time()
-    plan_id = str(uuid.uuid4())[:8]
-    plan = {
-        "id": plan_id,
-        "title": req.title,
-        "goal": req.goal,
-        "session_id": req.session_id,
-        "status": "draft",
-        "sections": req.sections or {},
-        "raw_markdown": req.raw_markdown,
-        "created_at": now,
-        "updated_at": now,
-    }
-    plans[plan_id] = plan
-    save_plans_state()
-    return plan
-
-
-@app.patch("/plans/{plan_id}")
-async def update_plan(plan_id: str, req: PlanUpdate):
-    """Update a plan's fields."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    if req.title is not None:
-        plan["title"] = req.title
-    if req.status is not None:
-        if req.status not in PLAN_STATUSES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid status '{req.status}'. Must be one of: {', '.join(sorted(PLAN_STATUSES))}"
-            )
-        plan["status"] = req.status
-    if req.sections is not None:
-        plan["sections"] = req.sections
-    if req.raw_markdown is not None:
-        plan["raw_markdown"] = req.raw_markdown
-
-    plan["updated_at"] = time.time()
-    save_plans_state()
-    return plan
-
-
-@app.post("/plans/{plan_id}/approve")
-async def approve_plan(plan_id: str):
-    """Approve a plan, setting its status to 'approved'."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    if plan["status"] not in ("draft",):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot approve a plan with status '{plan['status']}'. Only draft plans can be approved."
-        )
-    plan["status"] = "approved"
-    plan["updated_at"] = time.time()
-    save_plans_state()
-    return plan
-
-
-@app.post("/plans/{plan_id}/execute")
-async def execute_plan(plan_id: str):
-    """Mark a plan as 'executing'. Frontend should transition to agent/wild mode."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    if plan["status"] not in ("approved",):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot execute a plan with status '{plan['status']}'. Only approved plans can be executed."
-        )
-    plan["status"] = "executing"
-    plan["updated_at"] = time.time()
-    save_plans_state()
-    return plan
-
-
-@app.delete("/plans/{plan_id}")
-async def delete_plan(plan_id: str):
-    """Delete a plan."""
-    if plan_id not in plans:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    del plans[plan_id]
-    save_plans_state()
-    return {"deleted": True, "id": plan_id}
 
 
 def maybe_mount_frontend_static():
@@ -6185,7 +3000,7 @@ def main():
     maybe_mount_frontend_static()
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
-    logger.info(f"Working directory: {WORKDIR}")
+    logger.info(f"Working directory: {config.WORKDIR}")
     
     uvicorn.run(app, host=args.host, port=args.port, log_config=None)
 
