@@ -3,8 +3,20 @@
 set -euo pipefail
 
 INSTALL_DIR="${RESEARCH_AGENT_INSTALL_DIR:-${HOME}/.research-agent/app}"
-DEFAULT_BACKEND_BINARY_URL="https://drive.google.com/uc?export=download&id=1CIdMPZzF2GceTZkSwK_8_8T9crN1cfDl"
-DEFAULT_FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_DEFAULT_FRONTEND_BUNDLE_URL:-https://drive.google.com/uc?export=download&id=14kuhcyxGBtBl_oa774AaIcW4-FtyE7QR}"
+DEFAULT_RELEASE_REPO="${RESEARCH_AGENT_DEFAULT_RELEASE_REPO:-hao-ai-lab/research-agent}"
+DEFAULT_RELEASE_TAG="${RESEARCH_AGENT_DEFAULT_RELEASE_TAG:-v0.1.0-0219}"
+DEFAULT_RELEASE_BASE_URL="${RESEARCH_AGENT_DEFAULT_RELEASE_BASE_URL:-https://github.com/${DEFAULT_RELEASE_REPO}/releases/download/${DEFAULT_RELEASE_TAG}}"
+DEFAULT_BACKEND_BINARY_URL="${RESEARCH_AGENT_DEFAULT_BACKEND_BINARY_URL:-}"
+DEFAULT_FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_DEFAULT_FRONTEND_BUNDLE_URL:-}"
+DEFAULT_BACKEND_BINARY_BASE_URL="${RESEARCH_AGENT_DEFAULT_BACKEND_BINARY_BASE_URL:-$DEFAULT_RELEASE_BASE_URL}"
+DEFAULT_FRONTEND_BUNDLE_BASE_URL="${RESEARCH_AGENT_DEFAULT_FRONTEND_BUNDLE_BASE_URL:-$DEFAULT_RELEASE_BASE_URL}"
+DEFAULT_BACKEND_BINARY_SHA256="${RESEARCH_AGENT_DEFAULT_BACKEND_BINARY_SHA256:-0552d8914be1a29a4e6b837ecab190de349ec523ba259e6a40806638a823d37c}"
+DEFAULT_RUNTIME_ASSETS_BASE_URL="${RESEARCH_AGENT_DEFAULT_RUNTIME_ASSETS_BASE_URL:-https://raw.githubusercontent.com/${DEFAULT_RELEASE_REPO}/${DEFAULT_RELEASE_TAG}}"
+RUNTIME_ASSETS_BASE_URL="${RESEARCH_AGENT_RUNTIME_ASSETS_BASE_URL:-$DEFAULT_RUNTIME_ASSETS_BASE_URL}"
+DEFAULT_OPENCODE_CONFIG_URL="${RUNTIME_ASSETS_BASE_URL%/}/server/opencode.json"
+DEFAULT_RESEARCH_AGENT_MCP_URL="${RUNTIME_ASSETS_BASE_URL%/}/server/research_agent_mcp.py"
+DEFAULT_SLURM_MCP_CLI_URL="${RUNTIME_ASSETS_BASE_URL%/}/server/slurm_mcp_cli.py"
+DEFAULT_MCP_JSON_URL="${RUNTIME_ASSETS_BASE_URL%/}/.mcp.json"
 
 log() {
   printf '[install.sh] %s\n' "$*"
@@ -163,6 +175,110 @@ fi
 run_prereq_checks
 
 mkdir -p "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/server/dist"
+
+copy_or_download_asset() {
+  local local_src="$1"
+  local remote_url="$2"
+  local dest_path="$3"
+  local label="$4"
+  local tmp_path="${dest_path}.download.$$"
+
+  mkdir -p "$(dirname "$dest_path")"
+
+  if [ -f "$local_src" ]; then
+    cp "$local_src" "$dest_path"
+    log "Installed ${label} from local source"
+    return 0
+  fi
+
+  if [ -z "$remote_url" ]; then
+    die "Missing URL for ${label} (set appropriate RESEARCH_AGENT_*_URL env var)"
+  fi
+
+  rm -f "$tmp_path"
+  if ! curl -fsSL "$remote_url" -o "$tmp_path"; then
+    rm -f "$tmp_path"
+    die "Failed to download ${label} from ${remote_url}"
+  fi
+
+  mv -f "$tmp_path" "$dest_path"
+  log "Downloaded ${label} from ${remote_url}"
+}
+
+ensure_runtime_assets() {
+  local source_root=""
+  local opencode_config_url="${RESEARCH_AGENT_OPENCODE_CONFIG_URL:-$DEFAULT_OPENCODE_CONFIG_URL}"
+  local research_agent_mcp_url="${RESEARCH_AGENT_MCP_URL:-$DEFAULT_RESEARCH_AGENT_MCP_URL}"
+  local slurm_mcp_cli_url="${RESEARCH_AGENT_SLURM_MCP_CLI_URL:-$DEFAULT_SLURM_MCP_CLI_URL}"
+  local mcp_json_url="${RESEARCH_AGENT_MCP_JSON_URL:-$DEFAULT_MCP_JSON_URL}"
+
+  if [ -n "${BASH_SOURCE[0]:-}" ]; then
+    source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  fi
+
+  copy_or_download_asset \
+    "${source_root}/server/opencode.json" \
+    "$opencode_config_url" \
+    "${INSTALL_DIR}/server/opencode.json" \
+    "server/opencode.json"
+
+  copy_or_download_asset \
+    "${source_root}/server/research_agent_mcp.py" \
+    "$research_agent_mcp_url" \
+    "${INSTALL_DIR}/server/research_agent_mcp.py" \
+    "server/research_agent_mcp.py"
+
+  copy_or_download_asset \
+    "${source_root}/server/slurm_mcp_cli.py" \
+    "$slurm_mcp_cli_url" \
+    "${INSTALL_DIR}/server/slurm_mcp_cli.py" \
+    "server/slurm_mcp_cli.py"
+
+  copy_or_download_asset \
+    "${source_root}/.mcp.json" \
+    "$mcp_json_url" \
+    "${INSTALL_DIR}/.mcp.json" \
+    ".mcp.json"
+
+  python3 - "$INSTALL_DIR" <<'PY'
+import json
+import os
+import sys
+
+install_dir = os.path.abspath(sys.argv[1])
+config_path = os.path.join(install_dir, "server", "opencode.json")
+research_agent_script = os.path.join(install_dir, "server", "research_agent_mcp.py")
+slurm_script = os.path.join(install_dir, "server", "slurm_mcp_cli.py")
+
+try:
+    with open(config_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+except FileNotFoundError as exc:
+    raise SystemExit(f"Missing opencode config: {config_path}") from exc
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"Invalid JSON in {config_path}: {exc}") from exc
+
+mcp = payload.setdefault("mcp", {})
+mcp.setdefault("research-agent", {})
+mcp.setdefault("slurm-cli", {})
+
+if isinstance(mcp["research-agent"], dict):
+    mcp["research-agent"]["type"] = "local"
+    mcp["research-agent"]["command"] = ["python3", research_agent_script]
+    mcp["research-agent"]["enabled"] = True
+
+if isinstance(mcp["slurm-cli"], dict):
+    mcp["slurm-cli"]["type"] = "local"
+    mcp["slurm-cli"]["command"] = ["python3", slurm_script]
+    mcp["slurm-cli"]["enabled"] = True
+
+with open(config_path, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
+
+  log "Patched MCP command paths in ${INSTALL_DIR}/server/opencode.json"
+}
 
 LOCAL_SCRIPT=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/research-agent" ]; then
@@ -1565,27 +1681,30 @@ __RESEARCH_AGENT_EMBEDDED__
 fi
 chmod +x "${INSTALL_DIR}/scripts/research-agent"
 
+ensure_runtime_assets
+
 log "Running install bootstrap (artifact-first, no git clone)"
 install_args=(install --install-dir "$INSTALL_DIR")
 
 BACKEND_BINARY_URL="${RESEARCH_AGENT_BACKEND_BINARY_URL:-$DEFAULT_BACKEND_BINARY_URL}"
+BACKEND_BINARY_BASE_URL="${RESEARCH_AGENT_BACKEND_BINARY_BASE_URL:-$DEFAULT_BACKEND_BINARY_BASE_URL}"
 if [ -n "$BACKEND_BINARY_URL" ]; then
   install_args+=(--backend-binary-url "$BACKEND_BINARY_URL")
+elif [ -n "$BACKEND_BINARY_BASE_URL" ]; then
+  install_args+=(--backend-binary-base-url "$BACKEND_BINARY_BASE_URL")
 fi
 
 FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_FRONTEND_BUNDLE_URL:-$DEFAULT_FRONTEND_BUNDLE_URL}"
+FRONTEND_BUNDLE_BASE_URL="${RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL:-$DEFAULT_FRONTEND_BUNDLE_BASE_URL}"
 if [ -n "$FRONTEND_BUNDLE_URL" ]; then
   install_args+=(--frontend-bundle-url "$FRONTEND_BUNDLE_URL")
+elif [ -n "$FRONTEND_BUNDLE_BASE_URL" ]; then
+  install_args+=(--frontend-bundle-base-url "$FRONTEND_BUNDLE_BASE_URL")
 fi
 
-if [ -n "${RESEARCH_AGENT_BACKEND_BINARY_BASE_URL:-}" ]; then
-  install_args+=(--backend-binary-base-url "$RESEARCH_AGENT_BACKEND_BINARY_BASE_URL")
-fi
-if [ -n "${RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL:-}" ]; then
-  install_args+=(--frontend-bundle-base-url "$RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL")
-fi
-if [ -n "${RESEARCH_AGENT_BACKEND_BINARY_SHA256:-}" ]; then
-  install_args+=(--backend-binary-sha256 "$RESEARCH_AGENT_BACKEND_BINARY_SHA256")
+BACKEND_BINARY_SHA256="${RESEARCH_AGENT_BACKEND_BINARY_SHA256:-$DEFAULT_BACKEND_BINARY_SHA256}"
+if [ -n "$BACKEND_BINARY_SHA256" ]; then
+  install_args+=(--backend-binary-sha256 "$BACKEND_BINARY_SHA256")
 fi
 
 "${INSTALL_DIR}/scripts/research-agent" "${install_args[@]}"

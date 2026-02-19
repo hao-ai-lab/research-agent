@@ -10,6 +10,10 @@
     "cli",
     "scripts/research-agent",
     "server/build-backend-binary.sh",
+    "server/opencode.json",
+    "server/research_agent_mcp.py",
+    "server/slurm_mcp_cli.py",
+    ".mcp.json",
     "README.md",
     "install.sh"
   ],

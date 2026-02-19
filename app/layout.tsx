@@ -1,22 +1,9 @@
 import React from "react"
 import type { Metadata } from 'next'
-import { Manrope, JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ApiConfigProvider } from '@/lib/api-config'
 import { AppSettingsProvider } from '@/lib/app-settings'
 import './globals.css'
-
-const manrope = Manrope({
-  subsets: ['latin'],
-  variable: '--font-ui-sans',
-  display: 'swap',
-})
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  variable: '--font-ui-mono',
-  display: 'swap',
-})
 
 export const viewport = {
   width: 'device-width',
@@ -55,7 +42,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="bg-background" suppressHydrationWarning>
-      <body className={`${manrope.variable} ${jetbrainsMono.variable} font-sans antialiased`} suppressHydrationWarning>
+      <body className="font-sans antialiased" suppressHydrationWarning>
         <ApiConfigProvider>
           <AppSettingsProvider>
             {children}
