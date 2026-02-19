@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Clock, SlidersHorizontal, ListChecks } from 'lucide-react'
+import { Clock, SlidersHorizontal, ListChecks, Dna } from 'lucide-react'
 import type { WildModeSetup, AutonomyLevel } from '@/lib/types'
 import styles from './wild-mode-setup-panel.module.css'
 
@@ -28,6 +28,7 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
     const [customHours, setCustomHours] = useState('')
     const [autonomyLevel, setAutonomyLevel] = useState<AutonomyLevel>('balanced')
     const [queueModifyEnabled, setQueueModifyEnabled] = useState(true)
+    const [evoSweepEnabled, setEvoSweepEnabled] = useState(false)
     const [selectedPreset, setSelectedPreset] = useState<number | null>(360)
 
     const handlePresetClick = useCallback((minutes: number) => {
@@ -51,8 +52,9 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
             awayDurationMinutes: awayMinutes,
             autonomyLevel,
             queueModifyEnabled,
+            evoSweepEnabled,
         })
-    }, [awayMinutes, autonomyLevel, queueModifyEnabled, onLaunch])
+    }, [awayMinutes, autonomyLevel, queueModifyEnabled, evoSweepEnabled, onLaunch])
 
     // Wrap setters to also trigger apply
     const selectPreset = useCallback((minutes: number) => {
@@ -62,8 +64,9 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
             awayDurationMinutes: minutes,
             autonomyLevel,
             queueModifyEnabled,
+            evoSweepEnabled,
         }), 0)
-    }, [handlePresetClick, autonomyLevel, queueModifyEnabled, onLaunch])
+    }, [handlePresetClick, autonomyLevel, queueModifyEnabled, evoSweepEnabled, onLaunch])
 
     const selectAutonomy = useCallback((level: AutonomyLevel) => {
         setAutonomyLevel(level)
@@ -71,8 +74,9 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
             awayDurationMinutes: awayMinutes,
             autonomyLevel: level,
             queueModifyEnabled,
+            evoSweepEnabled,
         }), 0)
-    }, [awayMinutes, queueModifyEnabled, onLaunch])
+    }, [awayMinutes, queueModifyEnabled, evoSweepEnabled, onLaunch])
 
     const toggleQueue = useCallback(() => {
         const next = !queueModifyEnabled
@@ -81,8 +85,20 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
             awayDurationMinutes: awayMinutes,
             autonomyLevel,
             queueModifyEnabled: next,
+            evoSweepEnabled,
         }), 0)
-    }, [awayMinutes, autonomyLevel, queueModifyEnabled, onLaunch])
+    }, [awayMinutes, autonomyLevel, queueModifyEnabled, evoSweepEnabled, onLaunch])
+
+    const toggleEvoSweep = useCallback(() => {
+        const next = !evoSweepEnabled
+        setEvoSweepEnabled(next)
+        setTimeout(() => onLaunch({
+            awayDurationMinutes: awayMinutes,
+            autonomyLevel,
+            queueModifyEnabled,
+            evoSweepEnabled: next,
+        }), 0)
+    }, [awayMinutes, autonomyLevel, queueModifyEnabled, evoSweepEnabled, onLaunch])
 
     // For custom input, apply on blur or Enter
     const applyCustom = useCallback(() => {
@@ -162,6 +178,24 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
                             <div className={styles.toggleThumb} style={{ left: queueModifyEnabled ? '18px' : '2px' }} />
                         </div>
                         <span className={styles.toggleLabel}>{queueModifyEnabled ? 'On' : 'Off'}</span>
+                    </button>
+                </div>
+
+                {/* Evo Sweep toggle */}
+                <div className={styles.sectionQueue}>
+                    <div className={styles.label}>
+                        <Dna size={12} /> Evo Sweep
+                    </div>
+                    <button
+                        type="button"
+                        className={styles.queueToggle}
+                        onClick={toggleEvoSweep}
+                        title="Enable evolutionary sweep mode — population-based optimization for code and hyperparameters"
+                    >
+                        <div className={evoSweepEnabled ? styles.toggleTrackOn : styles.toggleTrackOff}>
+                            <div className={styles.toggleThumb} style={{ left: evoSweepEnabled ? '18px' : '2px' }} />
+                        </div>
+                        <span className={styles.toggleLabel}>{evoSweepEnabled ? 'On' : 'Off'}</span>
                     </button>
                 </div>
             </div>

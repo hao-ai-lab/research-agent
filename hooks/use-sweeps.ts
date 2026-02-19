@@ -20,8 +20,8 @@ interface UseSweepsResult {
   isLoading: boolean
   error: string | null
   refetch: () => Promise<void>
-  saveDraftSweep: (config: SweepConfig) => Promise<Sweep>
-  launchSweepFromConfig: (config: SweepConfig) => Promise<Sweep>
+  saveDraftSweep: (config: SweepConfig, chatSessionId?: string | null) => Promise<Sweep>
+  launchSweepFromConfig: (config: SweepConfig, chatSessionId?: string | null) => Promise<Sweep>
 }
 
 function isSweepActive(status: Sweep['status']) {
@@ -75,7 +75,7 @@ export function useSweeps(): UseSweepsResult {
     }
   }, [fetchSweeps])
 
-  const saveDraftSweep = useCallback(async (config: SweepConfig): Promise<Sweep> => {
+  const saveDraftSweep = useCallback(async (config: SweepConfig, chatSessionId?: string | null): Promise<Sweep> => {
     const existing = findSweepForConfig(sweepsRef.current, config)
 
     let apiSweep: ApiSweep
@@ -84,17 +84,17 @@ export function useSweeps(): UseSweepsResult {
         apiSweep = await updateSweep(existing.id, sweepConfigToUpdateRequest(config, 'draft'))
       } catch {
         // If the server rejects in-place mutation (e.g. sweep already has runs), create a new draft revision.
-        apiSweep = await createSweep(sweepConfigToCreateRequest(config, 'draft'))
+        apiSweep = await createSweep(sweepConfigToCreateRequest(config, 'draft', chatSessionId))
       }
     } else {
-      apiSweep = await createSweep(sweepConfigToCreateRequest(config, 'draft'))
+      apiSweep = await createSweep(sweepConfigToCreateRequest(config, 'draft', chatSessionId))
     }
 
     await fetchSweeps()
     return mapApiSweepToUiSweep(apiSweep)
   }, [fetchSweeps])
 
-  const launchSweepFromConfig = useCallback(async (config: SweepConfig): Promise<Sweep> => {
+  const launchSweepFromConfig = useCallback(async (config: SweepConfig, chatSessionId?: string | null): Promise<Sweep> => {
     const existing = findSweepForConfig(sweepsRef.current, config)
     const parallel = Math.max(1, config.parallelRuns || 1)
 
@@ -102,7 +102,7 @@ export function useSweeps(): UseSweepsResult {
     if (existing && existing.runIds.length > 0 && (existing.status === 'pending' || existing.status === 'running')) {
       targetSweepId = existing.id
     } else {
-      const createdSweep = await createSweep(sweepConfigToCreateRequest(config, 'pending'))
+      const createdSweep = await createSweep(sweepConfigToCreateRequest(config, 'pending', chatSessionId))
       targetSweepId = createdSweep.id
     }
 

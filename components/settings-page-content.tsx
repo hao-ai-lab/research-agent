@@ -3,6 +3,7 @@
 import React, { useMemo, useState, useCallback } from 'react'
 import {
   Bell,
+  Brain,
   Check,
   ChevronRight,
   Code,
@@ -10,9 +11,10 @@ import {
   Eye,
   EyeOff,
   LayoutGrid,
+  Lightbulb,
   Monitor,
   Moon,
-  Rows3,
+  Orbit,
   RotateCcw,
   Server,
   Clock,
@@ -22,12 +24,14 @@ import {
   Sun,
   ExternalLink,
   Loader2,
+  Terminal,
   Type,
   Wifi,
   WifiOff,
   X,
   Bug,
   FileText,
+  Wrench,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -35,7 +39,8 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
-import { useApiConfig } from '@/lib/api-config'
+import { Badge } from '@/components/ui/badge'
+import { createSetupShareLink, useApiConfig } from '@/lib/api-config'
 import type { AppSettings } from '@/lib/types'
 
 interface SettingsPageContentProps {
@@ -65,13 +70,27 @@ export function SettingsPageContent({
   const [slackSuccess, setSlackSuccess] = useState<string | null>(null)
   const [slackSetupOpen, setSlackSetupOpen] = useState(false)
 
-  const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
+  const {
+    apiUrl,
+    useMock,
+    authToken,
+    researchAgentKey,
+    setApiUrl,
+    setUseMock,
+    setAuthToken,
+    setResearchAgentKey,
+    resetToDefaults,
+    testConnection,
+  } = useApiConfig()
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
   const [authTokenInput, setAuthTokenInput] = useState(authToken)
+  const [researchAgentKeyInput, setResearchAgentKeyInput] = useState(researchAgentKey)
   const [showAuthToken, setShowAuthToken] = useState(false)
+  const [showResearchAgentKey, setShowResearchAgentKey] = useState(false)
   const [authTokenCopied, setAuthTokenCopied] = useState(false)
+  const [researchAgentKeyCopied, setResearchAgentKeyCopied] = useState(false)
+  const [setupLinkCopied, setSetupLinkCopied] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
-  const [appearanceAdvancedOpen, setAppearanceAdvancedOpen] = useState(false)
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
 
   // Local state for advanced appearance inputs (only update settings on blur)
@@ -108,6 +127,9 @@ export function SettingsPageContent({
   const [wildLoopHistoryBoxHeightInput, setWildLoopHistoryBoxHeightInput] = useState<string>(
     settings.appearance.wildLoopHistoryBoxHeightPx?.toString() ?? ''
   )
+  const [thinkingToolFontSizeInput, setThinkingToolFontSizeInput] = useState<string>(
+    settings.appearance.thinkingToolFontSizePx?.toString() ?? ''
+  )
 
   React.useEffect(() => {
     setApiUrlInput(apiUrl)
@@ -116,6 +138,10 @@ export function SettingsPageContent({
   React.useEffect(() => {
     setAuthTokenInput(authToken)
   }, [authToken])
+
+  React.useEffect(() => {
+    setResearchAgentKeyInput(researchAgentKey)
+  }, [researchAgentKey])
 
   // Sync local inputs when settings change externally (e.g. reset)
   React.useEffect(() => {
@@ -177,6 +203,7 @@ export function SettingsPageContent({
     const isConnected = await testConnection({
       apiUrl: nextApiUrl,
       authToken: nextAuthToken,
+      researchAgentKey: researchAgentKeyInput.trim(),
     })
     if (isConnected) {
       setApiUrl(nextApiUrl)
@@ -195,6 +222,10 @@ export function SettingsPageContent({
     setAuthToken(authTokenInput)
   }
 
+  const handleSaveResearchAgentKey = () => {
+    setResearchAgentKey(researchAgentKeyInput.trim())
+  }
+
   const handleCopyAuthToken = async () => {
     if (!authTokenInput.trim()) return
     try {
@@ -203,6 +234,42 @@ export function SettingsPageContent({
       setTimeout(() => setAuthTokenCopied(false), 1500)
     } catch (error) {
       console.error('Failed to copy auth token:', error)
+    }
+  }
+
+  const handleCopyResearchAgentKey = async () => {
+    if (!researchAgentKeyInput.trim()) return
+    try {
+      await navigator.clipboard.writeText(researchAgentKeyInput)
+      setResearchAgentKeyCopied(true)
+      setTimeout(() => setResearchAgentKeyCopied(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy RESEARCH_AGENT_KEY:', error)
+    }
+  }
+
+  const handleCopySetupLink = async () => {
+    const nextApiUrl = apiUrlInput.trim()
+    const nextAuthToken = authTokenInput.trim()
+    if (!nextApiUrl || !nextAuthToken) return
+
+    const confirmed = window.confirm(
+      'You are copying a setup link with the full auth token. Anyone with this link can access this entire session. Continue?'
+    )
+    if (!confirmed) return
+
+    const setupLink = createSetupShareLink({
+      apiUrl: nextApiUrl,
+      authToken: nextAuthToken,
+    })
+    if (!setupLink) return
+
+    try {
+      await navigator.clipboard.writeText(setupLink)
+      setSetupLinkCopied(true)
+      setTimeout(() => setSetupLinkCopied(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy setup link:', error)
     }
   }
 
@@ -265,15 +332,6 @@ export function SettingsPageContent({
           value: settings.appearance.buttonSize,
         },
         {
-          id: 'runItemInteractionMode',
-          label: 'Runs/Sweeps Click Mode',
-          description: 'Open detail page or expand inline details',
-          icon: Rows3,
-          type: 'select' as const,
-          options: ['detail-page', 'inline-expand'],
-          value: settings.appearance.runItemInteractionMode || 'detail-page',
-        },
-        {
           id: 'showRunItemMetadata',
           label: 'Run Item Metadata',
           description: 'Show Start, Created, and Runtime under each run name',
@@ -286,17 +344,33 @@ export function SettingsPageContent({
           label: 'Starter Cards',
           description: 'Show contextual prompt cards on new chats',
           icon: LayoutGrid,
-          type: 'toggle' as const,
-          value: settings.appearance.showStarterCards !== false,
+          type: 'select' as const,
+          options: ['none', 'novice', 'expert'],
+          value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
-          id: 'starterCardFlavor',
-          label: 'Starter Card Flavor',
-          description: 'Choose between expert context cards and novice quick-start prompts',
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.appearance.showChatContextPanel !== false,
+        },
+        {
+          id: 'showChatArtifacts',
+          label: 'Show Artifacts',
+          description: 'Show or hide artifacts panel in chat views',
           icon: LayoutGrid,
-          type: 'select' as const,
-          options: ['expert', 'novice'],
-          value: settings.appearance.starterCardFlavor || 'expert',
+          type: 'toggle' as const,
+          value: settings.appearance.showChatArtifacts === true,
+        },
+        {
+          id: 'chatCollapseArtifactsInChat',
+          label: 'Collapse Artifacts In Chat',
+          description: 'Render artifacts collapsed inside chat messages',
+          icon: LayoutGrid,
+          type: 'toggle' as const,
+          value: settings.appearance.chatCollapseArtifactsInChat === true,
         },
         {
           id: 'mobileEnterToNewline',
@@ -305,6 +379,31 @@ export function SettingsPageContent({
           icon: Type,
           type: 'toggle' as const,
           value: settings.appearance.mobileEnterToNewline ?? false,
+        },
+        {
+          id: 'thinkingDisplayMode',
+          label: 'Thinking Display',
+          description: 'How thinking content is rendered',
+          icon: Brain,
+          type: 'select' as const,
+          options: ['collapse', 'expand', 'inline'],
+          value: settings.appearance.thinkingDisplayMode || 'inline',
+        },
+        {
+          id: 'toolDisplayMode',
+          label: 'Tool Display',
+          description: 'How tool call content is rendered',
+          icon: Wrench,
+          type: 'select' as const,
+          options: ['collapse', 'expand', 'inline'],
+          value: settings.appearance.toolDisplayMode || 'expand',
+        },
+        {
+          id: 'thinkingToolFontSize',
+          label: 'Thinking / Tool Font Size',
+          description: 'Font size in px for thinking and tool content (10–24)',
+          icon: Type,
+          type: 'custom' as const,
         },
         {
           id: 'appearanceAdvanced',
@@ -357,6 +456,50 @@ export function SettingsPageContent({
           type: 'toggle' as const,
           value: settings.developer?.showPlanPanel === true,
         },
+        {
+          id: 'showSidebarRunsSweepsPreview',
+          label: 'Sidebar Runs/Sweeps Preview',
+          description: 'Show or hide recent Runs and Sweeps preview blocks in the desktop sidebar',
+          icon: Eye,
+          type: 'toggle' as const,
+          value: settings.developer?.showSidebarRunsSweepsPreview !== false,
+        },
+        {
+          id: 'showMemoryPanel',
+          label: 'Memory Panel',
+          description: 'Show the Memory tab in the sidebar',
+          icon: Lightbulb,
+          type: 'toggle' as const,
+          value: settings.developer?.showMemoryPanel === true,
+          beta: true,
+        },
+        {
+          id: 'showReportPanel',
+          label: 'Report Panel',
+          description: 'Show the Report tab in the sidebar',
+          icon: FileText,
+          type: 'toggle' as const,
+          value: settings.developer?.showReportPanel === true,
+          beta: true,
+        },
+        {
+          id: 'showTerminalPanel',
+          label: 'Terminal Panel',
+          description: 'Show the Terminal tab in the sidebar',
+          icon: Terminal,
+          type: 'toggle' as const,
+          value: settings.developer?.showTerminalPanel === true,
+          beta: true,
+        },
+        {
+          id: 'showContextualPanel',
+          label: 'Contextual Panel',
+          description: 'Show the Contextual tab in the sidebar',
+          icon: Orbit,
+          type: 'toggle' as const,
+          value: settings.developer?.showContextualPanel === true,
+          beta: true,
+        },
       ],
     },
     {
@@ -401,13 +544,6 @@ export function SettingsPageContent({
     onSettingsChange({
       ...settings,
       appearance: { ...settings.appearance, buttonSize },
-    })
-  }
-
-  const handleRunItemInteractionModeChange = (mode: 'detail-page' | 'inline-expand') => {
-    onSettingsChange({
-      ...settings,
-      appearance: { ...settings.appearance, runItemInteractionMode: mode },
     })
   }
 
@@ -876,8 +1012,10 @@ export function SettingsPageContent({
                       if (item.id === 'theme') handleThemeChange(option as 'dark' | 'light' | 'system')
                       if (item.id === 'fontSize') handleFontSizeChange(option as 'small' | 'medium' | 'large')
                       if (item.id === 'buttonSize') handleButtonSizeChange(option as 'compact' | 'default' | 'large')
-                      if (item.id === 'runItemInteractionMode') handleRunItemInteractionModeChange(option as 'detail-page' | 'inline-expand')
                       if (item.id === 'starterCardFlavor') updateAppearanceSettings({ starterCardFlavor: option as 'expert' | 'novice' })
+                      if (item.id === 'showStarterCards') updateAppearanceSettings({ starterCardFlavor: option as 'none' | 'novice' | 'expert' })
+                      if (item.id === 'thinkingDisplayMode') updateAppearanceSettings({ thinkingDisplayMode: option as 'collapse' | 'expand' | 'inline' })
+                      if (item.id === 'toolDisplayMode') updateAppearanceSettings({ toolDisplayMode: option as 'collapse' | 'expand' | 'inline' })
                     }}
                     className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium capitalize whitespace-nowrap transition-colors ${item.value === option
                       ? 'bg-accent text-accent-foreground'
@@ -898,7 +1036,12 @@ export function SettingsPageContent({
                 <Icon className="h-5 w-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-sm font-medium text-foreground">
+                  {item.label}
+                  {'beta' in item && (item as Record<string, unknown>).beta === true && (
+                    <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">beta</Badge>
+                  )}
+                </p>
                 <p className="text-xs text-muted-foreground">{item.description}</p>
               </div>
             </div>
@@ -908,7 +1051,9 @@ export function SettingsPageContent({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
-                if (item.id === 'showStarterCards') updateAppearanceSettings({ showStarterCards: checked })
+                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
+                if (item.id === 'showChatArtifacts') updateAppearanceSettings({ showChatArtifacts: checked })
+                if (item.id === 'chatCollapseArtifactsInChat') updateAppearanceSettings({ chatCollapseArtifactsInChat: checked })
                 if (item.id === 'mobileEnterToNewline') updateAppearanceSettings({ mobileEnterToNewline: checked })
                 if (item.id === 'showWildLoopState') {
                   onSettingsChange({
@@ -922,34 +1067,93 @@ export function SettingsPageContent({
                     developer: { ...settings.developer, showPlanPanel: checked },
                   })
                 }
+                if (item.id === 'showMemoryPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showMemoryPanel: checked },
+                  })
+                }
+                if (item.id === 'showReportPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showReportPanel: checked },
+                  })
+                }
+                if (item.id === 'showTerminalPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showTerminalPanel: checked },
+                  })
+                }
+                if (item.id === 'showContextualPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showContextualPanel: checked },
+                  })
+                }
+                if (item.id === 'showSidebarRunsSweepsPreview') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showSidebarRunsSweepsPreview: checked },
+                  })
+                }
               }}
             />
           </div>
         )
       case 'custom':
-        if (item.id === 'appearanceAdvanced') {
+        if (item.id === 'thinkingToolFontSize') {
           return (
             <div className="rounded-lg bg-secondary/50 p-4">
-              <button
-                type="button"
-                onClick={() => setAppearanceAdvancedOpen((prev) => !prev)}
-                className="flex w-full items-center justify-between text-left"
-              >
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-3 md:min-w-0 md:flex-1">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
-                    <Square className="h-5 w-5 text-muted-foreground" />
+                    <Type className="h-5 w-5 text-muted-foreground" />
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Advanced Appearance</p>
-                    <p className="text-xs text-muted-foreground">Numeric control for fonts and buttons</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground md:truncate">{item.label}</p>
+                    <p className="text-xs text-muted-foreground md:truncate">{item.description}</p>
                   </div>
                 </div>
-                <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${appearanceAdvancedOpen ? 'rotate-90' : ''}`} />
-              </button>
+                <Input
+                  id="thinking-tool-font-size"
+                  type="number"
+                  min={10}
+                  max={24}
+                  value={thinkingToolFontSizeInput}
+                  onChange={(e) => {
+                    setThinkingToolFontSizeInput(e.target.value)
+                    const v = Number(e.target.value)
+                    if (Number.isFinite(v) && v >= 10 && v <= 24) {
+                      updateAppearanceSettings({ thinkingToolFontSizePx: v })
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value)
+                    if (Number.isFinite(v) && v >= 10 && v <= 24) {
+                      updateAppearanceSettings({ thinkingToolFontSizePx: v })
+                    } else {
+                      setThinkingToolFontSizeInput(settings.appearance.thinkingToolFontSizePx?.toString() ?? '14')
+                    }
+                  }}
+                  placeholder="14"
+                  className="h-8 w-24 text-xs"
+                />
+              </div>
+            </div>
+          )
+        }
 
-              {appearanceAdvancedOpen && (
-                <div className="mt-4 space-y-3 border-t border-border pt-4">
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
+        if (item.id === 'appearanceAdvanced') {
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 px-1">
+                <Square className="h-4 w-4 text-muted-foreground" />
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Advanced</p>
+              </div>
+
+              <div className="rounded-lg bg-secondary/50 p-4">
+                  <div className="flex items-center justify-between gap-3 rounded-md px-1 py-1">
                     <div>
                       <Label htmlFor="sidebar-new-chat-toggle" className="text-xs">Sidebar New Chat Button</Label>
                       <p className="text-[11px] text-muted-foreground">Show or hide the New Chat button in the desktop sidebar</p>
@@ -960,8 +1164,10 @@ export function SettingsPageContent({
                       onCheckedChange={(checked) => updateAppearanceSettings({ showSidebarNewChatButton: checked })}
                     />
                   </div>
+              </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="custom-font-size" className="text-xs">Font Size (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Overrides small/medium/large when set</p>
@@ -978,8 +1184,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="custom-button-scale" className="text-xs">Button Scale (%) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Scales global button sizes</p>
@@ -996,8 +1204,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="chat-toolbar-button-size" className="text-xs">Chat Bottom Buttons (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Mode/add/mention/command controls</p>
@@ -1014,8 +1224,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="chat-input-initial-height" className="text-xs">Chat Input Initial Height (px) <span className="font-normal text-muted-foreground">40–120</span></Label>
                       <p className="text-[11px] text-muted-foreground">Default one-line composer height before expansion</p>
@@ -1032,8 +1244,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="tool-box-height" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">1–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
@@ -1051,8 +1265,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="custom-primary-color" className="text-xs">Primary Color</Label>
                       <p className="text-[11px] text-muted-foreground">Hex color for --primary (example: #f59e0b)</p>
@@ -1066,8 +1282,27 @@ export function SettingsPageContent({
                       className="h-8 w-28 text-xs font-mono"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                    <div>
+                      <Label htmlFor="custom-accent-color" className="text-xs">Accent Color</Label>
+                      <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
+                    </div>
+                    <Input
+                      id="custom-accent-color"
+                      value={accentColorInput}
+                      onChange={(e) => handleAccentColorChange(e.target.value)}
+                      onBlur={(e) => handleAccentColorBlur(e.target.value)}
+                      placeholder="#fb923c"
+                      className="h-8 w-28 text-xs font-mono"
+                    />
+                  </div>
+                  </div>
+
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-tasks-font-size" className="text-xs">Wild Loop Tasks Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
                       <p className="text-[11px] text-muted-foreground">tasks.md text size in the Wild Loop Debug panel</p>
@@ -1084,8 +1319,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-tasks-box-height" className="text-xs">Wild Loop Tasks Box Height (px) <span className="font-normal text-muted-foreground">160–1200</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of the tasks.md scroll area in the Wild Loop Debug panel</p>
@@ -1102,23 +1339,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
-
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="custom-accent-color" className="text-xs">Accent Color</Label>
-                      <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
-                    </div>
-                    <Input
-                      id="custom-accent-color"
-                      value={accentColorInput}
-                      onChange={(e) => handleAccentColorChange(e.target.value)}
-                      onBlur={(e) => handleAccentColorBlur(e.target.value)}
-                      placeholder="#fb923c"
-                      className="h-8 w-28 text-xs font-mono"
-                    />
                   </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-history-font-size" className="text-xs">Wild Loop History Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
                       <p className="text-[11px] text-muted-foreground">iteration history text size in the Wild Loop Debug panel</p>
@@ -1135,8 +1359,10 @@ export function SettingsPageContent({
                       className="h-8 w-24 text-xs"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div className="rounded-lg bg-secondary/50 p-4">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                     <div>
                       <Label htmlFor="wild-loop-history-box-height" className="text-xs">Wild Loop History Box Height (px) <span className="font-normal text-muted-foreground">120–1000</span></Label>
                       <p className="text-[11px] text-muted-foreground">Max height of iteration history list in the Wild Loop Debug panel</p>
@@ -1152,6 +1378,7 @@ export function SettingsPageContent({
                       placeholder="300"
                       className="h-8 w-24 text-xs"
                     />
+                  </div>
                   </div>
 
                   <div className="flex justify-end">
@@ -1171,14 +1398,13 @@ export function SettingsPageContent({
                           wildLoopHistoryFontSizePx: null,
                           wildLoopTasksBoxHeightPx: null,
                           wildLoopHistoryBoxHeightPx: null,
+                          thinkingToolFontSizePx: null,
                         })
                       }
                     >
                       Reset Advanced
                     </Button>
                   </div>
-                </div>
-              )}
             </div>
           )
         }
@@ -1276,6 +1502,69 @@ export function SettingsPageContent({
                       Save
                     </Button>
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="research-agent-key" className="text-xs">RESEARCH_AGENT_KEY</Label>
+                  <p className="text-xs text-muted-foreground">Gateway key used by model provider requests</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="research-agent-key"
+                      type={showResearchAgentKey ? 'text' : 'password'}
+                      placeholder="Enter RESEARCH_AGENT_KEY..."
+                      value={researchAgentKeyInput}
+                      onChange={(e) => setResearchAgentKeyInput(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowResearchAgentKey((prev) => !prev)}
+                      className="px-2"
+                      title={showResearchAgentKey ? 'Hide key' : 'Show key'}
+                    >
+                      {showResearchAgentKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      <span className="sr-only">{showResearchAgentKey ? 'Hide key' : 'Show key'}</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyResearchAgentKey}
+                      disabled={!researchAgentKeyInput.trim()}
+                      className="px-2"
+                      title="Copy RESEARCH_AGENT_KEY"
+                    >
+                      {researchAgentKeyCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSaveResearchAgentKey}
+                      disabled={researchAgentKeyInput.trim() === researchAgentKey}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                  <Label className="text-xs">Share Setup Link</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Copy a one-click setup link with this server URL and auth token.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopySetupLink}
+                    disabled={!apiUrlInput.trim() || !authTokenInput.trim()}
+                    className="w-full justify-center gap-2"
+                  >
+                    {setupLinkCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    {setupLinkCopied ? 'Copied' : 'Copy Setup Link'}
+                  </Button>
+                  <p className="text-xs text-amber-700">
+                    Warning: This includes the full auth token. Anyone with the link gets full session access.
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-2">

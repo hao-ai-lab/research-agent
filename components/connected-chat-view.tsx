@@ -3,11 +3,11 @@
 import { Fragment, useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './chat-message'
-import { ChatInput, type ChatMode } from './chat-input'
+import { ChatInput, type ChatMode } from './chat-input-simple'
 import { StreamingMessage } from './streaming-message'
 import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
-import { AlertCircle, Loader2, RefreshCw, WifiOff } from 'lucide-react'
+import { AlertCircle, Loader2, PanelRightOpen, RefreshCw, Wifi, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
 import { WildModeSetupPanel } from '@/components/wild-mode-setup-panel'
 import { WildLoopDebugPanel } from '@/components/wild-loop-debug-panel'
@@ -21,6 +21,8 @@ import {
 import { useAppSettings } from '@/lib/app-settings'
 import { useChatSession } from '@/hooks/use-chat-session'
 import { useWebNotification } from '@/hooks/use-web-notification'
+import { useFavicon } from '@/hooks/use-favicon'
+import { useIsMobile } from '@/components/ui/use-mobile'
 import type { UseWildLoopResult } from '@/hooks/use-wild-loop'
 import type {
     ChatMessage as ChatMessageType,
@@ -28,13 +30,13 @@ import type {
     Sweep,
     SweepConfig,
     InsightChart,
-    PromptProvenance,
     WildModeSetup,
 } from '@/lib/types'
 import type { Alert } from '@/lib/api-client'
 import type { PromptSkill } from '@/lib/api'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64
+const STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN = 'chatContextPanelHidden'
 
 interface ConnectedChatViewProps {
     runs: ExperimentRun[]
@@ -61,6 +63,7 @@ interface ConnectedChatViewProps {
     onUserMessage?: (message: string) => void
     skills?: PromptSkill[]
     contextTokenCount?: number
+    onRefreshContext?: () => Promise<void>
 }
 
 /**
@@ -89,10 +92,14 @@ export function ConnectedChatView({
     onUserMessage,
     skills = [],
     contextTokenCount = 0,
+    onRefreshContext,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
+    const isMobile = useIsMobile()
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
+    const [mobilePanelTab, setMobilePanelTab] = useState<'chat' | 'context'>('chat')
+    const [contextPanelHidden, setContextPanelHidden] = useState(false)
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
     const [starterReplyExcerptInsert, setStarterReplyExcerptInsert] = useState<{
         id: number
@@ -103,8 +110,9 @@ export function ConnectedChatView({
     const [excerptPreview, setExcerptPreview] = useState<{ fileName: string; text: string } | null>(null)
     const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
     const { settings, setSettings } = useAppSettings()
-    const showStarterCards = settings.appearance.showStarterCards !== false
-    const starterCardFlavor = settings.appearance.starterCardFlavor || 'expert'
+    const showStarterCards = settings.appearance.starterCardFlavor !== 'none'
+    const showChatContextPanel = settings.appearance.showChatContextPanel !== false
+    const starterCardFlavor = settings.appearance.starterCardFlavor || 'novice'
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
     const handleEditTemplate = useCallback((cardId: string, template: string | null) => {
         setSettings({
@@ -126,6 +134,7 @@ export function ConnectedChatView({
     // Counter to force re-render when provenance is added (ref alone won't trigger)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
+    const wasChatContextPanelEnabledRef = useRef(showChatContextPanel)
 
     // Web notification hook
     const { notify } = useWebNotification(webNotificationsEnabled)
@@ -136,6 +145,8 @@ export function ConnectedChatView({
         isConnected,
         isLoading,
         error,
+        retryState,
+        retryConnection,
         currentSessionId,
         currentSession,
         messages,
@@ -151,7 +162,12 @@ export function ConnectedChatView({
         queueMessage,
         messageQueue,
         removeFromQueue,
+        provenanceMap,
+        provenanceVersion,
     } = externalChatSession || internalChatSession
+
+    // Dynamic favicon indicator during retry
+    useFavicon(retryState?.isRetrying ?? false)
 
     // Always-current messages ref so streaming-end effect reads latest without re-triggering
     const messagesRef = useRef(messages)
@@ -161,6 +177,29 @@ export function ConnectedChatView({
     useEffect(() => {
         onSessionChange?.(currentSessionId)
     }, [currentSessionId, onSessionChange])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const stored = window.localStorage.getItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN)
+        setContextPanelHidden(stored === 'true')
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(contextPanelHidden))
+    }, [contextPanelHidden])
+
+    useEffect(() => {
+        if (showChatContextPanel && !wasChatContextPanelEnabledRef.current) {
+            setContextPanelHidden(false)
+        } else if (!showChatContextPanel) {
+            setContextPanelHidden(true)
+            if (mobilePanelTab === 'context') {
+                setMobilePanelTab('chat')
+            }
+        }
+        wasChatContextPanelEnabledRef.current = showChatContextPanel
+    }, [showChatContextPanel, mobilePanelTab])
 
     const getScrollViewport = useCallback((): HTMLDivElement | null => {
         if (!scrollRef.current) return null
@@ -276,6 +315,11 @@ export function ConnectedChatView({
         }
         return pairs
     }, [displayMessages])
+
+    const promptProvenanceEntries = useMemo(
+        () => Array.from(provenanceMap.values()),
+        [provenanceMap, provenanceVersion]
+    )
 
     const effectiveInsertDraft = useMemo(() => {
         if (!starterDraftInsert) return insertDraft
@@ -412,39 +456,81 @@ export function ConnectedChatView({
 
     // Connection error state
     if (!isConnected && !isLoading) {
+        const isRetrying = retryState?.isRetrying ?? false
         return (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center">
-                <WifiOff className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold text-foreground">Cannot Connect to Backend</h3>
-                <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                    Make sure the backend server is running, or try Demo Mode to explore the app.
-                </p>
-                <code className="mt-4 rounded bg-secondary px-3 py-1 text-xs text-muted-foreground">
-                    python server.py --workdir /your/project/root
-                </code>
+                {isRetrying ? (
+                    <>
+                        <div className="relative mb-4">
+                            <Wifi className="h-12 w-12 text-amber-500 animate-pulse" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-foreground">Reconnecting…</h3>
+                        <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+                            Attempt {retryState!.attempt} of {retryState!.maxAttempts}
+                            {retryState!.nextRetryIn > 0 && (
+                                <> — retrying in {retryState!.nextRetryIn}s</>
+                            )}
+                            {retryState!.nextRetryIn === 0 && (
+                                <> — connecting…</>
+                            )}
+                        </p>
+                        <div className="mt-4 w-48 rounded-full bg-secondary h-1.5 overflow-hidden">
+                            <div
+                                className="h-full bg-amber-500 transition-all duration-300"
+                                style={{ width: `${((retryState!.attempt - 1) / retryState!.maxAttempts) * 100}%` }}
+                            />
+                        </div>
+                        <div className="mt-6 flex flex-col gap-3">
+                            <button
+                                type="button"
+                                onClick={retryConnection}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                            >
+                                <RefreshCw className="h-4 w-4" />
+                                Retry Now
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onOpenSettings?.()}
+                                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                            >
+                                Configure Server URL
+                            </button>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <WifiOff className="h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-semibold text-foreground">Cannot Connect to Backend</h3>
+                        <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+                            Make sure the backend server is running, or try Demo Mode to explore the app.
+                        </p>
+                        <code className="mt-4 rounded bg-secondary px-3 py-1 text-xs text-muted-foreground">
+                            python server.py --workdir /your/project/root
+                        </code>
 
-                <div className="mt-6 flex flex-col gap-3">
-                    <button
-                        type="button"
-                        onClick={() => window.location.reload()}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-                    >
-                        <RefreshCw className="h-4 w-4" />
-                        Refresh
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onOpenSettings?.()
-                        }}
-                        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                    >
-                        Configure Server URL
-                    </button>
-                    <p className="text-xs text-muted-foreground">
-                        You can also change the server URL in Settings
-                    </p>
-                </div>
+                        <div className="mt-6 flex flex-col gap-3">
+                            <button
+                                type="button"
+                                onClick={retryConnection}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                            >
+                                <RefreshCw className="h-4 w-4" />
+                                Try Again
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onOpenSettings?.()}
+                                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                            >
+                                Configure Server URL
+                            </button>
+                            <p className="text-xs text-muted-foreground">
+                                You can also change the server URL in Settings
+                            </p>
+                        </div>
+                    </>
+                )}
             </div>
         )
     }
@@ -526,116 +612,129 @@ export function ConnectedChatView({
         </>
     )
 
-    // Find the closing of the chat view to add debug panel
-    const showDebugPanel = settings.developer?.showWildLoopState === true
-    const debugPanelElement = showDebugPanel ? (
-        <WildLoopDebugPanel onClose={() => {
-            setSettings({
-                ...settings,
-                developer: { ...settings.developer, showWildLoopState: false },
-            })
-        }} />
-    ) : null
+    const contextPanelElement = (
+        <WildLoopDebugPanel
+            onClose={() => setContextPanelHidden(true)}
+            layout="desktop"
+            mode={mode}
+            currentSessionId={currentSessionId}
+            runs={runs}
+            sweeps={sweeps}
+            messages={messages}
+            provenanceEntries={promptProvenanceEntries}
+            onRefreshData={onRefreshContext}
+        />
+    )
+
+    const mobileContextPanelElement = (
+        <WildLoopDebugPanel
+            onClose={() => setMobilePanelTab('chat')}
+            layout="mobile"
+            mode={mode}
+            currentSessionId={currentSessionId}
+            runs={runs}
+            sweeps={sweeps}
+            messages={messages}
+            provenanceEntries={promptProvenanceEntries}
+            onRefreshData={onRefreshContext}
+        />
+    )
+
+    const showChatPane = !isMobile || !showChatContextPanel || mobilePanelTab === 'chat'
 
     return (
-        <div className="flex h-full overflow-hidden">
-            <div className="flex flex-1 min-w-[400px] flex-col overflow-hidden">
-                {/* Error banner */}
-                {error && (
-                    <div className="shrink-0 bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 text-sm text-destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        {error}
+        <div className="relative flex h-full overflow-hidden">
+            <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${isMobile ? '' : 'min-w-[400px]'}`}>
+                {isMobile && showChatContextPanel && (
+                    <div className="shrink-0 border-b border-border/70 px-3 py-2">
+                        <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-1">
+                            <button
+                                type="button"
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${mobilePanelTab === 'chat'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                                onClick={() => setMobilePanelTab('chat')}
+                            >
+                                Chat
+                            </button>
+                            <button
+                                type="button"
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${mobilePanelTab === 'context'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                                onClick={() => setMobilePanelTab('context')}
+                            >
+                                Context
+                            </button>
+                        </div>
                     </div>
                 )}
 
-                {!hasConversation ? (
-                    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-                        <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
-                            {/* Welcome message for new chat */}
-                            <div className="mb-6 text-center">
-                                <h2 className="text-2xl font-semibold text-foreground mb-2">
-                                    What can I help you with?
-                                </h2>
-                            </div>
-                            <div className="w-full max-w-3xl">
-                                {renderChatInput('centered')}
-                            </div>
-                            {showStarterCards && mode !== 'wild' && (
-                                <div className="mt-4 lg:mt-5 w-full max-w-6xl">
-                                <ChatStarterCards
-                                    runs={runs}
-                                    sweeps={sweeps}
-                                    alerts={alerts}
-                                    flavor={starterCardFlavor}
-                                    customTemplates={customTemplates}
-                                    onEditTemplate={handleEditTemplate}
-                                        onPromptSelect={(prompt) => {
-                                            setStarterDraftInsert({
-                                                id: Date.now(),
-                                                text: prompt,
-                                            })
-                                        }}
-                                    />
-                                </div>
-                            )}
-                            {mode === 'wild' && wildLoop && (
-                                <div className="mt-4 lg:mt-5 w-full max-w-3xl">
-                                    <WildModeSetupPanel
-                                        onLaunch={(setup: WildModeSetup) => {
-                                            wildLoop.applySetup(setup)
-                                        }}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                ) : (
+                {showChatPane ? (
                     <>
-                        {/* Scrollable Chat Area */}
-                        <div className="flex-1 min-h-0 overflow-hidden">
-                            <ScrollArea className="h-full" ref={scrollRef}>
-                                <div className="pb-4">
-                                    <div className="mt-4 space-y-1 px-2.5 min-w-0">
-                                        {collapseChats
-                                            ? messagePairs.map((pair, index) => (
-                                                <CollapsedChatPair
-                                                    key={`${pair.user.id}-${index}`}
-                                                    pair={pair}
-                                                    collapseArtifacts={collapseArtifactsInChat}
-                                                    sweeps={sweeps}
-                                                    runs={runs}
-                                                    alerts={alerts}
-                                                    onEditSweep={onEditSweep}
-                                                    onLaunchSweep={onLaunchSweep}
-                                                    onRunClick={onRunClick}
-                                                    onReplyToSelection={handleReplyToSelection}
-                                                />
-                                            ))
-                                            : displayMessages.map((message, index) => {
-                                                // Find the previous user message for context extraction
-                                                let prevUserContent: string | undefined
-                                                if (message.role === 'assistant') {
-                                                    for (let i = index - 1; i >= 0; i--) {
-                                                        if (displayMessages[i].role === 'user') {
-                                                            prevUserContent = displayMessages[i].content
-                                                            break
-                                                        }
-                                                    }
-                                                }
-                                                return (
-                                                    <div
-                                                        key={message.id}
-                                                        className={message.role === 'user'
-                                                            ? 'sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85'
-                                                            : undefined}
-                                                        style={message.source === 'agent_wild' ? {
-                                                            borderLeft: '3px solid #a855f7',
-                                                            paddingLeft: '8px',
-                                                            marginLeft: '4px',
-                                                        } : undefined}
-                                                    >
-                                                        <ChatMessage
-                                                            message={message}
+                        {/* Error banner */}
+                        {error && (
+                            <div className="shrink-0 bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 text-sm text-destructive">
+                                <AlertCircle className="h-4 w-4" />
+                                {error}
+                            </div>
+                        )}
+
+                        {!hasConversation ? (
+                            <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+                                <div className="flex flex-1 min-h-0 flex-col items-center justify-center px-3 lg:px-6">
+                                    {/* Welcome message for new chat */}
+                                    <div className="mb-6 text-center">
+                                        <h2 className="text-2xl font-semibold text-foreground mb-2">
+                                            What can I help you with?
+                                        </h2>
+                                    </div>
+                                    <div className="w-full max-w-3xl">
+                                        {renderChatInput('centered')}
+                                    </div>
+                                    {showStarterCards && mode !== 'wild' && (
+                                        <div className="mt-4 lg:mt-5 w-full max-w-6xl">
+                                            <ChatStarterCards
+                                                runs={runs}
+                                                sweeps={sweeps}
+                                                alerts={alerts}
+                                                flavor={starterCardFlavor}
+                                                customTemplates={customTemplates}
+                                                onEditTemplate={handleEditTemplate}
+                                                onPromptSelect={(prompt) => {
+                                                    setStarterDraftInsert({
+                                                        id: Date.now(),
+                                                        text: prompt,
+                                                    })
+                                                }}
+                                            />
+                                        </div>
+                                    )}
+                                    {mode === 'wild' && wildLoop && (
+                                        <div className="mt-4 lg:mt-5 w-full max-w-3xl">
+                                            <WildModeSetupPanel
+                                                onLaunch={(setup: WildModeSetup) => {
+                                                    wildLoop.applySetup(setup)
+                                                }}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Scrollable Chat Area */}
+                                <div className="flex-1 min-h-0 overflow-hidden">
+                                    <ScrollArea className="h-full" ref={scrollRef}>
+                                        <div className="pb-4">
+                                            <div className="mt-4 space-y-1 px-2.5 min-w-0">
+                                                {collapseChats
+                                                    ? messagePairs.map((pair, index) => (
+                                                        <CollapsedChatPair
+                                                            key={`${pair.user.id}-${index}`}
+                                                            pair={pair}
                                                             collapseArtifacts={collapseArtifactsInChat}
                                                             sweeps={sweeps}
                                                             runs={runs}
@@ -644,26 +743,67 @@ export function ConnectedChatView({
                                                             onLaunchSweep={onLaunchSweep}
                                                             onRunClick={onRunClick}
                                                             onReplyToSelection={handleReplyToSelection}
-                                                            previousUserContent={prevUserContent}
                                                         />
-                                                    </div>
-                                                )
-                                            })}
+                                                    ))
+                                                    : displayMessages.map((message, index) => {
+                                                        // Find the previous user message for context extraction
+                                                        let prevUserContent: string | undefined
+                                                        if (message.role === 'assistant') {
+                                                            for (let i = index - 1; i >= 0; i--) {
+                                                                if (displayMessages[i].role === 'user') {
+                                                                    prevUserContent = displayMessages[i].content
+                                                                    break
+                                                                }
+                                                            }
+                                                        }
+                                                        return (
+                                                            <div
+                                                                key={message.id}
+                                                                className={message.role === 'user'
+                                                                    ? 'sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85'
+                                                                    : undefined}
+                                                                style={message.source === 'agent_wild' ? {
+                                                                    borderLeft: '3px solid #a855f7',
+                                                                    paddingLeft: '8px',
+                                                                    marginLeft: '4px',
+                                                                } : undefined}
+                                                            >
+                                                                <ChatMessage
+                                                                    message={message}
+                                                                    collapseArtifacts={collapseArtifactsInChat}
+                                                                    sweeps={sweeps}
+                                                                    runs={runs}
+                                                                    alerts={alerts}
+                                                                    onEditSweep={onEditSweep}
+                                                                    onLaunchSweep={onLaunchSweep}
+                                                                    onRunClick={onRunClick}
+                                                                    onReplyToSelection={handleReplyToSelection}
+                                                                    previousUserContent={prevUserContent}
+                                                                />
+                                                            </div>
+                                                        )
+                                                    })}
 
-                                        {/* Streaming message */}
-                                        {streamingState.isStreaming && (
-                                            <StreamingMessage streamingState={streamingState} />
-                                        )}
-                                    </div>
+                                                {/* Streaming message */}
+                                                {streamingState.isStreaming && (
+                                                    <StreamingMessage streamingState={streamingState} />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </ScrollArea>
                                 </div>
-                            </ScrollArea>
-                        </div>
 
-                        {/* Chat Input - Fixed at bottom once conversation starts */}
-                        <div className="shrink-0">
-                            {renderChatInput('docked')}
-                        </div>
+                                {/* Chat Input - Fixed at bottom once conversation starts */}
+                                <div className="shrink-0">
+                                    {renderChatInput('docked')}
+                                </div>
+                            </>
+                        )}
                     </>
+                ) : (
+                    <div className="min-h-0 flex-1 overflow-hidden">
+                        {mobileContextPanelElement}
+                    </div>
                 )}
 
                 {/* Termination config dialog */}
@@ -712,7 +852,18 @@ export function ConnectedChatView({
                     </SheetContent>
                 </Sheet>
             </div>
-            {debugPanelElement}
+            {!isMobile && showChatContextPanel && !contextPanelHidden && contextPanelElement}
+            {!isMobile && showChatContextPanel && contextPanelHidden && (
+                <button
+                    type="button"
+                    onClick={() => setContextPanelHidden(false)}
+                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-border bg-background/95 p-2 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
+                    title="Show context panel"
+                    aria-label="Show context panel"
+                >
+                    <PanelRightOpen className="h-4 w-4" />
+                </button>
+            )}
         </div>
     )
 }

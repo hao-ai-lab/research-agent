@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -31,11 +32,21 @@ jobs:
       - name: Install Modal CLI
         run: pip install modal
 
-      - name: Generate preview auth token
+      - name: Generate stable preview auth token
+        env:
+          PREVIEW_TOKEN_SEED: ${{ secrets.PREVIEW_AUTH_TOKEN_SEED || secrets.GH_PAT || secrets.MODAL_TOKEN_SECRET }}
+          PREVIEW_TOKEN_CONTEXT: ${{ format('{0}/{1}#{2}', github.repository_owner, github.event.repository.name, github.event.pull_request.number) }}
         run: |
           PREVIEW_AUTH_TOKEN="$(python - <<'PY'
-          import secrets
-          print(secrets.token_hex(32))
+          import hashlib
+          import hmac
+          import os
+
+          seed = os.environ["PREVIEW_TOKEN_SEED"]
+          if not seed:
+              raise SystemExit("PREVIEW_TOKEN_SEED is empty; set PREVIEW_AUTH_TOKEN_SEED or ensure GH_PAT/MODAL_TOKEN_SECRET exists")
+          context = os.environ["PREVIEW_TOKEN_CONTEXT"]
+          print(hmac.new(seed.encode("utf-8"), context.encode("utf-8"), hashlib.sha256).hexdigest())
           PY
           )"
           echo "PREVIEW_AUTH_TOKEN=${PREVIEW_AUTH_TOKEN}" >> "$GITHUB_ENV"

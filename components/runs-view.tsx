@@ -24,6 +24,7 @@ import {
   PlugZap,
   Filter,
   Plus,
+  Copy,
   Sparkles,
   Loader2,
   RefreshCw,
@@ -68,6 +69,7 @@ import type {
   ClusterType,
   ClusterUpdateRequest,
   CreateRunRequest,
+  GpuwrapConfig,
   Run,
 } from '@/lib/api'
 import { startSweep as apiStartSweep, updateSweep as apiUpdateSweep } from '@/lib/api-client'
@@ -138,6 +140,8 @@ interface RunsViewProps {
   onRespondToAlert?: (alertId: string, choice: string) => Promise<void>
   showDesktopSidebarToggle?: boolean
   onDesktopSidebarToggle?: () => void
+  openDialogIntent?: 'run' | 'sweep' | null
+  onDialogIntentHandled?: () => void
 }
 
 export function RunsView({
@@ -168,6 +172,8 @@ export function RunsView({
   onRespondToAlert,
   showDesktopSidebarToggle = false,
   onDesktopSidebarToggle,
+  openDialogIntent = null,
+  onDialogIntentHandled,
 }: RunsViewProps) {
   const { settings } = useAppSettings()
   const interactionMode = settings.appearance.runItemInteractionMode || 'detail-page'
@@ -201,11 +207,18 @@ export function RunsView({
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
   const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runCreateFromRunId, setRunCreateFromRunId] = useState<string | null>(null)
   const [runCreateName, setRunCreateName] = useState('')
   const [runCreateCommand, setRunCreateCommand] = useState('')
   const [runCreateWorkdir, setRunCreateWorkdir] = useState('')
   const [runCreateSweepId, setRunCreateSweepId] = useState<string>('none')
   const [runCreateAutoStart, setRunCreateAutoStart] = useState(true)
+  const [runCreateGpuwrapEnabled, setRunCreateGpuwrapEnabled] = useState(true)
+  const [runCreateGpuwrapAdvancedOpen, setRunCreateGpuwrapAdvancedOpen] = useState(false)
+  const [runCreateGpuwrapRetries, setRunCreateGpuwrapRetries] = useState('2')
+  const [runCreateGpuwrapRetryDelaySeconds, setRunCreateGpuwrapRetryDelaySeconds] = useState('8')
+  const [runCreateGpuwrapMaxMemoryUsedMb, setRunCreateGpuwrapMaxMemoryUsedMb] = useState('200')
+  const [runCreateGpuwrapMaxUtilization, setRunCreateGpuwrapMaxUtilization] = useState('40')
   const [runCreateError, setRunCreateError] = useState<string | null>(null)
   const [runCreateSubmitting, setRunCreateSubmitting] = useState(false)
   const [isSelectedRunRefreshing, setIsSelectedRunRefreshing] = useState(false)
@@ -235,6 +248,16 @@ export function RunsView({
           (a.startedAt?.getTime() || a.createdAt.getTime())
       ),
     [sweeps]
+  )
+  const sortedRunsForCreate = useMemo(
+    () =>
+      [...runs]
+        .sort((a, b) => {
+          const aTime = (a.createdAt || a.startTime).getTime()
+          const bTime = (b.createdAt || b.startTime).getTime()
+          return bTime - aTime
+        }),
+    [runs]
   )
   const sweepOptions = useMemo(
     () =>
@@ -748,14 +771,46 @@ export function RunsView({
   }
 
   const resetCreateRunForm = useCallback(() => {
+    setRunCreateFromRunId(null)
     setRunCreateName('')
     setRunCreateCommand('')
     setRunCreateWorkdir('')
     setRunCreateSweepId('none')
     setRunCreateAutoStart(true)
+    setRunCreateGpuwrapEnabled(true)
+    setRunCreateGpuwrapAdvancedOpen(false)
+    setRunCreateGpuwrapRetries('2')
+    setRunCreateGpuwrapRetryDelaySeconds('8')
+    setRunCreateGpuwrapMaxMemoryUsedMb('200')
+    setRunCreateGpuwrapMaxUtilization('40')
     setRunCreateError(null)
     setRunCreateSubmitting(false)
   }, [])
+
+  const openCreateRunDialog = useCallback(() => {
+    setRunDialogOpen(true)
+    setRunCreateError(null)
+  }, [])
+
+  const handleDuplicateRun = useCallback((runId: string) => {
+    const run = runs.find((candidate) => candidate.id === runId)
+    if (!run) return
+    setRunCreateFromRunId(runId)
+    setRunCreateName(run.alias || run.name || '')
+    setRunCreateCommand(run.command || '')
+    setRunCreateSweepId(run.sweepId || 'none')
+    setRunCreateError(null)
+  }, [runs])
+
+  useEffect(() => {
+    if (!openDialogIntent) return
+    if (openDialogIntent === 'run') {
+      openCreateRunDialog()
+    } else {
+      setSweepDialogOpen(true)
+    }
+    onDialogIntentHandled?.()
+  }, [onDialogIntentHandled, openCreateRunDialog, openDialogIntent])
 
   const handleSubmitCreateRun = useCallback(async () => {
     if (!onCreateRun || runCreateSubmitting) return
@@ -773,12 +828,72 @@ export function RunsView({
       return
     }
 
+    const parseIntField = (raw: string, label: string, min: number, max?: number): number | null => {
+      const trimmed = raw.trim()
+      if (!trimmed) {
+        setRunCreateError(`${label} is required.`)
+        return null
+      }
+      const value = Number.parseInt(trimmed, 10)
+      if (!Number.isFinite(value) || Number.isNaN(value)) {
+        setRunCreateError(`${label} must be an integer.`)
+        return null
+      }
+      if (value < min || (typeof max === 'number' && value > max)) {
+        if (typeof max === 'number') {
+          setRunCreateError(`${label} must be between ${min} and ${max}.`)
+        } else {
+          setRunCreateError(`${label} must be at least ${min}.`)
+        }
+        return null
+      }
+      return value
+    }
+
+    const parseFloatField = (raw: string, label: string, minExclusive: number): number | null => {
+      const trimmed = raw.trim()
+      if (!trimmed) {
+        setRunCreateError(`${label} is required.`)
+        return null
+      }
+      const value = Number.parseFloat(trimmed)
+      if (!Number.isFinite(value) || Number.isNaN(value)) {
+        setRunCreateError(`${label} must be a number.`)
+        return null
+      }
+      if (value <= minExclusive) {
+        setRunCreateError(`${label} must be greater than ${minExclusive}.`)
+        return null
+      }
+      return value
+    }
+
+    const gpuwrapConfig: GpuwrapConfig = {
+      enabled: runCreateGpuwrapEnabled,
+    }
+    if (runCreateGpuwrapEnabled) {
+      const retries = parseIntField(runCreateGpuwrapRetries, 'GPU Retries', 0, 20)
+      if (retries == null) return
+      const retryDelaySeconds = parseFloatField(runCreateGpuwrapRetryDelaySeconds, 'Retry Delay', 0)
+      if (retryDelaySeconds == null) return
+      const maxMemoryUsedMb = parseIntField(runCreateGpuwrapMaxMemoryUsedMb, 'Max Memory Used', 0)
+      if (maxMemoryUsedMb == null) return
+      const maxUtilization = parseIntField(runCreateGpuwrapMaxUtilization, 'Max Utilization', 0, 100)
+      if (maxUtilization == null) return
+
+      gpuwrapConfig.retries = retries
+      gpuwrapConfig.retry_delay_seconds = retryDelaySeconds
+      gpuwrapConfig.max_memory_used_mb = maxMemoryUsedMb
+      gpuwrapConfig.max_utilization = maxUtilization
+    }
+
     const request: CreateRunRequest = {
       name,
       command,
       auto_start: runCreateAutoStart,
       sweep_id: runCreateSweepId !== 'none' ? runCreateSweepId : undefined,
       workdir: workdir || undefined,
+      gpuwrap_config: gpuwrapConfig,
     }
 
     setRunCreateSubmitting(true)
@@ -798,6 +913,11 @@ export function RunsView({
     onRefresh,
     resetCreateRunForm,
     runCreateAutoStart,
+    runCreateGpuwrapEnabled,
+    runCreateGpuwrapRetries,
+    runCreateGpuwrapRetryDelaySeconds,
+    runCreateGpuwrapMaxMemoryUsedMb,
+    runCreateGpuwrapMaxUtilization,
     runCreateCommand,
     runCreateName,
     runCreateSubmitting,
@@ -1843,10 +1963,7 @@ export function RunsView({
                   variant="outline"
                   size="sm"
                   className="h-6 px-2 text-[11px] gap-1"
-                  onClick={() => {
-                    setRunDialogOpen(true)
-                    setRunCreateError(null)
-                  }}
+                  onClick={openCreateRunDialog}
                 >
                   <Play className="h-3 w-3" />
                   Create Run
@@ -2486,7 +2603,54 @@ export function RunsView({
       >
         <DialogContent className="max-w-xl p-0 overflow-hidden">
           <div className="border-b border-border px-5 py-4">
-            <DialogTitle className="text-sm font-semibold text-foreground">Create Run</DialogTitle>
+            <div className="flex items-center justify-between gap-2">
+              <DialogTitle className="text-sm font-semibold text-foreground">Create Run</DialogTitle>
+              <Select
+                value={runCreateFromRunId ?? undefined}
+                onValueChange={handleDuplicateRun}
+                disabled={sortedRunsForCreate.length === 0}
+              >
+                <SelectTrigger className={`h-7 w-auto gap-1 px-2 text-[11px] border-none ${runCreateFromRunId
+                  ? 'bg-accent/20 text-accent hover:bg-accent/30'
+                  : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                  }`}>
+                  <Copy className="h-3 w-3" />
+                  <span className="hidden sm:inline"><SelectValue placeholder="Create from..." /></span>
+                </SelectTrigger>
+                <SelectContent align="end" className="max-w-[360px]">
+                  <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    Create from run...
+                  </div>
+                  {sortedRunsForCreate.length === 0 ? (
+                    <div className="px-2 py-2 text-xs text-muted-foreground">No previous runs yet.</div>
+                  ) : (
+                    sortedRunsForCreate.map((run) => {
+                      const createdAt = run.createdAt || run.startTime
+                      const createdAtLabel = createdAt
+                        ? new Date(createdAt).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                        : ''
+                      const runTitle = run.alias || run.name || run.id
+
+                      return (
+                        <SelectItem key={run.id} value={run.id} className="text-xs">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="font-medium">{runTitle}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {run.id}{createdAtLabel ? ` · ${createdAtLabel}` : ''}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      )
+                    })
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Create a single run and optionally attach it to an existing sweep.
             </p>
@@ -2545,6 +2709,79 @@ export function RunsView({
                 </p>
               </div>
               <Switch checked={runCreateAutoStart} onCheckedChange={setRunCreateAutoStart} />
+            </div>
+            <div className="space-y-3 rounded-lg border border-border/70 bg-secondary/20 px-3 py-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-foreground">Use GPU Wrap</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Sidecar selects all currently available GPUs and retries on contention.
+                  </p>
+                </div>
+                <Switch checked={runCreateGpuwrapEnabled} onCheckedChange={setRunCreateGpuwrapEnabled} />
+              </div>
+              {runCreateGpuwrapEnabled && (
+                <div className="rounded-md border border-border/60 bg-background/70 px-2 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setRunCreateGpuwrapAdvancedOpen((prev) => !prev)}
+                    className="flex w-full items-center justify-between text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    <span>Advanced GPU Wrap Settings</span>
+                    <span>{runCreateGpuwrapAdvancedOpen ? 'Hide' : 'Show'}</span>
+                  </button>
+                  {runCreateGpuwrapAdvancedOpen && (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">GPU Retries</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={20}
+                          value={runCreateGpuwrapRetries}
+                          onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">Retry Delay (sec)</label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min={0.1}
+                          value={runCreateGpuwrapRetryDelaySeconds}
+                          onChange={(event) => setRunCreateGpuwrapRetryDelaySeconds(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">Max Memory Used (MB)</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={runCreateGpuwrapMaxMemoryUsedMb}
+                          onChange={(event) => setRunCreateGpuwrapMaxMemoryUsedMb(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground">Max Utilization (%)</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={runCreateGpuwrapMaxUtilization}
+                          onChange={(event) => setRunCreateGpuwrapMaxUtilization(event.target.value)}
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-2 text-[11px] text-muted-foreground">
+                    GPUs are considered available when memory used is at or below this threshold and utilization is at or below the max utilization threshold.
+                  </div>
+                </div>
+              )}
             </div>
             {runCreateError && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

@@ -20,6 +20,7 @@ import {
   BarChart3,
   MessageSquare,
   Archive,
+  Wand2,
   ListPlus,
   Trash2,
   ChevronDown,
@@ -165,7 +166,7 @@ export function ChatInput({
   const { settings } = useAppSettings()
   const isMobile = useIsMobile()
 
-  const referenceMentionRegex = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+/g
+  const referenceMentionRegex = /(?<!\S)@(?:run|sweep|artifact|alert|chart|chat|skill):[A-Za-z0-9:._-]+/g
   const genericMentionRegex = /(?<!\S)@[A-Za-z0-9:._-]*/g
 
   type MentionRange = {
@@ -296,6 +297,18 @@ export function ChatInput({
       })
     })
 
+    // Skills
+    skills.forEach((skill) => {
+      items.push({
+        id: `skill:${skill.id}`,
+        type: 'skill',
+        label: skill.name,
+        sublabel: skill.description || skill.id,
+        color: '#8b5cf6',
+        icon: <Wand2 className="h-3 w-3" />,
+      })
+    })
+
     // Chat messages (only user messages as segments)
     messages
       .filter(m => m.role === 'user' && m.content.trim())
@@ -328,7 +341,7 @@ export function ChatInput({
     })
 
     return items
-  }, [runs, sweeps, artifacts, charts, messages, alerts])
+  }, [runs, sweeps, artifacts, charts, skills, messages, alerts])
 
   // Filter mention items based on query and type filter
   const filteredMentionItems = useMemo(() => {
@@ -420,7 +433,7 @@ export function ChatInput({
   const highlightedMessage = useMemo(() => {
     if (!message) return null
     const parts: React.ReactNode[] = []
-    const tokenRegex = /((?<!\S)@(?:run|sweep|artifact|alert|chart|chat):[A-Za-z0-9:._-]+|(?<!\S)@[A-Za-z0-9:._-]*|(?<!\S)\/[a-zA-Z][\w-]*)/g
+    const tokenRegex = /((?<!\S)@(?:run|sweep|artifact|alert|chart|chat|skill):[A-Za-z0-9:._-]+|(?<!\S)@[A-Za-z0-9:._-]*|(?<!\S)\/[a-zA-Z][\w-]*)/g
     let cursor = 0
     let match: RegExpExecArray | null
     let keyIndex = 0
@@ -788,6 +801,9 @@ export function ChatInput({
         } else if (textAfterAt.startsWith('chat:')) {
           setMentionFilter('chat')
           setMentionQuery(textAfterAt.slice(5))
+        } else if (textAfterAt.startsWith('skill:')) {
+          setMentionFilter('skill')
+          setMentionQuery(textAfterAt.slice(6))
         } else {
           setMentionFilter('all')
         }
@@ -1181,7 +1197,7 @@ export function ChatInput({
               <span className="text-[10px] text-muted-foreground mr-1">Filter:</span>
               <div className="flex-1 min-w-0 overflow-x-auto">
                 <div className="flex min-w-max items-center gap-1 pr-1">
-                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat'] as const).map((type) => (
+                  {(['all', 'run', 'sweep', 'artifact', 'alert', 'chart', 'chat', 'skill'] as const).map((type) => (
                     <button
                       key={type}
                       type="button"
@@ -1296,7 +1312,7 @@ export function ChatInput({
             placeholder="Ask me about your research"
             disabled={disabled}
             rows={1}
-            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 pr-12 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
+            className="relative z-10 w-full resize-none bg-transparent px-4 py-3 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
             style={{
               minHeight: `var(--app-chat-input-initial-height, ${DEFAULT_CHAT_INPUT_INITIAL_HEIGHT_PX}px)`,
               maxHeight: `${MAX_CHAT_INPUT_HEIGHT_PX}px`,
@@ -1304,26 +1320,6 @@ export function ChatInput({
               color: 'transparent',
             }}
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`chat-toolbar-icon absolute bottom-2 right-2 z-20 ${isRecording ? 'text-destructive bg-destructive/10' : ''}`}
-            onClick={toggleRecording}
-            disabled={!dictationSupported}
-            title={dictationSupported ? (isRecording ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported'}
-          >
-            {isRecording ? (
-              <MicOff className="h-4 w-4" />
-            ) : (
-              <Mic className="h-4 w-4" />
-            )}
-          </Button>
-          {isRecording && (
-            <span className="absolute bottom-4 right-12 z-20 flex items-center gap-1 text-[10px] text-destructive animate-pulse">
-              <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-              Rec
-            </span>
-          )}
         </div>
       </div>
 
@@ -1412,6 +1408,7 @@ export function ChatInput({
                       <button type="button" onClick={() => { openMentionFromToolbar('all') }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">@ mention</button>
                       <button type="button" onClick={() => { openMentionFromToolbar('run') }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Run</button>
                       <button type="button" onClick={() => { openMentionFromToolbar('sweep') }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Sweep</button>
+                      <button type="button" onClick={() => { openMentionFromToolbar('skill') }} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-secondary/70">Skill</button>
                     </div>
                   </div>
 
@@ -1522,6 +1519,7 @@ export function ChatInput({
                     <button type="button" onClick={() => openMentionFromToolbar('run')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Play className="h-3.5 w-3.5" /><span>Add run</span></button>
                     <button type="button" onClick={() => openMentionFromToolbar('sweep')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Sparkles className="h-3.5 w-3.5 text-violet-500" /><span>Add sweep</span></button>
                     <button type="button" onClick={() => openMentionFromToolbar('artifact')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Archive className="h-3.5 w-3.5" /><span>Add artifact</span></button>
+                    <button type="button" onClick={() => openMentionFromToolbar('skill')} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-secondary"><Wand2 className="h-3.5 w-3.5 text-violet-500" /><span>Add skill</span></button>
                   </div>
                 </PopoverContent>
               </Popover>
@@ -1547,6 +1545,24 @@ export function ChatInput({
 
         {/* Stop + Send/Queue buttons */}
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
+          {/* Dictation mic button */}
+          <div className="relative flex items-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`chat-toolbar-icon ${isRecording ? 'bg-destructive/10 text-destructive' : ''}`}
+              onClick={toggleRecording}
+              disabled={!dictationSupported}
+              title={dictationSupported ? (isRecording ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported'}
+            >
+              {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
+            {isRecording && (
+              <span className="absolute -top-1 -right-1 flex items-center gap-0.5 text-[9px] text-destructive animate-pulse">
+                <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+              </span>
+            )}
+          </div>
           {/* Context token count - circular indicator */}
           <Tooltip>
             <TooltipTrigger asChild>

@@ -218,6 +218,7 @@ export function mapApiSweepToUiSweep(sweep: ApiSweep): UiSweep {
     id: sweep.id,
     config,
     creationContext: hydrateCreationContextFromApi(sweep, createdAt, config),
+    chatSessionId: sweep.chat_session_id ?? null,
     status: mapApiSweepStatusToUi(sweep.status),
     runIds: sweep.run_ids,
     createdAt,
@@ -237,8 +238,9 @@ export function mapApiSweepToUiSweep(sweep: ApiSweep): UiSweep {
 export function sweepConfigToCreateRequest(
   config: SweepConfig,
   status: CreateSweepRequest['status'],
+  chatSessionId?: string | null,
 ): CreateSweepRequest {
-  return {
+  const request: CreateSweepRequest = {
     name: config.name || `sweep-${Date.now()}`,
     base_command: config.command || '',
     parameters: hyperparametersToParameterGrid(config.hyperparameters),
@@ -248,6 +250,10 @@ export function sweepConfigToCreateRequest(
     status,
     ui_config: serializeConfig(config),
   }
+  if (chatSessionId) {
+    request.chat_session_id = chatSessionId
+  }
+  return request
 }
 
 export function sweepConfigToUpdateRequest(

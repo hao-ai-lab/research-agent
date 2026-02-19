@@ -31,6 +31,10 @@ const STORAGE_KEY_APPEARANCE_CUSTOM_PRIMARY_COLOR =
   "research-agent-appearance-custom-primary-color";
 const STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR =
   "research-agent-appearance-custom-accent-color";
+const LEGACY_STORAGE_KEY_CHAT_SHOW_ARTIFACTS = "chatShowArtifacts";
+const LEGACY_STORAGE_KEY_CHAT_COLLAPSE_CHATS = "chatCollapseChats";
+const LEGACY_STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS =
+  "chatCollapseArtifactsInChat";
 
 export const defaultAppSettings: AppSettings = {
   appearance: {
@@ -50,10 +54,17 @@ export const defaultAppSettings: AppSettings = {
     wildLoopHistoryFontSizePx: null,
     wildLoopTasksBoxHeightPx: null,
     wildLoopHistoryBoxHeightPx: null,
-    showStarterCards: false,
-    starterCardFlavor: "expert",
-    showSidebarNewChatButton: false,
+    showStarterCards: true,
+    starterCardFlavor: "novice",
+    showChatContextPanel: true,
+    showChatArtifacts: false,
+    chatCollapseAllChats: false,
+    chatCollapseArtifactsInChat: false,
+    showSidebarNewChatButton: true,
     mobileEnterToNewline: false,
+    thinkingDisplayMode: 'inline',
+    toolDisplayMode: 'expand',
+    thinkingToolFontSizePx: 14,
   },
   integrations: {},
   notifications: {
@@ -69,6 +80,16 @@ export const defaultAppSettings: AppSettings = {
       { id: "insights", label: "Insights", visible: true, order: 3 },
       { id: "terminal", label: "Terminal", visible: true, order: 4 },
     ],
+  },
+  developer: {
+    showWildLoopState: true,
+    showPlanPanel: false,
+    showSidebarRunsSweepsPreview: true,
+    debugRefreshIntervalSeconds: 2,
+    showMemoryPanel: false,
+    showReportPanel: false,
+    showTerminalPanel: false,
+    showContextualPanel: false,
   },
 };
 
@@ -106,7 +127,13 @@ function isValidRunItemInteractionMode(
 function isValidStarterCardFlavor(
   value: unknown,
 ): value is NonNullable<AppSettings["appearance"]["starterCardFlavor"]> {
-  return value === "novice" || value === "expert";
+  return value === "none" || value === "novice" || value === "expert";
+}
+
+function isValidDisplayMode(
+  value: unknown,
+): value is 'collapse' | 'expand' | 'inline' {
+  return value === 'collapse' || value === 'expand' || value === 'inline';
 }
 
 function parseStoredNumber(value: string | null): number | null {
@@ -310,6 +337,15 @@ function readStoredSettings(): AppSettings {
     const storedCustomAccentColor = sanitizeHexColor(
       localStorage.getItem(STORAGE_KEY_APPEARANCE_CUSTOM_ACCENT_COLOR),
     );
+    const legacyShowArtifacts = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_SHOW_ARTIFACTS,
+    );
+    const legacyCollapseChats = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_COLLAPSE_CHATS,
+    );
+    const legacyCollapseArtifacts = localStorage.getItem(
+      LEGACY_STORAGE_KEY_CHAT_COLLAPSE_ARTIFACTS,
+    );
 
     const resolvedTheme = isValidTheme(storedTheme)
       ? storedTheme
@@ -381,7 +417,29 @@ function readStoredSettings(): AppSettings {
         showStarterCards:
           parsed?.appearance?.showStarterCards ??
           defaultAppSettings.appearance.showStarterCards,
-        starterCardFlavor: resolvedStarterCardFlavor,
+        starterCardFlavor:
+          // Migration: if legacy showStarterCards was explicitly false, map to 'none'
+          parsed?.appearance?.showStarterCards === false && !isValidStarterCardFlavor(starterCardFlavorFromBlob)
+            ? 'none'
+            : resolvedStarterCardFlavor,
+        showChatContextPanel:
+          parsed?.appearance?.showChatContextPanel ??
+          defaultAppSettings.appearance.showChatContextPanel,
+        showChatArtifacts:
+          parsed?.appearance?.showChatArtifacts ??
+          (legacyShowArtifacts != null
+            ? legacyShowArtifacts === "true"
+            : defaultAppSettings.appearance.showChatArtifacts),
+        chatCollapseAllChats:
+          parsed?.appearance?.chatCollapseAllChats ??
+          (legacyCollapseChats != null
+            ? legacyCollapseChats === "true"
+            : defaultAppSettings.appearance.chatCollapseAllChats),
+        chatCollapseArtifactsInChat:
+          parsed?.appearance?.chatCollapseArtifactsInChat ??
+          (legacyCollapseArtifacts != null
+            ? legacyCollapseArtifacts === "true"
+            : defaultAppSettings.appearance.chatCollapseArtifactsInChat),
         showSidebarNewChatButton:
           parsed?.appearance?.showSidebarNewChatButton ??
           defaultAppSettings.appearance.showSidebarNewChatButton,
@@ -401,6 +459,20 @@ function readStoredSettings(): AppSettings {
         mobileEnterToNewline:
           parsed?.appearance?.mobileEnterToNewline ??
           defaultAppSettings.appearance.mobileEnterToNewline,
+        thinkingDisplayMode:
+          isValidDisplayMode(parsed?.appearance?.thinkingDisplayMode)
+            ? parsed!.appearance.thinkingDisplayMode
+            // Migration: map old 'collapsible' to 'collapse'
+            : (parsed?.appearance as Record<string,unknown>)?.thinkingDisplayMode === 'collapsible'
+              ? 'collapse'
+              : defaultAppSettings.appearance.thinkingDisplayMode,
+        toolDisplayMode:
+          isValidDisplayMode(parsed?.appearance?.toolDisplayMode)
+            ? parsed!.appearance.toolDisplayMode
+            : defaultAppSettings.appearance.toolDisplayMode,
+        thinkingToolFontSizePx:
+          sanitizePositiveNumber(parsed?.appearance?.thinkingToolFontSizePx) ??
+          defaultAppSettings.appearance.thinkingToolFontSizePx,
       },
       integrations: parsed?.integrations || defaultAppSettings.integrations,
       notifications: {
@@ -414,7 +486,10 @@ function readStoredSettings(): AppSettings {
           parsed?.notifications?.webNotificationsEnabled ??
           defaultAppSettings.notifications.webNotificationsEnabled,
       },
-      developer: parsed?.developer ?? defaultAppSettings.developer,
+      developer: {
+        ...defaultAppSettings.developer,
+        ...(parsed?.developer ?? {}),
+      },
       leftPanel: parsed?.leftPanel ?? defaultAppSettings.leftPanel,
     };
   } catch {
@@ -553,6 +628,20 @@ export function AppSettingsProvider({
       root.style.setProperty('--accent', customAccentColor)
     } else {
       root.style.removeProperty('--accent')
+    }
+
+    const thinkingToolFontSizePx = settings.appearance.thinkingToolFontSizePx;
+    if (
+      typeof thinkingToolFontSizePx === "number" &&
+      Number.isFinite(thinkingToolFontSizePx) &&
+      thinkingToolFontSizePx > 0
+    ) {
+      root.style.setProperty(
+        "--app-thinking-tool-font-size",
+        `${thinkingToolFontSizePx}px`,
+      );
+    } else {
+      root.style.removeProperty("--app-thinking-tool-font-size");
     }
 
     const handleThemeChange = () => {

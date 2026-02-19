@@ -51,6 +51,8 @@ fi
 if [ "$START_FRONTEND" = "1" ]; then
   (
     cd "${ROOT_DIR}"
+    export RESEARCH_AGENT_WORKDIR="${ROOT_DIR}"
+    export RESEARCH_AGENT_BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
     npm run dev -- --port "${FRONTEND_PORT}"
   ) &
   pids+=("$!")

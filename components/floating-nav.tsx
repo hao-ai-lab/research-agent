@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Menu, Bell, Settings, PlugZap, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Orbit, Pause, Play, Square, Target } from 'lucide-react'
+import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Pause, Play, Square, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -9,8 +9,6 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
   DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
 import {
   Select,
@@ -21,8 +19,6 @@ import {
 } from '@/components/ui/select'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Progress } from '@/components/ui/progress'
-import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
 import { useApiConfig } from '@/lib/api-config'
 import type { WildLoopPhase } from '@/lib/types'
 import type { RunStats } from '@/hooks/use-wild-loop'
@@ -67,14 +63,9 @@ interface FloatingNavProps {
   // Chat-specific props
   eventCount?: number
   onAlertClick?: () => void
-  onCreateSweepClick?: () => void
-  onOpenContextualClick?: () => void
-  showArtifacts?: boolean
-  onToggleArtifacts?: () => void
+  onExportSession?: () => void
   collapseChats?: boolean
-  onToggleCollapseChats?: () => void
-  collapseArtifactsInChat?: boolean
-  onToggleCollapseArtifactsInChat?: () => void
+  onCollapseChatsChange?: (collapsed: boolean) => void
   // Session selector props (for chat tab)
   sessionTitle?: string
   currentSessionId?: string | null
@@ -96,14 +87,9 @@ export function FloatingNav({
   onDesktopSidebarToggle,
   eventCount = 0,
   onAlertClick,
-  onCreateSweepClick,
-  onOpenContextualClick,
-  showArtifacts = false,
-  onToggleArtifacts,
+  onExportSession,
   collapseChats = false,
-  onToggleCollapseChats,
-  collapseArtifactsInChat = false,
-  onToggleCollapseArtifactsInChat,
+  onCollapseChatsChange,
   sessionTitle = 'New Chat',
   currentSessionId,
   sessions = [],
@@ -212,6 +198,32 @@ export function FloatingNav({
       {/* Right side buttons - only show in chat */}
       {isChat && (
         <div className="flex items-center gap-1 shrink-0">
+          {/* Collapse All Chats Button */}
+          {onCollapseChatsChange && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onCollapseChatsChange(!collapseChats)}
+              className={`h-8 w-8 ${collapseChats ? 'bg-secondary text-secondary-foreground' : ''}`}
+              title={collapseChats ? 'Expand all chats' : 'Collapse all chats'}
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+              <span className="sr-only">{collapseChats ? 'Expand all chats' : 'Collapse all chats'}</span>
+            </Button>
+          )}
+          {/* Export Button */}
+          {onExportSession && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onExportSession}
+              className="h-8 w-8"
+              title="Export session as Markdown"
+            >
+              <Download className="h-4 w-4" />
+              <span className="sr-only">Export session</span>
+            </Button>
+          )}
           {/* Alert Button with Badge */}
           <Button
             variant="ghost"
@@ -230,91 +242,6 @@ export function FloatingNav({
             )}
             <span className="sr-only">View alerts ({eventCount})</span>
           </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onCreateSweepClick}
-            className="h-8 w-8"
-            title="Create sweep"
-          >
-            <PlugZap className="h-4 w-4" />
-            <span className="sr-only">Create sweep</span>
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onOpenContextualClick}
-            className="h-8 w-8"
-            title="Open contextual chat"
-          >
-            <Orbit className="h-4 w-4" />
-            <span className="sr-only">Open contextual chat</span>
-          </Button>
-
-          {/* Settings Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-              >
-                <Settings className="h-4 w-4" />
-                <span className="sr-only">Chat settings</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Chat Settings</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="flex items-center justify-between cursor-pointer"
-                onSelect={(e) => {
-                  e.preventDefault()
-                  onToggleArtifacts?.()
-                }}
-              >
-                <Label htmlFor="show-artifacts" className="cursor-pointer">Show artifacts</Label>
-                <Switch
-                  id="show-artifacts"
-                  checked={showArtifacts}
-                  onCheckedChange={onToggleArtifacts}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="flex items-center justify-between cursor-pointer"
-                onSelect={(e) => {
-                  e.preventDefault()
-                  onToggleCollapseChats?.()
-                }}
-              >
-                <Label htmlFor="collapse-chats" className="cursor-pointer">Collapse all chats</Label>
-                <Switch
-                  id="collapse-chats"
-                  checked={collapseChats}
-                  onCheckedChange={onToggleCollapseChats}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="flex items-center justify-between cursor-pointer"
-                onSelect={(e) => {
-                  e.preventDefault()
-                  onToggleCollapseArtifactsInChat?.()
-                }}
-              >
-                <Label htmlFor="collapse-artifacts" className="cursor-pointer">Collapse artifacts in chat</Label>
-                <Switch
-                  id="collapse-artifacts"
-                  checked={collapseArtifactsInChat}
-                  onCheckedChange={onToggleCollapseArtifactsInChat}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       )}
 

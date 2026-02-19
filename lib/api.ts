@@ -1,6 +1,6 @@
 'use client'
 
-import { getApiUrl, getAuthToken } from './api-config'
+import { getApiUrl, getAuthToken, getResearchAgentKey } from './api-config'
 import type { PromptProvenance } from '@/lib/types'
 
 // Get API URL dynamically at runtime (supports localStorage override)
@@ -17,6 +17,11 @@ function getHeaders(includeContentType: boolean = false): HeadersInit {
     const authToken = getAuthToken()
     if (authToken) {
         headers['X-Auth-Token'] = authToken
+    }
+
+    const researchAgentKey = getResearchAgentKey()
+    if (researchAgentKey) {
+        headers['X-Research-Agent-Key'] = researchAgentKey
     }
 
     return headers
@@ -428,7 +433,9 @@ export interface Run {
     error?: string | null
     wandb_dir?: string | null
     sweep_id?: string | null
+    chat_session_id?: string | null
     sweep_params?: Record<string, unknown> | null
+    gpuwrap_config?: GpuwrapConfig | null
     // Optional fields for metrics/charts (from mock or W&B)
     progress?: number
     config?: Record<string, unknown>
@@ -437,6 +444,14 @@ export interface Run {
     metricSeries?: Record<string, { step: number; value: number }[]>
     metricKeys?: string[]
     color?: string
+}
+
+export interface GpuwrapConfig {
+    enabled?: boolean
+    retries?: number
+    retry_delay_seconds?: number
+    max_memory_used_mb?: number
+    max_utilization?: number
 }
 
 export interface Alert {
@@ -460,13 +475,16 @@ export interface CreateRunRequest {
     sweep_id?: string
     parent_run_id?: string
     origin_alert_id?: string
+    chat_session_id?: string
     auto_start?: boolean
+    gpuwrap_config?: GpuwrapConfig
 }
 
 export interface RunRerunRequest {
     command?: string
     auto_start?: boolean
     origin_alert_id?: string
+    gpuwrap_config?: GpuwrapConfig
 }
 
 export interface RunUpdateRequest {
@@ -479,39 +497,8 @@ export interface WildModeState {
     enabled: boolean
 }
 
-export interface WildLoopStatus {
-    phase: string
-    iteration: number
-    goal: string | null
-    session_id: string | null
-    started_at: number | null
-    is_paused: boolean
-    is_active: boolean
-    stage: string
-    sweep_id: string | null
-    termination: {
-        max_iterations: number | null
-        max_time_seconds: number | null
-        max_tokens: number | null
-        custom_condition: string | null
-    }
-    // Enriched fields from engine
-    queue_size: number
-    queue_events: WildEventQueueItem[]
-    run_stats: {
-        total: number
-        running: number
-        completed: number
-        failed: number
-        queued: number
-    }
-    active_alerts: Alert[]
-    has_pending_prompt: boolean
-    pending_event_id: string | null
-    plan_autonomy: string
-    created_sweeps: { id: string; name: string; status: string; run_count: number }[]
-    created_runs: { id: string; name: string; status: string }[]
-}
+
+
 
 export interface LogResponse {
     content: string
@@ -793,317 +780,13 @@ export async function setWildMode(enabled: boolean): Promise<WildModeState> {
     return response.json()
 }
 
-/**
- * Get wild loop status
- */
-export async function getWildLoopStatus(): Promise<WildLoopStatus> {
-    const response = await fetch(`${API_URL()}/wild/status`, {
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to get wild loop status: ${response.statusText}`)
-    }
-    return response.json()
-}
 
-/**
- * Update wild loop status from frontend
- */
-export async function updateWildLoopStatus(update: {
-    phase?: string
-    iteration?: number
-    goal?: string
-    session_id?: string
-    is_paused?: boolean
-    is_active?: boolean
-    stage?: string
-}): Promise<WildLoopStatus> {
-    const params = new URLSearchParams()
-    if (update.phase !== undefined) params.set('phase', update.phase)
-    if (update.iteration !== undefined) params.set('iteration', String(update.iteration))
-    if (update.goal !== undefined) params.set('goal', update.goal)
-    if (update.session_id !== undefined) params.set('session_id', update.session_id)
-    if (update.is_paused !== undefined) params.set('is_paused', String(update.is_paused))
-    if (update.is_active !== undefined) params.set('is_active', String(update.is_active))
-    if (update.stage !== undefined) params.set('stage', update.stage)
 
-    const response = await fetch(`${API_URL()}/wild/status?${params}`, {
-        method: 'POST',
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to update wild loop status: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Configure wild loop termination conditions
- */
-export async function configureWildLoop(config: {
-    goal?: string
-    session_id?: string
-    max_iterations?: number
-    max_time_seconds?: number
-    max_tokens?: number
-    custom_condition?: string
-    autonomy_level?: string
-    queue_modify_enabled?: boolean
-    plan_autonomy?: string
-}): Promise<WildLoopStatus> {
-    const response = await fetch(`${API_URL()}/wild/configure`, {
-        method: 'POST',
-        headers: getHeaders(true),
-        body: JSON.stringify(config),
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to configure wild loop: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-// =============================================================================
-// Wild Event Queue Functions
-// =============================================================================
-
-export interface WildEventQueueItem {
-    id: string
-    priority: number
-    title: string
-    prompt: string
-    type: string
-    created_at: number
-}
-
-/**
- * Enqueue a wild event with priority
- */
-export async function enqueueWildEvent(event: {
-    priority?: number
-    title: string
-    prompt: string
-    type?: string
-}): Promise<{ added: boolean; event: WildEventQueueItem; queue_size: number }> {
-    const response = await fetch(`${API_URL()}/wild/events/enqueue`, {
-        method: 'POST',
-        headers: getHeaders(true),
-        body: JSON.stringify(event),
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to enqueue wild event: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Dequeue the highest-priority wild event
- */
-export async function dequeueWildEvent(): Promise<{ event: WildEventQueueItem | null; queue_size: number }> {
-    const response = await fetch(`${API_URL()}/wild/events/next`, {
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to dequeue wild event: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Get the current wild event queue state
- */
-export async function getWildEventQueue(): Promise<{ queue_size: number; events: WildEventQueueItem[] }> {
-    const response = await fetch(`${API_URL()}/wild/events/queue`, {
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to get wild event queue: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-// =============================================================================
-// Wild Prompt Builder (server-side construction with transparency)
-// =============================================================================
-
-export interface BuildWildPromptRequest {
-    prompt_type: 'exploring' | 'run_event' | 'alert' | 'analysis'
-    goal?: string
-    iteration?: number
-    max_iterations?: number
-    // run_event
-    run_id?: string
-    run_name?: string
-    run_status?: string
-    run_command?: string
-    log_tail?: string
-    sweep_summary?: string
-    // alert
-    alert_id?: string
-    alert_severity?: string
-    alert_message?: string
-    alert_choices?: string[]
-    // analysis
-    sweep_name?: string
-    total_runs?: number
-    passed_runs?: number
-    failed_runs?: number
-    run_summaries?: string
-}
 
 // Re-export from canonical location
 export type { PromptProvenance } from '@/lib/types'
 
-/**
- * Build a wild loop prompt server-side with full provenance metadata.
- * Returns the rendered prompt, template used, variables applied, and user input.
- */
-export async function buildWildPrompt(req: BuildWildPromptRequest): Promise<PromptProvenance> {
-    const response = await fetch(`${API_URL()}/wild/build-prompt`, {
-        method: 'POST',
-        headers: getHeaders(true),
-        body: JSON.stringify(req),
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to build wild prompt: ${response.statusText}`)
-    }
-    return response.json()
-}
 
-// =============================================================================
-// Backend-Driven Wild Loop Engine (v5) API Functions
-// =============================================================================
-
-export interface WildNextPrompt {
-    has_prompt: boolean
-    event_id?: string | null
-    prompt?: string | null
-    display_message?: string | null
-    title?: string | null
-    event_type?: string | null
-    priority?: number | null
-    provenance?: PromptProvenance | null
-}
-
-/**
- * Start the wild loop with a goal and session.
- */
-export async function startWildLoop(params: {
-    goal: string
-    session_id: string
-    max_iterations?: number
-    max_time_seconds?: number
-    max_tokens?: number
-    custom_condition?: string
-}): Promise<WildLoopStatus> {
-    const response = await fetch(`${API_URL()}/wild/start`, {
-        method: 'POST',
-        headers: getHeaders(true),
-        body: JSON.stringify(params),
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to start wild loop: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Stop the wild loop.
- */
-export async function stopWildLoop(): Promise<WildLoopStatus> {
-    const response = await fetch(`${API_URL()}/wild/stop`, {
-        method: 'POST',
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to stop wild loop: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Pause the wild loop.
- */
-export async function pauseWildLoop(): Promise<WildLoopStatus> {
-    const response = await fetch(`${API_URL()}/wild/pause`, {
-        method: 'POST',
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to pause wild loop: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Resume the wild loop.
- */
-export async function resumeWildLoop(): Promise<WildLoopStatus> {
-    const response = await fetch(`${API_URL()}/wild/resume`, {
-        method: 'POST',
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to resume wild loop: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Notify the backend that the agent finished responding.
- */
-export async function wildResponseComplete(responseText: string): Promise<WildLoopStatus> {
-    const response = await fetch(`${API_URL()}/wild/response-complete`, {
-        method: 'POST',
-        headers: getHeaders(true),
-        body: JSON.stringify({ response_text: responseText }),
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to submit wild response: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Get the next prompt the frontend should send to the agent.
- */
-export async function getWildNextPrompt(): Promise<WildNextPrompt> {
-    const response = await fetch(`${API_URL()}/wild/next-prompt`, {
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to get wild next prompt: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Mark the current pending prompt as consumed/sent.
- */
-export async function consumeWildPrompt(): Promise<{ consumed: boolean; queue_size: number }> {
-    const response = await fetch(`${API_URL()}/wild/next-prompt/consume`, {
-        method: 'POST',
-        headers: getHeaders()
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to consume wild prompt: ${response.statusText}`)
-    }
-    return response.json()
-}
-
-/**
- * Insert a user steer message into the wild loop queue.
- */
-export async function steerWildLoop(message: string, priority: number = 10): Promise<{ added: boolean; queue_size: number }> {
-    const response = await fetch(`${API_URL()}/wild/steer`, {
-        method: 'POST',
-        headers: getHeaders(true),
-        body: JSON.stringify({ message, priority }),
-    })
-    if (!response.ok) {
-        throw new Error(`Failed to steer wild loop: ${response.statusText}`)
-    }
-    return response.json()
-}
 
 // =============================================================================
 // Wild Loop V2 (Ralph-style) API Functions
@@ -1163,6 +846,7 @@ export async function startWildV2(params: {
     chat_session_id?: string
     max_iterations?: number
     wait_seconds?: number
+    evo_sweep_enabled?: boolean
 }): Promise<WildV2Status> {
     const response = await fetch(`${API_URL()}/wild/v2/start`, {
         method: 'POST',
@@ -1756,6 +1440,7 @@ export interface Sweep {
     max_runs?: number
     goal?: string
     is_wild?: boolean
+    chat_session_id?: string | null
     ui_config?: Record<string, unknown> | null
     creation_context?: {
         name?: string | null
@@ -1795,6 +1480,7 @@ export interface CreateSweepRequest {
     goal?: string
     status?: 'draft' | 'pending' | 'running'
     ui_config?: Record<string, unknown>
+    chat_session_id?: string
 }
 
 export interface UpdateSweepRequest {
@@ -1886,11 +1572,15 @@ export async function startSweep(sweepId: string, parallel: number = 1): Promise
 /**
  * Create an empty sweep container for wild loop job tracking
  */
-export async function createWildSweep(name: string, goal: string): Promise<Sweep> {
+export async function createWildSweep(name: string, goal: string, chatSessionId?: string): Promise<Sweep> {
+    const request: Record<string, unknown> = { name, goal }
+    if (chatSessionId) {
+        request.chat_session_id = chatSessionId
+    }
     const response = await fetch(`${API_URL()}/sweeps/wild`, {
         method: 'POST',
         headers: getHeaders(true),
-        body: JSON.stringify({ name, goal }),
+        body: JSON.stringify(request),
     })
     if (!response.ok) {
         throw new Error(`Failed to create wild sweep: ${response.statusText}`)

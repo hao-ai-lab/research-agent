@@ -1,6 +1,6 @@
 import { open, stat } from 'node:fs/promises'
 import { NextRequest, NextResponse } from 'next/server'
-import { getWorkspaceRoot, normalizeExplorerPath, resolveExplorerPath } from '../_utils'
+import { getWorkspaceRoot, normalizeExplorerPath, resolveExplorerPath, validateAuthToken } from '../_utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,8 +42,15 @@ function getErrorCode(error: unknown): string | undefined {
 }
 
 export async function GET(request: NextRequest) {
+  if (!validateAuthToken(request)) {
+    return NextResponse.json(
+      { error: 'Unauthorized - invalid or missing X-Auth-Token' },
+      { status: 401 },
+    )
+  }
+
   try {
-    const workspaceRoot = await getWorkspaceRoot()
+    const workspaceRoot = await getWorkspaceRoot(request)
     const relativePath = normalizeExplorerPath(request.nextUrl.searchParams.get('path'))
     if (!relativePath) {
       return NextResponse.json({ error: 'A file path is required' }, { status: 400 })
@@ -89,4 +96,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status })
   }
 }
-

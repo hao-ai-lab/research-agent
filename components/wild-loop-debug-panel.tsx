@@ -4,12 +4,21 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { RefreshCw, X, ChevronDown, ChevronRight, Bug, Circle, Settings, CheckCircle2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { getWildLoopStatus, getWildEventQueue, configureWildLoop, getWildV2Status } from '@/lib/api'
-import type { WildLoopStatus, WildEventQueueItem, WildV2Status } from '@/lib/api'
+import { getWildV2Status } from '@/lib/api'
+import type { ChatMessageData, WildV2Status } from '@/lib/api'
 import { useAppSettings } from '@/lib/app-settings'
+import type { ExperimentRun, PromptProvenance, Sweep } from '@/lib/types'
 
 interface WildLoopDebugPanelProps {
     onClose: () => void
+    layout?: 'desktop' | 'mobile'
+    mode?: 'agent' | 'wild' | 'plan' | 'sweep'
+    currentSessionId?: string | null
+    runs?: ExperimentRun[]
+    sweeps?: Sweep[]
+    messages?: ChatMessageData[]
+    provenanceEntries?: PromptProvenance[]
+    onRefreshData?: () => Promise<void>
 }
 
 const DEBUG_PANEL_MIN_WIDTH = 320
@@ -175,15 +184,113 @@ function stripMarkdownSyntax(text: string): string {
         .trim()
 }
 
-export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
+function trimPreview(text: string | null | undefined, maxLength: number = 220): string {
+    const normalized = (text || '').trim()
+    if (!normalized) return ''
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized
+}
+
+function extractTagBlock(content: string, tag: string): string | null {
+    const match = content.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i'))
+    if (!match) return null
+    return match[1].trim() || null
+}
+
+function formatRelativeTimestamp(timestampMs: number): string {
+    const diffMs = Date.now() - timestampMs
+    if (diffMs < 60_000) return 'just now'
+    const minutes = Math.floor(diffMs / 60_000)
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ago`
+}
+
+function getRunTrendSeries(run: ExperimentRun): { label: string; points: { step: number; value: number }[] } | null {
+    if (run.metricSeries) {
+        for (const [key, points] of Object.entries(run.metricSeries)) {
+            const normalized = (points || [])
+                .filter((point) => Number.isFinite(point.step) && Number.isFinite(point.value))
+                .map((point) => ({ step: Number(point.step), value: Number(point.value) }))
+            if (normalized.length >= 2) {
+                return { label: key, points: normalized.slice(-48) }
+            }
+        }
+    }
+
+    const fallback = (run.lossHistory || [])
+        .filter((point) => Number.isFinite(point.step) && Number.isFinite(point.trainLoss))
+        .map((point) => ({ step: Number(point.step), value: Number(point.trainLoss) }))
+    if (fallback.length >= 2) {
+        return { label: 'trainLoss', points: fallback.slice(-48) }
+    }
+    return null
+}
+
+function MiniTrendChart({ points }: { points: { step: number; value: number }[] }) {
+    if (points.length < 2) return null
+
+    const width = 220
+    const height = 58
+    const padding = 6
+    const values = points.map((point) => point.value)
+    const minValue = Math.min(...values)
+    const maxValue = Math.max(...values)
+    const valueSpan = maxValue - minValue || 1
+
+    const toX = (index: number) => {
+        if (points.length === 1) return padding
+        return padding + (index / (points.length - 1)) * (width - padding * 2)
+    }
+
+    const toY = (value: number) => {
+        const normalized = (value - minValue) / valueSpan
+        return height - padding - normalized * (height - padding * 2)
+    }
+
+    const polyline = points
+        .map((point, index) => `${toX(index)},${toY(point.value)}`)
+        .join(' ')
+
+    const lastPoint = points[points.length - 1]
+    const lastX = toX(points.length - 1)
+    const lastY = toY(lastPoint.value)
+
+    return (
+        <svg
+            width="100%"
+            viewBox={`0 0 ${width} ${height}`}
+            className="h-14 w-full rounded border border-border/40 bg-secondary/20"
+            role="img"
+            aria-label="Run metric trend"
+        >
+            <polyline
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="text-blue-400"
+                points={polyline}
+            />
+            <circle cx={lastX} cy={lastY} r="2.5" className="fill-blue-300" />
+        </svg>
+    )
+}
+
+export function WildLoopDebugPanel({
+    onClose,
+    layout = 'desktop',
+    mode = 'agent',
+    currentSessionId = null,
+    runs = [],
+    sweeps = [],
+    messages = [],
+    provenanceEntries = [],
+    onRefreshData,
+}: WildLoopDebugPanelProps) {
     const { settings, setSettings } = useAppSettings()
-    const [status, setStatus] = useState<WildLoopStatus | null>(null)
-    const [queue, setQueue] = useState<{ queue_size: number; events: WildEventQueueItem[] } | null>(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [statusOpen, setStatusOpen] = useState(true)
-    const [queueOpen, setQueueOpen] = useState(true)
-    const [entitiesOpen, setEntitiesOpen] = useState(true)
     const [settingsOpen, setSettingsOpen] = useState(false)
     const [v2PlanOpen, setV2PlanOpen] = useState(true)
     const [v2TasksOpen, setV2TasksOpen] = useState(true)
@@ -195,11 +302,19 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         clampDebugPanelWidth(settings.developer?.wildLoopDebugPanelWidthPx ?? DEBUG_PANEL_DEFAULT_WIDTH)
     )
     const [isResizingPanel, setIsResizingPanel] = useState(false)
+    const [contextOverviewOpen, setContextOverviewOpen] = useState(true)
+    const [contextSweepsOpen, setContextSweepsOpen] = useState(true)
+    const [contextRunsOpen, setContextRunsOpen] = useState(true)
+    const [contextChartsOpen, setContextChartsOpen] = useState(true)
+    const [contextJourneyOpen, setContextJourneyOpen] = useState(true)
+    const [contextPromptsOpen, setContextPromptsOpen] = useState(false)
     const panelWidthRef = useRef(panelWidth)
     const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null)
+    const activePointerIdRef = useRef<number | null>(null)
     const settingsRef = useRef(settings)
-    const prevIterationRef = useRef<number | null>(null)
 
+
+    const isMobileLayout = layout === 'mobile'
     const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 2
     const tasksFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopTasksFontSizePx ?? 16))
     const historyFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopHistoryFontSizePx ?? 15))
@@ -226,32 +341,90 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         [v2Status?.history]
     )
     const allHistoryExpanded = reversedHistory.length > 0 && reversedHistory.every((h) => expandedHistoryRows[h.iteration] === true)
+    const relatedSweeps = useMemo(() => {
+        if (!currentSessionId) return []
+        return [...sweeps]
+            .filter((sweep) => sweep.chatSessionId === currentSessionId)
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    }, [sweeps, currentSessionId])
+    const relatedSweepIds = useMemo(
+        () => new Set(relatedSweeps.map((sweep) => sweep.id)),
+        [relatedSweeps]
+    )
+    const relatedRuns = useMemo(() => {
+        if (!currentSessionId) return []
+        return [...runs]
+            .filter((run) => run.chatSessionId === currentSessionId || (!!run.sweepId && relatedSweepIds.has(run.sweepId)))
+            .sort((a, b) => {
+                const aTime = a.startedAt?.getTime() ?? a.createdAt?.getTime() ?? a.startTime.getTime()
+                const bTime = b.startedAt?.getTime() ?? b.createdAt?.getTime() ?? b.startTime.getTime()
+                return bTime - aTime
+            })
+    }, [runs, currentSessionId, relatedSweepIds])
+    const runTrends = useMemo(() => {
+        return relatedRuns
+            .map((run) => ({ run, trend: getRunTrendSeries(run) }))
+            .filter((entry): entry is { run: ExperimentRun; trend: { label: string; points: { step: number; value: number }[] } } => !!entry.trend)
+            .slice(0, 4)
+    }, [relatedRuns])
+    const latestUserMessage = useMemo(
+        () => [...messages].reverse().find((message) => message.role === 'user' && message.content.trim().length > 0) || null,
+        [messages]
+    )
+    const latestAssistantMessage = useMemo(
+        () => [...messages].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0) || null,
+        [messages]
+    )
+    const latestReflection = useMemo(() => {
+        if (v2Status?.reflection?.trim()) return v2Status.reflection.trim()
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index]
+            if (message.role !== 'assistant') continue
+            const extracted = extractTagBlock(message.content, 'reflection')
+            if (extracted) return extracted
+        }
+        return ''
+    }, [messages, v2Status?.reflection])
+    const latestSummary = useMemo(() => {
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index]
+            if (message.role !== 'assistant') continue
+            const extracted = extractTagBlock(message.content, 'summary')
+            if (extracted) return extracted
+        }
+        return trimPreview(latestAssistantMessage?.content || '', 360)
+    }, [messages, latestAssistantMessage?.content])
+    const recentPromptProvenance = useMemo(
+        () => provenanceEntries.slice(-6).reverse(),
+        [provenanceEntries]
+    )
+    const panelTitle = mode === 'wild' ? 'Wild Context' : 'Chat Context'
+    const showWildDiagnostics = mode === 'wild' || v2Status?.active === true
 
     const refresh = useCallback(async () => {
         setLoading(true)
         setError(null)
-        try {
-            const [statusData, queueData, v2Data] = await Promise.all([
-                getWildLoopStatus(),
-                getWildEventQueue(),
-                getWildV2Status().catch(() => ({ active: false } as WildV2Status)),
-            ])
-            setStatus(statusData)
-            setQueue(queueData)
-            setV2Status(v2Data)
-            setLastRefreshed(new Date())
+        const [v2Result, contextResult] = await Promise.allSettled([
+            getWildV2Status().catch(() => ({ active: false } as WildV2Status)),
+            onRefreshData ? onRefreshData() : Promise.resolve(),
+        ])
 
-            // Detect iteration changes for extra refresh (already handled by interval)
-            if (prevIterationRef.current !== null && statusData.iteration !== prevIterationRef.current) {
-                // Iteration changed — data is already fresh from this call
-            }
-            prevIterationRef.current = statusData.iteration
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to fetch')
-        } finally {
-            setLoading(false)
+        let nextError: string | null = null
+
+        if (v2Result.status === 'fulfilled') {
+            setV2Status(v2Result.value)
+        } else {
+            nextError = v2Result.reason instanceof Error ? v2Result.reason.message : 'Failed to fetch wild v2 status'
         }
-    }, [])
+
+        if (contextResult.status === 'rejected' && !nextError) {
+            nextError = contextResult.reason instanceof Error ? contextResult.reason.message : 'Failed to refresh runs and sweeps'
+        }
+
+        setError(nextError)
+        setLastRefreshed(new Date())
+        setLoading(false)
+    }, [onRefreshData])
 
     // Auto-refresh on mount + interval
     useEffect(() => {
@@ -281,28 +454,32 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
     }, [panelWidth])
 
     useEffect(() => {
+        if (isMobileLayout) return
         if (isResizingPanel) return
         const savedWidth = settings.developer?.wildLoopDebugPanelWidthPx
         if (typeof savedWidth === 'number' && Number.isFinite(savedWidth)) {
             setPanelWidth(clampDebugPanelWidth(savedWidth))
         }
-    }, [settings.developer?.wildLoopDebugPanelWidthPx, isResizingPanel])
+    }, [settings.developer?.wildLoopDebugPanelWidthPx, isMobileLayout, isResizingPanel])
 
     useEffect(() => {
+        if (isMobileLayout) return
         if (!isResizingPanel) return
 
-        const handleMouseMove = (event: MouseEvent) => {
+        const handlePointerMove = (event: PointerEvent) => {
+            if (activePointerIdRef.current !== null && event.pointerId !== activePointerIdRef.current) return
             const dragState = resizeStartRef.current
             if (!dragState) return
             const nextWidth = clampDebugPanelWidth(dragState.startWidth + (dragState.startX - event.clientX))
             setPanelWidth(nextWidth)
         }
 
-        const handleMouseUp = () => {
+        const finishResize = () => {
             const nextWidth = panelWidthRef.current
             const currentSettings = settingsRef.current
             setIsResizingPanel(false)
             resizeStartRef.current = null
+            activePointerIdRef.current = null
             setSettings({
                 ...currentSettings,
                 developer: {
@@ -312,27 +489,39 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
             })
         }
 
-        window.addEventListener('mousemove', handleMouseMove)
-        window.addEventListener('mouseup', handleMouseUp)
+        const handlePointerUp = (event: PointerEvent) => {
+            if (activePointerIdRef.current !== null && event.pointerId !== activePointerIdRef.current) return
+            finishResize()
+        }
+
+        window.addEventListener('pointermove', handlePointerMove)
+        window.addEventListener('pointerup', handlePointerUp)
+        window.addEventListener('pointercancel', handlePointerUp)
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
+        document.body.style.touchAction = 'none'
 
         return () => {
-            window.removeEventListener('mousemove', handleMouseMove)
-            window.removeEventListener('mouseup', handleMouseUp)
+            window.removeEventListener('pointermove', handlePointerMove)
+            window.removeEventListener('pointerup', handlePointerUp)
+            window.removeEventListener('pointercancel', handlePointerUp)
             document.body.style.cursor = ''
             document.body.style.userSelect = ''
+            document.body.style.touchAction = ''
         }
-    }, [isResizingPanel, setSettings])
+    }, [isMobileLayout, isResizingPanel, setSettings])
 
-    const startPanelResize = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const startPanelResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+        if (isMobileLayout) return
         event.preventDefault()
+        activePointerIdRef.current = event.pointerId
+        event.currentTarget.setPointerCapture(event.pointerId)
         resizeStartRef.current = {
             startX: event.clientX,
             startWidth: panelWidthRef.current,
         }
         setIsResizingPanel(true)
-    }, [])
+    }, [isMobileLayout])
 
     const resetPanelWidth = useCallback(() => {
         const nextWidth = DEBUG_PANEL_DEFAULT_WIDTH
@@ -346,26 +535,7 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         })
     }, [settings, setSettings])
 
-    const phaseColor = (phase: string) => {
-        switch (phase) {
-            case 'idle': return 'text-muted-foreground'
-            case 'exploring': return 'text-blue-400'
-            case 'monitoring': return 'text-green-400'
-            case 'analyzing': return 'text-yellow-400'
-            case 'fixing': return 'text-red-400'
-            case 'paused': return 'text-orange-400'
-            default: return 'text-foreground'
-        }
-    }
 
-    const priorityLabel = (p: number) => {
-        if (p <= 10) return { label: 'User', color: 'text-purple-400' }
-        if (p <= 20) return { label: 'Critical', color: 'text-red-400' }
-        if (p <= 30) return { label: 'Warning', color: 'text-yellow-400' }
-        if (p <= 50) return { label: 'Run', color: 'text-blue-400' }
-        if (p <= 70) return { label: 'Analysis', color: 'text-cyan-400' }
-        return { label: 'Explore', color: 'text-muted-foreground' }
-    }
 
     const statusColor = (s: string) => {
         switch (s) {
@@ -378,28 +548,29 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
         }
     }
 
-    const totalEntities = (status?.created_sweeps?.length ?? 0) + (status?.created_runs?.length ?? 0)
 
     return (
         <div
-            className={`relative flex h-full shrink-0 flex-col border-l border-border bg-background/95 backdrop-blur-sm ${isResizingPanel ? 'select-none' : ''}`}
-            style={{ width: `${panelWidth}px`, maxWidth: '50vw' }}
+            className={`relative flex h-full shrink-0 flex-col bg-background/95 backdrop-blur-sm ${isMobileLayout ? 'w-full border-l-0' : 'border-l border-border'} ${isResizingPanel ? 'select-none' : ''}`}
+            style={isMobileLayout ? undefined : { width: `${panelWidth}px`, maxWidth: '50vw' }}
         >
-            <button
-                type="button"
-                className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize"
-                onMouseDown={startPanelResize}
-                onDoubleClick={resetPanelWidth}
-                title="Drag to resize panel. Double click to reset."
-                aria-label="Resize debug panel"
-            >
-                <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/70 transition-colors group-hover:bg-foreground/60" />
-            </button>
+            {!isMobileLayout && (
+                <button
+                    type="button"
+                    className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize"
+                    onPointerDown={startPanelResize}
+                    onDoubleClick={resetPanelWidth}
+                    title="Drag to resize panel. Double click to reset."
+                    aria-label="Resize debug panel"
+                >
+                    <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/70 transition-colors group-hover:bg-foreground/60" />
+                </button>
+            )}
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
                 <div className="flex items-center gap-2">
                     <Bug className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">Wild Loop Debug</span>
+                    <span className="text-sm font-medium">{panelTitle}</span>
                 </div>
                 <div className="flex items-center gap-1">
                     <Button
@@ -443,8 +614,201 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                <Collapsible open={contextOverviewOpen} onOpenChange={setContextOverviewOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {contextOverviewOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <span>Session Overview</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 text-xs">
+                            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+                                <span className="text-muted-foreground">Mode:</span>
+                                <span className="font-medium">{mode}</span>
+                                <span className="text-muted-foreground">Chat:</span>
+                                <span className="font-mono text-[10px] break-all">{currentSessionId || 'none'}</span>
+                                <span className="text-muted-foreground">Messages:</span>
+                                <span>{messages.length}</span>
+                                <span className="text-muted-foreground">Related sweeps:</span>
+                                <span>{relatedSweeps.length}</span>
+                                <span className="text-muted-foreground">Related runs:</span>
+                                <span>{relatedRuns.length}</span>
+                            </div>
+                            {latestUserMessage && (
+                                <div className="mt-3 border-t border-border/30 pt-2">
+                                    <div className="text-[10px] font-medium text-muted-foreground">Latest user intent</div>
+                                    <div className="mt-1 text-foreground/90">{trimPreview(latestUserMessage.content, 260)}</div>
+                                    <div className="mt-1 text-[10px] text-muted-foreground/70">
+                                        {formatRelativeTimestamp(latestUserMessage.timestamp * 1000)}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible open={contextSweepsOpen} onOpenChange={setContextSweepsOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {contextSweepsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <span>Related Sweeps</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">{relatedSweeps.length}</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        {relatedSweeps.length === 0 ? (
+                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                                No chat-linked sweeps yet.
+                            </div>
+                        ) : (
+                            <div className="space-y-1.5">
+                                {relatedSweeps.slice(0, 8).map((sweep) => (
+                                    <div key={sweep.id} className="rounded-lg border border-border/50 bg-secondary/20 px-3 py-2 text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`font-medium ${statusColor(sweep.status)}`}>{sweep.status}</span>
+                                            <span className="min-w-0 flex-1 truncate text-foreground">
+                                                {sweep.config.name || sweep.creationContext.name || sweep.id}
+                                            </span>
+                                        </div>
+                                        <div className="mt-1 text-[10px] text-muted-foreground/80">
+                                            {sweep.progress.completed}/{sweep.progress.total} complete • {formatRelativeTimestamp(sweep.createdAt.getTime())}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible open={contextRunsOpen} onOpenChange={setContextRunsOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {contextRunsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <span>Related Runs</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">{relatedRuns.length}</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        {relatedRuns.length === 0 ? (
+                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                                No chat-linked runs yet.
+                            </div>
+                        ) : (
+                            <div className="space-y-1.5">
+                                {relatedRuns.slice(0, 10).map((run) => {
+                                    const runTime = run.startedAt?.getTime() ?? run.createdAt?.getTime() ?? run.startTime.getTime()
+                                    return (
+                                        <div key={run.id} className="rounded-lg border border-border/50 bg-secondary/20 px-3 py-2 text-xs">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`font-medium ${statusColor(run.status)}`}>{run.status}</span>
+                                                <span className="min-w-0 flex-1 truncate text-foreground">{run.alias || run.name}</span>
+                                            </div>
+                                            <div className="mt-1 text-[10px] text-muted-foreground/80">
+                                                {trimPreview(run.command, 90)} • {formatRelativeTimestamp(runTime)}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible open={contextChartsOpen} onOpenChange={setContextChartsOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {contextChartsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <span>Run Charts</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">{runTrends.length}</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        {runTrends.length === 0 ? (
+                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                                No metric trends yet for related runs.
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {runTrends.map(({ run, trend }) => {
+                                    const latestPoint = trend.points[trend.points.length - 1]
+                                    return (
+                                        <div key={run.id} className="rounded-lg border border-border/50 bg-secondary/20 px-3 py-2">
+                                            <div className="mb-1 flex items-center gap-2 text-xs">
+                                                <span className="min-w-0 flex-1 truncate text-foreground">{run.alias || run.name}</span>
+                                                <span className="text-[10px] text-muted-foreground">
+                                                    {trend.label}: {latestPoint.value.toFixed(4)}
+                                                </span>
+                                            </div>
+                                            <MiniTrendChart points={trend.points} />
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible open={contextJourneyOpen} onOpenChange={setContextJourneyOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {contextJourneyOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <span>Journey Summary</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-2 text-xs">
+                            <div>
+                                <div className="text-[10px] font-medium text-muted-foreground">Latest summary</div>
+                                <div className="mt-1 whitespace-pre-wrap text-foreground/90">
+                                    {trimPreview(latestSummary, 420) || 'No summary captured yet.'}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-[10px] font-medium text-muted-foreground">Latest reflection</div>
+                                <div className="mt-1 whitespace-pre-wrap text-foreground/80">
+                                    {trimPreview(latestReflection, 360) || 'No reflection captured yet.'}
+                                </div>
+                            </div>
+                            {latestAssistantMessage && (
+                                <div className="text-[10px] text-muted-foreground/70">
+                                    Last assistant update: {formatRelativeTimestamp(latestAssistantMessage.timestamp * 1000)}
+                                </div>
+                            )}
+                        </div>
+                    </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible open={contextPromptsOpen} onOpenChange={setContextPromptsOpen}>
+                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                        {contextPromptsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        <span>Prompt Provenance</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">{recentPromptProvenance.length}</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                        {recentPromptProvenance.length === 0 ? (
+                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                                No prompt provenance captured for this session yet.
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {recentPromptProvenance.map((entry, index) => (
+                                    <details key={`${entry.user_input}-${index}`} className="rounded-lg border border-border/50 bg-secondary/20 p-2">
+                                        <summary className="cursor-pointer text-xs font-medium text-foreground">
+                                            {entry.prompt_type || 'prompt'} • {trimPreview(entry.user_input, 90) || 'No user input'}
+                                        </summary>
+                                        <div className="mt-2 space-y-2 text-[11px]">
+                                            <div>
+                                                <div className="text-[10px] font-medium text-muted-foreground">Input</div>
+                                                <div className="mt-1 whitespace-pre-wrap text-foreground/85">{entry.user_input || '—'}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] font-medium text-muted-foreground">Actual prompt sent</div>
+                                                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border/40 bg-background/60 p-2 text-[10px] text-foreground/85">
+                                                    {entry.rendered || '—'}
+                                                </pre>
+                                            </div>
+                                        </div>
+                                    </details>
+                                ))}
+                            </div>
+                        )}
+                    </CollapsibleContent>
+                </Collapsible>
+
                 {/* Settings Section */}
-                <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
+                {showWildDiagnostics && (
+                    <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
                     <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
                         {settingsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                         <Settings className="h-3 w-3 text-muted-foreground" />
@@ -473,10 +837,11 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                             </div>
                         </div>
                     </CollapsibleContent>
-                </Collapsible>
+                    </Collapsible>
+                )}
 
                 {/* V2 Plan Section */}
-                {v2Status && v2Status.active && (
+                {showWildDiagnostics && v2Status && v2Status.active && (
                     <Collapsible open={v2PlanOpen} onOpenChange={setV2PlanOpen}>
                         <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-green-500/10 border border-green-500/20 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-green-500/15">
                             {v2PlanOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -848,264 +1213,19 @@ export function WildLoopDebugPanel({ onClose }: WildLoopDebugPanelProps) {
                     </Collapsible>
                 )}
 
-                {/* Status Section */}
-                <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-                        {statusOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <span>Wild Status</span>
-                        {status && (
-                            <span className={`ml-auto text-[10px] ${phaseColor(status.phase)}`}>
-                                {status.phase}
-                            </span>
-                        )}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        {status ? (
-                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-2 text-xs">
-                                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
-                                    <span className="text-muted-foreground">Phase:</span>
-                                    <span className={`font-medium ${phaseColor(status.phase)}`}>{status.phase}</span>
-
-                                    <span className="text-muted-foreground">Active:</span>
-                                    <span className={status.is_active ? 'text-green-400' : 'text-muted-foreground'}>{String(status.is_active)}</span>
-
-                                    <span className="text-muted-foreground">Paused:</span>
-                                    <span className={status.is_paused ? 'text-orange-400' : 'text-muted-foreground'}>{String(status.is_paused)}</span>
-
-                                    <span className="text-muted-foreground">Stage:</span>
-                                    <span>{status.stage || '—'}</span>
-
-                                    <span className="text-muted-foreground">Iteration:</span>
-                                    <span>{status.iteration}</span>
-
-                                    <span className="text-muted-foreground">Goal:</span>
-                                    <span className="whitespace-pre-wrap break-words" title={status.goal || undefined}>{status.goal || '—'}</span>
-
-                                    <span className="text-muted-foreground">Session:</span>
-                                    <span className="font-mono text-[10px] truncate" title={status.session_id || undefined}>
-                                        {status.session_id ? status.session_id.slice(0, 12) + '…' : '—'}
-                                    </span>
-
-                                    <span className="text-muted-foreground">Sweep:</span>
-                                    <span className="font-mono text-[10px]">{status.sweep_id || '—'}</span>
-
-                                    <span className="text-muted-foreground">Queue:</span>
-                                    <span>{status.queue_size} events</span>
-
-                                    <span className="text-muted-foreground">Plan:</span>
-                                    <button
-                                        className={`text-left font-medium cursor-pointer hover:underline ${status.plan_autonomy === 'agent' ? 'text-green-400' : 'text-blue-400'
-                                            }`}
-                                        onClick={async () => {
-                                            const next = status.plan_autonomy === 'agent' ? 'collaborative' : 'agent'
-                                            try {
-                                                await configureWildLoop({ plan_autonomy: next })
-                                                refresh()
-                                            } catch { }
-                                        }}
-                                        title={`Click to switch to ${status.plan_autonomy === 'agent' ? 'collaborative' : 'agent'} mode`}
-                                    >
-                                        {status.plan_autonomy === 'agent' ? '🤖 Agent decides' : '🤝 Collaborative'}
-                                    </button>
-                                </div>
-
-                                {/* Run stats */}
-                                {status.run_stats && (
-                                    <div className="border-t border-border/30 pt-2">
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Run Stats</div>
-                                        <div className="flex flex-wrap gap-2 text-[10px]">
-                                            <span>Total: {status.run_stats.total}</span>
-                                            <span className="text-green-400">✓ {status.run_stats.completed}</span>
-                                            <span className="text-blue-400">▶ {status.run_stats.running}</span>
-                                            <span className="text-red-400">✗ {status.run_stats.failed}</span>
-                                            <span className="text-muted-foreground">⏳ {status.run_stats.queued}</span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Termination */}
-                                {status.termination && (
-                                    <div className="border-t border-border/30 pt-2">
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Termination</div>
-                                        <div className="text-[10px] space-y-0.5">
-                                            {status.termination.max_iterations != null && (
-                                                <div>Max iterations: {status.termination.max_iterations}</div>
-                                            )}
-                                            {status.termination.max_time_seconds != null && (
-                                                <div>Max time: {status.termination.max_time_seconds}s</div>
-                                            )}
-                                            {status.termination.max_tokens != null && (
-                                                <div>Max tokens: {status.termination.max_tokens}</div>
-                                            )}
-                                            {!status.termination.max_iterations && !status.termination.max_time_seconds && !status.termination.max_tokens && (
-                                                <div className="text-muted-foreground">No limits set</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Active alerts */}
-                                {status.active_alerts && status.active_alerts.length > 0 && (
-                                    <div className="border-t border-border/30 pt-2">
-                                        <div className="text-[10px] text-muted-foreground mb-1 font-medium">Active Alerts ({status.active_alerts.length})</div>
-                                        <div className="space-y-1">
-                                            {status.active_alerts.slice(0, 5).map((alert, i) => (
-                                                <div key={i} className="text-[10px] flex items-start gap-1">
-                                                    <Circle className="h-2 w-2 mt-0.5 text-yellow-400 fill-yellow-400/30" />
-                                                    <span className="truncate">{alert.message}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="text-xs text-muted-foreground p-3">
-                                {loading ? 'Loading...' : 'No data'}
-                            </div>
-                        )}
-                    </CollapsibleContent>
-                </Collapsible>
-
-                {/* Created Entities Section */}
-                <Collapsible open={entitiesOpen} onOpenChange={setEntitiesOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-                        {entitiesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <span>Created Entities</span>
-                        <span className="ml-auto text-[10px] text-muted-foreground">
-                            {totalEntities} items
-                        </span>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        {totalEntities === 0 ? (
-                            <div className="text-xs text-muted-foreground p-3 text-center">
-                                No sweeps or runs created yet
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-3 text-xs">
-                                {/* Created Sweeps */}
-                                {status?.created_sweeps && status.created_sweeps.length > 0 && (
-                                    <div>
-                                        <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
-                                            Sweeps ({status.created_sweeps.length})
-                                        </div>
-                                        <div className="space-y-1">
-                                            {status.created_sweeps.map((sweep) => (
-                                                <div
-                                                    key={sweep.id}
-                                                    className="flex items-center gap-2 rounded border border-border/30 bg-secondary/10 px-2 py-1.5"
-                                                >
-                                                    <span className={`text-[10px] font-medium ${statusColor(sweep.status)}`}>
-                                                        {sweep.status}
-                                                    </span>
-                                                    <span className="truncate flex-1 text-[10px]" title={sweep.name}>
-                                                        {sweep.name}
-                                                    </span>
-                                                    <span className="text-[10px] text-muted-foreground/60 shrink-0">
-                                                        {sweep.run_count} runs
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Created Runs */}
-                                {status?.created_runs && status.created_runs.length > 0 && (
-                                    <div>
-                                        <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">
-                                            Runs ({status.created_runs.length})
-                                        </div>
-                                        <div className="space-y-1">
-                                            {status.created_runs.map((run) => (
-                                                <div
-                                                    key={run.id}
-                                                    className="flex items-center gap-2 rounded border border-border/30 bg-secondary/10 px-2 py-1.5"
-                                                >
-                                                    <span className={`text-[10px] font-medium ${statusColor(run.status)}`}>
-                                                        {run.status}
-                                                    </span>
-                                                    <span className="truncate flex-1 text-[10px]" title={run.name}>
-                                                        {run.name}
-                                                    </span>
-                                                    <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">
-                                                        {run.id}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </CollapsibleContent>
-                </Collapsible>
-
-                {/* Queue Section */}
-                <Collapsible open={queueOpen} onOpenChange={setQueueOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-                        {queueOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <span>Event Queue</span>
-                        {queue && (
-                            <span className="ml-auto text-[10px] text-muted-foreground">
-                                {queue.queue_size} items
-                            </span>
-                        )}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        {queue ? (
-                            queue.events.length === 0 ? (
-                                <div className="text-xs text-muted-foreground p-3 text-center">
-                                    Queue is empty
-                                </div>
-                            ) : (
-                                <div className="space-y-1.5">
-                                    {queue.events.map((event, index) => {
-                                        const pl = priorityLabel(event.priority)
-                                        return (
-                                            <div
-                                                key={event.id}
-                                                className="rounded-lg border border-border/50 bg-secondary/20 p-2.5 text-xs space-y-1"
-                                            >
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] text-muted-foreground/60 w-4">#{index + 1}</span>
-                                                    <span className={`text-[10px] font-medium ${pl.color}`}>{pl.label}</span>
-                                                    <span className="text-muted-foreground/60">p{event.priority}</span>
-                                                    <span className="ml-auto text-[10px] text-muted-foreground/50">{event.type}</span>
-                                                </div>
-                                                <div className="font-medium text-foreground truncate" title={event.title}>
-                                                    {event.title}
-                                                </div>
-                                                {event.prompt && (
-                                                    <div className="text-[10px] text-muted-foreground/70 line-clamp-2" title={event.prompt}>
-                                                        {event.prompt.slice(0, 120)}{event.prompt.length > 120 ? '…' : ''}
-                                                    </div>
-                                                )}
-                                                <div className="text-[10px] text-muted-foreground/50">
-                                                    {new Date(event.created_at * 1000).toLocaleTimeString()}
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            )
-                        ) : (
-                            <div className="text-xs text-muted-foreground p-3">
-                                {loading ? 'Loading...' : 'No data'}
-                            </div>
-                        )}
-                    </CollapsibleContent>
-                </Collapsible>
 
                 {/* Raw JSON toggle */}
-                <details className="text-xs">
+                {showWildDiagnostics && (
+                    <details className="text-xs">
                     <summary className="text-muted-foreground/50 cursor-pointer hover:text-muted-foreground text-[10px]">
                         Raw JSON
                     </summary>
                     <pre className="mt-2 rounded-lg border border-border/30 bg-secondary/10 p-2 text-[10px] overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify({ status, queue }, null, 2)}
+                        {JSON.stringify({ v2Status }, null, 2)}
                     </pre>
-                </details>
+                    </details>
+                )}
+
             </div>
         </div>
     )

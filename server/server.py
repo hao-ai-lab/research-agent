@@ -28,23 +28,7 @@ import socket
 import subprocess
 from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
-from wild_loop import (
-    WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest,
-    BuildPromptRequest, BuildPromptResponse,
-    WildEventQueue, wild_event_queue,
-    wild_loop_state,
-    get_wild_mode_state, set_wild_mode_state,
-    get_loop_status, update_loop_status, configure_loop,
-    enqueue_event, dequeue_event, get_queue_state, resolve_event, get_all_events,
-    auto_enqueue_alert, auto_enqueue_run_terminal, record_created_entity,
-    build_experiment_context, build_wild_prompt, build_prompt_for_frontend,
-    get_serializable_state as get_wild_serializable_state,
-    load_from_saved as load_wild_from_saved,
-    # Backend-driven engine (v5)
-    WildStartRequest, WildResponseCompleteRequest, WildSteerRequest, WildNextPrompt,
-    engine as wild_engine,
-)
-import wild_loop as wild_loop_mod
+
 from wild_loop_v2 import WildV2Engine
 from memory_store import MemoryStore
 from slack_handler import slack_notifier
@@ -56,7 +40,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Configure logging — explicit handlers so uvicorn.run() can't override them
 _log_formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
@@ -69,11 +53,6 @@ logger.setLevel(logging.DEBUG)
 logger.addHandler(_log_handler)
 logger.propagate = False  # Don't depend on root logger (uvicorn resets it)
 
-# Wild loop logger
-_wild_logger = logging.getLogger("wild_loop")
-_wild_logger.setLevel(logging.DEBUG)
-_wild_logger.addHandler(_log_handler)
-_wild_logger.propagate = False
 
 # =============================================================================
 # Configuration
@@ -114,7 +93,13 @@ OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 # MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "research-agent")
 # MODEL_ID = os.environ.get("MODEL_ID", "claude-sonnet-4-20250514")
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
-MODEL_ID = os.environ.get("MODEL_ID", "kimi-k2.5-free")
+MODEL_ID = os.environ.get("MODEL_ID", "minimax-m2.5-free")
+
+# Runtime gateway key override from frontend (`X-Research-Agent-Key`).
+# When present, we use this value to update the running OpenCode config.
+RUNTIME_RESEARCH_AGENT_KEY = os.environ.get("RESEARCH_AGENT_KEY", "").strip()
+RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED = ""
+RUNTIME_RESEARCH_AGENT_KEY_LOCK = asyncio.Lock()
 
 # User authentication token - if set, all API requests must include X-Auth-Token header
 USER_AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN")
@@ -174,6 +159,89 @@ def init_paths(workdir: str):
 def get_auth() -> Optional[httpx.BasicAuth]:
     """Get HTTP basic auth if password is configured."""
     return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else None
+
+
+def set_runtime_research_agent_key(raw_key: Optional[str]) -> None:
+    """Store a frontend-provided RESEARCH_AGENT_KEY for this backend process."""
+    global RUNTIME_RESEARCH_AGENT_KEY
+    normalized = str(raw_key or "").strip()
+    if not normalized:
+        return
+    if normalized == RUNTIME_RESEARCH_AGENT_KEY:
+        return
+    RUNTIME_RESEARCH_AGENT_KEY = normalized
+    os.environ["RESEARCH_AGENT_KEY"] = normalized
+
+
+async def apply_runtime_research_agent_key(client: Optional[httpx.AsyncClient] = None) -> None:
+    """Best-effort sync of runtime RESEARCH_AGENT_KEY into the running OpenCode config."""
+    global RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED
+
+    key = str(RUNTIME_RESEARCH_AGENT_KEY or "").strip()
+    if not key or key == RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED:
+        return
+
+    async with RUNTIME_RESEARCH_AGENT_KEY_LOCK:
+        key = str(RUNTIME_RESEARCH_AGENT_KEY or "").strip()
+        if not key or key == RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED:
+            return
+
+        close_client = False
+        active_client = client
+        if active_client is None:
+            active_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+            close_client = True
+
+        try:
+            patch_payloads = (
+                {"provider": {"opencode": {"options": {"apiKey": key}}}},
+                {"providers": {"opencode": {"options": {"apiKey": key}}}},
+                {"provider": {"research-agent": {"options": {"apiKey": key}}}},
+                {"providers": {"research-agent": {"options": {"apiKey": key}}}},
+            )
+
+            applied = False
+            for payload in patch_payloads:
+                try:
+                    response = await active_client.patch(
+                        f"{OPENCODE_URL}/config",
+                        json=payload,
+                        auth=get_auth(),
+                    )
+                    if response.is_success:
+                        applied = True
+                        break
+                except Exception:
+                    continue
+
+            if not applied:
+                auth_payloads = (
+                    {"apiKey": key},
+                    {"key": key},
+                    {"token": key},
+                )
+                for provider_id in ("opencode", "research-agent"):
+                    if applied:
+                        break
+                    for payload in auth_payloads:
+                        try:
+                            response = await active_client.put(
+                                f"{OPENCODE_URL}/auth/{provider_id}",
+                                json=payload,
+                                auth=get_auth(),
+                            )
+                            if response.is_success:
+                                applied = True
+                                break
+                        except Exception:
+                            continue
+
+            if applied:
+                RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED = key
+                logger.info("Applied runtime RESEARCH_AGENT_KEY to OpenCode config.")
+        finally:
+            if close_client and active_client is not None:
+                await active_client.aclose()
 
 
 def _parse_optional_int(value: Any) -> Optional[int]:
@@ -276,6 +344,9 @@ app.add_middleware(
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Validate X-Auth-Token header if USER_AUTH_TOKEN is configured."""
+    # Allow frontend to provide runtime RESEARCH_AGENT_KEY.
+    set_runtime_research_agent_key(request.headers.get("X-Research-Agent-Key"))
+
     # Skip auth for CORS preflight
     if request.method == "OPTIONS":
         return await call_next(request)
@@ -350,6 +421,14 @@ class SessionModelUpdate(BaseModel):
 # - running: Command actively executing
 # - finished/failed/stopped: Terminal states
 
+class GpuwrapConfig(BaseModel):
+    enabled: Optional[bool] = None
+    retries: Optional[int] = Field(default=None, ge=0, le=20)
+    retry_delay_seconds: Optional[float] = Field(default=None, gt=0, le=600)
+    max_memory_used_mb: Optional[int] = Field(default=None, ge=0, le=10_000_000)
+    max_utilization: Optional[int] = Field(default=None, ge=0, le=100)
+
+
 class RunCreate(BaseModel):
     name: str
     command: str
@@ -359,6 +438,7 @@ class RunCreate(BaseModel):
     origin_alert_id: Optional[str] = None
     chat_session_id: Optional[str] = None  # Originating chat session for traceability
     auto_start: bool = False  # If True, skip ready and go straight to queued
+    gpuwrap_config: Optional[GpuwrapConfig] = None
 
 
 class RunStatusUpdate(BaseModel):
@@ -427,10 +507,12 @@ class RunRerunRequest(BaseModel):
     command: Optional[str] = None
     auto_start: bool = False
     origin_alert_id: Optional[str] = None
+    gpuwrap_config: Optional[GpuwrapConfig] = None
 
 
-# WildModeRequest, WildLoopConfigRequest, WildEvent, EnqueueEventRequest
-# → imported from wild_loop module
+class WildModeRequest(BaseModel):
+    enabled: bool
+
 
 
 # Plan Models
@@ -481,7 +563,7 @@ import subprocess
 INTERNAL_SKILL_IDS = {
     "ra_mode_plan",
 }
-INTERNAL_SKILL_PREFIXES = ("wild_", "ra_mode_")
+INTERNAL_SKILL_PREFIXES = ("ra_mode_",)
 
 
 def _is_internal_skill(skill_id: str) -> bool:
@@ -823,13 +905,9 @@ runs: Dict[str, dict] = {}
 sweeps: Dict[str, dict] = {}
 active_alerts: Dict[str, dict] = {}
 plans: Dict[str, dict] = {}
-# wild_mode_enabled, wild_loop_state → imported from wild_loop module
-# Access via wild_loop_mod.wild_mode_enabled / wild_loop_state (imported ref)
+wild_mode_enabled: bool = False
 session_stop_flags: Dict[str, bool] = {}
 active_chat_tasks: Dict[str, asyncio.Task] = {}
-
-
-# WildEventQueue class + wild_event_queue instance → imported from wild_loop module
 
 
 def _get_run_log_content(run_id: str) -> str:
@@ -877,37 +955,6 @@ def _start_sweep_sync(sweep_id: str, parallel: int = 1):
     sweep["status"] = "running"
     sweep["parallel"] = parallel
 
-
-def _respond_to_alert_sync(alert_id: str, choice: str):
-    """Synchronous alert response for engine callbacks."""
-    alert = active_alerts.get(alert_id)
-    if not alert:
-        return
-    alert["status"] = "responded"
-    alert["choice"] = choice
-    response_file = alert.get("response_file")
-    if response_file:
-        try:
-            with open(response_file, "w") as f:
-                f.write(choice)
-        except Exception as e:
-            logger.error(f"Engine: Failed writing alert response for {alert_id}: {e}")
-
-# Wire up the WildLoopEngine callbacks (dependency injection to avoid circular imports)
-wild_engine.set_callbacks(
-    get_runs=lambda: runs,
-    get_sweeps=lambda: sweeps,
-    get_alerts=lambda: active_alerts,
-    get_run_logs=_get_run_log_content,
-    create_sweep=_create_sweep_sync,
-    start_sweep=_start_sweep_sync,
-    respond_to_alert=_respond_to_alert_sync,
-    recompute_sweep_state=lambda sid: recompute_sweep_state(sid) if 'recompute_sweep_state' in dir() else None,
-    skill_get_fn=lambda skill_id: prompt_skill_manager.get(skill_id),
-    save_settings=lambda: save_settings_state(),
-    server_url=SERVER_CALLBACK_URL,
-    auth_token=USER_AUTH_TOKEN or "",
-)
 
 # Wild Loop V2 engine (ralph-style)
 wild_v2_engine = WildV2Engine(
@@ -1180,9 +1227,7 @@ def _normalize_cluster_state(raw_state: Any) -> dict:
 def save_settings_state():
     """Persist settings to disk."""
     try:
-        wild_state = get_wild_serializable_state()
         payload = {
-            **wild_state,
             "cluster": cluster_state,
         }
         # Persist Slack config if enabled
@@ -1202,7 +1247,6 @@ def load_settings_state():
         try:
             with open(SETTINGS_DATA_FILE, "r") as f:
                 data = json.load(f)
-                load_wild_from_saved(data)
                 cluster_state = _normalize_cluster_state(data.get("cluster"))
                 # Restore Slack configuration
                 slack_notifier.load_from_saved(data.get("slack"))
@@ -2003,6 +2047,21 @@ def get_or_create_session(session_name: Optional[str] = None):
         return None
 
 
+def _normalize_gpuwrap_config(config: Any) -> Optional[dict]:
+    """Validate and normalize per-run gpuwrap settings."""
+    if config is None:
+        return None
+
+    try:
+        validated = GpuwrapConfig.model_validate(config)
+    except Exception:
+        logger.warning("Ignoring invalid gpuwrap_config: %r", config)
+        return None
+
+    data = validated.model_dump(exclude_none=True)
+    return data or None
+
+
 def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     """Launch a run in a new tmux window with sidecar."""
     session = get_or_create_session()
@@ -2027,6 +2086,16 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     command_file = os.path.join(run_dir, "command.txt")
     with open(command_file, "w") as f:
         f.write(run_data["command"])
+
+    gpuwrap_config = _normalize_gpuwrap_config(run_data.get("gpuwrap_config"))
+    if gpuwrap_config:
+        run_data["gpuwrap_config"] = gpuwrap_config
+        gpuwrap_config_file = os.path.join(run_dir, "gpuwrap_config.json")
+        with open(gpuwrap_config_file, "w") as f:
+            json.dump(gpuwrap_config, f)
+    else:
+        run_data["gpuwrap_config"] = None
+        gpuwrap_config_file = None
     
     # Get sidecar path
     server_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2056,6 +2125,8 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
         )
     if USER_AUTH_TOKEN:
         sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
+    if gpuwrap_config_file:
+        sidecar_cmd += f" --gpuwrap_config_file {shlex.quote(gpuwrap_config_file)}"
     
     logger.info(f"Executing sidecar: {sidecar_cmd}")
     pane.send_keys(sidecar_cmd)
@@ -2083,7 +2154,14 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         return session["opencode_session_id"]
     
     async with httpx.AsyncClient() as client:
-        resp = await client.post(f"{OPENCODE_URL}/session", json={}, auth=get_auth())
+        await apply_runtime_research_agent_key(client)
+        # Bind new OpenCode sessions to this server's workdir to avoid stale project reuse.
+        resp = await client.post(
+            f"{OPENCODE_URL}/session",
+            params={"directory": os.path.abspath(WORKDIR)},
+            json={},
+            auth=get_auth(),
+        )
         resp.raise_for_status()
         opencode_id = resp.json().get("id")
         session["opencode_session_id"] = opencode_id
@@ -2118,6 +2196,7 @@ async def send_prompt_to_opencode(
     model_id: str,
 ):
     """Send a prompt to an OpenCode session using an explicit model."""
+    await apply_runtime_research_agent_key(client)
     prompt_payload = {
         "model": {"providerID": model_provider, "modelID": model_id},
         "parts": [{"type": "text", "text": content}]
@@ -2556,7 +2635,16 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
     if event_sid != target_session_id:
         return None
     
-    if etype == "message.part.updated":
+    if etype == "message.part.delta":
+        delta = props.get("delta")
+        if not isinstance(delta, str) or delta == "":
+            return None
+        field = props.get("field", "")
+        part_id = props.get("partID")
+        if field in ("text", "reasoning"):
+            return {"type": "part_delta", "id": part_id, "ptype": field, "delta": delta}
+
+    elif etype == "message.part.updated":
         ptype = part.get("type")
         part_id = part.get("id")
 
@@ -2580,7 +2668,7 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
                 "name": _extract_tool_name(part),
                 **tool_data,
             }
-    
+
     elif etype == "session.status":
         if props.get("status", {}).get("type") == "idle":
             return {"type": "session_status", "status": "idle", "_done": True}
@@ -3179,6 +3267,15 @@ class ModeConfig:
     build_state: Callable[[str], dict]  # (message) -> template variables
 
 
+def _build_agent_state(_message: str) -> dict:
+    """Build template variables for agent (default chat) mode."""
+    return {
+        "experiment_context": _build_experiment_context(),
+        "server_url": SERVER_CALLBACK_URL,
+        "auth_token": USER_AUTH_TOKEN or "",
+    }
+
+
 def _build_plan_state(message: str) -> dict:
     """Build template variables for plan mode."""
     # Summarize existing plans for context
@@ -3197,18 +3294,14 @@ def _build_plan_state(message: str) -> dict:
     }
 
 
-# NOTE: wild mode uses build_wild_prompt() from wild_loop module directly,
-# because it has its own iteration/sweep/condition logic. We register it
-# with a special sentinel so the generic path delegates correctly.
-_WILD_SENTINEL = "__wild__"
 
 MODE_REGISTRY: Dict[str, ModeConfig] = {
+    "agent": ModeConfig(skill_id="ra_mode_agent", build_state=_build_agent_state),
     "plan": ModeConfig(skill_id="ra_mode_plan", build_state=_build_plan_state),
-    "wild": ModeConfig(skill_id=_WILD_SENTINEL, build_state=lambda _msg: {}),
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tuple:
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session_id: Optional[str] = None) -> tuple:
     """Build the full prompt for a chat turn, prepending mode-specific preamble.
 
     Returns (content: str, provenance: dict | None).
@@ -3219,28 +3312,22 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tupl
 
     config = MODE_REGISTRY.get(mode)
     if config:
-        if config.skill_id == _WILD_SENTINEL:
-            # Delegate to wild_loop module
-            experiment_context = _build_experiment_context()
-            mode_note = build_wild_prompt(prompt_skill_manager.render, experiment_context, server_url=SERVER_CALLBACK_URL, auth_token=USER_AUTH_TOKEN or "")
-            # Wild mode provenance is handled by the frontend's wild loop
+        variables = config.build_state(message)
+        skill = prompt_skill_manager.get(config.skill_id)
+        rendered = prompt_skill_manager.render(config.skill_id, variables)
+        if rendered:
+            mode_note = rendered + "\n\n"
+            provenance = {
+                "rendered": rendered,
+                "user_input": message,
+                "skill_id": config.skill_id,
+                "skill_name": skill.get("name", config.skill_id) if skill else config.skill_id,
+                "template": skill.get("template") if skill else None,
+                "variables": variables,
+                "prompt_type": mode,
+            }
         else:
-            variables = config.build_state(message)
-            skill = prompt_skill_manager.get(config.skill_id)
-            rendered = prompt_skill_manager.render(config.skill_id, variables)
-            if rendered:
-                mode_note = rendered + "\n\n"
-                provenance = {
-                    "rendered": rendered,
-                    "user_input": message,
-                    "skill_id": config.skill_id,
-                    "skill_name": skill.get("name", config.skill_id) if skill else config.skill_id,
-                    "template": skill.get("template") if skill else None,
-                    "variables": variables,
-                    "prompt_type": mode,
-                }
-            else:
-                logger.warning(f"{config.skill_id} prompt skill not found — sending raw message")
+            logger.warning(f"{config.skill_id} prompt skill not found — sending raw message")
 
     # For agent mode (no config / no skill), build a simple provenance
     if provenance is None and mode != "wild":
@@ -3254,10 +3341,23 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent") -> tupl
             "prompt_type": mode,
         }
 
-    content = f"{mode_note}[USER] {message}"
+    chat_linking_note = ""
+    if session_id:
+        chat_linking_note = (
+            "[CHAT LINKAGE]\n"
+            "For experiment API creations (`POST /runs`, `POST /sweeps`, "
+            "`POST /sweeps/wild`, `POST /sweeps/{id}/runs`), include "
+            f"`\"chat_session_id\": \"{session_id}\"` in JSON bodies.\n"
+            "Use `null` only when intentionally creating entities not tied to this chat.\n"
+            "[/CHAT LINKAGE]\n\n"
+        )
+
+    content = f"{chat_linking_note}{mode_note}[USER] {message}"
     session_system_prompt = str(session.get("system_prompt", "")).strip()
     if session_system_prompt:
         content = f"[SYSTEM INSTRUCTIONS]\n{session_system_prompt}\n[/SYSTEM INSTRUCTIONS]\n\n{content}"
+    if provenance is not None:
+        provenance["rendered"] = content
     return content, provenance
 
 
@@ -3492,7 +3592,7 @@ async def chat_endpoint(req: ChatRequest):
         elif req.plan_mode:
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
-    content, provenance = _build_chat_prompt(session, llm_input, effective_mode)
+    content, provenance = _build_chat_prompt(session, llm_input, effective_mode, session_id=session_id)
     runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it
@@ -3569,6 +3669,7 @@ async def create_run(req: RunCreate):
         raise HTTPException(status_code=404, detail=f"Sweep not found: {req.sweep_id}")
     
     initial_status = "queued" if req.auto_start else "ready"
+    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
     
     run_data = {
         "name": req.name,
@@ -3581,6 +3682,7 @@ async def create_run(req: RunCreate):
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
         "chat_session_id": req.chat_session_id,
+        "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -3592,7 +3694,6 @@ async def create_run(req: RunCreate):
     _sync_run_membership_with_sweep(run_id, req.sweep_id)
     save_runs_state()
     
-    record_created_entity("run", run_id, chat_session_id=req.chat_session_id)
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
 
     # If auto_start is requested, actually launch the run in tmux
@@ -3741,6 +3842,10 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
 
     new_run_id = uuid.uuid4().hex[:12]
     initial_status = "queued" if req and req.auto_start else "ready"
+    if req and req.gpuwrap_config is not None:
+        gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
+    else:
+        gpuwrap_config = _normalize_gpuwrap_config(source_run.get("gpuwrap_config"))
 
     new_run = {
         "name": f"{source_run.get('name', 'Run')} (Rerun)",
@@ -3752,6 +3857,7 @@ async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
         "sweep_id": source_run.get("sweep_id"),
         "parent_run_id": run_id,
         "origin_alert_id": req.origin_alert_id if req else None,
+        "gpuwrap_config": gpuwrap_config,
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -3839,11 +3945,6 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
     elif next_status in RUN_STATUS_TERMINAL:
         run["ended_at"] = time.time()
 
-    # Auto-enqueue wild event on terminal run status (delegated to wild_loop module)
-    auto_enqueue_run_terminal(
-        run_id=run_id, run_name=run.get("name", run_id),
-        status=next_status, exit_code=run.get("exit_code"), error=run.get("error"),
-    )
 
     # Slack notifications for terminal run states
     if slack_notifier.is_enabled and next_status in RUN_STATUS_TERMINAL:
@@ -3885,13 +3986,6 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
 
     alert_payload = alert.model_dump()
 
-    # Auto-enqueue wild event for this alert (delegated to wild_loop module)
-    auto_enqueue_alert(
-        alert_id=alert_id, run_id=run_id,
-        run_name=runs[run_id].get("name", run_id),
-        severity=severity, message=req.message, choices=req.choices,
-    )
-
     # Slack notification for alert
     if slack_notifier.is_enabled:
         slack_notifier.send_alert(
@@ -3899,7 +3993,7 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
             run=runs.get(run_id),
         )
 
-    if wild_loop_mod.wild_mode_enabled:
+    if wild_mode_enabled:
         session_id = uuid.uuid4().hex[:12]
         chat_sessions[session_id] = {
             "title": f"Alert: {runs[run_id].get('name', run_id)}",
@@ -4083,162 +4177,18 @@ async def respond_to_alert(alert_id: str, req: RespondAlertRequest):
 @app.get("/wild-mode")
 async def get_wild_mode():
     """Get current wild mode state."""
-    return get_wild_mode_state()
+    return {"enabled": wild_mode_enabled}
 
 
 @app.post("/wild-mode")
 async def set_wild_mode(req: WildModeRequest):
     """Enable or disable wild mode."""
-    result = set_wild_mode_state(req.enabled)
+    global wild_mode_enabled
+    wild_mode_enabled = bool(req.enabled)
     save_settings_state()
-    return result
+    return {"enabled": wild_mode_enabled}
 
 
-# =============================================================================
-# Wild Event Queue Endpoints (delegated to wild_loop module)
-# =============================================================================
-
-@app.post("/wild/events/enqueue")
-async def enqueue_wild_event(req: EnqueueEventRequest):
-    """Push an event into the wild event queue with priority."""
-    return enqueue_event(req)
-
-
-@app.get("/wild/events/next")
-async def dequeue_wild_event():
-    """Pop and return the highest-priority event from the queue."""
-    return dequeue_event()
-
-
-@app.get("/wild/events/queue")
-async def get_wild_event_queue_endpoint():
-    """Inspect the current queue state (for debugging/UI)."""
-    return get_queue_state()
-
-
-@app.post("/wild/events/{event_id}/resolve")
-async def resolve_wild_event(event_id: str):
-    """Resolve (consume) a specific event by ID, out of normal queue order."""
-    return resolve_event(event_id)
-
-
-@app.get("/wild/events/all")
-async def get_all_wild_events():
-    """Return all events including resolved (history view)."""
-    return get_all_events()
-
-
-@app.get("/wild/events/{event_id}")
-async def peek_wild_event(event_id: str):
-    """Peek at a specific event by ID without consuming it."""
-    event = wild_event_queue.get_event(event_id)
-    if event is None:
-        raise HTTPException(status_code=404, detail="Event not found")
-    return event
-
-
-@app.get("/wild/status")
-async def get_wild_status():
-    """Get the current wild loop state (enriched with queue/run stats)."""
-    return wild_engine.get_full_status()
-
-
-@app.post("/wild/status")
-async def update_wild_status(phase: str = None, iteration: int = None,
-                             goal: str = None, session_id: str = None,
-                             is_paused: bool = None, is_active: bool = None,
-                             stage: str = None):
-    """Update wild loop state from frontend."""
-    result = update_loop_status(phase=phase, iteration=iteration, goal=goal,
-                                session_id=session_id, is_paused=is_paused,
-                                is_active=is_active, stage=stage)
-    save_settings_state()
-    return result
-
-
-@app.post("/wild/configure")
-async def configure_wild_loop_endpoint(req: WildLoopConfigRequest):
-    """Configure wild loop termination conditions and goal."""
-    result = configure_loop(req)
-    save_settings_state()
-    return result
-
-
-@app.post("/wild/build-prompt")
-async def build_wild_loop_prompt(req: BuildPromptRequest):
-    """Build a wild loop prompt server-side and return full provenance metadata.
-
-    Returns the rendered prompt, the skill template used, the variables applied,
-    and the user's original input — giving the frontend full transparency.
-    """
-    result = build_prompt_for_frontend(
-        req, prompt_skill_manager.get,
-        server_url=SERVER_CALLBACK_URL,
-        auth_token=USER_AUTH_TOKEN or "",
-    )
-    return result
-
-
-# =============================================================================
-# Backend-Driven Wild Loop Endpoints (v5 Engine)
-# =============================================================================
-
-@app.post("/wild/start")
-async def wild_start(req: WildStartRequest):
-    """Start the wild loop with a goal and session."""
-    result = wild_engine.start(req)
-    save_settings_state()
-    return result
-
-
-@app.post("/wild/stop")
-async def wild_stop():
-    """Stop the wild loop."""
-    result = wild_engine.stop()
-    save_settings_state()
-    return result
-
-
-@app.post("/wild/pause")
-async def wild_pause():
-    """Pause the wild loop."""
-    result = wild_engine.pause()
-    save_settings_state()
-    return result
-
-
-@app.post("/wild/resume")
-async def wild_resume():
-    """Resume the wild loop."""
-    result = wild_engine.resume()
-    save_settings_state()
-    return result
-
-
-@app.post("/wild/response-complete")
-async def wild_response_complete(req: WildResponseCompleteRequest):
-    """Frontend tells backend the agent finished responding."""
-    result = wild_engine.on_response_complete(req.response_text)
-    save_settings_state()
-    return result
-
-
-@app.get("/wild/next-prompt")
-async def wild_next_prompt():
-    """Get the next prompt the frontend should send to the agent."""
-    return wild_engine.get_next_prompt()
-
-
-@app.post("/wild/next-prompt/consume")
-async def wild_consume_prompt():
-    """Mark the current pending prompt as consumed/sent."""
-    return wild_engine.consume_prompt()
-
-
-@app.post("/wild/steer")
-async def wild_steer(req: WildSteerRequest):
-    """Insert a user steer message into the wild loop queue."""
-    return wild_engine.steer(req)
 
 
 # =============================================================================
@@ -4250,6 +4200,7 @@ class WildV2StartRequest(BaseModel):
     chat_session_id: Optional[str] = None
     max_iterations: int = 25
     wait_seconds: float = 30.0
+    evo_sweep_enabled: bool = False
 
 class WildV2SteerRequest(BaseModel):
     context: str
@@ -4266,6 +4217,7 @@ async def wild_v2_start(req: WildV2StartRequest):
         chat_session_id=req.chat_session_id,
         max_iterations=req.max_iterations,
         wait_seconds=req.wait_seconds,
+        evo_sweep_enabled=req.evo_sweep_enabled,
     )
     return result
 
@@ -4360,6 +4312,39 @@ async def wild_v2_iteration_log(session_id: str):
 async def wild_v2_steer(req: WildV2SteerRequest):
     """Inject user context for the next iteration."""
     return wild_v2_engine.steer(req.context)
+
+
+# =============================================================================
+# Evolutionary Sweep Endpoints
+# =============================================================================
+
+@app.get("/wild/v2/evo-sweep/{session_id}")
+async def wild_v2_evo_sweep_status(session_id: str):
+    """Get the current evolutionary sweep status for a session."""
+    session = wild_v2_engine._session  # type: ignore[attr-defined]
+    if not session or session.session_id != session_id:
+        return {"active": False, "message": "No active session matches"}
+    controller = getattr(session, "_evo_controller", None)
+    if controller is None:
+        return {"active": False, "sweep_id": None}
+    return {
+        "active": True,
+        "sweep_id": controller.sweep_id,
+        "evo_sweep_enabled": session.evo_sweep_enabled,
+    }
+
+
+@app.post("/wild/v2/evo-sweep/{session_id}/stop")
+async def wild_v2_evo_sweep_stop(session_id: str):
+    """Stop an in-progress evolutionary sweep."""
+    session = wild_v2_engine._session  # type: ignore[attr-defined]
+    if not session or session.session_id != session_id:
+        return {"stopped": False, "message": "No active session matches"}
+    controller = getattr(session, "_evo_controller", None)
+    if controller is None:
+        return {"stopped": False, "message": "No evo sweep in progress"}
+    controller.cancel()
+    return {"stopped": True, "sweep_id": controller.sweep_id}
 
 
 # =============================================================================
@@ -4562,8 +4547,40 @@ async def disconnect_slack():
 
 
 def _build_experiment_context() -> str:
-    """Build a summary of current experiment state for the wild mode prompt."""
-    return build_experiment_context(runs, sweeps, active_alerts, recompute_all_sweep_states)
+    """Build a summary of current experiment state for mode prompts."""
+    lines = ["\n--- Current Experiment State ---"]
+    recompute_all_sweep_states()
+
+    active_runs = [{"id": rid, **r} for rid, r in runs.items()
+                   if r.get("status") in ["running", "queued", "launching"]]
+    finished_runs = [{"id": rid, **r} for rid, r in runs.items()
+                     if r.get("status") == "finished"]
+    failed_runs = [{"id": rid, **r} for rid, r in runs.items()
+                   if r.get("status") == "failed"]
+
+    lines.append(f"Active runs: {len(active_runs)}")
+    for r in active_runs[:5]:
+        lines.append(f"  - {r['id']}: {r.get('name', '?')} [{r.get('status')}] cmd={r.get('command', '')[:80]}")
+    lines.append(f"Finished runs: {len(finished_runs)} | Failed runs: {len(failed_runs)}")
+    for r in failed_runs[:3]:
+        lines.append(f"  - FAILED {r['id']}: {r.get('name', '?')} error={r.get('error', 'unknown')[:100]}")
+
+    active_sweeps = [{"id": sid, **s} for sid, s in sweeps.items()]
+    if active_sweeps:
+        lines.append(f"Sweeps: {len(active_sweeps)}")
+        for s in active_sweeps[:3]:
+            p = s.get("progress", {})
+            lines.append(f"  - {s['id']}: {s.get('name', '?')} "
+                         f"[{p.get('completed', 0)}/{p.get('total', 0)} done, {p.get('failed', 0)} failed]")
+
+    pending_alerts = [a for a in active_alerts.values() if a.get("status") == "pending"]
+    if pending_alerts:
+        lines.append(f"Pending alerts: {len(pending_alerts)}")
+        for a in pending_alerts[:3]:
+            lines.append(f"  - {a['id']}: [{a.get('severity')}] {a.get('message', '')[:80]}")
+
+    lines.append("--- End State ---\n")
+    return "\n".join(lines)
 
 
 # =============================================================================
@@ -4815,7 +4832,6 @@ async def create_wild_sweep(req: WildSweepCreate):
     
     sweeps[sweep_id] = sweep_data
     recompute_sweep_state(sweep_id)
-    wild_loop_state["sweep_id"] = sweep_id
     save_runs_state()
     
     logger.info(f"Created wild sweep {sweep_id}: {req.name} (goal: {req.goal[:80]})")
@@ -4873,7 +4889,6 @@ async def create_sweep(req: SweepCreate):
         }
         sweeps[sweep_id] = sweep_data
         save_runs_state()
-        record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
         logger.info(f"Created draft sweep {sweep_id}: {req.name}")
         return {"id": sweep_id, **sweep_data}
     
@@ -4895,6 +4910,7 @@ async def create_sweep(req: SweepCreate):
             "is_archived": False,
             "sweep_id": sweep_id,
             "sweep_params": params,
+            "chat_session_id": req.chat_session_id,
             "tmux_window": None,
             "run_dir": None,
             "exit_code": None,
@@ -4935,9 +4951,6 @@ async def create_sweep(req: SweepCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
     
-    record_created_entity("sweep", sweep_id, chat_session_id=req.chat_session_id)
-    for rid in run_ids:
-        record_created_entity("run", rid, chat_session_id=req.chat_session_id)
     logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
 
@@ -5090,6 +5103,7 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
 
     run_id = uuid.uuid4().hex[:12]
     initial_status = "queued" if req.auto_start else "ready"
+    gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
 
     run_data = {
         "name": req.name,
@@ -5101,6 +5115,8 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
         "sweep_id": sweep_id,
         "parent_run_id": req.parent_run_id,
         "origin_alert_id": req.origin_alert_id,
+        "gpuwrap_config": gpuwrap_config,
+        "chat_session_id": req.chat_session_id or sweeps[sweep_id].get("chat_session_id"),
         "tmux_window": None,
         "run_dir": None,
         "exit_code": None,
@@ -5113,7 +5129,6 @@ async def add_run_to_sweep_directly(sweep_id: str, req: RunCreate):
     recompute_sweep_state(sweep_id)
     save_runs_state()
 
-    record_created_entity("run", run_id, chat_session_id=getattr(req, 'chat_session_id', None))
     logger.info(f"Created run {run_id} and attached to sweep {sweep_id}: {req.name} (status: {initial_status})")
     return {"id": run_id, **run_data}
 
@@ -5574,16 +5589,13 @@ def main():
     
     # Check required environment variables
     if not os.environ.get("RESEARCH_AGENT_KEY"):
-        logger.warning("⚠️  RESEARCH_AGENT_KEY environment variable is not set!")
-        logger.warning("   The Anthropic gateway requires this for authentication.")
-        logger.warning("   Set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+        logger.info("💡 Tip: Want free Anthropic credits? Ask the maintainer for a gateway key.")
+        logger.info("   Then set it with: export RESEARCH_AGENT_KEY=your-gateway-token")
+        logger.info("   Or set RESEARCH_AGENT_KEY in the frontend Settings page.")
     
     if not USER_AUTH_TOKEN:
-        logger.warning("⚠️  RESEARCH_AGENT_USER_AUTH_TOKEN is not set!")
-        logger.warning("   Your server has NO authentication - anyone can access it.")
-        logger.warning("   For secure remote access, generate a token with:")
-        logger.warning("     ./generate_auth_token.sh")
-        logger.warning("   Then set: export RESEARCH_AGENT_USER_AUTH_TOKEN=<token>")
+        logger.info("RESEARCH_AGENT_USER_AUTH_TOKEN is not set — running without server-side auth.")
+        logger.info("   You can set your auth token in the GUI Settings page, or export the env var for remote access.")
     
     # Start OpenCode server subprocess
     # start_opencode_server_subprocess(args)

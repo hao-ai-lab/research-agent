@@ -28,6 +28,7 @@ export interface ExperimentRun {
   id: string;
   name: string;
   sweepId?: string;
+  chatSessionId?: string | null;
   sweepParams?: Record<string, unknown> | null;
   alias?: string;
   status: RunStatus;
@@ -100,11 +101,18 @@ export interface AppSettings {
     wildLoopHistoryFontSizePx?: number | null;
     wildLoopTasksBoxHeightPx?: number | null;
     wildLoopHistoryBoxHeightPx?: number | null;
-    showStarterCards?: boolean;
-    starterCardFlavor?: "novice" | "expert";
+    showStarterCards?: boolean; // DEPRECATED: use starterCardFlavor 'none' instead
+    starterCardFlavor?: "none" | "novice" | "expert";
+    showChatContextPanel?: boolean;
+    showChatArtifacts?: boolean;
+    chatCollapseAllChats?: boolean;
+    chatCollapseArtifactsInChat?: boolean;
     showSidebarNewChatButton?: boolean;
     starterCardTemplates?: Record<string, string>;
     mobileEnterToNewline?: boolean;
+    thinkingDisplayMode?: 'collapse' | 'expand' | 'inline';
+    toolDisplayMode?: 'collapse' | 'expand' | 'inline';
+    thinkingToolFontSizePx?: number | null;
   };
   integrations: {
     slack?: {
@@ -128,8 +136,13 @@ export interface AppSettings {
   developer?: {
     showWildLoopState?: boolean;
     showPlanPanel?: boolean;
+    showSidebarRunsSweepsPreview?: boolean;
     debugRefreshIntervalSeconds?: number;
     wildLoopDebugPanelWidthPx?: number;
+    showMemoryPanel?: boolean;
+    showReportPanel?: boolean;
+    showTerminalPanel?: boolean;
+    showContextualPanel?: boolean;
   };
 }
 
@@ -224,17 +237,9 @@ export interface WildModeSetup {
   awayDurationMinutes: number;
   autonomyLevel: AutonomyLevel;
   queueModifyEnabled: boolean;
+  evoSweepEnabled: boolean;
 }
 
-export interface WildLoopState {
-  phase: WildLoopPhase;
-  iteration: number;
-  goal: string | null;
-  sessionId: string | null;
-  startedAt: number | null;
-  isPaused: boolean;
-  termination: TerminationConditions;
-}
 
 export interface ChatMessage {
   id: string;
@@ -393,6 +398,7 @@ export interface Sweep {
   id: string;
   config: SweepConfig;
   creationContext: SweepCreationContext;
+  chatSessionId?: string | null;
   status: SweepStatus;
   runIds: string[];
   bestRunId?: string;
