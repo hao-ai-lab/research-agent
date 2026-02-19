@@ -132,6 +132,10 @@ export interface AppSettings {
     showSidebarRunsSweepsPreview?: boolean;
     debugRefreshIntervalSeconds?: number;
     wildLoopDebugPanelWidthPx?: number;
+    showMemoryPanel?: boolean;
+    showReportPanel?: boolean;
+    showTerminalPanel?: boolean;
+    showContextualPanel?: boolean;
   };
 }
 

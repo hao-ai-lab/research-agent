@@ -370,6 +370,10 @@ export function DesktopSidebar({
                 {PRIMARY_NAV_ITEMS
                   .filter((item) => {
                     if (item.tab === 'plans') return settings.developer?.showPlanPanel
+                    if (item.tab === 'memory') return settings.developer?.showMemoryPanel
+                    if (item.tab === 'report') return settings.developer?.showReportPanel
+                    if (item.tab === 'terminal') return settings.developer?.showTerminalPanel
+                    if (item.tab === 'contextual') return settings.developer?.showContextualPanel
 
                     const configItem = settings.leftPanel?.items.find((i) => i.id === item.tab)
                     if (configItem) return configItem.visible
