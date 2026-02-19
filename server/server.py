@@ -3557,59 +3557,14 @@ async def update_cluster_state(req: ClusterUpdateRequest):
 
 
 # =============================================================================
-# Slack Integration Endpoints
+# Slack Integration Endpoints  (extracted to slack_routes.py)
 # =============================================================================
 
-class SlackConfigRequest(BaseModel):
-    bot_token: str
-    channel: str
-    signing_secret: str = ""
-    notify_on_complete: bool = True
-    notify_on_failed: bool = True
-    notify_on_alert: bool = True
+import slack_routes  # noqa: E402
+slack_routes.init(slack_notifier, save_settings_state)
+app.include_router(slack_routes.router)
 
 
-@app.post("/integrations/slack/configure")
-async def configure_slack(req: SlackConfigRequest):
-    """Configure Slack integration with bot token and channel."""
-    try:
-        result = slack_notifier.configure(
-            bot_token=req.bot_token,
-            channel=req.channel,
-            signing_secret=req.signing_secret,
-            notify_on_complete=req.notify_on_complete,
-            notify_on_failed=req.notify_on_failed,
-            notify_on_alert=req.notify_on_alert,
-        )
-        save_settings_state()
-        return result
-    except (ValueError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/integrations/slack/status")
-async def get_slack_status():
-    """Return current Slack integration status."""
-    return slack_notifier.get_status()
-
-
-@app.post("/integrations/slack/test")
-async def test_slack():
-    """Send a test notification to Slack."""
-    if not slack_notifier.is_enabled:
-        raise HTTPException(status_code=400, detail="Slack is not configured")
-    result = slack_notifier.send_test()
-    if not result["ok"]:
-        raise HTTPException(status_code=500, detail=result.get("error", "Send failed"))
-    return result
-
-
-@app.delete("/integrations/slack/configure")
-async def disconnect_slack():
-    """Disconnect Slack integration."""
-    slack_notifier.disconnect()
-    save_settings_state()
-    return {"ok": True, "message": "Slack disconnected"}
 
 
 def _build_experiment_context() -> str:
