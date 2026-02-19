@@ -315,7 +315,7 @@ export function WildLoopDebugPanel({
 
 
     const isMobileLayout = layout === 'mobile'
-    const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 2
+    const refreshInterval = settings.developer?.debugRefreshIntervalSeconds ?? 10
     const tasksFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopTasksFontSizePx ?? 16))
     const historyFontSizePx = Math.max(12, Math.min(28, settings.appearance.wildLoopHistoryFontSizePx ?? 15))
     const tasksBoxHeightPx = Math.max(160, Math.min(1200, settings.appearance.wildLoopTasksBoxHeightPx ?? 420))
@@ -809,34 +809,34 @@ export function WildLoopDebugPanel({
                 {/* Settings Section */}
                 {showWildDiagnostics && (
                     <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-                        {settingsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        <Settings className="h-3 w-3 text-muted-foreground" />
-                        <span>Settings</span>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2">
-                        <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-3 text-xs">
-                            <div>
-                                <label className="text-muted-foreground text-[10px] font-medium block mb-1">
-                                    Auto-refresh interval (seconds)
-                                </label>
-                                <div className="flex items-center gap-2">
-                                    {[0, 1, 2, 5, 10].map((s) => (
-                                        <button
-                                            key={s}
-                                            className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${refreshInterval === s
-                                                ? 'bg-primary text-primary-foreground border-primary'
-                                                : 'border-border/50 hover:bg-secondary text-muted-foreground'
-                                                }`}
-                                            onClick={() => setRefreshInterval(s)}
-                                        >
-                                            {s === 0 ? 'Off' : `${s}s`}
-                                        </button>
-                                    ))}
+                        <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                            {settingsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                            <Settings className="h-3 w-3 text-muted-foreground" />
+                            <span>Settings</span>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-2">
+                            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-3 text-xs">
+                                <div>
+                                    <label className="text-muted-foreground text-[10px] font-medium block mb-1">
+                                        Auto-refresh interval (seconds)
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        {[0, 1, 2, 5, 10].map((s) => (
+                                            <button
+                                                key={s}
+                                                className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${refreshInterval === s
+                                                    ? 'bg-primary text-primary-foreground border-primary'
+                                                    : 'border-border/50 hover:bg-secondary text-muted-foreground'
+                                                    }`}
+                                                onClick={() => setRefreshInterval(s)}
+                                            >
+                                                {s === 0 ? 'Off' : `${s}s`}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </CollapsibleContent>
+                        </CollapsibleContent>
                     </Collapsible>
                 )}
 
@@ -1217,12 +1217,12 @@ export function WildLoopDebugPanel({
                 {/* Raw JSON toggle */}
                 {showWildDiagnostics && (
                     <details className="text-xs">
-                    <summary className="text-muted-foreground/50 cursor-pointer hover:text-muted-foreground text-[10px]">
-                        Raw JSON
-                    </summary>
-                    <pre className="mt-2 rounded-lg border border-border/30 bg-secondary/10 p-2 text-[10px] overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify({ v2Status }, null, 2)}
-                    </pre>
+                        <summary className="text-muted-foreground/50 cursor-pointer hover:text-muted-foreground text-[10px]">
+                            Raw JSON
+                        </summary>
+                        <pre className="mt-2 rounded-lg border border-border/30 bg-secondary/10 p-2 text-[10px] overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
+                            {JSON.stringify({ v2Status }, null, 2)}
+                        </pre>
                     </details>
                 )}
 

@@ -85,7 +85,7 @@ export const defaultAppSettings: AppSettings = {
     showWildLoopState: true,
     showPlanPanel: false,
     showSidebarRunsSweepsPreview: true,
-    debugRefreshIntervalSeconds: 2,
+    debugRefreshIntervalSeconds: 10,
     showMemoryPanel: false,
     showReportPanel: false,
     showTerminalPanel: false,
