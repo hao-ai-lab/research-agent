@@ -558,11 +558,7 @@ export function ChatInput({
 
   useEffect(() => {
     if (!insertDraft?.text) return
-    setMessage((prev) => {
-      if (!prev) return insertDraft.text
-      const separator = prev.endsWith(' ') ? '' : ' '
-      return `${prev}${separator}${insertDraft.text}`
-    })
+    setMessage(insertDraft.text)
     setTimeout(() => {
       textareaRef.current?.focus()
       if (textareaRef.current) {
@@ -630,14 +626,14 @@ export function ChatInput({
     if (isMentionOpen && filteredMentionItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSelectedMentionIndex(prev => 
+        setSelectedMentionIndex(prev =>
           prev < filteredMentionItems.length - 1 ? prev + 1 : 0
         )
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSelectedMentionIndex(prev => 
+        setSelectedMentionIndex(prev =>
           prev > 0 ? prev - 1 : filteredMentionItems.length - 1
         )
         return
@@ -773,7 +769,7 @@ export function ChatInput({
     // Detect @ mention trigger
     const textBeforeCursor = value.slice(0, cursorPos)
     const atIndex = textBeforeCursor.lastIndexOf('@')
-    
+
     if (atIndex !== -1) {
       const textAfterAt = textBeforeCursor.slice(atIndex + 1)
       // Check if there's no space between @ and cursor (still in mention mode)
@@ -781,7 +777,7 @@ export function ChatInput({
         setMentionStartIndex(atIndex)
         setMentionQuery(textAfterAt)
         setIsMentionOpen(true)
-        
+
         // Auto-detect filter from query prefix
         if (textAfterAt.startsWith('run:')) {
           setMentionFilter('run')
@@ -838,17 +834,17 @@ export function ChatInput({
 
   const insertMention = useCallback((item: MentionItem) => {
     if (mentionStartIndex === null) return
-    
+
     const beforeMention = message.slice(0, mentionStartIndex)
     const afterMention = message.slice(textareaRef.current?.selectionStart || message.length)
     const mentionText = `@${item.id} `
-    
+
     setMessage(beforeMention + mentionText + afterMention)
     setIsMentionOpen(false)
     setMentionStartIndex(null)
     setMentionQuery('')
     setMentionFilter('all')
-    
+
     // Focus and move cursor after mention
     setTimeout(() => {
       if (textareaRef.current) {
@@ -1098,18 +1094,17 @@ export function ChatInput({
                 {queue.length} message{queue.length > 1 ? 's' : ''} queued
               </span>
             </div>
-            <ChevronDown 
-              className={`h-3.5 w-3.5 text-amber-500 transition-transform ${
-                isQueueExpanded ? 'rotate-180' : ''
-              }`} 
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-amber-500 transition-transform ${isQueueExpanded ? 'rotate-180' : ''
+                }`}
             />
           </button>
-          
+
           {/* Queue items */}
           {isQueueExpanded && (
             <div className="border-t border-amber-500/20 max-h-32 overflow-y-auto">
               {queue.map((queuedMsg, index) => (
-                <div 
+                <div
                   key={index}
                   className="flex items-start gap-2 px-3 py-2 hover:bg-amber-500/5 group"
                 >
@@ -1151,9 +1146,8 @@ export function ChatInput({
                     type="button"
                     onClick={() => insertMention(item)}
                     onMouseEnter={() => setSelectedMentionIndex(index)}
-                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
-                      index === selectedMentionIndex ? 'bg-secondary' : 'hover:bg-secondary/50'
-                    }`}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${index === selectedMentionIndex ? 'bg-secondary' : 'hover:bg-secondary/50'
+                      }`}
                   >
                     <span
                       className="flex items-center justify-center h-5 w-5 rounded shrink-0"
@@ -1202,24 +1196,23 @@ export function ChatInput({
                       key={type}
                       type="button"
                       onClick={() => setMentionFilter(type)}
-                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${
-                        mentionFilter === type
+                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${mentionFilter === type
                           ? 'border-transparent'
                           : 'border-transparent text-muted-foreground hover:bg-secondary'
-                      }`}
+                        }`}
                       style={
                         mentionFilter === type
                           ? type === 'all'
                             ? {
-                                backgroundColor: 'hsl(var(--secondary))',
-                                color: 'hsl(var(--foreground))',
-                                borderColor: 'hsl(var(--border))',
-                              }
+                              backgroundColor: 'hsl(var(--secondary))',
+                              color: 'hsl(var(--foreground))',
+                              borderColor: 'hsl(var(--border))',
+                            }
                             : {
-                                color: mentionTypeColorMap[type],
-                                backgroundColor: mentionTypeBackgroundMap[type],
-                                borderColor: `${mentionTypeColorMap[type]}66`,
-                              }
+                              color: mentionTypeColorMap[type],
+                              backgroundColor: mentionTypeBackgroundMap[type],
+                              borderColor: `${mentionTypeColorMap[type]}66`,
+                            }
                           : undefined
                       }
                     >
@@ -1255,9 +1248,8 @@ export function ChatInput({
                     type="button"
                     onClick={() => insertSlashCommand(item)}
                     onMouseEnter={() => setSelectedSlashIndex(index)}
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors ${
-                      index === selectedSlashIndex ? 'bg-secondary' : 'hover:bg-secondary/50'
-                    }`}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors ${index === selectedSlashIndex ? 'bg-secondary' : 'hover:bg-secondary/50'
+                      }`}
                   >
                     <span className="text-xs font-medium" style={{ color: item.color }}>
                       {item.command}
@@ -1345,19 +1337,18 @@ export function ChatInput({
                           onClick={() => {
                             onModeChange(nextMode)
                           }}
-                          className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-                            nextMode === 'agent'
+                          className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${nextMode === 'agent'
                               ? mode === nextMode
                                 ? 'border-border/60 bg-secondary text-foreground'
                                 : 'border-border/40 text-foreground/80 hover:bg-secondary/70'
                               : nextMode === 'plan'
-                              ? mode === nextMode
-                                ? 'border-orange-500/45 bg-orange-500/18 text-orange-300'
-                                : 'border-orange-500/25 bg-orange-500/8 text-orange-300/80 hover:bg-orange-500/14'
-                              : mode === nextMode
-                              ? 'border-violet-500/45 bg-violet-500/18 text-violet-300'
-                              : 'border-violet-500/25 bg-violet-500/8 text-violet-300/80 hover:bg-violet-500/14'
-                          }`}
+                                ? mode === nextMode
+                                  ? 'border-orange-500/45 bg-orange-500/18 text-orange-300'
+                                  : 'border-orange-500/25 bg-orange-500/8 text-orange-300/80 hover:bg-orange-500/14'
+                                : mode === nextMode
+                                  ? 'border-violet-500/45 bg-violet-500/18 text-violet-300'
+                                  : 'border-violet-500/25 bg-violet-500/8 text-violet-300/80 hover:bg-violet-500/14'
+                            }`}
                         >
                           {nextMode === 'agent' ? 'Agent' : nextMode === 'plan' ? 'Plan' : 'Wild'}
                         </button>
@@ -1387,9 +1378,8 @@ export function ChatInput({
                                     await onModelChange({ provider_id: option.provider_id, model_id: option.model_id })
                                   })()
                                 }}
-                                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
-                                  isSelected ? 'bg-secondary text-foreground' : 'hover:bg-secondary/70'
-                                }`}
+                                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${isSelected ? 'bg-secondary text-foreground' : 'hover:bg-secondary/70'
+                                  }`}
                               >
                                 <div className="h-3.5 w-3.5 shrink-0 text-primary">{isSelected ? <Check className="h-3.5 w-3.5" /> : null}</div>
                                 <span className="min-w-0 flex-1 truncate">{option.model_id}</span>
@@ -1440,15 +1430,14 @@ export function ChatInput({
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                      mode === 'agent'
+                    className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${mode === 'agent'
                         ? 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
                         : mode === 'wild'
-                        ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
-                        : mode === 'plan'
-                        ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
-                        : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
-                    }`}
+                          ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
+                          : mode === 'plan'
+                            ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
+                            : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
+                      }`}
                   >
                     {mode === 'agent' ? <MessageSquare className="h-3 w-3" /> : mode === 'wild' ? <Zap className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
                     {mode === 'wild' ? 'Wild' : mode === 'plan' ? 'Plan' : 'Agent'}
@@ -1641,7 +1630,7 @@ export function ChatInput({
                     { value: 15, label: 'Queued', desc: 'Normal user message.' },
                     { value: 20, label: 'Critical alert', desc: 'Urgent failures' },
                     { value: 30, label: 'Warning', desc: 'Non-critical alerts' },
-                    { value: 50, label: 'Event', desc: 'Run completions or normal event'},
+                    { value: 50, label: 'Event', desc: 'Run completions or normal event' },
                     { value: 70, label: 'Analysis', desc: 'Post-sweep analysis' },
                     { value: 90, label: 'Exploring', desc: 'Lowest — loop iterations' },
                   ].map((opt) => (
@@ -1649,9 +1638,8 @@ export function ChatInput({
                       key={opt.value}
                       type="button"
                       onClick={() => setSteerPriority(opt.value)}
-                      className={`flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left hover:bg-secondary/80 transition-colors ${
-                        steerPriority === opt.value ? 'bg-secondary text-foreground' : 'text-foreground/80'
-                      }`}
+                      className={`flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left hover:bg-secondary/80 transition-colors ${steerPriority === opt.value ? 'bg-secondary text-foreground' : 'text-foreground/80'
+                        }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="w-7 shrink-0 font-mono text-sm font-bold text-muted-foreground tabular-nums">{opt.value}</span>
@@ -1682,17 +1670,16 @@ export function ChatInput({
             </Popover>
           )}
 
-        <Button
+          <Button
             onClick={handleSubmit}
             disabled={!message.trim() && attachments.length === 0 && !replyExcerpt}
             size="icon"
-            className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${
-              isStreaming && onQueue
+            className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${isStreaming && onQueue
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
                 : isWildLoopActive && onSteer
                   ? 'bg-orange-500 text-white hover:bg-orange-600'
                   : 'bg-primary text-primary-foreground hover:bg-primary/90'
-            }`}
+              }`}
             title={`Send with priority P${steerPriority}`}
           >
             {isStreaming && onQueue ? (
@@ -1712,7 +1699,7 @@ export function ChatInput({
             <span className="sr-only">
               {isStreaming && onQueue ? 'Queue message' : isWildLoopActive && onSteer ? 'Steer agent' : 'Send message'}
             </span>
-        </Button>
+          </Button>
         </div>
       </div>
 
