@@ -300,7 +300,7 @@ def run_alert_judge(context: str, workdir: str | None = None) -> dict | None:
         "If action is ignore, keep message empty.\n"
         f"Context:\n{context}"
     )
-    cmd = ["opencode", "run", "--model", "opencode/kimi-k2.5-free", prompt]
+    cmd = ["opencode", "run", "--model", "opencode/minimax-m2.5-free", prompt]
     try:
         res = subprocess.run(
             cmd,

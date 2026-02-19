@@ -54,11 +54,25 @@ export function SettingsPageContent({
   const [slackChannel, setSlackChannel] = useState(settings.integrations.slack?.channel || '')
   const [showSlackApiKey, setShowSlackApiKey] = useState(false)
 
-  const { apiUrl, useMock, authToken, setApiUrl, setUseMock, setAuthToken, resetToDefaults, testConnection } = useApiConfig()
+  const {
+    apiUrl,
+    useMock,
+    authToken,
+    researchAgentKey,
+    setApiUrl,
+    setUseMock,
+    setAuthToken,
+    setResearchAgentKey,
+    resetToDefaults,
+    testConnection,
+  } = useApiConfig()
   const [apiUrlInput, setApiUrlInput] = useState(apiUrl)
   const [authTokenInput, setAuthTokenInput] = useState(authToken)
+  const [researchAgentKeyInput, setResearchAgentKeyInput] = useState(researchAgentKey)
   const [showAuthToken, setShowAuthToken] = useState(false)
+  const [showResearchAgentKey, setShowResearchAgentKey] = useState(false)
   const [authTokenCopied, setAuthTokenCopied] = useState(false)
+  const [researchAgentKeyCopied, setResearchAgentKeyCopied] = useState(false)
   const [setupLinkCopied, setSetupLinkCopied] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle')
   const authTokenInputRef = React.useRef<HTMLInputElement>(null)
@@ -105,6 +119,10 @@ export function SettingsPageContent({
   React.useEffect(() => {
     setAuthTokenInput(authToken)
   }, [authToken])
+
+  React.useEffect(() => {
+    setResearchAgentKeyInput(researchAgentKey)
+  }, [researchAgentKey])
 
   // Sync local inputs when settings change externally (e.g. reset)
   React.useEffect(() => {
@@ -166,6 +184,7 @@ export function SettingsPageContent({
     const isConnected = await testConnection({
       apiUrl: nextApiUrl,
       authToken: nextAuthToken,
+      researchAgentKey: researchAgentKeyInput.trim(),
     })
     if (isConnected) {
       setApiUrl(nextApiUrl)
@@ -184,6 +203,10 @@ export function SettingsPageContent({
     setAuthToken(authTokenInput)
   }
 
+  const handleSaveResearchAgentKey = () => {
+    setResearchAgentKey(researchAgentKeyInput.trim())
+  }
+
   const handleCopyAuthToken = async () => {
     if (!authTokenInput.trim()) return
     try {
@@ -192,6 +215,17 @@ export function SettingsPageContent({
       setTimeout(() => setAuthTokenCopied(false), 1500)
     } catch (error) {
       console.error('Failed to copy auth token:', error)
+    }
+  }
+
+  const handleCopyResearchAgentKey = async () => {
+    if (!researchAgentKeyInput.trim()) return
+    try {
+      await navigator.clipboard.writeText(researchAgentKeyInput)
+      setResearchAgentKeyCopied(true)
+      setTimeout(() => setResearchAgentKeyCopied(false), 1500)
+    } catch (error) {
+      console.error('Failed to copy RESEARCH_AGENT_KEY:', error)
     }
   }
 
@@ -1211,6 +1245,49 @@ export function SettingsPageContent({
                       size="sm"
                       onClick={handleSaveAuthToken}
                       disabled={authTokenInput === authToken}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="research-agent-key" className="text-xs">RESEARCH_AGENT_KEY</Label>
+                  <p className="text-xs text-muted-foreground">Gateway key used by model provider requests</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="research-agent-key"
+                      type={showResearchAgentKey ? 'text' : 'password'}
+                      placeholder="Enter RESEARCH_AGENT_KEY..."
+                      value={researchAgentKeyInput}
+                      onChange={(e) => setResearchAgentKeyInput(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowResearchAgentKey((prev) => !prev)}
+                      className="px-2"
+                      title={showResearchAgentKey ? 'Hide key' : 'Show key'}
+                    >
+                      {showResearchAgentKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      <span className="sr-only">{showResearchAgentKey ? 'Hide key' : 'Show key'}</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyResearchAgentKey}
+                      disabled={!researchAgentKeyInput.trim()}
+                      className="px-2"
+                      title="Copy RESEARCH_AGENT_KEY"
+                    >
+                      {researchAgentKeyCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSaveResearchAgentKey}
+                      disabled={researchAgentKeyInput.trim() === researchAgentKey}
                     >
                       Save
                     </Button>

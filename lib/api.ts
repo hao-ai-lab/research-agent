@@ -1,6 +1,6 @@
 'use client'
 
-import { getApiUrl, getAuthToken } from './api-config'
+import { getApiUrl, getAuthToken, getResearchAgentKey } from './api-config'
 import type { PromptProvenance } from '@/lib/types'
 
 // Get API URL dynamically at runtime (supports localStorage override)
@@ -17,6 +17,11 @@ function getHeaders(includeContentType: boolean = false): HeadersInit {
     const authToken = getAuthToken()
     if (authToken) {
         headers['X-Auth-Token'] = authToken
+    }
+
+    const researchAgentKey = getResearchAgentKey()
+    if (researchAgentKey) {
+        headers['X-Research-Agent-Key'] = researchAgentKey
     }
 
     return headers
