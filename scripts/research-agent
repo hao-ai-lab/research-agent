@@ -114,7 +114,11 @@ maybe_cmd() {
 }
 
 run_tmux() {
-  env -u TMUX tmux "$@"
+  env -u TMUX -u TMUX_PANE tmux "$@"
+}
+
+ensure_tmux_server() {
+  run_tmux start-server >/dev/null 2>&1 || true
 }
 
 ensure_state_dir() {
@@ -572,7 +576,7 @@ tmux_session_exists() {
 tmux_window_exists() {
   local session="$1"
   local window="$2"
-  run_tmux list-windows -t "$session" -F '#W' | grep -Fxq "$window"
+  run_tmux list-windows -t "$session" -F '#W' 2>/dev/null | grep -Fxq "$window"
 }
 
 tmux_replace_window() {
@@ -588,8 +592,16 @@ tmux_replace_window() {
 }
 
 ensure_tmux_session() {
+  ensure_tmux_server
   if ! tmux_session_exists "$TMUX_SESSION_NAME"; then
-    run_tmux new-session -d -s "$TMUX_SESSION_NAME" -n bootstrap "sleep infinity"
+    local tmux_err uid bootstrap_cmd
+    # macOS /bin/sleep does not support "infinity"; keep this shell alive portably.
+    bootstrap_cmd='while :; do sleep 3600; done'
+    if ! tmux_err="$(run_tmux new-session -d -s "$TMUX_SESSION_NAME" -n bootstrap "$bootstrap_cmd" 2>&1)"; then
+      uid="$(id -u 2>/dev/null || echo '?')"
+      warn "tmux failed to create session ${TMUX_SESSION_NAME}: ${tmux_err}"
+      die "Cannot start tmux session. Ensure /private/tmp/tmux-${uid} (macOS) or /tmp/tmux-${uid} is writable."
+    fi
   fi
 }
 
