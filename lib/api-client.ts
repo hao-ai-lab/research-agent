@@ -47,6 +47,8 @@ export type {
     RepoDiffResponse,
     RepoFilesResponse,
     RepoFileResponse,
+    JourneyNextActionsRequest,
+    JourneyNextActionsResponse,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -192,3 +194,6 @@ export const detectCluster = (...args: Parameters<typeof realApi.detectCluster>)
 
 export const updateCluster = (...args: Parameters<typeof realApi.updateCluster>) =>
     getApi().updateCluster(...args)
+
+export const getJourneyNextActions = (...args: Parameters<typeof realApi.getJourneyNextActions>) =>
+    getApi().getJourneyNextActions(...args)

@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/research-journey.schema.json",
+  "title": "Research Journey",
+  "description": "Event-sourced research journey model for hierarchy + timeline replay.",
+  "type": "object",
+  "required": [
+    "journey_id",
+    "title",
+    "started_at",
+    "updated_at",
+    "nodes",
+    "edges",
+    "events",
+    "artifacts",
+    "reflections"
+  ],
+  "properties": {
+    "journey_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "reflections": { "$ref": "#/$defs/reflections" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": ["active", "completed", "failed", "blocked", "archived"]
+    },
+    "node_type": {
+      "type": "string",
+      "enum": ["question", "hypothesis", "experiment", "result", "decision", "artifact"]
+    },
+    "edge_relation": {
+      "type": "string",
+      "enum": ["derived_from", "tests", "contradicts", "supersedes", "blocked_by", "informs", "depends_on"]
+    },
+    "actor": {
+      "type": "string",
+      "enum": ["human", "agent", "system"]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "failed", "inconclusive", "partial"]
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "title",
+        "status",
+        "created_at",
+        "effort_minutes",
+        "cost_usd",
+        "confidence",
+        "parent_ids",
+        "tags"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "$ref": "#/$defs/node_type" },
+        "title": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string" },
+        "status": { "$ref": "#/$defs/status" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "effort_minutes": { "type": "number", "minimum": 0 },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "information_gain_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "why_stopped": { "type": "string" },
+        "parent_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to", "relation"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "relation": { "$ref": "#/$defs/edge_relation" }
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": ["id", "ts", "node_id", "actor", "kind", "note"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "ts": { "type": "string", "format": "date-time" },
+        "node_id": { "type": "string", "minLength": 1 },
+        "actor": { "$ref": "#/$defs/actor" },
+        "kind": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" },
+        "metadata": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["id", "node_id", "kind", "path", "commit_sha"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "node_id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": ["notebook", "report", "dataset", "prompt", "code", "run_log", "chart", "other"]
+        },
+        "path": { "type": "string", "minLength": 1 },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{7,40}$"
+        },
+        "uri": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "reflections": {
+      "type": "object",
+      "required": ["wins", "failures", "costly_paths", "next_best_actions"],
+      "properties": {
+        "wins": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "failures": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "costly_paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "next_best_actions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

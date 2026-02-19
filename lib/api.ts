@@ -1812,3 +1812,33 @@ export async function deletePlan(planId: string): Promise<{ deleted: boolean; id
     }
     return response.json()
 }
+
+// =============================================================================
+// Journey AI Recommendations
+// =============================================================================
+
+export interface JourneyNextActionsRequest {
+    journey: Record<string, unknown>
+    max_actions?: number
+}
+
+export interface JourneyNextActionsResponse {
+    next_best_actions: string[]
+    reasoning?: string
+    source?: string
+}
+
+export async function getJourneyNextActions(
+    request: JourneyNextActionsRequest
+): Promise<JourneyNextActionsResponse> {
+    const response = await fetch(`${API_URL()}/journey/next-actions`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const message = await response.text()
+        throw new Error(`Failed to get journey next actions: ${message || response.statusText}`)
+    }
+    return response.json()
+}

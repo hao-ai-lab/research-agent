@@ -128,6 +128,7 @@ AUTH_PROTECTED_PREFIXES = (
     "/git",
     "/plans",
     "/integrations",
+    "/journey",
 )
 
 
@@ -547,6 +548,11 @@ class ClusterUpdateRequest(BaseModel):
 
 class ClusterDetectRequest(BaseModel):
     preferred_type: Optional[str] = None
+
+
+class JourneyNextActionsRequest(BaseModel):
+    journey: dict
+    max_actions: int = Field(default=3, ge=1, le=8)
 
 
 # =============================================================================
@@ -2742,6 +2748,167 @@ async def health():
 async def health_json():
     """JSON health endpoint."""
     return {"status": "ok", "service": "research-agent-server", "workdir": WORKDIR}
+
+
+def _extract_actions_from_text(raw_text: str, max_actions: int) -> list[str]:
+    text = str(raw_text or "").strip()
+    if not text:
+        return []
+
+    def _normalize(actions: list[Any]) -> list[str]:
+        cleaned: list[str] = []
+        for item in actions:
+            if isinstance(item, str):
+                value = item.strip()
+                if value:
+                    cleaned.append(value)
+            if len(cleaned) >= max_actions:
+                break
+        return cleaned
+
+    # 1) Best case: full JSON object.
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            actions = parsed.get("next_best_actions")
+            if isinstance(actions, list):
+                normalized = _normalize(actions)
+                if normalized:
+                    return normalized
+    except Exception:
+        pass
+
+    # 2) Extract JSON object embedded in prose.
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, dict):
+                actions = parsed.get("next_best_actions")
+                if isinstance(actions, list):
+                    normalized = _normalize(actions)
+                    if normalized:
+                        return normalized
+        except Exception:
+            pass
+
+    # 3) Fallback: bullets / numbered lines.
+    fallback: list[str] = []
+    for line in text.splitlines():
+        candidate = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
+        if candidate:
+            fallback.append(candidate)
+        if len(fallback) >= max_actions:
+            break
+    return fallback
+
+
+@app.post("/journey/next-actions")
+async def journey_next_actions(req: JourneyNextActionsRequest):
+    """Generate next-best research directions from journey context using OpenCode."""
+    journey = req.journey if isinstance(req.journey, dict) else {}
+    max_actions = int(req.max_actions or 3)
+
+    title = str(journey.get("title") or "User Research Journey").strip()
+    summary = journey.get("summary") if isinstance(journey.get("summary"), dict) else {}
+    reflections = journey.get("reflections") if isinstance(journey.get("reflections"), dict) else {}
+    events = journey.get("events") if isinstance(journey.get("events"), list) else []
+    steps = journey.get("steps") if isinstance(journey.get("steps"), list) else []
+
+    compact_events: list[dict[str, Any]] = []
+    for event in events[-20:]:
+        if not isinstance(event, dict):
+            continue
+        compact_events.append({
+            "time": event.get("time"),
+            "actor": event.get("actor"),
+            "event": event.get("event"),
+            "note": event.get("note"),
+        })
+
+    compact_steps: list[dict[str, Any]] = []
+    for step in steps[-20:]:
+        if not isinstance(step, dict):
+            continue
+        compact_steps.append({
+            "type": step.get("type"),
+            "status": step.get("status"),
+            "title": step.get("title"),
+            "effort_minutes": step.get("effort_minutes"),
+            "confidence": step.get("confidence"),
+        })
+
+    prompt_payload = {
+        "title": title,
+        "summary": summary,
+        "reflections": reflections,
+        "recent_steps": compact_steps,
+        "recent_events": compact_events,
+        "constraints": {
+            "max_actions": max_actions,
+            "audience": "researcher",
+            "style": "concrete, actionable, non-generic",
+        },
+    }
+
+    prompt = (
+        "You are a senior research planning assistant. "
+        "Given a research journey, propose the next best actions.\n\n"
+        "Return strict JSON only with this schema:\n"
+        "{\n"
+        '  "next_best_actions": ["action 1", "action 2", "action 3"],\n'
+        '  "reasoning": "brief 1-2 sentence rationale"\n'
+        "}\n\n"
+        f"The list must have at most {max_actions} items.\n"
+        "Each action must be specific and testable.\n"
+        "Avoid generic advice.\n\n"
+        f"Journey context:\n{json.dumps(prompt_payload, ensure_ascii=False)}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=60.0)) as client:
+            await apply_runtime_research_agent_key(client)
+            session_resp = await client.post(
+                f"{OPENCODE_URL}/session",
+                params={"directory": os.path.abspath(WORKDIR)},
+                json={},
+                auth=get_auth(),
+            )
+            session_resp.raise_for_status()
+            opencode_session_id = session_resp.json().get("id")
+            if not opencode_session_id:
+                raise RuntimeError("OpenCode session creation returned no id")
+
+            await send_prompt_to_opencode(client, opencode_session_id, prompt, MODEL_PROVIDER, MODEL_ID)
+
+            chunks: list[str] = []
+            async for event, text_delta, _thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
+                if event.get("type") == "part_delta" and event.get("ptype") == "text" and text_delta:
+                    chunks.append(text_delta)
+                if event.get("type") == "session_status" and event.get("status") == "idle":
+                    break
+
+            raw_text = "".join(chunks).strip()
+            actions = _extract_actions_from_text(raw_text, max_actions)
+            if not actions:
+                raise RuntimeError("Model output did not contain usable next actions")
+
+            reasoning = ""
+            try:
+                parsed = json.loads(raw_text)
+                if isinstance(parsed, dict) and isinstance(parsed.get("reasoning"), str):
+                    reasoning = parsed.get("reasoning", "").strip()
+            except Exception:
+                pass
+
+            return {
+                "next_best_actions": actions,
+                "reasoning": reasoning,
+                "source": "llm",
+            }
+    except Exception as e:
+        logger.warning("journey_next_actions failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Failed to generate next actions: {e}")
 
 
 # =============================================================================

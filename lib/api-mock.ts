@@ -27,6 +27,8 @@ import type {
     ClusterStatusResponse,
     ClusterUpdateRequest,
     ClusterDetectRequest,
+    JourneyNextActionsRequest,
+    JourneyNextActionsResponse,
     RepoDiffFileStatus,
     RepoDiffLine,
     RepoDiffFile,
@@ -1530,4 +1532,22 @@ export async function updateCluster(request: ClusterUpdateRequest): Promise<Clus
     }
 
     return buildClusterResponse()
+}
+
+export async function getJourneyNextActions(
+    request: JourneyNextActionsRequest
+): Promise<JourneyNextActionsResponse> {
+    await delay(120)
+    const maxActions = Math.max(1, Math.min(8, Number(request.max_actions || 3)))
+    const defaults = [
+        'Group recent failures by root cause, then run one constrained retry for the top failure cluster.',
+        'Pick one high-effort branch and run a smaller ablation to validate the main assumption first.',
+        'Add one chart tied to the latest successful run and capture the decision it supports.',
+        'Summarize the last 5 user prompts into explicit hypotheses before launching new runs.',
+    ]
+    return {
+        next_best_actions: defaults.slice(0, maxActions),
+        reasoning: 'Mock recommendation response based on recent journey signals.',
+        source: 'mock',
+    }
 }

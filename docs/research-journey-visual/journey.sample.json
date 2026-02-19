@@ -1,0 +1,233 @@
+{
+  "journey_id": "jrny_2026_02_19_retrieval",
+  "title": "Agentic Retrieval Strategy Exploration",
+  "started_at": "2026-02-10T16:00:00Z",
+  "updated_at": "2026-02-19T21:00:00Z",
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "question",
+      "title": "How do we improve retrieval precision without recall collapse?",
+      "summary": "Baseline has noisy top-3 despite decent recall.",
+      "status": "active",
+      "created_at": "2026-02-10T16:00:00Z",
+      "effort_minutes": 35,
+      "cost_usd": 0.42,
+      "confidence": 0.48,
+      "information_gain_score": 0.31,
+      "outcome": "inconclusive",
+      "parent_ids": [],
+      "tags": ["retrieval", "baseline"]
+    },
+    {
+      "id": "n2",
+      "type": "hypothesis",
+      "title": "Hybrid BM25 + dense reranker will reduce false positives",
+      "summary": "Use lexical retrieval before reranking candidate pool.",
+      "status": "completed",
+      "created_at": "2026-02-11T10:20:00Z",
+      "effort_minutes": 70,
+      "cost_usd": 1.93,
+      "confidence": 0.67,
+      "information_gain_score": 0.73,
+      "outcome": "success",
+      "parent_ids": ["n1"],
+      "tags": ["hybrid", "reranker"]
+    },
+    {
+      "id": "n3",
+      "type": "experiment",
+      "title": "Prompt-only query expansion",
+      "summary": "Expand user query to increase semantic coverage.",
+      "status": "failed",
+      "created_at": "2026-02-12T14:00:00Z",
+      "effort_minutes": 130,
+      "cost_usd": 4.87,
+      "confidence": 0.29,
+      "information_gain_score": 0.12,
+      "outcome": "failed",
+      "why_stopped": "Added many noisy terms; precision degraded.",
+      "parent_ids": ["n1"],
+      "tags": ["prompting", "expansion"]
+    },
+    {
+      "id": "n4",
+      "type": "experiment",
+      "title": "Metadata filter before reranking",
+      "summary": "Filter by document type and recency before scoring.",
+      "status": "completed",
+      "created_at": "2026-02-14T09:10:00Z",
+      "effort_minutes": 90,
+      "cost_usd": 2.32,
+      "confidence": 0.75,
+      "information_gain_score": 0.79,
+      "outcome": "success",
+      "parent_ids": ["n2"],
+      "tags": ["metadata", "ranking"]
+    },
+    {
+      "id": "n5",
+      "type": "decision",
+      "title": "Adopt metadata-filter + reranker path as default",
+      "summary": "Best efficiency and stable gains across held-out set.",
+      "status": "completed",
+      "created_at": "2026-02-16T11:50:00Z",
+      "effort_minutes": 45,
+      "cost_usd": 0.86,
+      "confidence": 0.83,
+      "information_gain_score": 0.81,
+      "outcome": "success",
+      "parent_ids": ["n4"],
+      "tags": ["decision", "default-path"]
+    },
+    {
+      "id": "n6",
+      "type": "result",
+      "title": "Ablation: chunk-size 384 vs 768",
+      "summary": "384 improved precision modestly; latency unchanged.",
+      "status": "completed",
+      "created_at": "2026-02-18T18:25:00Z",
+      "effort_minutes": 65,
+      "cost_usd": 1.42,
+      "confidence": 0.69,
+      "information_gain_score": 0.58,
+      "outcome": "partial",
+      "parent_ids": ["n5"],
+      "tags": ["ablation", "chunking"]
+    },
+    {
+      "id": "n7",
+      "type": "experiment",
+      "title": "Tooling retry loop with same prompt family",
+      "summary": "Three retries with minor wording changes yielded similar outcomes.",
+      "status": "failed",
+      "created_at": "2026-02-19T08:40:00Z",
+      "effort_minutes": 180,
+      "cost_usd": 6.14,
+      "confidence": 0.24,
+      "information_gain_score": 0.08,
+      "outcome": "failed",
+      "why_stopped": "Loop detected; low novelty and repeated failures.",
+      "parent_ids": ["n3"],
+      "tags": ["loop", "costly"]
+    }
+  ],
+  "edges": [
+    { "from": "n1", "to": "n2", "relation": "derived_from" },
+    { "from": "n1", "to": "n3", "relation": "tests" },
+    { "from": "n2", "to": "n4", "relation": "informs" },
+    { "from": "n4", "to": "n5", "relation": "supersedes" },
+    { "from": "n5", "to": "n6", "relation": "tests" },
+    { "from": "n3", "to": "n7", "relation": "derived_from" },
+    { "from": "n3", "to": "n4", "relation": "contradicts" },
+    { "from": "n7", "to": "n5", "relation": "blocked_by" }
+  ],
+  "events": [
+    {
+      "id": "e1",
+      "ts": "2026-02-10T16:05:00Z",
+      "node_id": "n1",
+      "actor": "human",
+      "kind": "question_created",
+      "note": "Precision gap observed in weekly QA review."
+    },
+    {
+      "id": "e2",
+      "ts": "2026-02-11T10:22:00Z",
+      "node_id": "n2",
+      "actor": "agent",
+      "kind": "hypothesis_created",
+      "note": "Proposed hybrid retrieval and reranking approach."
+    },
+    {
+      "id": "e3",
+      "ts": "2026-02-12T16:45:00Z",
+      "node_id": "n3",
+      "actor": "human",
+      "kind": "experiment_failed",
+      "note": "Expansion generated noisy terms and drifted intent."
+    },
+    {
+      "id": "e4",
+      "ts": "2026-02-14T10:05:00Z",
+      "node_id": "n4",
+      "actor": "agent",
+      "kind": "experiment_completed",
+      "note": "Metadata pre-filter increased precision at top ranks."
+    },
+    {
+      "id": "e5",
+      "ts": "2026-02-16T12:10:00Z",
+      "node_id": "n5",
+      "actor": "human",
+      "kind": "decision_recorded",
+      "note": "Promoted metadata+reranker to default strategy."
+    },
+    {
+      "id": "e6",
+      "ts": "2026-02-18T18:40:00Z",
+      "node_id": "n6",
+      "actor": "agent",
+      "kind": "ablation_logged",
+      "note": "Chunk size 384 chosen for next sweep."
+    },
+    {
+      "id": "e7",
+      "ts": "2026-02-19T09:20:00Z",
+      "node_id": "n7",
+      "actor": "system",
+      "kind": "loop_alert",
+      "note": "Three low-variance retries detected."
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "a1",
+      "node_id": "n2",
+      "kind": "notebook",
+      "path": "experiments/retrieval/hybrid_rerank_v1.ipynb",
+      "commit_sha": "a12ef45"
+    },
+    {
+      "id": "a2",
+      "node_id": "n4",
+      "kind": "report",
+      "path": "reports/retrieval/metadata_filter_eval.md",
+      "commit_sha": "b67cd29"
+    },
+    {
+      "id": "a3",
+      "node_id": "n5",
+      "kind": "code",
+      "path": "server/retrieval/pipeline.py",
+      "commit_sha": "c9d3f80"
+    },
+    {
+      "id": "a4",
+      "node_id": "n7",
+      "kind": "run_log",
+      "path": "logs/retrieval/retry_loop_2026_02_19.log",
+      "commit_sha": "de214ff"
+    }
+  ],
+  "reflections": {
+    "wins": [
+      "Metadata pre-filter + reranker improved top-3 precision by 12%.",
+      "Decision quality improved when evidence and confidence were recorded explicitly.",
+      "Ablation runs were fast and produced reusable conclusions."
+    ],
+    "failures": [
+      "Prompt-only expansion repeatedly increased noise.",
+      "Retry loop consumed high human effort with low information gain."
+    ],
+    "costly_paths": [
+      "n3 -> n7 prompt-iteration branch used 310 minutes for minimal signal.",
+      "Late detection of repeated retries delayed pivot by 2 days."
+    ],
+    "next_best_actions": [
+      "Add automatic loop detector to stop after two low-variance failures.",
+      "Run focused ablation on recency window and metadata quality.",
+      "Introduce tool selection policy based on expected information gain."
+    ]
+  }
+}
