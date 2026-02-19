@@ -3465,55 +3465,14 @@ async def wild_v2_evo_sweep_stop(session_id: str):
 
 
 # =============================================================================
-# Memory Bank Endpoints
+# Memory Bank Endpoints  (extracted to memory_routes.py)
 # =============================================================================
 
-# Memory models imported above from models.py
+import memory_routes  # noqa: E402
+memory_routes.init(memory_store)
+app.include_router(memory_routes.router)
 
 
-
-@app.get("/memories")
-async def list_memories(active_only: bool = False, source: Optional[str] = None):
-    """List all memories, optionally filtered."""
-    entries = memory_store.list(active_only=active_only, source=source)
-    return [{"id": m.id, "title": m.title, "content": m.content,
-             "source": m.source, "tags": m.tags, "session_id": m.session_id,
-             "created_at": m.created_at, "is_active": m.is_active}
-            for m in entries]
-
-
-@app.post("/memories")
-async def create_memory(req: MemoryCreateRequest):
-    """Create a new memory entry."""
-    entry = memory_store.add(
-        title=req.title,
-        content=req.content,
-        source=req.source,
-        tags=req.tags,
-        session_id=req.session_id,
-    )
-    return entry.to_dict()
-
-
-@app.patch("/memories/{memory_id}")
-async def update_memory(memory_id: str, req: MemoryUpdateRequest):
-    """Update a memory (toggle, edit title/content)."""
-    updates = {k: v for k, v in req.dict().items() if v is not None}
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    entry = memory_store.update(memory_id, **updates)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    return entry.to_dict()
-
-
-@app.delete("/memories/{memory_id}")
-async def delete_memory(memory_id: str):
-    """Delete a memory."""
-    deleted = memory_store.delete(memory_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    return {"deleted": True, "id": memory_id}
 
 
 @app.get("/cluster")
@@ -4392,120 +4351,14 @@ def start_opencode_server_subprocess(args):
 
 
 # =============================================================================
-# Plan Endpoints
+# Plan Endpoints  (extracted to plan_routes.py)
 # =============================================================================
 
-@app.get("/plans")
-async def list_plans(status: Optional[str] = None, session_id: Optional[str] = None):
-    """List all plans, optionally filtered by status or session."""
-    result = list(plans.values())
-    if status:
-        result = [p for p in result if p.get("status") == status]
-    if session_id:
-        result = [p for p in result if p.get("session_id") == session_id]
-    # Sort by created_at descending (newest first)
-    result.sort(key=lambda p: p.get("created_at", 0), reverse=True)
-    return result
+import plan_routes  # noqa: E402
+plan_routes.init(plans, save_plans_state)
+app.include_router(plan_routes.router)
 
 
-@app.get("/plans/{plan_id}")
-async def get_plan(plan_id: str):
-    """Get a single plan by ID."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    return plan
-
-
-@app.post("/plans")
-async def create_plan(req: PlanCreate):
-    """Create a new plan."""
-    now = time.time()
-    plan_id = str(uuid.uuid4())[:8]
-    plan = {
-        "id": plan_id,
-        "title": req.title,
-        "goal": req.goal,
-        "session_id": req.session_id,
-        "status": "draft",
-        "sections": req.sections or {},
-        "raw_markdown": req.raw_markdown,
-        "created_at": now,
-        "updated_at": now,
-    }
-    plans[plan_id] = plan
-    save_plans_state()
-    return plan
-
-
-@app.patch("/plans/{plan_id}")
-async def update_plan(plan_id: str, req: PlanUpdate):
-    """Update a plan's fields."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    if req.title is not None:
-        plan["title"] = req.title
-    if req.status is not None:
-        if req.status not in PLAN_STATUSES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid status '{req.status}'. Must be one of: {', '.join(sorted(PLAN_STATUSES))}"
-            )
-        plan["status"] = req.status
-    if req.sections is not None:
-        plan["sections"] = req.sections
-    if req.raw_markdown is not None:
-        plan["raw_markdown"] = req.raw_markdown
-
-    plan["updated_at"] = time.time()
-    save_plans_state()
-    return plan
-
-
-@app.post("/plans/{plan_id}/approve")
-async def approve_plan(plan_id: str):
-    """Approve a plan, setting its status to 'approved'."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    if plan["status"] not in ("draft",):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot approve a plan with status '{plan['status']}'. Only draft plans can be approved."
-        )
-    plan["status"] = "approved"
-    plan["updated_at"] = time.time()
-    save_plans_state()
-    return plan
-
-
-@app.post("/plans/{plan_id}/execute")
-async def execute_plan(plan_id: str):
-    """Mark a plan as 'executing'. Frontend should transition to agent/wild mode."""
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    if plan["status"] not in ("approved",):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot execute a plan with status '{plan['status']}'. Only approved plans can be executed."
-        )
-    plan["status"] = "executing"
-    plan["updated_at"] = time.time()
-    save_plans_state()
-    return plan
-
-
-@app.delete("/plans/{plan_id}")
-async def delete_plan(plan_id: str):
-    """Delete a plan."""
-    if plan_id not in plans:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    del plans[plan_id]
-    save_plans_state()
-    return {"deleted": True, "id": plan_id}
 
 
 def maybe_mount_frontend_static():
