@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Menu, Bell, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Pause, Play, Square, Target } from 'lucide-react'
+import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Pause, Play, Square, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -63,6 +63,7 @@ interface FloatingNavProps {
   // Chat-specific props
   eventCount?: number
   onAlertClick?: () => void
+  onExportSession?: () => void
   // Session selector props (for chat tab)
   sessionTitle?: string
   currentSessionId?: string | null
@@ -84,6 +85,7 @@ export function FloatingNav({
   onDesktopSidebarToggle,
   eventCount = 0,
   onAlertClick,
+  onExportSession,
   sessionTitle = 'New Chat',
   currentSessionId,
   sessions = [],
@@ -192,6 +194,19 @@ export function FloatingNav({
       {/* Right side buttons - only show in chat */}
       {isChat && (
         <div className="flex items-center gap-1 shrink-0">
+          {/* Export Button */}
+          {onExportSession && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onExportSession}
+              className="h-8 w-8"
+              title="Export session as Markdown"
+            >
+              <Download className="h-4 w-4" />
+              <span className="sr-only">Export session</span>
+            </Button>
+          )}
           {/* Alert Button with Badge */}
           <Button
             variant="ghost"

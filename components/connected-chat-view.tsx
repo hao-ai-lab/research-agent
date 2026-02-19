@@ -7,8 +7,7 @@ import { ChatInput, type ChatMode } from './chat-input-simple'
 import { StreamingMessage } from './streaming-message'
 import { EventQueuePanel } from './event-queue-panel'
 import { WildTerminationDialog } from './wild-termination-dialog'
-import { AlertCircle, Download, Loader2, PanelRightOpen, RefreshCw, WifiOff } from 'lucide-react'
-import { exportSessionToMarkdown, downloadMarkdown } from '@/lib/export-session-markdown'
+import { AlertCircle, Loader2, PanelRightOpen, RefreshCw, WifiOff } from 'lucide-react'
 import { ChatStarterCards } from '@/components/chat-starter-cards'
 import { WildModeSetupPanel } from '@/components/wild-mode-setup-panel'
 import { WildLoopDebugPanel } from '@/components/wild-loop-debug-panel'
@@ -678,25 +677,6 @@ export function ConnectedChatView({
                             </div>
                         ) : (
                             <>
-                                {/* Export button toolbar */}
-                                <div className="shrink-0 flex items-center justify-end px-3 py-1.5 border-b border-border/40">
-                                    <button
-                                        type="button"
-                                        id="export-session-markdown"
-                                        onClick={() => {
-                                            const title = currentSession?.title?.trim() || 'Untitled Session'
-                                            const markdown = exportSessionToMarkdown(displayMessages, title)
-                                            const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)
-                                            downloadMarkdown(markdown, `${safeTitle}.md`)
-                                        }}
-                                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                                        title="Export session as Markdown"
-                                    >
-                                        <Download className="h-3.5 w-3.5" />
-                                        Export
-                                    </button>
-                                </div>
-
                                 {/* Scrollable Chat Area */}
                                 <div className="flex-1 min-h-0 overflow-hidden">
                                     <ScrollArea className="h-full" ref={scrollRef}>
