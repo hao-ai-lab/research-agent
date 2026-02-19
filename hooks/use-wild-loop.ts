@@ -90,6 +90,9 @@ export function useWildLoop(): UseWildLoopResult {
   const statusRef = useRef(status)
   statusRef.current = status
 
+  // Store the latest WildModeSetup so start() can include evo_sweep_enabled
+  const setupRef = useRef<WildModeSetup | null>(null)
+
   // ---- Poll backend status every 2s ----
   useEffect(() => {
     let cancelled = false
@@ -119,6 +122,7 @@ export function useWildLoop(): UseWildLoopResult {
       const s = await startWildV2({
         goal,
         chat_session_id: sessionId,
+        evo_sweep_enabled: setupRef.current?.evoSweepEnabled ?? false,
       })
       setStatus(s)
     } catch (err) {
@@ -198,8 +202,9 @@ export function useWildLoop(): UseWildLoopResult {
   // ---- Apply setup from WildModeSetupPanel ----
 
   const applySetup = useCallback(async (_setup: WildModeSetup) => {
-    // V2 setup is applied at start time via startWildV2 params
-    console.log('[wild-loop-v2] Setup will be applied on next start')
+    // Store setup for use when start() is called
+    setupRef.current = _setup
+    console.log('[wild-loop-v2] Setup saved (evoSweep=%s)', _setup.evoSweepEnabled)
   }, [])
 
   // ---- Derive return values from V2 backend state ----

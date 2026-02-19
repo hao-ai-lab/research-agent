@@ -4407,6 +4407,7 @@ class WildV2StartRequest(BaseModel):
     chat_session_id: Optional[str] = None
     max_iterations: int = 25
     wait_seconds: float = 30.0
+    evo_sweep_enabled: bool = False
 
 class WildV2SteerRequest(BaseModel):
     context: str
@@ -4423,6 +4424,7 @@ async def wild_v2_start(req: WildV2StartRequest):
         chat_session_id=req.chat_session_id,
         max_iterations=req.max_iterations,
         wait_seconds=req.wait_seconds,
+        evo_sweep_enabled=req.evo_sweep_enabled,
     )
     return result
 
@@ -4517,6 +4519,39 @@ async def wild_v2_iteration_log(session_id: str):
 async def wild_v2_steer(req: WildV2SteerRequest):
     """Inject user context for the next iteration."""
     return wild_v2_engine.steer(req.context)
+
+
+# =============================================================================
+# Evolutionary Sweep Endpoints
+# =============================================================================
+
+@app.get("/wild/v2/evo-sweep/{session_id}")
+async def wild_v2_evo_sweep_status(session_id: str):
+    """Get the current evolutionary sweep status for a session."""
+    session = wild_v2_engine._session  # type: ignore[attr-defined]
+    if not session or session.session_id != session_id:
+        return {"active": False, "message": "No active session matches"}
+    controller = getattr(session, "_evo_controller", None)
+    if controller is None:
+        return {"active": False, "sweep_id": None}
+    return {
+        "active": True,
+        "sweep_id": controller.sweep_id,
+        "evo_sweep_enabled": session.evo_sweep_enabled,
+    }
+
+
+@app.post("/wild/v2/evo-sweep/{session_id}/stop")
+async def wild_v2_evo_sweep_stop(session_id: str):
+    """Stop an in-progress evolutionary sweep."""
+    session = wild_v2_engine._session  # type: ignore[attr-defined]
+    if not session or session.session_id != session_id:
+        return {"stopped": False, "message": "No active session matches"}
+    controller = getattr(session, "_evo_controller", None)
+    if controller is None:
+        return {"stopped": False, "message": "No evo sweep in progress"}
+    controller.cancel()
+    return {"stopped": True, "sweep_id": controller.sweep_id}
 
 
 # =============================================================================

@@ -50,6 +50,11 @@ except ImportError:
         parse_summary,
     )
 
+try:
+    from server.evo_sweep import EvoSweepController, parse_evo_sweep
+except ImportError:
+    from evo_sweep import EvoSweepController, parse_evo_sweep  # type: ignore[no-redef]
+
 logger = logging.getLogger("wild_loop_v2")
 
 
@@ -88,6 +93,9 @@ class WildV2Session:
     autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
     away_duration_minutes: int = 0    # 0 = user is present
 
+    # Evolutionary sweep mode
+    evo_sweep_enabled: bool = False
+
     def to_dict(self) -> dict:
         return {
             "session_id": self.session_id,
@@ -107,6 +115,7 @@ class WildV2Session:
             "short_iteration_count": self.short_iteration_count,
             "autonomy_level": self.autonomy_level,
             "away_duration_minutes": self.away_duration_minutes,
+            "evo_sweep_enabled": self.evo_sweep_enabled,
         }
 
 
@@ -174,6 +183,7 @@ class WildV2Engine:
         wait_seconds: float = 30.0,
         autonomy_level: str = "balanced",
         away_duration_minutes: int = 0,
+        evo_sweep_enabled: bool = False,
     ) -> dict:
         """Start a new V2 wild session."""
         logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d autonomy=%s", goal[:80], chat_session_id, max_iterations, autonomy_level)
@@ -192,6 +202,7 @@ class WildV2Engine:
             wait_seconds=wait_seconds,
             autonomy_level=autonomy_level,
             away_duration_minutes=away_duration_minutes,
+            evo_sweep_enabled=evo_sweep_enabled,
         )
 
         # Create session storage dir
@@ -398,6 +409,7 @@ class WildV2Engine:
             away_duration_minutes=session.away_duration_minutes,
             user_wants_questions=session.autonomy_level != "full" and session.away_duration_minutes == 0,
             memories_text=memories_text,
+            evo_sweep_enabled=session.evo_sweep_enabled,
         )
 
     async def _send_prompt(self, session: "WildV2Session", prompt: str, display_msg: str) -> str:
@@ -546,8 +558,9 @@ class WildV2Engine:
                 promise = parse_promise(full_text)
                 new_plan = parse_plan(full_text)
                 summary = parse_summary(full_text) or full_text[:300]
-                logger.info("[wild-v2] Parsed: promise=%s, has_plan=%s, summary=%s",
-                           promise, bool(new_plan), summary[:80].replace('\n', ' '))
+                evo_sweep_config = parse_evo_sweep(full_text) if session.evo_sweep_enabled else None
+                logger.info("[wild-v2] Parsed: promise=%s, has_plan=%s, evo_sweep=%s, summary=%s",
+                           promise, bool(new_plan), bool(evo_sweep_config), summary[:80].replace('\n', ' '))
 
                 # 4. Update plan in memory (tasks.md is managed by agent on disk)
                 if new_plan:
@@ -592,6 +605,33 @@ class WildV2Engine:
                     "errors": errors[:5],  # cap stored errors
                 }
                 session.history.append(iter_record)
+
+                # 6b. Run evolutionary sweep if signaled
+                if evo_sweep_config and session.evo_sweep_enabled:
+                    logger.info("[wild-v2] 🧬 Evo sweep triggered! target=%s metric=%s",
+                               evo_sweep_config.target_script, evo_sweep_config.fitness_metric)
+                    evo_sweep_config.workdir = evo_sweep_config.workdir or session.workdir or os.environ.get("WORKDIR", ".")
+                    controller = EvoSweepController(
+                        server_url=self._server_url,
+                        auth_token=self._auth_token,
+                    )
+                    # Store controller reference for potential cancellation
+                    session._evo_controller = controller  # type: ignore[attr-defined]
+                    try:
+                        evo_result = await controller.run(evo_sweep_config)
+                        iter_record["evo_sweep"] = {
+                            "sweep_id": evo_result.sweep_id,
+                            "best_fitness": evo_result.best_fitness,
+                            "best_config": evo_result.best_config,
+                            "generations": evo_result.generations_completed,
+                            "status": evo_result.status,
+                        }
+                        logger.info("[wild-v2] 🧬 Evo sweep complete: best_fitness=%s", evo_result.best_fitness)
+                    except Exception as evo_err:
+                        logger.error("[wild-v2] Evo sweep failed: %s", evo_err)
+                        iter_record["evo_sweep"] = {"status": "failed", "error": str(evo_err)}
+                    finally:
+                        session._evo_controller = None  # type: ignore[attr-defined]
 
                 # 7. Append to iteration_log.md on disk
                 self._append_iteration_log(session, iter_record)

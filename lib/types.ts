@@ -226,6 +226,7 @@ export interface WildModeSetup {
   awayDurationMinutes: number;
   autonomyLevel: AutonomyLevel;
   queueModifyEnabled: boolean;
+  evoSweepEnabled: boolean;
 }
 
 export interface WildLoopState {
