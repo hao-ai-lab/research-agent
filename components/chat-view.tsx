@@ -146,7 +146,7 @@ export function ChatView({
                     <div
                       key={message.id}
                       className={message.role === 'user'
-                        ? 'sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85'
+                        ? 'sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85 overflow-hidden'
                         : undefined}
                     >
                       <ChatMessage 
