@@ -10,8 +10,10 @@ import {
   Eye,
   EyeOff,
   LayoutGrid,
+  Lightbulb,
   Monitor,
   Moon,
+  Orbit,
   RotateCcw,
   Server,
   Clock,
@@ -19,6 +21,7 @@ import {
   Sparkles,
   Square,
   Sun,
+  Terminal,
   Type,
   Wifi,
   WifiOff,
@@ -32,6 +35,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
+import { Badge } from '@/components/ui/badge'
 import { createSetupShareLink, useApiConfig } from '@/lib/api-config'
 import type { AppSettings } from '@/lib/types'
 
@@ -435,6 +439,42 @@ export function SettingsPageContent({
           icon: Eye,
           type: 'toggle' as const,
           value: settings.developer?.showSidebarRunsSweepsPreview !== false,
+        },
+        {
+          id: 'showMemoryPanel',
+          label: 'Memory Panel',
+          description: 'Show the Memory tab in the sidebar',
+          icon: Lightbulb,
+          type: 'toggle' as const,
+          value: settings.developer?.showMemoryPanel === true,
+          beta: true,
+        },
+        {
+          id: 'showReportPanel',
+          label: 'Report Panel',
+          description: 'Show the Report tab in the sidebar',
+          icon: FileText,
+          type: 'toggle' as const,
+          value: settings.developer?.showReportPanel === true,
+          beta: true,
+        },
+        {
+          id: 'showTerminalPanel',
+          label: 'Terminal Panel',
+          description: 'Show the Terminal tab in the sidebar',
+          icon: Terminal,
+          type: 'toggle' as const,
+          value: settings.developer?.showTerminalPanel === true,
+          beta: true,
+        },
+        {
+          id: 'showContextualPanel',
+          label: 'Contextual Panel',
+          description: 'Show the Contextual tab in the sidebar',
+          icon: Orbit,
+          type: 'toggle' as const,
+          value: settings.developer?.showContextualPanel === true,
+          beta: true,
         },
       ],
     },
@@ -897,7 +937,12 @@ export function SettingsPageContent({
                 <Icon className="h-5 w-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-sm font-medium text-foreground">
+                  {item.label}
+                  {'beta' in item && (item as Record<string, unknown>).beta === true && (
+                    <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">beta</Badge>
+                  )}
+                </p>
                 <p className="text-xs text-muted-foreground">{item.description}</p>
               </div>
             </div>
@@ -923,6 +968,30 @@ export function SettingsPageContent({
                   onSettingsChange({
                     ...settings,
                     developer: { ...settings.developer, showPlanPanel: checked },
+                  })
+                }
+                if (item.id === 'showMemoryPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showMemoryPanel: checked },
+                  })
+                }
+                if (item.id === 'showReportPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showReportPanel: checked },
+                  })
+                }
+                if (item.id === 'showTerminalPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showTerminalPanel: checked },
+                  })
+                }
+                if (item.id === 'showContextualPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showContextualPanel: checked },
                   })
                 }
                 if (item.id === 'showSidebarRunsSweepsPreview') {

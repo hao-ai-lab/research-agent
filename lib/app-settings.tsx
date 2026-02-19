@@ -83,6 +83,10 @@ export const defaultAppSettings: AppSettings = {
     showPlanPanel: false,
     showSidebarRunsSweepsPreview: true,
     debugRefreshIntervalSeconds: 2,
+    showMemoryPanel: false,
+    showReportPanel: false,
+    showTerminalPanel: false,
+    showContextualPanel: false,
   },
 };
 
