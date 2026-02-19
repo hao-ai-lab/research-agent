@@ -175,7 +175,7 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
                         onClick={toggleQueue}
                     >
                         <div className={queueModifyEnabled ? styles.toggleTrackOn : styles.toggleTrackOff}>
-                            <div className={styles.toggleThumb} style={{ left: queueModifyEnabled ? '18px' : '2px' }} />
+                            <div className={styles.toggleThumb} style={{ left: queueModifyEnabled ? '19px' : '3px' }} />
                         </div>
                         <span className={styles.toggleLabel}>{queueModifyEnabled ? 'On' : 'Off'}</span>
                     </button>
@@ -193,7 +193,7 @@ export function WildModeSetupPanel({ onLaunch }: WildModeSetupPanelProps) {
                         title="Enable evolutionary sweep mode — population-based optimization for code and hyperparameters"
                     >
                         <div className={evoSweepEnabled ? styles.toggleTrackOn : styles.toggleTrackOff}>
-                            <div className={styles.toggleThumb} style={{ left: evoSweepEnabled ? '18px' : '2px' }} />
+                            <div className={styles.toggleThumb} style={{ left: evoSweepEnabled ? '19px' : '3px' }} />
                         </div>
                         <span className={styles.toggleLabel}>{evoSweepEnabled ? 'On' : 'Off'}</span>
                     </button>
