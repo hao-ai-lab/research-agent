@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 # Ensure slack_sdk is available (the handler gracefully degrades if not)
-from slack_handler import SlackNotifier
+from integrations.slack_handler import SlackNotifier
 
 
 class TestSlackNotifierInit(unittest.TestCase):

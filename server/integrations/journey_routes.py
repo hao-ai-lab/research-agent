@@ -14,15 +14,15 @@ from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
-import config
-from config import (
+from core import config
+from core.config import (
     OPENCODE_URL,
     MODEL_PROVIDER,
     MODEL_ID,
     apply_runtime_research_agent_key,
     get_auth,
 )
-from models import (
+from core.models import (
     JourneyNextActionsRequest,
     JourneyEventCreate,
     JourneyRecommendationCreate,
@@ -32,7 +32,7 @@ from models import (
     JOURNEY_REC_STATUS_VALUES,
     JOURNEY_DECISION_STATUS_VALUES,
 )
-from state import (
+from core.state import (
     journey_events,
     journey_recommendations,
     journey_decisions,

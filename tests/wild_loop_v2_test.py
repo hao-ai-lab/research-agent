@@ -12,14 +12,14 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
-from wild_loop_v2 import (
+from agent.wild_loop_v2 import (
     WildV2Engine,
     WildV2Session,
     parse_plan,
     parse_promise,
     parse_summary,
 )
-from v2_prompts import (
+from agent.v2_prompts import (
     PromptContext,
     build_iteration_prompt,
     build_planning_prompt,

@@ -24,7 +24,7 @@ from typing import Any, Callable, Optional
 import httpx
 
 try:
-    from server.v2_prompts import (
+    from agent.v2_prompts import (
         PromptContext,
         build_iteration_prompt,
         build_planning_prompt,
@@ -37,7 +37,7 @@ try:
         parse_summary,
     )
 except ImportError:
-    from v2_prompts import (  # type: ignore[no-redef]
+    from .v2_prompts import (  # type: ignore[no-redef]
         PromptContext,
         build_iteration_prompt,
         build_planning_prompt,
@@ -51,9 +51,9 @@ except ImportError:
     )
 
 try:
-    from server.evo_sweep import EvoSweepController, parse_evo_sweep
+    from runs.evo_sweep import EvoSweepController, parse_evo_sweep
 except ImportError:
-    from evo_sweep import EvoSweepController, parse_evo_sweep  # type: ignore[no-redef]
+    from .evo_sweep import EvoSweepController, parse_evo_sweep  # type: ignore[no-redef]
 
 logger = logging.getLogger("wild_loop_v2")
 

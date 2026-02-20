@@ -14,8 +14,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-import config
-from models import SweepCreate, SweepUpdate, RunCreate
+from core import config
+from core.models import SweepCreate, SweepUpdate, RunCreate
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()

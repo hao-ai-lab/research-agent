@@ -16,8 +16,8 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 from fastapi import HTTPException
 
-import config
-from config import (
+from core import config
+from core.config import (
     OPENCODE_URL,
     MODEL_PROVIDER,
     MODEL_ID,
@@ -25,7 +25,7 @@ from config import (
     get_auth,
     get_session_model,
 )
-from state import (
+from core.state import (
     chat_sessions,
     active_chat_streams,
     session_stop_flags,

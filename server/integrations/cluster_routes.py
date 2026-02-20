@@ -11,8 +11,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from models import ClusterDetectRequest, ClusterUpdateRequest
-from state import (
+from core.models import ClusterDetectRequest, ClusterUpdateRequest
+from core.state import (
     _normalize_cluster_state,
     _normalize_cluster_type,
     _normalize_cluster_status,

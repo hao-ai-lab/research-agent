@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from skills_manager import PromptSkillManager
+from skills.manager import PromptSkillManager
 
 router = APIRouter()
 

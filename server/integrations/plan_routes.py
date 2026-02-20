@@ -12,7 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from models import PlanCreate, PlanUpdate, PLAN_STATUSES
+from core.models import PlanCreate, PlanUpdate, PLAN_STATUSES
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()

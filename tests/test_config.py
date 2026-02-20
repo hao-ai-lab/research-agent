@@ -6,7 +6,7 @@ import sys
 # Ensure server/ is on the path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
 
-from config import (
+from core.config import (
     _parse_optional_int,
     requires_api_auth,
     get_session_model,
