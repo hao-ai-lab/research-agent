@@ -13,6 +13,7 @@ import {
   X,
   Zap,
   Play,
+  Pause,
   Square,
   AlertTriangle,
   BarChart3,
@@ -26,7 +27,7 @@ import {
   Check,
   Sparkles,
   Wand2,
-  Navigation,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,6 +88,9 @@ interface ChatInputProps {
   layout?: "docked" | "centered";
   skills?: PromptSkill[];
   isWildLoopActive?: boolean;
+  wildLoopPaused?: boolean;
+  onWildPause?: () => void;
+  onWildResume?: () => void;
   onWildStop?: () => void;
   onSteer?: (message: string, priority: number) => void;
   onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void;
@@ -154,6 +158,9 @@ export function ChatInput({
   layout = "docked",
   skills = [],
   isWildLoopActive = false,
+  wildLoopPaused = false,
+  onWildPause,
+  onWildResume,
   onWildStop,
   onSteer,
   onOpenReplyExcerpt,
@@ -787,9 +794,9 @@ export function ChatInput({
     selectedModel ||
     (defaultModelOption
       ? {
-        provider_id: defaultModelOption.provider_id,
-        model_id: defaultModelOption.model_id,
-      }
+          provider_id: defaultModelOption.provider_id,
+          model_id: defaultModelOption.model_id,
+        }
       : null);
   const modelOptionsByProvider = useMemo(() => {
     const groups = new Map<string, ChatModelOption[]>();
@@ -956,10 +963,11 @@ export function ChatInput({
                     type="button"
                     onClick={() => insertMention(item)}
                     onMouseEnter={() => setSelectedMentionIndex(index)}
-                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${index === selectedMentionIndex
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
+                      index === selectedMentionIndex
                         ? "bg-secondary"
                         : "hover:bg-secondary/50"
-                      }`}
+                    }`}
                   >
                     <span
                       className="flex items-center justify-center h-5 w-5 rounded shrink-0"
@@ -1016,22 +1024,23 @@ export function ChatInput({
                       key={type}
                       type="button"
                       onClick={() => setMentionFilter(type)}
-                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${mentionFilter === type
+                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${
+                        mentionFilter === type
                           ? "border-transparent"
                           : "border-transparent text-muted-foreground hover:bg-secondary"
-                        }`}
+                      }`}
                       style={
                         mentionFilter === type
                           ? type === "all"
                             ? {
-                              backgroundColor: "hsl(var(--secondary))",
-                              color: "hsl(var(--foreground))",
-                              borderColor: "hsl(var(--border))",
-                            }
+                                backgroundColor: "hsl(var(--secondary))",
+                                color: "hsl(var(--foreground))",
+                                borderColor: "hsl(var(--border))",
+                              }
                             : {
-                              color: mentionTypeColorMap[type],
-                              borderColor: `${mentionTypeColorMap[type]}66`,
-                            }
+                                color: mentionTypeColorMap[type],
+                                borderColor: `${mentionTypeColorMap[type]}66`,
+                              }
                           : undefined
                       }
                     >
@@ -1158,20 +1167,27 @@ export function ChatInput({
           </Button>
 
           {/* Mode toggle */}
-          <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
+          <Popover open={isModeOpen && !isWildLoopActive} onOpenChange={setIsModeOpen}>
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${mode === "agent"
-                    ? "border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
-                    : mode === "wild"
-                      ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300"
-                      : mode === "plan"
-                        ? "border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300"
-                        : "border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300"
-                  }`}
+                disabled={isWildLoopActive}
+                className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                  isWildLoopActive
+                    ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300 cursor-not-allowed opacity-70"
+                    : mode === "agent"
+                      ? "border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
+                      : mode === "wild"
+                        ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300"
+                        : mode === "plan"
+                          ? "border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300"
+                          : "border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300"
+                }`}
+                title={isWildLoopActive ? "Mode locked during wild loop" : "Select mode"}
               >
-                {mode === "agent" ? (
+                {isWildLoopActive ? (
+                  <Lock className="h-3 w-3" />
+                ) : mode === "agent" ? (
                   <MessageSquare className="h-3 w-3" />
                 ) : mode === "wild" ? (
                   <Zap className="h-3 w-3" />
@@ -1282,7 +1298,7 @@ export function ChatInput({
                           const isSelected = Boolean(
                             effectiveSelectedModel &&
                             option.provider_id ===
-                            effectiveSelectedModel.provider_id &&
+                              effectiveSelectedModel.provider_id &&
                             option.model_id === effectiveSelectedModel.model_id,
                           );
                           return (
@@ -1364,30 +1380,53 @@ export function ChatInput({
               Stop
             </Button>
           )}
-          {isWildLoopActive && !isStreaming && onWildStop && (
-            <Button
-              onClick={onWildStop}
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-            >
-              <Square className="h-3 w-3" />
-              Stop
-            </Button>
+          {isWildLoopActive && !isStreaming && (
+            <>
+              {wildLoopPaused ? (
+                <Button
+                  onClick={onWildResume}
+                  size="sm"
+                  className="h-9 gap-1.5 px-3 text-xs bg-violet-600 hover:bg-violet-700 text-white"
+                >
+                  <Play className="h-3 w-3" />
+                  Resume
+                </Button>
+              ) : (
+                <Button
+                  onClick={onWildPause}
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-1.5 px-3 text-xs border-violet-500/40 text-violet-400 hover:bg-violet-500/10"
+                >
+                  <Pause className="h-3 w-3" />
+                  Pause
+                </Button>
+              )}
+              <Button
+                onClick={onWildStop}
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+              >
+                <Square className="h-3 w-3" />
+                Stop
+              </Button>
+            </>
           )}
           <Button
             onClick={handleSubmit}
             disabled={
               !message.trim() && !replyExcerpt && attachments.length === 0
             }
-            size={isWildLoopActive && onSteer ? "sm" : "icon"}
-            className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${isStreaming && onQueue
+            size="icon"
+            className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${
+              isStreaming && onQueue
                 ? "bg-amber-500 text-white hover:bg-amber-600"
                 : isWildLoopActive && onSteer
-                  ? "bg-violet-600 text-white hover:bg-violet-700 gap-1.5 px-3"
+                  ? "bg-orange-500 text-white hover:bg-orange-600"
                   : "bg-primary text-primary-foreground hover:bg-primary/90"
-              }`}
-            title={isWildLoopActive && onSteer ? "Steer the wild loop" : "Send message"}
+            }`}
+            title="Send message"
           >
             {isStreaming && onQueue ? (
               <>
@@ -1397,11 +1436,6 @@ export function ChatInput({
                     {queueCount}
                   </span>
                 )}
-              </>
-            ) : isWildLoopActive && onSteer ? (
-              <>
-                <Navigation className="h-3.5 w-3.5" />
-                Steer
               </>
             ) : (
               <Send />
