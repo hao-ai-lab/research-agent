@@ -30,6 +30,7 @@ import {
   RefreshCw,
   Server,
   Bell,
+  Eye,
   Terminal,
   Pencil,
   Check,
@@ -59,6 +60,7 @@ import {
 } from '@/components/ui/select'
 import { AllRunsChart } from './all-runs-chart'
 import { RunDetailView } from './run-detail-view'
+import type { RunDetailFieldVisibility, RunDetailFieldKey } from './run-detail-view'
 import { VisibilityManageView } from './visibility-manage-view'
 import { RunName } from './run-name'
 import type { ExperimentRun, TagDefinition, VisibilityGroup, Sweep, SweepConfig } from '@/lib/types'
@@ -89,6 +91,7 @@ type DetailsView = 'time' | 'priority'
 type GroupByMode = 'none' | 'sweep'
 type RunDialogMode = 'create' | 'edit-frozen'
 const STORAGE_KEY_RUNS_VIEW_PREFERENCES = 'runsViewPreferences'
+const RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY = 'run-detail-field-visibility-v1'
 const CHARTS_PAGE_SIZE = 12
 const SWEEPS_PAGE_SIZE = 8
 const RUNS_PAGE_SIZE = 5
@@ -101,6 +104,23 @@ const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
   'failed',
   'canceled',
 ]
+
+const DEFAULT_RUN_DETAIL_FIELD_VISIBILITY: RunDetailFieldVisibility = {
+  aliasNotes: true,
+  tags: true,
+  chat: false,
+  summary: true,
+  gpuwrap: true,
+  outcome: true,
+  metrics: true,
+  alerts: true,
+  charts: true,
+  logs: true,
+  sidecarLogs: true,
+  terminal: false,
+  command: true,
+  artifacts: false,
+}
 
 const CLUSTER_TYPE_OPTIONS: Array<{ value: ClusterType; label: string }> = [
   { value: 'unknown', label: 'Unknown' },
@@ -229,6 +249,8 @@ export function RunsView({
   const [chartsPage, setChartsPage] = useState(1)
   const [sweepsPage, setSweepsPage] = useState(1)
   const [runsPage, setRunsPage] = useState(1)
+  const [fieldsPopoverOpen, setFieldsPopoverOpen] = useState(false)
+  const [runDetailFieldVisibility, setRunDetailFieldVisibility] = useState<RunDetailFieldVisibility>(DEFAULT_RUN_DETAIL_FIELD_VISIBILITY)
   const scrollPositionRef = useRef<number>(0)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
@@ -815,6 +837,10 @@ export function RunsView({
     setRunDialogOpen(true)
   }, [])
 
+  const toggleRunDetailField = useCallback((field: RunDetailFieldKey) => {
+    setRunDetailFieldVisibility((prev) => ({ ...prev, [field]: !prev[field] }))
+  }, [])
+
   const handleDuplicateRun = useCallback((runId: string) => {
     const run = runs.find((candidate) => candidate.id === runId)
     if (!run) return
@@ -834,6 +860,26 @@ export function RunsView({
     }
     onDialogIntentHandled?.()
   }, [onDialogIntentHandled, openCreateRunDialog, openDialogIntent])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem(RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Partial<RunDetailFieldVisibility>
+      setRunDetailFieldVisibility((prev) => ({ ...prev, ...parsed }))
+    } catch {
+      // Ignore invalid persisted values.
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(
+      RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY,
+      JSON.stringify(runDetailFieldVisibility)
+    )
+  }, [runDetailFieldVisibility])
 
   const handleSubmitCreateRun = useCallback(async () => {
     if (!onCreateRun || runCreateSubmitting) return
@@ -1622,75 +1668,123 @@ export function RunsView({
               </Button>
             )}
             {onRefresh && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => { void handleRefreshSelectedRun() }}
-                disabled={isSelectedRunRefreshing}
-                className="h-7 w-7 text-muted-foreground"
-                title="Refresh"
-              >
-                <RefreshCw className={`h-4 w-4 ${isSelectedRunRefreshing ? 'animate-spin' : ''}`} />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => { void handleRefreshSelectedRun() }}
+                    disabled={isSelectedRunRefreshing}
+                    className="h-7 w-7 text-muted-foreground"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isSelectedRunRefreshing ? 'animate-spin' : ''}`} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Refresh</TooltipContent>
+              </Tooltip>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => openEditRunDialog(selectedRun)}
-              className="h-7 w-7 text-muted-foreground"
-              title="Edit Run (frozen)"
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={selectedRunPendingAlerts > 0 ? 'default' : 'ghost'}
-              size="icon"
-              onClick={handleScrollToRunAlerts}
-              className={`h-7 w-7 ${selectedRunPendingAlerts > 0 ? '' : 'text-muted-foreground'}`}
-              title={selectedRunPendingAlerts > 0 ? `Check alerts (${selectedRunPendingAlerts} pending)` : 'Check alerts'}
-            >
-              <Bell className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onUpdateRun?.({ ...selectedRun, isFavorite: !selectedRun.isFavorite })}
-              className={`h-7 w-7 ${selectedRun.isFavorite ? 'text-yellow-500' : 'text-muted-foreground'}`}
-            >
-              <Star className={`h-4 w-4 ${selectedRun.isFavorite ? 'fill-yellow-500' : ''}`} />
-            </Button>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7">
-                  <div
-                    className="h-4 w-4 rounded-full border border-border"
-                    style={{ backgroundColor: selectedRun.color || '#4ade80' }}
-                  />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEditRunDialog(selectedRun)}
+                  className="h-7 gap-1.5 text-xs"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-40 p-2" align="end">
-                <div className="grid grid-cols-5 gap-1.5">
-                  {DEFAULT_RUN_COLORS.map((color) => (
+              </TooltipTrigger>
+              <TooltipContent>Edit run (frozen)</TooltipContent>
+            </Tooltip>
+            <Popover open={fieldsPopoverOpen} onOpenChange={setFieldsPopoverOpen}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                      <Eye className="h-3.5 w-3.5" />
+                      Fields
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Show or hide run fields</TooltipContent>
+              </Tooltip>
+              <PopoverContent align="end" className="w-56 p-2">
+                <div className="space-y-1">
+                  {([
+                    ['aliasNotes', 'Alias & notes'],
+                    ['tags', 'Tags'],
+                    ['chat', 'Chat'],
+                    ['summary', 'Summary'],
+                    ['gpuwrap', 'GPU wrap'],
+                    ['outcome', 'Outcome'],
+                    ['metrics', 'Metrics'],
+                    ['alerts', 'Alerts'],
+                    ['charts', 'Charts'],
+                    ['logs', 'Logs'],
+                    ['sidecarLogs', 'Sidecar logs'],
+                    ['terminal', 'Terminal'],
+                    ['command', 'Command'],
+                    ['artifacts', 'Artifacts'],
+                  ] as Array<[RunDetailFieldKey, string]>).map(([key, label]) => (
                     <button
-                      key={color}
+                      key={key}
                       type="button"
-                      onClick={() => onUpdateRun?.({ ...selectedRun, color })}
-                      className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${selectedRun.color === color ? 'border-foreground' : 'border-transparent'
-                        }`}
-                      style={{ backgroundColor: color }}
-                    />
+                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-secondary"
+                      onClick={() => toggleRunDetailField(key)}
+                    >
+                      <span>{label}</span>
+                      {runDetailFieldVisibility[key] ? (
+                        <Check className="h-3.5 w-3.5 text-green-500" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
                   ))}
                 </div>
               </PopoverContent>
             </Popover>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onUpdateRun?.({ ...selectedRun, isArchived: !selectedRun.isArchived })}
-              className={`h-7 w-7 ${selectedRun.isArchived ? 'text-muted-foreground' : ''}`}
-            >
-              <Archive className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={selectedRunPendingAlerts > 0 ? 'default' : 'ghost'}
+                  size="icon"
+                  onClick={handleScrollToRunAlerts}
+                  className={`h-7 w-7 ${selectedRunPendingAlerts > 0 ? '' : 'text-muted-foreground'}`}
+                >
+                  <Bell className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {selectedRunPendingAlerts > 0 ? `Check alerts (${selectedRunPendingAlerts} pending)` : 'Check alerts'}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onUpdateRun?.({ ...selectedRun, isFavorite: !selectedRun.isFavorite })}
+                  className={`h-7 w-7 ${selectedRun.isFavorite ? 'text-yellow-500' : 'text-muted-foreground'}`}
+                >
+                  <Star className={`h-4 w-4 ${selectedRun.isFavorite ? 'fill-yellow-500' : ''}`} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{selectedRun.isFavorite ? 'Unfavorite' : 'Favorite'}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onUpdateRun?.({ ...selectedRun, isArchived: !selectedRun.isArchived })}
+                  className={`h-7 w-7 ${selectedRun.isArchived ? 'text-muted-foreground' : ''}`}
+                >
+                  <Archive className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{selectedRun.isArchived ? 'Unarchive run' : 'Archive run'}</TooltipContent>
+            </Tooltip>
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-hidden">
@@ -1699,7 +1793,7 @@ export function RunsView({
             alerts={selectedRunAlerts}
             onSweepSelect={(sweep) => handleSweepClick(sweep)}
             onUpdateRun={onUpdateRun}
-            onOpenEditRun={openEditRunDialog}
+            fieldVisibility={runDetailFieldVisibility}
             allTags={allTags}
             onCreateTag={onCreateTag}
             sweeps={sweeps}

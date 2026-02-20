@@ -8,7 +8,6 @@ import {
   Package,
   FileCode,
   Copy,
-  Eye,
   Check,
   ChevronDown,
   ChevronRight,
@@ -49,19 +48,20 @@ import { TmuxTerminalPanel } from './tmux-terminal-panel'
 import type { ExperimentRun, TagDefinition, MetricVisualization, Sweep } from '@/lib/types'
 import { getSweep, type Alert } from '@/lib/api-client'
 import { mapApiSweepToUiSweep } from '@/lib/sweep-mappers'
+import { DEFAULT_RUN_COLORS } from '@/lib/mock-data'
 
 interface RunDetailViewProps {
   run: ExperimentRun
   alerts?: Alert[]
   onSweepSelect?: (sweep: Sweep) => void
   onUpdateRun?: (run: ExperimentRun) => void
-  onOpenEditRun?: (run: ExperimentRun) => void
+  fieldVisibility: RunDetailFieldVisibility
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
   sweeps?: Sweep[]
 }
 
-type RunDetailFieldKey =
+export type RunDetailFieldKey =
   | 'aliasNotes'
   | 'tags'
   | 'chat'
@@ -77,26 +77,7 @@ type RunDetailFieldKey =
   | 'command'
   | 'artifacts'
 
-type RunDetailFieldVisibility = Record<RunDetailFieldKey, boolean>
-
-const RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY = 'run-detail-field-visibility-v1'
-
-const DEFAULT_FIELD_VISIBILITY: RunDetailFieldVisibility = {
-  aliasNotes: true,
-  tags: true,
-  chat: false,
-  summary: true,
-  gpuwrap: true,
-  outcome: true,
-  metrics: true,
-  alerts: true,
-  charts: true,
-  logs: true,
-  sidecarLogs: true,
-  terminal: false,
-  command: true,
-  artifacts: false,
-}
+export type RunDetailFieldVisibility = Record<RunDetailFieldKey, boolean>
 
 // Generate chart data from metricSeries (real data) with lossHistory fallback
 function generateMetricData(run: ExperimentRun, metricPath: string, _layer?: number) {
@@ -245,7 +226,7 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, onOpenEditRun, allTags, onCreateTag, sweeps = [] }: RunDetailViewProps) {
+export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, fieldVisibility, allTags, onCreateTag, sweeps = [] }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [copiedRunId, setCopiedRunId] = useState(false)
   const [copiedSweepId, setCopiedSweepId] = useState(false)
@@ -257,8 +238,6 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, on
   const [notesOpen, setNotesOpen] = useState(false)
   const [editedNotes, setEditedNotes] = useState(run.notes || '')
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
-  const [fieldsPopoverOpen, setFieldsPopoverOpen] = useState(false)
-  const [fieldVisibility, setFieldVisibility] = useState<RunDetailFieldVisibility>(DEFAULT_FIELD_VISIBILITY)
 
   // Charts state
   const [chartsOpen, setChartsOpen] = useState(false)
@@ -310,26 +289,6 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, on
   }, [linkedSweepFromList, run.sweepId])
 
   const linkedSweep = linkedSweepFromList || linkedSweepFromApi
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      const raw = window.localStorage.getItem(RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as Partial<RunDetailFieldVisibility>
-      setFieldVisibility((prev) => ({ ...prev, ...parsed }))
-    } catch {
-      // Ignore invalid persisted values.
-    }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(
-      RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY,
-      JSON.stringify(fieldVisibility)
-    )
-  }, [fieldVisibility])
 
   useEffect(() => {
     setEditedCommand(run.command)
@@ -491,178 +450,11 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, on
     : []
   const gpuwrapEnabled = run.gpuwrap_config?.enabled === true
 
-  const toggleFieldVisibility = (field: RunDetailFieldKey) => {
-    setFieldVisibility((prev) => ({ ...prev, [field]: !prev[field] }))
-  }
-
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="p-3 space-y-3">
-            <div className="flex items-center justify-end gap-2">
-              {onOpenEditRun && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs"
-                  onClick={() => onOpenEditRun(run)}
-                >
-                  <Pencil className="h-3 w-3" />
-                  Edit
-                </Button>
-              )}
-              <Popover open={fieldsPopoverOpen} onOpenChange={setFieldsPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-                    <Eye className="h-3 w-3" />
-                    Fields
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-56 p-2">
-                  <div className="space-y-1">
-                    {([
-                      ['aliasNotes', 'Alias & notes'],
-                      ['tags', 'Tags'],
-                      ['chat', 'Chat'],
-                      ['summary', 'Summary'],
-                      ['gpuwrap', 'GPU wrap'],
-                      ['outcome', 'Outcome'],
-                      ['metrics', 'Metrics'],
-                      ['alerts', 'Alerts'],
-                      ['charts', 'Charts'],
-                      ['logs', 'Logs'],
-                      ['sidecarLogs', 'Sidecar logs'],
-                      ['terminal', 'Terminal'],
-                      ['command', 'Command'],
-                      ['artifacts', 'Artifacts'],
-                    ] as Array<[RunDetailFieldKey, string]>).map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-secondary"
-                        onClick={() => toggleFieldVisibility(key)}
-                      >
-                        <span>{label}</span>
-                        {fieldVisibility[key] ? <Check className="h-3.5 w-3.5 text-green-500" /> : <X className="h-3.5 w-3.5 text-muted-foreground" />}
-                      </button>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {fieldVisibility.aliasNotes && (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-lg border border-border bg-card p-2">
-                  <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Alias</div>
-                  {aliasEditing ? (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        value={editedAlias}
-                        onChange={(e) => setEditedAlias(e.target.value)}
-                        placeholder="Enter alias..."
-                        className="h-7 text-xs flex-1"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleSaveAlias()
-                          if (e.key === 'Escape') handleCancelAlias()
-                        }}
-                      />
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleSaveAlias}>
-                        <Check className="h-3 w-3 text-green-500" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCancelAlias}>
-                        <X className="h-3 w-3 text-muted-foreground" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 min-w-0">
-                      {run.alias ? (
-                        <span className="text-sm font-medium truncate">{run.alias}</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">No alias set</span>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 shrink-0"
-                        onClick={() => setAliasEditing(true)}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-lg border border-border bg-card p-2">
-                  <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Notes</div>
-                  {notesOpen ? (
-                    <>
-                      <Textarea
-                        placeholder="Add notes about this run..."
-                        value={editedNotes}
-                        onChange={(e) => setEditedNotes(e.target.value)}
-                        className="min-h-[60px] text-xs resize-none"
-                      />
-                      <div className="mt-2 flex justify-end gap-2">
-                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setNotesOpen(false)}>
-                          Cancel
-                        </Button>
-                        <Button size="sm" className="h-6 text-xs" onClick={handleSaveNotes}>
-                          Save
-                        </Button>
-                      </div>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setNotesOpen(true)}
-                      className="w-full text-left rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground hover:bg-secondary transition-colors"
-                    >
-                      {run.notes ? (
-                        <span className="line-clamp-2">{run.notes}</span>
-                      ) : (
-                        <span className="italic">Add notes...</span>
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {fieldVisibility.tags && (
-              <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto rounded-lg border border-border bg-card px-2 py-1.5">
-                {run.tags && run.tags.length > 0 ? (
-                  run.tags.map((tagName) => {
-                    const tag = allTags.find((t) => t.name === tagName)
-                    return (
-                      <span
-                        key={tagName}
-                        className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                        style={{
-                          backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
-                          color: tag?.color || '#4ade80',
-                        }}
-                      >
-                        {tagName}
-                      </span>
-                    )
-                  })
-                ) : (
-                  <span className="text-[10px] text-muted-foreground">No tags</span>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5 shrink-0"
-                  onClick={() => setTagsDialogOpen(true)}
-                >
-                  <Plus className="h-3 w-3" />
-                </Button>
-              </div>
-            )}
-
             {fieldVisibility.chat && (
               <div className="rounded-lg border border-border bg-card p-2 text-xs">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Chat Session</p>
@@ -672,135 +464,278 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, on
 
             {fieldVisibility.summary && (
               <div className="rounded-lg border border-border bg-card p-2 space-y-2">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Run ID</p>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0"
-                        onClick={() => copyValue(run.id, setCopiedRunId)}
-                      >
-                        {copiedRunId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                      </Button>
-                    </div>
-                    <p className="text-xs font-mono text-foreground truncate">{run.id}</p>
-                  </div>
-
-                  <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
-                      {run.sweepId && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 shrink-0"
-                          onClick={() => copyValue(run.sweepId!, setCopiedSweepId)}
-                        >
-                          {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                        </Button>
-                      )}
-                    </div>
-                    {linkedSweep ? (
-                      <button
-                        type="button"
-                        onClick={() => onSweepSelect?.(linkedSweep)}
-                        className="mt-1 flex w-full items-center justify-between rounded-md border border-border/50 bg-secondary/35 px-2 py-1.5 text-left transition-colors hover:bg-secondary/60 disabled:cursor-default disabled:hover:bg-secondary/35"
-                        disabled={!onSweepSelect}
-                      >
-                        <span className="truncate text-xs font-medium text-foreground">
-                          {linkedSweep.config.name || linkedSweep.id}
-                        </span>
-                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      </button>
-                    ) : (
-                      <p className="mt-1 text-xs font-mono text-foreground truncate">
-                        {run.sweepId
-                          ? (isLoadingLinkedSweep ? `Loading ${run.sweepId}...` : run.sweepId)
-                          : 'No sweep'}
-                      </p>
-                    )}
-                    {linkedSweep && (
-                      <div className="mt-1 flex items-center gap-2">
-                        <span className="truncate text-[10px] font-mono text-muted-foreground">{linkedSweep.id}</span>
-                        <Badge variant="outline" className="h-4 text-[9px] capitalize">
-                          {linkedSweep.status}
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {fieldVisibility.command && (
-                  <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
-                    <div className="mb-1 flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Command</p>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 gap-1 text-[10px]"
-                          onClick={copyCommand}
-                        >
-                          {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                          Copy
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 gap-1 text-[10px]"
-                          onClick={() => setCommandEditing((prev) => !prev)}
-                          disabled={!onUpdateRun || run.status === 'running'}
-                        >
-                          <Pencil className="h-3 w-3" />
-                          {commandEditing ? 'Close' : 'Edit'}
-                        </Button>
-                      </div>
-                    </div>
-                    {commandEditing ? (
-                      <>
-                        <Textarea
-                          value={editedCommand}
-                          onChange={(e) => setEditedCommand(e.target.value)}
-                          className="min-h-[96px] resize-y font-mono text-xs"
-                          placeholder="Enter run command..."
-                        />
-                        <div className="mt-2 flex items-center justify-end gap-2">
+                <div className="grid gap-2 lg:grid-cols-[1.35fr_1fr]">
+                  <div className="space-y-2">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Run ID</p>
                           <Button
                             variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={handleCancelCommand}
+                            size="icon"
+                            className="h-6 w-6 shrink-0"
+                            onClick={() => copyValue(run.id, setCopiedRunId)}
                           >
-                            Cancel
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={handleSaveCommand}
-                            disabled={!editedCommand.trim()}
-                          >
-                            Save
+                            {copiedRunId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
                           </Button>
                         </div>
-                      </>
-                    ) : (
-                      <div className="rounded bg-muted/50 px-2 py-1.5">
-                        <code className="whitespace-pre-wrap break-all text-[11px] font-mono text-foreground">
-                          {run.command}
-                        </code>
+                        <p className="text-xs font-mono text-foreground truncate">{run.id}</p>
+                      </div>
+
+                      <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
+                          {run.sweepId && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0"
+                              onClick={() => copyValue(run.sweepId!, setCopiedSweepId)}
+                            >
+                              {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                            </Button>
+                          )}
+                        </div>
+                        {linkedSweep ? (
+                          <button
+                            type="button"
+                            onClick={() => onSweepSelect?.(linkedSweep)}
+                            className="mt-1 flex w-full items-center justify-between rounded-md border border-border/50 bg-secondary/35 px-2 py-1.5 text-left transition-colors hover:bg-secondary/60 disabled:cursor-default disabled:hover:bg-secondary/35"
+                            disabled={!onSweepSelect}
+                          >
+                            <span className="truncate text-xs font-medium text-foreground">
+                              {linkedSweep.config.name || linkedSweep.id}
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          </button>
+                        ) : (
+                          <p className="mt-1 text-xs font-mono text-foreground truncate">
+                            {run.sweepId
+                              ? (isLoadingLinkedSweep ? `Loading ${run.sweepId}...` : run.sweepId)
+                              : 'No sweep'}
+                          </p>
+                        )}
+                        {linkedSweep && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <span className="truncate text-[10px] font-mono text-muted-foreground">{linkedSweep.id}</span>
+                            <Badge variant="outline" className="h-4 text-[9px] capitalize">
+                              {linkedSweep.status}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {fieldVisibility.command && (
+                      <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Command</p>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 gap-1 text-[10px]"
+                              onClick={copyCommand}
+                            >
+                              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                              Copy
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 gap-1 text-[10px]"
+                              onClick={() => setCommandEditing((prev) => !prev)}
+                              disabled={!onUpdateRun || run.status === 'running'}
+                            >
+                              <Pencil className="h-3 w-3" />
+                              {commandEditing ? 'Close' : 'Edit'}
+                            </Button>
+                          </div>
+                        </div>
+                        {commandEditing ? (
+                          <>
+                            <Textarea
+                              value={editedCommand}
+                              onChange={(e) => setEditedCommand(e.target.value)}
+                              className="min-h-[96px] resize-y font-mono text-xs"
+                              placeholder="Enter run command..."
+                            />
+                            <div className="mt-2 flex items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={handleCancelCommand}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={handleSaveCommand}
+                                disabled={!editedCommand.trim()}
+                              >
+                                Save
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="rounded bg-muted/50 px-2 py-1.5">
+                            <code className="whitespace-pre-wrap break-all text-[11px] font-mono text-foreground">
+                              {run.command}
+                            </code>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
+
+                  {(fieldVisibility.aliasNotes || fieldVisibility.tags) && (
+                    <div className="space-y-2">
+                      {fieldVisibility.aliasNotes && (
+                        <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Alias</p>
+                          {aliasEditing ? (
+                            <div className="mt-1 flex items-center gap-1">
+                              <Input
+                                value={editedAlias}
+                                onChange={(e) => setEditedAlias(e.target.value)}
+                                placeholder="Enter alias..."
+                                className="h-7 text-xs flex-1"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveAlias()
+                                  if (e.key === 'Escape') handleCancelAlias()
+                                }}
+                              />
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleSaveAlias}>
+                                <Check className="h-3 w-3 text-green-500" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCancelAlias}>
+                                <X className="h-3 w-3 text-muted-foreground" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="mt-1 flex items-center gap-1 min-w-0">
+                              {run.alias ? (
+                                <span className="text-sm font-medium truncate">{run.alias}</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground italic">No alias set</span>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 shrink-0"
+                                onClick={() => setAliasEditing(true)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                          <p className="mt-2 text-[10px] uppercase tracking-wider text-muted-foreground">Notes</p>
+                          {notesOpen ? (
+                            <>
+                              <Textarea
+                                placeholder="Add notes about this run..."
+                                value={editedNotes}
+                                onChange={(e) => setEditedNotes(e.target.value)}
+                                className="mt-1 min-h-[60px] text-xs resize-none"
+                              />
+                              <div className="mt-2 flex justify-end gap-2">
+                                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setNotesOpen(false)}>
+                                  Cancel
+                                </Button>
+                                <Button size="sm" className="h-6 text-xs" onClick={handleSaveNotes}>
+                                  Save
+                                </Button>
+                              </div>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setNotesOpen(true)}
+                              className="mt-1 w-full text-left rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground hover:bg-secondary transition-colors"
+                            >
+                              {run.notes ? (
+                                <span className="line-clamp-2">{run.notes}</span>
+                              ) : (
+                                <span className="italic">Add notes...</span>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {fieldVisibility.tags && (
+                        <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tags</p>
+                          <div className="mt-1 flex items-center gap-1.5 min-w-0 overflow-x-auto">
+                            {run.tags && run.tags.length > 0 ? (
+                              run.tags.map((tagName) => {
+                                const tag = allTags.find((t) => t.name === tagName)
+                                return (
+                                  <span
+                                    key={tagName}
+                                    className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                                    style={{
+                                      backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
+                                      color: tag?.color || '#4ade80',
+                                    }}
+                                  >
+                                    {tagName}
+                                  </span>
+                                )
+                              })
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground">No tags</span>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 shrink-0"
+                              onClick={() => setTagsDialogOpen(true)}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-2 gap-2 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-5">
                   <div>
                     <p className="uppercase tracking-wide">Status</p>
-                    <Badge variant="outline" className={`mt-1 h-5 text-[9px] ${getStatusBadgeClass(run.status)}`}>
-                      {getStatusText(run.status)}
-                    </Badge>
+                    <div className="mt-1 flex items-center gap-2">
+                      <Badge variant="outline" className={`h-5 text-[9px] ${getStatusBadgeClass(run.status)}`}>
+                        {getStatusText(run.status)}
+                      </Badge>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-5 w-5">
+                            <div
+                              className="h-3.5 w-3.5 rounded-full border border-border"
+                              style={{ backgroundColor: run.color || '#4ade80' }}
+                            />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-40 p-2" align="start">
+                          <div className="grid grid-cols-5 gap-1.5">
+                            {DEFAULT_RUN_COLORS.map((color) => (
+                              <button
+                                key={color}
+                                type="button"
+                                onClick={() => onUpdateRun?.({ ...run, color })}
+                                className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${run.color === color ? 'border-foreground' : 'border-transparent'
+                                  }`}
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   </div>
                   <div>
                     <p className="uppercase tracking-wide">Start</p>
@@ -829,6 +764,17 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, on
                     </p>
                   </div>
                 </div>
+
+                {fieldVisibility.outcome && terminalOutcome.state && (
+                  <div className="border-t border-border pt-2">
+                    <div className={`rounded-md border px-2 py-1.5 text-[11px] ${terminalOutcome.className}`}>
+                      <p className="font-medium">Outcome: {terminalOutcome.summary}</p>
+                      {terminalOutcome.detail && (
+                        <p className="mt-0.5 break-words">{terminalOutcome.detail}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -839,15 +785,6 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, on
                   <p className="mt-0.5">
                     Retries: {run.gpuwrap_config?.retries == null ? 'Unlimited' : run.gpuwrap_config?.retries} · Retry delay: {run.gpuwrap_config?.retry_delay_seconds ?? 5}s
                   </p>
-                )}
-              </div>
-            )}
-
-            {fieldVisibility.outcome && terminalOutcome.state && (
-              <div className={`rounded-md border px-2 py-1.5 text-[11px] ${terminalOutcome.className}`}>
-                <p className="font-medium">Outcome: {terminalOutcome.summary}</p>
-                {terminalOutcome.detail && (
-                  <p className="mt-0.5 break-words">{terminalOutcome.detail}</p>
                 )}
               </div>
             )}
