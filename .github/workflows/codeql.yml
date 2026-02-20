@@ -1,0 +1,44 @@
+name: "CodeQL"
+
+on:
+  # Nightly at 6:00 AM UTC (10:00 PM PST)
+  schedule:
+    - cron: "0 6 * * *"
+  # Keep security overview current on main
+  push:
+    branches: [main]
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
