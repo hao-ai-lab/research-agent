@@ -349,14 +349,6 @@ export function SettingsPageContent({
           value: settings.appearance.starterCardFlavor || 'novice',
         },
         {
-          id: 'showChatContextPanel',
-          label: 'Chat Context Panel',
-          description: 'Show or hide the right-side context panel in chat',
-          icon: settings.appearance.showChatContextPanel !== false ? Eye : EyeOff,
-          type: 'toggle' as const,
-          value: settings.appearance.showChatContextPanel !== false,
-        },
-        {
           id: 'showChatArtifacts',
           label: 'Show Artifacts',
           description: 'Show or hide artifacts panel in chat views',
@@ -499,6 +491,22 @@ export function SettingsPageContent({
           type: 'toggle' as const,
           value: settings.developer?.showContextualPanel === true,
           beta: true,
+        },
+        {
+          id: 'showJourneyPanel',
+          label: 'User Journey Panel',
+          description: 'Show the User Journey tab in the sidebar',
+          icon: Sparkles,
+          type: 'toggle' as const,
+          value: settings.developer?.showJourneyPanel === true,
+        },
+        {
+          id: 'showChatContextPanel',
+          label: 'Chat Context Panel',
+          description: 'Show or hide the right-side context panel in chat',
+          icon: settings.developer?.showChatContextPanel !== false ? Eye : EyeOff,
+          type: 'toggle' as const,
+          value: settings.developer?.showChatContextPanel === true,
         },
       ],
     },
@@ -1051,7 +1059,6 @@ export function SettingsPageContent({
                 if (item.id === 'alertsEnabled') handleAlertsToggle(checked)
                 if (item.id === 'webNotifications') handleWebNotificationsToggle(checked)
                 if (item.id === 'showRunItemMetadata') updateAppearanceSettings({ showRunItemMetadata: checked })
-                if (item.id === 'showChatContextPanel') updateAppearanceSettings({ showChatContextPanel: checked })
                 if (item.id === 'showChatArtifacts') updateAppearanceSettings({ showChatArtifacts: checked })
                 if (item.id === 'chatCollapseArtifactsInChat') updateAppearanceSettings({ chatCollapseArtifactsInChat: checked })
                 if (item.id === 'mobileEnterToNewline') updateAppearanceSettings({ mobileEnterToNewline: checked })
@@ -1089,6 +1096,18 @@ export function SettingsPageContent({
                   onSettingsChange({
                     ...settings,
                     developer: { ...settings.developer, showContextualPanel: checked },
+                  })
+                }
+                if (item.id === 'showJourneyPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showJourneyPanel: checked },
+                  })
+                }
+                if (item.id === 'showChatContextPanel') {
+                  onSettingsChange({
+                    ...settings,
+                    developer: { ...settings.developer, showChatContextPanel: checked },
                   })
                 }
                 if (item.id === 'showSidebarRunsSweepsPreview') {
@@ -1153,258 +1172,258 @@ export function SettingsPageContent({
               </div>
 
               <div className="rounded-lg bg-secondary/50 p-4">
-                  <div className="flex items-center justify-between gap-3 rounded-md px-1 py-1">
-                    <div>
-                      <Label htmlFor="sidebar-new-chat-toggle" className="text-xs">Sidebar New Chat Button</Label>
-                      <p className="text-[11px] text-muted-foreground">Show or hide the New Chat button in the desktop sidebar</p>
-                    </div>
-                    <Switch
-                      id="sidebar-new-chat-toggle"
-                      checked={settings.appearance.showSidebarNewChatButton === true}
-                      onCheckedChange={(checked) => updateAppearanceSettings({ showSidebarNewChatButton: checked })}
-                    />
+                <div className="flex items-center justify-between gap-3 rounded-md px-1 py-1">
+                  <div>
+                    <Label htmlFor="sidebar-new-chat-toggle" className="text-xs">Sidebar New Chat Button</Label>
+                    <p className="text-[11px] text-muted-foreground">Show or hide the New Chat button in the desktop sidebar</p>
                   </div>
+                  <Switch
+                    id="sidebar-new-chat-toggle"
+                    checked={settings.appearance.showSidebarNewChatButton === true}
+                    onCheckedChange={(checked) => updateAppearanceSettings({ showSidebarNewChatButton: checked })}
+                  />
+                </div>
               </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="custom-font-size" className="text-xs">Font Size (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
-                      <p className="text-[11px] text-muted-foreground">Overrides small/medium/large when set</p>
-                    </div>
-                    <Input
-                      id="custom-font-size"
-                      type="number"
-                      min={1}
-                      max={1000}
-                      value={fontSizeInput}
-                      onChange={(e) => handleCustomFontSizeChange(e.target.value)}
-                      onBlur={(e) => handleCustomFontSizeBlur(e.target.value)}
-                      placeholder={settings.appearance.fontSize === 'small' ? '14' : settings.appearance.fontSize === 'large' ? '18' : '16'}
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="custom-font-size" className="text-xs">Font Size (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
+                    <p className="text-[11px] text-muted-foreground">Overrides small/medium/large when set</p>
                   </div>
-                  </div>
+                  <Input
+                    id="custom-font-size"
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={fontSizeInput}
+                    onChange={(e) => handleCustomFontSizeChange(e.target.value)}
+                    onBlur={(e) => handleCustomFontSizeBlur(e.target.value)}
+                    placeholder={settings.appearance.fontSize === 'small' ? '14' : settings.appearance.fontSize === 'large' ? '18' : '16'}
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="custom-button-scale" className="text-xs">Button Scale (%) <span className="font-normal text-muted-foreground">1–1000</span></Label>
-                      <p className="text-[11px] text-muted-foreground">Scales global button sizes</p>
-                    </div>
-                    <Input
-                      id="custom-button-scale"
-                      type="number"
-                      min={1}
-                      max={1000}
-                      value={buttonScaleInput}
-                      onChange={(e) => handleCustomButtonScaleChange(e.target.value)}
-                      onBlur={(e) => handleCustomButtonScaleBlur(e.target.value)}
-                      placeholder="120"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="custom-button-scale" className="text-xs">Button Scale (%) <span className="font-normal text-muted-foreground">1–1000</span></Label>
+                    <p className="text-[11px] text-muted-foreground">Scales global button sizes</p>
                   </div>
-                  </div>
+                  <Input
+                    id="custom-button-scale"
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={buttonScaleInput}
+                    onChange={(e) => handleCustomButtonScaleChange(e.target.value)}
+                    onBlur={(e) => handleCustomButtonScaleBlur(e.target.value)}
+                    placeholder="120"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="chat-toolbar-button-size" className="text-xs">Chat Bottom Buttons (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
-                      <p className="text-[11px] text-muted-foreground">Mode/add/mention/command controls</p>
-                    </div>
-                    <Input
-                      id="chat-toolbar-button-size"
-                      type="number"
-                      min={1}
-                      max={1000}
-                      value={chatToolbarSizeInput}
-                      onChange={(e) => handleChatToolbarButtonSizeChange(e.target.value)}
-                      onBlur={(e) => handleChatToolbarButtonSizeBlur(e.target.value)}
-                      placeholder="36"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="chat-toolbar-button-size" className="text-xs">Chat Bottom Buttons (px) <span className="font-normal text-muted-foreground">1–1000</span></Label>
+                    <p className="text-[11px] text-muted-foreground">Mode/add/mention/command controls</p>
                   </div>
-                  </div>
+                  <Input
+                    id="chat-toolbar-button-size"
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={chatToolbarSizeInput}
+                    onChange={(e) => handleChatToolbarButtonSizeChange(e.target.value)}
+                    onBlur={(e) => handleChatToolbarButtonSizeBlur(e.target.value)}
+                    placeholder="36"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="chat-input-initial-height" className="text-xs">Chat Input Initial Height (px) <span className="font-normal text-muted-foreground">40–120</span></Label>
-                      <p className="text-[11px] text-muted-foreground">Default one-line composer height before expansion</p>
-                    </div>
-                    <Input
-                      id="chat-input-initial-height"
-                      type="number"
-                      min={40}
-                      max={120}
-                      value={chatInputInitialHeightInput}
-                      onChange={(e) => handleChatInputInitialHeightChange(e.target.value, chatInputInitialHeightInput)}
-                      onBlur={(e) => handleChatInputInitialHeightBlur(e.target.value)}
-                      placeholder="48"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="chat-input-initial-height" className="text-xs">Chat Input Initial Height (px) <span className="font-normal text-muted-foreground">40–120</span></Label>
+                    <p className="text-[11px] text-muted-foreground">Default one-line composer height before expansion</p>
                   </div>
-                  </div>
+                  <Input
+                    id="chat-input-initial-height"
+                    type="number"
+                    min={40}
+                    max={120}
+                    value={chatInputInitialHeightInput}
+                    onChange={(e) => handleChatInputInitialHeightChange(e.target.value, chatInputInitialHeightInput)}
+                    onBlur={(e) => handleChatInputInitialHeightBlur(e.target.value)}
+                    placeholder="48"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="tool-box-height" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">1–1000</span></Label>
-                      <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
-                    </div>
-                    <Input
-                      id="tool-box-height"
-                      type="number"
-                      min={1}
-                      max={1000}
-                      step={0.5}
-                      value={toolBoxHeightInput}
-                      onChange={(e) => handleToolBoxHeightChange(e.target.value, toolBoxHeightInput)}
-                      onBlur={(e) => handleToolBoxHeightBlur(e.target.value)}
-                      placeholder="7.5"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="tool-box-height" className="text-xs">Tool / Thinking Box Height (rem) <span className="font-normal text-muted-foreground">1–1000</span></Label>
+                    <p className="text-[11px] text-muted-foreground">Max height of tool/thinking boxes during streaming</p>
                   </div>
-                  </div>
+                  <Input
+                    id="tool-box-height"
+                    type="number"
+                    min={1}
+                    max={1000}
+                    step={0.5}
+                    value={toolBoxHeightInput}
+                    onChange={(e) => handleToolBoxHeightChange(e.target.value, toolBoxHeightInput)}
+                    onBlur={(e) => handleToolBoxHeightBlur(e.target.value)}
+                    placeholder="7.5"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="custom-primary-color" className="text-xs">Primary Color</Label>
-                      <p className="text-[11px] text-muted-foreground">Hex color for --primary (example: #f59e0b)</p>
-                    </div>
-                    <Input
-                      id="custom-primary-color"
-                      value={primaryColorInput}
-                      onChange={(e) => handlePrimaryColorChange(e.target.value)}
-                      onBlur={(e) => handlePrimaryColorBlur(e.target.value)}
-                      placeholder="#f59e0b"
-                      className="h-8 w-28 text-xs font-mono"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="custom-primary-color" className="text-xs">Primary Color</Label>
+                    <p className="text-[11px] text-muted-foreground">Hex color for --primary (example: #f59e0b)</p>
                   </div>
-                  </div>
+                  <Input
+                    id="custom-primary-color"
+                    value={primaryColorInput}
+                    onChange={(e) => handlePrimaryColorChange(e.target.value)}
+                    onBlur={(e) => handlePrimaryColorBlur(e.target.value)}
+                    placeholder="#f59e0b"
+                    className="h-8 w-28 text-xs font-mono"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="custom-accent-color" className="text-xs">Accent Color</Label>
-                      <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
-                    </div>
-                    <Input
-                      id="custom-accent-color"
-                      value={accentColorInput}
-                      onChange={(e) => handleAccentColorChange(e.target.value)}
-                      onBlur={(e) => handleAccentColorBlur(e.target.value)}
-                      placeholder="#fb923c"
-                      className="h-8 w-28 text-xs font-mono"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="custom-accent-color" className="text-xs">Accent Color</Label>
+                    <p className="text-[11px] text-muted-foreground">Hex color for --accent (example: #fb923c)</p>
                   </div>
-                  </div>
+                  <Input
+                    id="custom-accent-color"
+                    value={accentColorInput}
+                    onChange={(e) => handleAccentColorChange(e.target.value)}
+                    onBlur={(e) => handleAccentColorBlur(e.target.value)}
+                    placeholder="#fb923c"
+                    className="h-8 w-28 text-xs font-mono"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="wild-loop-tasks-font-size" className="text-xs">Wild Loop Tasks Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
-                      <p className="text-[11px] text-muted-foreground">tasks.md text size in the Wild Loop Debug panel</p>
-                    </div>
-                    <Input
-                      id="wild-loop-tasks-font-size"
-                      type="number"
-                      min={12}
-                      max={28}
-                      value={wildLoopTasksFontSizeInput}
-                      onChange={(e) => handleWildLoopTasksFontSizeChange(e.target.value, wildLoopTasksFontSizeInput)}
-                      onBlur={(e) => handleWildLoopTasksFontSizeBlur(e.target.value)}
-                      placeholder="16"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="wild-loop-tasks-font-size" className="text-xs">Wild Loop Tasks Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
+                    <p className="text-[11px] text-muted-foreground">tasks.md text size in the Wild Loop Debug panel</p>
                   </div>
-                  </div>
+                  <Input
+                    id="wild-loop-tasks-font-size"
+                    type="number"
+                    min={12}
+                    max={28}
+                    value={wildLoopTasksFontSizeInput}
+                    onChange={(e) => handleWildLoopTasksFontSizeChange(e.target.value, wildLoopTasksFontSizeInput)}
+                    onBlur={(e) => handleWildLoopTasksFontSizeBlur(e.target.value)}
+                    placeholder="16"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="wild-loop-tasks-box-height" className="text-xs">Wild Loop Tasks Box Height (px) <span className="font-normal text-muted-foreground">160–1200</span></Label>
-                      <p className="text-[11px] text-muted-foreground">Max height of the tasks.md scroll area in the Wild Loop Debug panel</p>
-                    </div>
-                    <Input
-                      id="wild-loop-tasks-box-height"
-                      type="number"
-                      min={160}
-                      max={1200}
-                      value={wildLoopTasksBoxHeightInput}
-                      onChange={(e) => handleWildLoopTasksBoxHeightChange(e.target.value, wildLoopTasksBoxHeightInput)}
-                      onBlur={(e) => handleWildLoopTasksBoxHeightBlur(e.target.value)}
-                      placeholder="420"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="wild-loop-tasks-box-height" className="text-xs">Wild Loop Tasks Box Height (px) <span className="font-normal text-muted-foreground">160–1200</span></Label>
+                    <p className="text-[11px] text-muted-foreground">Max height of the tasks.md scroll area in the Wild Loop Debug panel</p>
                   </div>
-                  </div>
+                  <Input
+                    id="wild-loop-tasks-box-height"
+                    type="number"
+                    min={160}
+                    max={1200}
+                    value={wildLoopTasksBoxHeightInput}
+                    onChange={(e) => handleWildLoopTasksBoxHeightChange(e.target.value, wildLoopTasksBoxHeightInput)}
+                    onBlur={(e) => handleWildLoopTasksBoxHeightBlur(e.target.value)}
+                    placeholder="420"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="wild-loop-history-font-size" className="text-xs">Wild Loop History Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
-                      <p className="text-[11px] text-muted-foreground">iteration history text size in the Wild Loop Debug panel</p>
-                    </div>
-                    <Input
-                      id="wild-loop-history-font-size"
-                      type="number"
-                      min={12}
-                      max={28}
-                      value={wildLoopHistoryFontSizeInput}
-                      onChange={(e) => handleWildLoopHistoryFontSizeChange(e.target.value, wildLoopHistoryFontSizeInput)}
-                      onBlur={(e) => handleWildLoopHistoryFontSizeBlur(e.target.value)}
-                      placeholder="15"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="wild-loop-history-font-size" className="text-xs">Wild Loop History Font (px) <span className="font-normal text-muted-foreground">12–28</span></Label>
+                    <p className="text-[11px] text-muted-foreground">iteration history text size in the Wild Loop Debug panel</p>
                   </div>
-                  </div>
+                  <Input
+                    id="wild-loop-history-font-size"
+                    type="number"
+                    min={12}
+                    max={28}
+                    value={wildLoopHistoryFontSizeInput}
+                    onChange={(e) => handleWildLoopHistoryFontSizeChange(e.target.value, wildLoopHistoryFontSizeInput)}
+                    onBlur={(e) => handleWildLoopHistoryFontSizeBlur(e.target.value)}
+                    placeholder="15"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                    <div>
-                      <Label htmlFor="wild-loop-history-box-height" className="text-xs">Wild Loop History Box Height (px) <span className="font-normal text-muted-foreground">120–1000</span></Label>
-                      <p className="text-[11px] text-muted-foreground">Max height of iteration history list in the Wild Loop Debug panel</p>
-                    </div>
-                    <Input
-                      id="wild-loop-history-box-height"
-                      type="number"
-                      min={120}
-                      max={1000}
-                      value={wildLoopHistoryBoxHeightInput}
-                      onChange={(e) => handleWildLoopHistoryBoxHeightChange(e.target.value, wildLoopHistoryBoxHeightInput)}
-                      onBlur={(e) => handleWildLoopHistoryBoxHeightBlur(e.target.value)}
-                      placeholder="300"
-                      className="h-8 w-24 text-xs"
-                    />
+              <div className="rounded-lg bg-secondary/50 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                  <div>
+                    <Label htmlFor="wild-loop-history-box-height" className="text-xs">Wild Loop History Box Height (px) <span className="font-normal text-muted-foreground">120–1000</span></Label>
+                    <p className="text-[11px] text-muted-foreground">Max height of iteration history list in the Wild Loop Debug panel</p>
                   </div>
-                  </div>
+                  <Input
+                    id="wild-loop-history-box-height"
+                    type="number"
+                    min={120}
+                    max={1000}
+                    value={wildLoopHistoryBoxHeightInput}
+                    onChange={(e) => handleWildLoopHistoryBoxHeightChange(e.target.value, wildLoopHistoryBoxHeightInput)}
+                    onBlur={(e) => handleWildLoopHistoryBoxHeightBlur(e.target.value)}
+                    placeholder="300"
+                    className="h-8 w-24 text-xs"
+                  />
+                </div>
+              </div>
 
-                  <div className="flex justify-end">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        updateAppearanceSettings({
-                          customFontSizePx: null,
-                          customButtonScalePercent: null,
-                          chatToolbarButtonSizePx: null,
-                          chatInputInitialHeightPx: null,
-                          streamingToolBoxHeightRem: null,
-                          customPrimaryColor: null,
-                          customAccentColor: null,
-                          wildLoopTasksFontSizePx: null,
-                          wildLoopHistoryFontSizePx: null,
-                          wildLoopTasksBoxHeightPx: null,
-                          wildLoopHistoryBoxHeightPx: null,
-                          thinkingToolFontSizePx: null,
-                        })
-                      }
-                    >
-                      Reset Advanced
-                    </Button>
-                  </div>
+              <div className="flex justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    updateAppearanceSettings({
+                      customFontSizePx: null,
+                      customButtonScalePercent: null,
+                      chatToolbarButtonSizePx: null,
+                      chatInputInitialHeightPx: null,
+                      streamingToolBoxHeightRem: null,
+                      customPrimaryColor: null,
+                      customAccentColor: null,
+                      wildLoopTasksFontSizePx: null,
+                      wildLoopHistoryFontSizePx: null,
+                      wildLoopTasksBoxHeightPx: null,
+                      wildLoopHistoryBoxHeightPx: null,
+                      thinkingToolFontSizePx: null,
+                    })
+                  }
+                >
+                  Reset Advanced
+                </Button>
+              </div>
             </div>
           )
         }

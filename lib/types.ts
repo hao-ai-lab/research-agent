@@ -143,6 +143,8 @@ export interface AppSettings {
     showReportPanel?: boolean;
     showTerminalPanel?: boolean;
     showContextualPanel?: boolean;
+    showJourneyPanel?: boolean;
+    showChatContextPanel?: boolean;
   };
 }
 

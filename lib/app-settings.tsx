@@ -56,7 +56,7 @@ export const defaultAppSettings: AppSettings = {
     wildLoopHistoryBoxHeightPx: null,
     showStarterCards: true,
     starterCardFlavor: "novice",
-    showChatContextPanel: true,
+    showChatContextPanel: false,
     showChatArtifacts: false,
     chatCollapseAllChats: false,
     chatCollapseArtifactsInChat: false,
@@ -90,6 +90,8 @@ export const defaultAppSettings: AppSettings = {
     showReportPanel: false,
     showTerminalPanel: false,
     showContextualPanel: false,
+    showJourneyPanel: false,
+    showChatContextPanel: false,
   },
 };
 
@@ -174,8 +176,8 @@ function writeSettingsToStorage(nextSettings: AppSettings) {
   localStorage.setItem(
     STORAGE_KEY_APPEARANCE_RUN_ITEM_INTERACTION,
     nextSettings.appearance.runItemInteractionMode ||
-      defaultAppSettings.appearance.runItemInteractionMode ||
-      "detail-page",
+    defaultAppSettings.appearance.runItemInteractionMode ||
+    "detail-page",
   );
 
   const customFontSizePx = sanitizePositiveNumber(
@@ -463,7 +465,7 @@ function readStoredSettings(): AppSettings {
           isValidDisplayMode(parsed?.appearance?.thinkingDisplayMode)
             ? parsed!.appearance.thinkingDisplayMode
             // Migration: map old 'collapsible' to 'collapse'
-            : (parsed?.appearance as Record<string,unknown>)?.thinkingDisplayMode === 'collapsible'
+            : (parsed?.appearance as Record<string, unknown>)?.thinkingDisplayMode === 'collapsible'
               ? 'collapse'
               : defaultAppSettings.appearance.thinkingDisplayMode,
         toolDisplayMode:
