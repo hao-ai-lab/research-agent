@@ -90,7 +90,7 @@ type GroupByMode = 'none' | 'sweep'
 const STORAGE_KEY_RUNS_VIEW_PREFERENCES = 'runsViewPreferences'
 const CHARTS_PAGE_SIZE = 12
 const SWEEPS_PAGE_SIZE = 8
-const RUNS_PAGE_SIZE = 24
+const RUNS_PAGE_SIZE = 5
 
 const RUN_STATUS_OPTIONS: ExperimentRun['status'][] = [
   'ready',
@@ -195,7 +195,7 @@ export function RunsView({
   const [manageMode, setManageMode] = useState(false)
   const [selectedManageRunIds, setSelectedManageRunIds] = useState<Set<string>>(new Set())
   const [groupByMode, setGroupByMode] = useState<GroupByMode>('sweep')
-  const [sweepFilter, setSweepFilter] = useState<string>('all')
+  const [sweepFilter, setSweepFilter] = useState<Set<string>>(new Set())
   const [includeArchived, setIncludeArchived] = useState(false)
   const [statusFilter, setStatusFilter] = useState<Set<ExperimentRun['status']>>(
     () => new Set(RUN_STATUS_OPTIONS)
@@ -343,7 +343,7 @@ export function RunsView({
       const parsed = JSON.parse(raw) as {
         detailsView?: DetailsView
         groupByMode?: GroupByMode
-        sweepFilter?: string
+        sweepFilter?: string | string[]
         statusFilter?: ExperimentRun['status'][]
       }
 
@@ -353,8 +353,11 @@ export function RunsView({
       if (parsed.groupByMode === 'none' || parsed.groupByMode === 'sweep') {
         setGroupByMode(parsed.groupByMode)
       }
-      if (typeof parsed.sweepFilter === 'string') {
-        setSweepFilter(parsed.sweepFilter)
+      if (Array.isArray(parsed.sweepFilter)) {
+        setSweepFilter(new Set(parsed.sweepFilter))
+      } else if (typeof parsed.sweepFilter === 'string' && parsed.sweepFilter !== 'all') {
+        // Migrate old single-select value
+        setSweepFilter(parsed.sweepFilter === 'none' ? new Set(['__no_sweep__']) : new Set([parsed.sweepFilter]))
       }
       if (Array.isArray(parsed.statusFilter)) {
         const validStatuses = parsed.statusFilter.filter((status): status is ExperimentRun['status'] =>
@@ -370,16 +373,19 @@ export function RunsView({
   }, [])
 
   useEffect(() => {
-    if (sweepFilter === 'all' || sweepFilter === 'none') return
-    if (sweepOptions.includes(sweepFilter)) return
-    setSweepFilter('all')
+    if (sweepFilter.size === 0) return
+    // Remove stale sweep IDs that no longer exist
+    const validIds = new Set([...sweepFilter].filter(id => id === '__no_sweep__' || sweepOptions.includes(id)))
+    if (validIds.size !== sweepFilter.size) {
+      setSweepFilter(validIds)
+    }
   }, [sweepFilter, sweepOptions])
 
   useEffect(() => {
     const preferences = {
       detailsView,
       groupByMode,
-      sweepFilter,
+      sweepFilter: Array.from(sweepFilter),
       statusFilter: Array.from(statusFilter),
     }
     window.localStorage.setItem(STORAGE_KEY_RUNS_VIEW_PREFERENCES, JSON.stringify(preferences))
@@ -390,9 +396,9 @@ export function RunsView({
     return runs.filter((run) => {
       if (!includeArchived && run.isArchived) return false
       if (!statusFilter.has(run.status)) return false
-      if (sweepFilter === 'all') return true
-      if (sweepFilter === 'none') return !run.sweepId
-      return run.sweepId === sweepFilter
+      if (sweepFilter.size === 0) return true // empty set = show all
+      if (!run.sweepId) return sweepFilter.has('__no_sweep__')
+      return sweepFilter.has(run.sweepId)
     })
   }, [runs, includeArchived, statusFilter, sweepFilter])
 
@@ -1970,7 +1976,7 @@ export function RunsView({
     <>
       <div className="flex flex-col h-full overflow-hidden">
         {/* Top Nav Bar */}
-        <div className="flex items-center justify-between border-b border-border bg-card/80 px-4 py-3 backdrop-blur-sm shrink-0">
+        <div className="flex items-center justify-between border-b border-border/50 px-4 py-3 shrink-0">
           <div className="flex items-center gap-2">
             {showDesktopSidebarToggle && onDesktopSidebarToggle && (
               <Button
@@ -2114,10 +2120,32 @@ export function RunsView({
                     <div className="rounded-xl border border-border bg-card">
                       <div className="border-b border-border px-4 py-3 space-y-2">
                         <div className="flex items-center gap-2">
-                          <div className="hidden min-w-0 flex-1 sm:block">
-                            <p className="truncate text-[11px] text-muted-foreground">
-                              Time: {detailsView === 'time' ? 'Time' : 'Priority'} · Group: {groupByMode === 'sweep' ? 'Sweep' : 'None'} · Sweep: {sweepFilter === 'all' ? 'All' : sweepFilter === 'none' ? 'No Sweep' : sweepFilter} · Status: {isAllStatusSelected ? 'All' : `${statusFilter.size} selected`} · Archived: {includeArchived ? 'Show' : 'Hide'}
-                            </p>
+                          <div className="hidden min-w-0 flex-1 sm:flex items-center gap-1.5 flex-wrap">
+                            {sweepFilter.size > 0 && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] gap-1">
+                                Sweep: {sweepFilter.has('__no_sweep__') && sweepFilter.size === 1 ? 'No Sweep' : `${sweepFilter.size} selected`}
+                              </Badge>
+                            )}
+                            {!isAllStatusSelected && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] gap-1">
+                                Status: {statusFilter.size} selected
+                              </Badge>
+                            )}
+                            {includeArchived && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] gap-1">
+                                +Archived
+                              </Badge>
+                            )}
+                            {detailsView !== 'time' && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] gap-1">
+                                Priority view
+                              </Badge>
+                            )}
+                            {groupByMode !== 'sweep' && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] gap-1">
+                                Ungrouped
+                              </Badge>
+                            )}
                           </div>
 
                           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -2162,20 +2190,62 @@ export function RunsView({
 
                                   <div className="grid gap-1.5">
                                     <p className="text-[11px] font-medium text-muted-foreground">Sweep</p>
-                                    <Select value={sweepFilter} onValueChange={setSweepFilter}>
-                                      <SelectTrigger className="h-8 w-full text-xs">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="all">All</SelectItem>
-                                        <SelectItem value="none">No Sweep</SelectItem>
-                                        {sweepOptions.map((sweepId) => (
-                                          <SelectItem key={sweepId} value={sweepId}>
-                                            {sweepId}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button variant="outline" className="h-8 w-full justify-between text-xs">
+                                          {sweepFilter.size === 0 ? 'All' : `${sweepFilter.size} selected`}
+                                          <ChevronDown className="h-3 w-3 opacity-50" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent align="start" className="w-56 p-2">
+                                        <div className="flex items-center justify-between mb-2 px-1">
+                                          <p className="text-[11px] font-medium text-muted-foreground">Filter by sweep</p>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setSweepFilter(new Set())}
+                                            className="h-5 px-1.5 text-[10px]"
+                                          >
+                                            Clear
+                                          </Button>
+                                        </div>
+                                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setSweepFilter(prev => {
+                                                const next = new Set(prev)
+                                                if (next.has('__no_sweep__')) next.delete('__no_sweep__')
+                                                else next.add('__no_sweep__')
+                                                return next
+                                              })
+                                            }}
+                                            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors ${sweepFilter.has('__no_sweep__') ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-secondary/60'}`}
+                                          >
+                                            {sweepFilter.has('__no_sweep__') ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5 text-muted-foreground" />}
+                                            No Sweep
+                                          </button>
+                                          {sweepOptions.map((sweepId) => (
+                                            <button
+                                              key={sweepId}
+                                              type="button"
+                                              onClick={() => {
+                                                setSweepFilter(prev => {
+                                                  const next = new Set(prev)
+                                                  if (next.has(sweepId)) next.delete(sweepId)
+                                                  else next.add(sweepId)
+                                                  return next
+                                                })
+                                              }}
+                                              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors ${sweepFilter.has(sweepId) ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-secondary/60'}`}
+                                            >
+                                              {sweepFilter.has(sweepId) ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5 text-muted-foreground" />}
+                                              <span className="truncate">{sweepId}</span>
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
                                   </div>
 
                                   <div className="grid gap-1.5">
@@ -2249,25 +2319,25 @@ export function RunsView({
 
                         <div className="flex items-center gap-2">
                           <Button
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-[11px]"
+                            className="h-7 w-7 px-0 text-[13px] text-muted-foreground"
                             onClick={() => setRunsPage((p) => Math.max(1, p - 1))}
                             disabled={runsPage === 1}
                           >
-                            Prev
+                            ‹
                           </Button>
                           <span className="text-[11px] text-muted-foreground">
-                            Page {runsPage} / {totalRunsPages}
+                            {runsPage} / {totalRunsPages}
                           </span>
                           <Button
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-[11px]"
+                            className="h-7 w-7 px-0 text-[13px] text-muted-foreground"
                             onClick={() => setRunsPage((p) => Math.min(totalRunsPages, p + 1))}
                             disabled={runsPage >= totalRunsPages}
                           >
-                            Next
+                            ›
                           </Button>
                         </div>
 
@@ -2418,25 +2488,25 @@ export function RunsView({
                     <div className="rounded-xl border border-border bg-card p-3">
                       <div className="mb-2 flex items-center gap-2">
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-[11px]"
+                          className="h-7 w-7 px-0 text-[13px] text-muted-foreground"
                           onClick={() => setSweepsPage((p) => Math.max(1, p - 1))}
                           disabled={sweepsPage === 1}
                         >
-                          Prev
+                          ‹
                         </Button>
                         <span className="text-[11px] text-muted-foreground">
-                          Page {sweepsPage} / {totalSweepsPages}
+                          {sweepsPage} / {totalSweepsPages}
                         </span>
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-[11px]"
+                          className="h-7 w-7 px-0 text-[13px] text-muted-foreground"
                           onClick={() => setSweepsPage((p) => Math.min(totalSweepsPages, p + 1))}
                           disabled={sweepsPage >= totalSweepsPages}
                         >
-                          Next
+                          ›
                         </Button>
                       </div>
                       {sortedSweeps.length > 0 ? (
@@ -2474,25 +2544,25 @@ export function RunsView({
                     <div className="mb-2 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-[11px]"
+                          className="h-7 w-7 px-0 text-[13px] text-muted-foreground"
                           onClick={() => setChartsPage((p) => Math.max(1, p - 1))}
                           disabled={chartsPage === 1}
                         >
-                          Prev
+                          ‹
                         </Button>
                         <span className="text-[11px] text-muted-foreground">
-                          Page {chartsPage} / {totalChartsPages}
+                          {chartsPage} / {totalChartsPages}
                         </span>
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-[11px]"
+                          className="h-7 w-7 px-0 text-[13px] text-muted-foreground"
                           onClick={() => setChartsPage((p) => Math.min(totalChartsPages, p + 1))}
                           disabled={chartsPage >= totalChartsPages}
                         >
-                          Next
+                          ›
                         </Button>
                       </div>
                       <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => onNavigateToCharts?.()}>
