@@ -42,3 +42,7 @@ server/.uv-cache
 server/dist
 server/build
 .ra-auth-token
+
+*.gz
+*ubyte
+.worktrees/
