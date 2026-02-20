@@ -15,12 +15,16 @@ Run:
     .ra-venv/bin/python -m pytest tests/test_journey_scenarios.py -v
 """
 
+import os
 import time
 import requests
 import pytest
 
 SERVER = "http://127.0.0.1:10000"
+AUTH_TOKEN = os.environ.get("RESEARCH_AGENT_USER_AUTH_TOKEN", "")
 HEADERS = {"Content-Type": "application/json"}
+if AUTH_TOKEN:
+    HEADERS["X-Auth-Token"] = AUTH_TOKEN
 
 
 def _server_available() -> bool:
