@@ -2,7 +2,7 @@
 
 All prompt-building logic is isolated here as pure functions that take a
 PromptContext and return a string.  Templates are always resolved via
-PromptSkillManager.render() from SKILL.md files in prompt_skills/.
+PromptSkillManager.render() from SKILL.md files in skills/prompts/.
 No inline fallback templates — the SKILL.md files are the single source of truth.
 """
 
@@ -400,7 +400,7 @@ def build_planning_prompt(
     if not rendered:
         raise RuntimeError(
             "Failed to render 'wild_v2_planning' skill template. "
-            "Ensure prompt_skills/wild_v2_planning/SKILL.md exists and is valid."
+            "Ensure skills/prompts/wild_v2_planning/SKILL.md exists and is valid."
         )
     return rendered
 
@@ -443,6 +443,6 @@ def build_iteration_prompt(
     if not rendered:
         raise RuntimeError(
             "Failed to render 'wild_v2_iteration' skill template. "
-            "Ensure prompt_skills/wild_v2_iteration/SKILL.md exists and is valid."
+            "Ensure skills/prompts/wild_v2_iteration/SKILL.md exists and is valid."
         )
     return rendered

@@ -2,7 +2,7 @@
 Prompt Skill Manager — manages prompt template files.
 
 Extracted from server.py. Skills are Codex-standard folders:
-prompt_skills/<name>/SKILL.md with YAML frontmatter and {{variable}} placeholders.
+skills/prompts/<name>/SKILL.md with YAML frontmatter and {{variable}} placeholders.
 """
 
 import logging
@@ -32,12 +32,12 @@ def _is_internal_skill(skill_id: str) -> bool:
 class PromptSkillManager:
     """Manages prompt template files (markdown with YAML frontmatter).
 
-    Skills are Codex-standard folders: prompt_skills/<name>/SKILL.md
+    Skills are Codex-standard folders: skills/prompts/<name>/SKILL.md
     with YAML frontmatter and {{variable}} placeholders.
     """
 
     def __init__(self, skills_dir: Optional[str] = None):
-        self.skills_dir = skills_dir or os.path.join(_SERVER_FILE_DIR, "prompt_skills")
+        self.skills_dir = skills_dir or os.path.join(_SERVER_FILE_DIR, "skills", "prompts")
         self._skills: Dict[str, dict] = {}
         self.load_all()
 
