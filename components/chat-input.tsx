@@ -558,11 +558,7 @@ export function ChatInput({
 
   useEffect(() => {
     if (!insertDraft?.text) return
-    setMessage((prev) => {
-      if (!prev) return insertDraft.text
-      const separator = prev.endsWith(' ') ? '' : ' '
-      return `${prev}${separator}${insertDraft.text}`
-    })
+    setMessage(insertDraft.text)
     setTimeout(() => {
       textareaRef.current?.focus()
       if (textareaRef.current) {

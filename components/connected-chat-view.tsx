@@ -66,6 +66,9 @@ interface ConnectedChatViewProps {
     onRefreshContext?: () => Promise<void>
     /** Ref that will be populated with a function to scroll to a specific round index */
     scrollToRoundRef?: React.MutableRefObject<((roundIndex: number) => void) | null>
+    /** External control for context panel visibility */
+    contextPanelHidden?: boolean
+    onContextPanelHiddenChange?: (hidden: boolean) => void
 }
 
 /**
@@ -96,13 +99,18 @@ export function ConnectedChatView({
     contextTokenCount = 0,
     onRefreshContext,
     scrollToRoundRef,
+    contextPanelHidden: contextPanelHiddenProp,
+    onContextPanelHiddenChange,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
     const isMobile = useIsMobile()
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [mobilePanelTab, setMobilePanelTab] = useState<'chat' | 'context'>('chat')
-    const [contextPanelHidden, setContextPanelHidden] = useState(false)
+    const [localContextPanelHidden, setLocalContextPanelHidden] = useState(true)
+    // Use parent-controlled state if provided, otherwise fall back to local state
+    const contextPanelHidden = contextPanelHiddenProp ?? localContextPanelHidden
+    const setContextPanelHidden = onContextPanelHiddenChange ?? setLocalContextPanelHidden
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
     const [starterReplyExcerptInsert, setStarterReplyExcerptInsert] = useState<{
         id: number
@@ -114,7 +122,7 @@ export function ConnectedChatView({
     const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
     const { settings, setSettings } = useAppSettings()
     const showStarterCards = settings.appearance.starterCardFlavor !== 'none'
-    const showChatContextPanel = settings.developer?.showChatContextPanel === true
+    const showChatContextPanel = true  // always available; visibility controlled by contextPanelHidden
     const starterCardFlavor = settings.appearance.starterCardFlavor || 'novice'
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
     const handleEditTemplate = useCallback((cardId: string, template: string | null) => {
@@ -137,7 +145,6 @@ export function ConnectedChatView({
     // Counter to force re-render when provenance is added (ref alone won't trigger)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
-    const wasChatContextPanelEnabledRef = useRef(showChatContextPanel)
 
     // Pending workdir for the next session to be created
     const [pendingWorkdir, setPendingWorkdir] = useState<string | null>(null)
@@ -184,28 +191,21 @@ export function ConnectedChatView({
         onSessionChange?.(currentSessionId)
     }, [currentSessionId, onSessionChange])
 
+    // Only persist/load from localStorage when NOT externally controlled
     useEffect(() => {
+        if (contextPanelHiddenProp != null) return  // parent controls
         if (typeof window === 'undefined') return
         const stored = window.localStorage.getItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN)
-        setContextPanelHidden(stored === 'true')
-    }, [])
+        setLocalContextPanelHidden(stored === 'true')
+    }, [contextPanelHiddenProp])
 
     useEffect(() => {
+        if (contextPanelHiddenProp != null) return  // parent controls
         if (typeof window === 'undefined') return
-        window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(contextPanelHidden))
-    }, [contextPanelHidden])
+        window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(localContextPanelHidden))
+    }, [localContextPanelHidden, contextPanelHiddenProp])
 
-    useEffect(() => {
-        if (showChatContextPanel && !wasChatContextPanelEnabledRef.current) {
-            setContextPanelHidden(false)
-        } else if (!showChatContextPanel) {
-            setContextPanelHidden(true)
-            if (mobilePanelTab === 'context') {
-                setMobilePanelTab('chat')
-            }
-        }
-        wasChatContextPanelEnabledRef.current = showChatContextPanel
-    }, [showChatContextPanel, mobilePanelTab])
+
 
     const getScrollViewport = useCallback((): HTMLDivElement | null => {
         if (!scrollRef.current) return null
@@ -417,6 +417,7 @@ export function ConnectedChatView({
 
     // Handle send - create session if needed, start wild loop if in wild mode
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
+        setStarterDraftInsert(null)
         let sessionId = currentSessionId
         if (!sessionId) {
             sessionId = await createNewSession(pendingWorkdir || undefined)
@@ -617,15 +618,8 @@ export function ConnectedChatView({
                 layout={layout}
                 skills={skills}
                 isWildLoopActive={wildLoop?.isActive ?? false}
-                onSteer={wildLoop ? (msg, priority) => {
-                    wildLoop.insertIntoQueue({
-                        id: `steer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                        priority,
-                        title: msg.length > 50 ? msg.slice(0, 47) + '...' : msg,
-                        prompt: msg,
-                        type: 'steer',
-                        createdAt: Date.now(),
-                    }, 0) // Insert at front of queue
+                onSteer={wildLoop ? (msg) => {
+                    wildLoop.steer(msg)
                 } : undefined}
                 onOpenReplyExcerpt={handleOpenReplyExcerpt}
                 contextTokenCount={contextTokenCount}
@@ -727,7 +721,7 @@ export function ConnectedChatView({
                                                 runs={runs}
                                                 sweeps={sweeps}
                                                 alerts={alerts}
-                                                flavor={starterCardFlavor}
+                                                flavor={starterCardFlavor === 'none' ? undefined : starterCardFlavor}
                                                 customTemplates={customTemplates}
                                                 onEditTemplate={handleEditTemplate}
                                                 onPromptSelect={(prompt) => {
@@ -886,17 +880,6 @@ export function ConnectedChatView({
                 </Sheet>
             </div>
             {!isMobile && showChatContextPanel && !contextPanelHidden && contextPanelElement}
-            {!isMobile && showChatContextPanel && contextPanelHidden && (
-                <button
-                    type="button"
-                    onClick={() => setContextPanelHidden(false)}
-                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-border bg-background/95 p-2 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
-                    title="Show context panel"
-                    aria-label="Show context panel"
-                >
-                    <PanelRightOpen className="h-4 w-4" />
-                </button>
-            )}
         </div>
     )
 }

@@ -27,6 +27,38 @@ function getHeaders(includeContentType: boolean = false): HeadersInit {
     return headers
 }
 
+// ---------------------------------------------------------------------------
+// Telemetry-instrumented fetch wrapper
+// ---------------------------------------------------------------------------
+import { telemetry } from './telemetry'
+
+/**
+ * Drop-in replacement for `fetch` that records request telemetry.
+ * Measures wall-clock duration and fires a telemetry event after the
+ * response headers arrive.  Failures are tracked too (status = 0).
+ */
+async function trackedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const start = performance.now()
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const method = init?.method ?? 'GET'
+    // Extract the path portion (strip the base API URL prefix)
+    let path = url
+    try {
+        path = new URL(url).pathname
+    } catch {
+        // keep raw url as path
+    }
+
+    try {
+        const response = await fetch(input, init)
+        telemetry.trackRequest(method, path, response.status, performance.now() - start)
+        return response
+    } catch (err) {
+        telemetry.trackRequest(method, path, 0, performance.now() - start, { error: String(err) })
+        throw err
+    }
+}
+
 // Types
 export type ChatSessionStatus =
     | 'running'
@@ -133,7 +165,7 @@ export interface StreamEvent {
  * List all chat sessions
  */
 export async function listSessions(): Promise<ChatSession[]> {
-    const response = await fetch(`${API_URL()}/sessions`, {
+    const response = await trackedFetch(`${API_URL()}/sessions`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -157,7 +189,7 @@ export async function createSession(title?: string, model?: SessionModelSelectio
     if (workdir) {
         body.workdir = workdir
     }
-    const response = await fetch(`${API_URL()}/sessions`, {
+    const response = await trackedFetch(`${API_URL()}/sessions`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(body),
@@ -189,7 +221,7 @@ export async function listDirectories(path?: string): Promise<ListDirectoriesRes
     if (path) {
         url.searchParams.set('path', path)
     }
-    const response = await fetch(url.toString(), {
+    const response = await trackedFetch(url.toString(), {
         headers: getHeaders(),
     })
     if (!response.ok) {
@@ -202,7 +234,7 @@ export async function listDirectories(path?: string): Promise<ListDirectoriesRes
  * Get a session with all messages
  */
 export async function getSession(sessionId: string): Promise<SessionWithMessages> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -215,7 +247,7 @@ export async function getSession(sessionId: string): Promise<SessionWithMessages
  * Rename a chat session
  */
 export async function renameSession(sessionId: string, title: string): Promise<ChatSession> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: getHeaders(true),
         body: JSON.stringify({ title }),
@@ -230,7 +262,7 @@ export async function renameSession(sessionId: string, title: string): Promise<C
  * Delete a chat session
  */
 export async function deleteSession(sessionId: string): Promise<void> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}`, {
         method: 'DELETE',
         headers: getHeaders()
     })
@@ -243,7 +275,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
  * List available chat models.
  */
 export async function listModels(): Promise<ChatModelOption[]> {
-    const response = await fetch(`${API_URL()}/models`, {
+    const response = await trackedFetch(`${API_URL()}/models`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -256,7 +288,7 @@ export async function listModels(): Promise<ChatModelOption[]> {
  * Get currently configured session model.
  */
 export async function getSessionModel(sessionId: string): Promise<SessionModelSelection> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}/model`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}/model`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -269,7 +301,7 @@ export async function getSessionModel(sessionId: string): Promise<SessionModelSe
  * Update provider/model for a chat session.
  */
 export async function setSessionModel(sessionId: string, model: SessionModelSelection): Promise<SessionModelSelection> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}/model`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}/model`, {
         method: 'PUT',
         headers: getHeaders(true),
         body: JSON.stringify(model),
@@ -299,7 +331,7 @@ export async function* streamChat(
     if (promptOverride) {
         body.prompt_override = promptOverride
     }
-    const response = await fetch(`${API_URL()}/chat`, {
+    const response = await trackedFetch(`${API_URL()}/chat`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(body),
@@ -373,7 +405,7 @@ export async function* streamSession(
         params.set('run_id', runId)
     }
 
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}/stream?${params.toString()}`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}/stream?${params.toString()}`, {
         method: 'GET',
         headers: getHeaders(),
         signal,
@@ -429,7 +461,7 @@ export async function* streamSession(
  */
 export async function checkApiHealth(): Promise<boolean> {
     try {
-        const response = await fetch(`${API_URL()}/`, {
+        const response = await trackedFetch(`${API_URL()}/`, {
             method: 'GET',
             signal: AbortSignal.timeout(15000)
         })
@@ -590,7 +622,7 @@ export interface RepoFileResponse {
  * List all runs
  */
 export async function listRuns(includeArchived: boolean = false): Promise<Run[]> {
-    const response = await fetch(`${API_URL()}/runs?archived=${includeArchived}`, {
+    const response = await trackedFetch(`${API_URL()}/runs?archived=${includeArchived}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -603,7 +635,7 @@ export async function listRuns(includeArchived: boolean = false): Promise<Run[]>
  * Create a new run (in queued state)
  */
 export async function createRun(request: CreateRunRequest): Promise<Run> {
-    const response = await fetch(`${API_URL()}/runs`, {
+    const response = await trackedFetch(`${API_URL()}/runs`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -618,7 +650,7 @@ export async function createRun(request: CreateRunRequest): Promise<Run> {
  * Get a single run by ID
  */
 export async function getRun(runId: string): Promise<Run> {
-    const response = await fetch(`${API_URL()}/runs/${runId}`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -631,7 +663,7 @@ export async function getRun(runId: string): Promise<Run> {
  * Update mutable run fields
  */
 export async function updateRun(runId: string, request: RunUpdateRequest): Promise<Run> {
-    const response = await fetch(`${API_URL()}/runs/${runId}`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}`, {
         method: 'PUT',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -647,7 +679,7 @@ export async function updateRun(runId: string, request: RunUpdateRequest): Promi
  * Start a queued run
  */
 export async function startRun(runId: string): Promise<{ message: string; tmux_window: string }> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/start`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/start`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -662,7 +694,7 @@ export async function startRun(runId: string): Promise<{ message: string; tmux_w
  * Stop a running job
  */
 export async function stopRun(runId: string): Promise<void> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/stop`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/stop`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -675,7 +707,7 @@ export async function stopRun(runId: string): Promise<void> {
  * Rerun a run (creates a new run with parent linkage)
  */
 export async function rerunRun(runId: string, request: RunRerunRequest = {}): Promise<Run> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/rerun`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/rerun`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -691,7 +723,7 @@ export async function rerunRun(runId: string, request: RunRerunRequest = {}): Pr
  * Archive a run
  */
 export async function archiveRun(runId: string): Promise<void> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/archive`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/archive`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -704,7 +736,7 @@ export async function archiveRun(runId: string): Promise<void> {
  * Unarchive a run
  */
 export async function unarchiveRun(runId: string): Promise<void> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/unarchive`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/unarchive`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -717,7 +749,7 @@ export async function unarchiveRun(runId: string): Promise<void> {
  * List all alerts
  */
 export async function listAlerts(): Promise<Alert[]> {
-    const response = await fetch(`${API_URL()}/alerts`, {
+    const response = await trackedFetch(`${API_URL()}/alerts`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -730,7 +762,7 @@ export async function listAlerts(): Promise<Alert[]> {
  * Respond to an alert choice
  */
 export async function respondToAlert(alertId: string, choice: string): Promise<{ message: string }> {
-    const response = await fetch(`${API_URL()}/alerts/${alertId}/respond`, {
+    const response = await trackedFetch(`${API_URL()}/alerts/${alertId}/respond`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify({ choice }),
@@ -746,7 +778,7 @@ export async function respondToAlert(alertId: string, choice: string): Promise<{
  * Stop a chat session stream (including auto-alert sessions)
  */
 export async function stopSession(sessionId: string): Promise<{ message: string }> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}/stop`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}/stop`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -760,7 +792,7 @@ export async function stopSession(sessionId: string): Promise<{ message: string 
  * Get the system prompt for a chat session
  */
 export async function getSystemPrompt(sessionId: string): Promise<{ system_prompt: string }> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -773,7 +805,7 @@ export async function getSystemPrompt(sessionId: string): Promise<{ system_promp
  * Update the system prompt for a chat session
  */
 export async function setSystemPrompt(sessionId: string, systemPrompt: string): Promise<{ system_prompt: string }> {
-    const response = await fetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
+    const response = await trackedFetch(`${API_URL()}/sessions/${sessionId}/system-prompt`, {
         method: 'PUT',
         headers: getHeaders(true),
         body: JSON.stringify({ system_prompt: systemPrompt }),
@@ -788,7 +820,7 @@ export async function setSystemPrompt(sessionId: string, systemPrompt: string): 
  * Get wild mode state
  */
 export async function getWildMode(): Promise<WildModeState> {
-    const response = await fetch(`${API_URL()}/wild-mode`, {
+    const response = await trackedFetch(`${API_URL()}/wild-mode`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -801,7 +833,7 @@ export async function getWildMode(): Promise<WildModeState> {
  * Set wild mode state
  */
 export async function setWildMode(enabled: boolean): Promise<WildModeState> {
-    const response = await fetch(`${API_URL()}/wild-mode`, {
+    const response = await trackedFetch(`${API_URL()}/wild-mode`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify({ enabled }),
@@ -841,7 +873,7 @@ export interface WildV2Status {
     active: boolean
     session_id?: string
     goal?: string
-    status?: string  // running | paused | done | failed
+    status?: string  // running | paused | stopped | done | failed
     iteration?: number
     max_iterations?: number
     plan?: string
@@ -880,7 +912,7 @@ export async function startWildV2(params: {
     wait_seconds?: number
     evo_sweep_enabled?: boolean
 }): Promise<WildV2Status> {
-    const response = await fetch(`${API_URL()}/wild/v2/start`, {
+    const response = await trackedFetch(`${API_URL()}/wild/v2/start`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(params),
@@ -892,12 +924,13 @@ export async function startWildV2(params: {
 }
 
 /**
- * Stop the active V2 wild session.
+ * Stop a V2 wild session.
  */
-export async function stopWildV2(): Promise<WildV2Status> {
-    const response = await fetch(`${API_URL()}/wild/v2/stop`, {
+export async function stopWildV2(chatSessionId?: string): Promise<WildV2Status> {
+    const response = await trackedFetch(`${API_URL()}/wild/v2/stop`, {
         method: 'POST',
-        headers: getHeaders()
+        headers: getHeaders(true),
+        body: JSON.stringify({ chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to stop wild v2: ${response.statusText}`)
@@ -908,8 +941,11 @@ export async function stopWildV2(): Promise<WildV2Status> {
 /**
  * Get V2 wild session status.
  */
-export async function getWildV2Status(): Promise<WildV2Status> {
-    const response = await fetch(`${API_URL()}/wild/v2/status`, {
+export async function getWildV2Status(chatSessionId?: string): Promise<WildV2Status> {
+    const params = new URLSearchParams()
+    if (chatSessionId) params.set('chat_session_id', chatSessionId)
+    const qs = params.toString()
+    const response = await trackedFetch(`${API_URL()}/wild/v2/status${qs ? `?${qs}` : ''}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -919,12 +955,13 @@ export async function getWildV2Status(): Promise<WildV2Status> {
 }
 
 /**
- * Pause the V2 wild session.
+ * Pause a V2 wild session.
  */
-export async function pauseWildV2(): Promise<WildV2Status> {
-    const response = await fetch(`${API_URL()}/wild/v2/pause`, {
+export async function pauseWildV2(chatSessionId?: string): Promise<WildV2Status> {
+    const response = await trackedFetch(`${API_URL()}/wild/v2/pause`, {
         method: 'POST',
-        headers: getHeaders()
+        headers: getHeaders(true),
+        body: JSON.stringify({ chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to pause wild v2: ${response.statusText}`)
@@ -933,12 +970,13 @@ export async function pauseWildV2(): Promise<WildV2Status> {
 }
 
 /**
- * Resume the V2 wild session.
+ * Resume a V2 wild session.
  */
-export async function resumeWildV2(): Promise<WildV2Status> {
-    const response = await fetch(`${API_URL()}/wild/v2/resume`, {
+export async function resumeWildV2(chatSessionId?: string): Promise<WildV2Status> {
+    const response = await trackedFetch(`${API_URL()}/wild/v2/resume`, {
         method: 'POST',
-        headers: getHeaders()
+        headers: getHeaders(true),
+        body: JSON.stringify({ chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to resume wild v2: ${response.statusText}`)
@@ -949,11 +987,11 @@ export async function resumeWildV2(): Promise<WildV2Status> {
 /**
  * Inject user context for the next V2 iteration.
  */
-export async function steerWildV2(context: string): Promise<{ ok: boolean }> {
-    const response = await fetch(`${API_URL()}/wild/v2/steer`, {
+export async function steerWildV2(context: string, chatSessionId?: string): Promise<{ ok: boolean }> {
+    const response = await trackedFetch(`${API_URL()}/wild/v2/steer`, {
         method: 'POST',
         headers: getHeaders(true),
-        body: JSON.stringify({ context }),
+        body: JSON.stringify({ context, chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to steer wild v2: ${response.statusText}`)
@@ -979,7 +1017,7 @@ export interface Memory {
 export async function listMemories(activeOnly: boolean = false): Promise<Memory[]> {
     const params = new URLSearchParams()
     if (activeOnly) params.set('active_only', 'true')
-    const response = await fetch(`${API_URL()}/memories?${params}`, {
+    const response = await trackedFetch(`${API_URL()}/memories?${params}`, {
         headers: getHeaders(),
     })
     if (!response.ok) {
@@ -994,7 +1032,7 @@ export async function createMemory(memory: {
     source?: string
     tags?: string[]
 }): Promise<Memory> {
-    const response = await fetch(`${API_URL()}/memories`, {
+    const response = await trackedFetch(`${API_URL()}/memories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getHeaders() },
         body: JSON.stringify(memory),
@@ -1011,7 +1049,7 @@ export async function updateMemory(memoryId: string, updates: {
     is_active?: boolean
     tags?: string[]
 }): Promise<Memory> {
-    const response = await fetch(`${API_URL()}/memories/${memoryId}`, {
+    const response = await trackedFetch(`${API_URL()}/memories/${memoryId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...getHeaders() },
         body: JSON.stringify(updates),
@@ -1023,7 +1061,7 @@ export async function updateMemory(memoryId: string, updates: {
 }
 
 export async function deleteMemory(memoryId: string): Promise<void> {
-    const response = await fetch(`${API_URL()}/memories/${memoryId}`, {
+    const response = await trackedFetch(`${API_URL()}/memories/${memoryId}`, {
         method: 'DELETE',
         headers: getHeaders(),
     })
@@ -1073,7 +1111,7 @@ export interface SkillFileEntry {
  * List all available prompt skills
  */
 export async function listPromptSkills(): Promise<PromptSkill[]> {
-    const response = await fetch(`${API_URL()}/prompt-skills`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1086,7 +1124,7 @@ export async function listPromptSkills(): Promise<PromptSkill[]> {
  * Get a single prompt skill by ID
  */
 export async function getPromptSkill(id: string): Promise<PromptSkill> {
-    const response = await fetch(`${API_URL()}/prompt-skills/${id}`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/${id}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1099,7 +1137,7 @@ export async function getPromptSkill(id: string): Promise<PromptSkill> {
  * Update a prompt skill's template
  */
 export async function updatePromptSkill(id: string, template: string): Promise<PromptSkill> {
-    const response = await fetch(`${API_URL()}/prompt-skills/${id}`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/${id}`, {
         method: 'PUT',
         headers: getHeaders(true),
         body: JSON.stringify({ template }),
@@ -1114,7 +1152,7 @@ export async function updatePromptSkill(id: string, template: string): Promise<P
  * Reload all prompt skills from disk
  */
 export async function reloadPromptSkills(): Promise<{ message: string; count: number }> {
-    const response = await fetch(`${API_URL()}/prompt-skills/reload`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/reload`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -1128,7 +1166,7 @@ export async function reloadPromptSkills(): Promise<{ message: string; count: nu
  * Create a new prompt skill
  */
 export async function createSkill(req: CreateSkillRequest): Promise<PromptSkill> {
-    const response = await fetch(`${API_URL()}/prompt-skills`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(req),
@@ -1144,7 +1182,7 @@ export async function createSkill(req: CreateSkillRequest): Promise<PromptSkill>
  * Delete a user-created skill (internal skills return 403)
  */
 export async function deleteSkill(id: string): Promise<{ message: string }> {
-    const response = await fetch(`${API_URL()}/prompt-skills/${id}`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/${id}`, {
         method: 'DELETE',
         headers: getHeaders()
     })
@@ -1159,7 +1197,7 @@ export async function deleteSkill(id: string): Promise<{ message: string }> {
  * Install a skill from an external source (git clone)
  */
 export async function installSkill(req: InstallSkillRequest): Promise<PromptSkill> {
-    const response = await fetch(`${API_URL()}/prompt-skills/install`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/install`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(req),
@@ -1176,7 +1214,7 @@ export async function installSkill(req: InstallSkillRequest): Promise<PromptSkil
  */
 export async function searchSkills(query: string, limit: number = 20): Promise<PromptSkill[]> {
     const params = new URLSearchParams({ q: query, limit: String(limit) })
-    const response = await fetch(`${API_URL()}/prompt-skills/search?${params}`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/search?${params}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1189,7 +1227,7 @@ export async function searchSkills(query: string, limit: number = 20): Promise<P
  * List all files in a skill's folder
  */
 export async function listSkillFiles(id: string): Promise<SkillFileEntry[]> {
-    const response = await fetch(`${API_URL()}/prompt-skills/${id}/files`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/${id}/files`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1202,7 +1240,7 @@ export async function listSkillFiles(id: string): Promise<SkillFileEntry[]> {
  * Read a file from a skill's folder
  */
 export async function readSkillFile(id: string, path: string): Promise<{ path: string; content: string }> {
-    const response = await fetch(`${API_URL()}/prompt-skills/${id}/files/${encodeURIComponent(path)}`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/${id}/files/${encodeURIComponent(path)}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1215,7 +1253,7 @@ export async function readSkillFile(id: string, path: string): Promise<{ path: s
  * Write a file in a skill's folder
  */
 export async function writeSkillFile(id: string, path: string, content: string): Promise<{ message: string; path: string }> {
-    const response = await fetch(`${API_URL()}/prompt-skills/${id}/files/${encodeURIComponent(path)}`, {
+    const response = await trackedFetch(`${API_URL()}/prompt-skills/${id}/files/${encodeURIComponent(path)}`, {
         method: 'PUT',
         headers: getHeaders(true),
         body: JSON.stringify({ content }),
@@ -1231,7 +1269,7 @@ export async function writeSkillFile(id: string, path: string, content: string):
  * Add a standalone run to an existing sweep
  */
 export async function addRunToSweep(runId: string, sweepId: string): Promise<{ message: string }> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/add-to-sweep?sweep_id=${sweepId}`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/add-to-sweep?sweep_id=${sweepId}`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -1252,7 +1290,7 @@ export async function getRunLogs(
     offset: number = -10000,
     limit: number = 10000
 ): Promise<LogResponse> {
-    const response = await fetch(
+    const response = await trackedFetch(
         `${API_URL()}/runs/${runId}/logs?offset=${offset}&limit=${limit}`,
         { headers: getHeaders() }
     )
@@ -1272,7 +1310,7 @@ export async function* streamRunLogs(runId: string): AsyncGenerator<{
     status?: string
     error?: string
 }> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/logs/stream`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/logs/stream`, {
         headers: getHeaders()
     })
 
@@ -1323,7 +1361,7 @@ export async function getSidecarLogs(
     offset: number = -10000,
     limit: number = 10000
 ): Promise<LogResponse> {
-    const response = await fetch(
+    const response = await trackedFetch(
         `${API_URL()}/runs/${runId}/sidecar-logs?offset=${offset}&limit=${limit}`,
         { headers: getHeaders() }
     )
@@ -1342,7 +1380,7 @@ export async function* streamSidecarLogs(runId: string): AsyncGenerator<{
     status?: string
     error?: string
 }> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/sidecar-logs/stream`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/sidecar-logs/stream`, {
         headers: getHeaders()
     })
 
@@ -1388,7 +1426,7 @@ export async function* streamSidecarLogs(runId: string): AsyncGenerator<{
  * Get run artifacts
  */
 export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/artifacts`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/artifacts`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1401,7 +1439,7 @@ export async function getRunArtifacts(runId: string): Promise<Artifact[]> {
  * Queue a ready run
  */
 export async function queueRun(runId: string): Promise<Run> {
-    const response = await fetch(`${API_URL()}/runs/${runId}/queue`, {
+    const response = await trackedFetch(`${API_URL()}/runs/${runId}/queue`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -1415,7 +1453,7 @@ export async function queueRun(runId: string): Promise<Run> {
  * Get repository diff for changed files in the active workdir
  */
 export async function getRepoDiff(unified: number = 3): Promise<RepoDiffResponse> {
-    const response = await fetch(`${API_URL()}/git/diff?unified=${unified}`, {
+    const response = await trackedFetch(`${API_URL()}/git/diff?unified=${unified}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1428,7 +1466,7 @@ export async function getRepoDiff(unified: number = 3): Promise<RepoDiffResponse
  * Get repository file list for file explorer mode
  */
 export async function getRepoFiles(limit: number = 5000): Promise<RepoFilesResponse> {
-    const response = await fetch(`${API_URL()}/git/files?limit=${limit}`, {
+    const response = await trackedFetch(`${API_URL()}/git/files?limit=${limit}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1445,7 +1483,7 @@ export async function getRepoFile(path: string, maxBytes: number = 120000): Prom
         path,
         max_bytes: String(maxBytes),
     })
-    const response = await fetch(`${API_URL()}/git/file?${params.toString()}`, {
+    const response = await trackedFetch(`${API_URL()}/git/file?${params.toString()}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1534,7 +1572,7 @@ export interface UpdateSweepRequest {
  * List all sweeps
  */
 export async function listSweeps(limit: number = 200): Promise<Sweep[]> {
-    const response = await fetch(`${API_URL()}/sweeps?limit=${limit}`, {
+    const response = await trackedFetch(`${API_URL()}/sweeps?limit=${limit}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1547,7 +1585,7 @@ export async function listSweeps(limit: number = 200): Promise<Sweep[]> {
  * Create a new sweep with child runs
  */
 export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
-    const response = await fetch(`${API_URL()}/sweeps`, {
+    const response = await trackedFetch(`${API_URL()}/sweeps`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -1562,7 +1600,7 @@ export async function createSweep(request: CreateSweepRequest): Promise<Sweep> {
  * Update an existing sweep
  */
 export async function updateSweep(sweepId: string, request: UpdateSweepRequest): Promise<Sweep> {
-    const response = await fetch(`${API_URL()}/sweeps/${sweepId}`, {
+    const response = await trackedFetch(`${API_URL()}/sweeps/${sweepId}`, {
         method: 'PUT',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -1578,7 +1616,7 @@ export async function updateSweep(sweepId: string, request: UpdateSweepRequest):
  * Get sweep details
  */
 export async function getSweep(sweepId: string): Promise<Sweep> {
-    const response = await fetch(`${API_URL()}/sweeps/${sweepId}`, {
+    const response = await trackedFetch(`${API_URL()}/sweeps/${sweepId}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1591,7 +1629,7 @@ export async function getSweep(sweepId: string): Promise<Sweep> {
  * Start all ready/queued runs in a sweep
  */
 export async function startSweep(sweepId: string, parallel: number = 1): Promise<{ message: string }> {
-    const response = await fetch(`${API_URL()}/sweeps/${sweepId}/start?parallel=${parallel}`, {
+    const response = await trackedFetch(`${API_URL()}/sweeps/${sweepId}/start?parallel=${parallel}`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -1609,7 +1647,7 @@ export async function createWildSweep(name: string, goal: string, chatSessionId?
     if (chatSessionId) {
         request.chat_session_id = chatSessionId
     }
-    const response = await fetch(`${API_URL()}/sweeps/wild`, {
+    const response = await trackedFetch(`${API_URL()}/sweeps/wild`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -1677,7 +1715,7 @@ export interface ClusterDetectRequest {
 // =============================================================================
 
 export async function getClusterStatus(): Promise<ClusterStatusResponse> {
-    const response = await fetch(`${API_URL()}/cluster`, {
+    const response = await trackedFetch(`${API_URL()}/cluster`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1687,7 +1725,7 @@ export async function getClusterStatus(): Promise<ClusterStatusResponse> {
 }
 
 export async function detectCluster(request?: ClusterDetectRequest): Promise<ClusterStatusResponse> {
-    const response = await fetch(`${API_URL()}/cluster/detect`, {
+    const response = await trackedFetch(`${API_URL()}/cluster/detect`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request || {}),
@@ -1699,7 +1737,7 @@ export async function detectCluster(request?: ClusterDetectRequest): Promise<Clu
 }
 
 export async function updateCluster(request: ClusterUpdateRequest): Promise<ClusterStatusResponse> {
-    const response = await fetch(`${API_URL()}/cluster`, {
+    const response = await trackedFetch(`${API_URL()}/cluster`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -1751,7 +1789,7 @@ export async function listPlans(status?: PlanStatus, sessionId?: string): Promis
     if (status) params.set('status', status)
     if (sessionId) params.set('session_id', sessionId)
     const qs = params.toString()
-    const response = await fetch(`${API_URL()}/plans${qs ? `?${qs}` : ''}`, {
+    const response = await trackedFetch(`${API_URL()}/plans${qs ? `?${qs}` : ''}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1764,7 +1802,7 @@ export async function listPlans(status?: PlanStatus, sessionId?: string): Promis
  * Get a single plan by ID
  */
 export async function getPlan(planId: string): Promise<Plan> {
-    const response = await fetch(`${API_URL()}/plans/${planId}`, {
+    const response = await trackedFetch(`${API_URL()}/plans/${planId}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -1777,7 +1815,7 @@ export async function getPlan(planId: string): Promise<Plan> {
  * Create a new plan
  */
 export async function createPlan(request: CreatePlanRequest): Promise<Plan> {
-    const response = await fetch(`${API_URL()}/plans`, {
+    const response = await trackedFetch(`${API_URL()}/plans`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -1792,7 +1830,7 @@ export async function createPlan(request: CreatePlanRequest): Promise<Plan> {
  * Update a plan's fields
  */
 export async function updatePlan(planId: string, request: UpdatePlanRequest): Promise<Plan> {
-    const response = await fetch(`${API_URL()}/plans/${planId}`, {
+    const response = await trackedFetch(`${API_URL()}/plans/${planId}`, {
         method: 'PATCH',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -1807,7 +1845,7 @@ export async function updatePlan(planId: string, request: UpdatePlanRequest): Pr
  * Approve a draft plan
  */
 export async function approvePlan(planId: string): Promise<Plan> {
-    const response = await fetch(`${API_URL()}/plans/${planId}/approve`, {
+    const response = await trackedFetch(`${API_URL()}/plans/${planId}/approve`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -1821,7 +1859,7 @@ export async function approvePlan(planId: string): Promise<Plan> {
  * Mark an approved plan as executing
  */
 export async function executePlan(planId: string): Promise<Plan> {
-    const response = await fetch(`${API_URL()}/plans/${planId}/execute`, {
+    const response = await trackedFetch(`${API_URL()}/plans/${planId}/execute`, {
         method: 'POST',
         headers: getHeaders()
     })
@@ -1835,7 +1873,7 @@ export async function executePlan(planId: string): Promise<Plan> {
  * Delete a plan
  */
 export async function deletePlan(planId: string): Promise<{ deleted: boolean; id: string }> {
-    const response = await fetch(`${API_URL()}/plans/${planId}`, {
+    const response = await trackedFetch(`${API_URL()}/plans/${planId}`, {
         method: 'DELETE',
         headers: getHeaders()
     })
@@ -1979,7 +2017,7 @@ export interface JourneyGenerateRecommendationsResponse {
 export async function getJourneyNextActions(
     request: JourneyNextActionsRequest
 ): Promise<JourneyNextActionsResponse> {
-    const response = await fetch(`${API_URL()}/journey/next-actions`, {
+    const response = await trackedFetch(`${API_URL()}/journey/next-actions`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -2001,7 +2039,7 @@ export async function getJourneyLoop(params?: {
     if (params?.run_id) search.set('run_id', params.run_id)
     if (typeof params?.limit === 'number') search.set('limit', String(params.limit))
     const suffix = search.toString() ? `?${search.toString()}` : ''
-    const response = await fetch(`${API_URL()}/journey/loop${suffix}`, {
+    const response = await trackedFetch(`${API_URL()}/journey/loop${suffix}`, {
         headers: getHeaders(),
     })
     if (!response.ok) {
@@ -2013,7 +2051,7 @@ export async function getJourneyLoop(params?: {
 export async function createJourneyEvent(
     request: JourneyEventCreateRequest
 ): Promise<JourneyLoopEvent> {
-    const response = await fetch(`${API_URL()}/journey/events`, {
+    const response = await trackedFetch(`${API_URL()}/journey/events`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -2034,7 +2072,7 @@ export async function listJourneyRecommendations(params?: {
     if (params?.run_id) search.set('run_id', params.run_id)
     if (typeof params?.limit === 'number') search.set('limit', String(params.limit))
     const suffix = search.toString() ? `?${search.toString()}` : ''
-    const response = await fetch(`${API_URL()}/journey/recommendations${suffix}`, {
+    const response = await trackedFetch(`${API_URL()}/journey/recommendations${suffix}`, {
         headers: getHeaders(),
     })
     if (!response.ok) {
@@ -2046,7 +2084,7 @@ export async function listJourneyRecommendations(params?: {
 export async function createJourneyRecommendation(
     request: JourneyRecommendationCreateRequest
 ): Promise<JourneyRecommendation> {
-    const response = await fetch(`${API_URL()}/journey/recommendations`, {
+    const response = await trackedFetch(`${API_URL()}/journey/recommendations`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -2061,7 +2099,7 @@ export async function respondJourneyRecommendation(
     recommendationId: string,
     request: JourneyRecommendationRespondRequest
 ): Promise<JourneyRecommendation> {
-    const response = await fetch(`${API_URL()}/journey/recommendations/${encodeURIComponent(recommendationId)}/respond`, {
+    const response = await trackedFetch(`${API_URL()}/journey/recommendations/${encodeURIComponent(recommendationId)}/respond`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -2075,7 +2113,7 @@ export async function respondJourneyRecommendation(
 export async function generateJourneyRecommendations(
     request: JourneyNextActionsRequest
 ): Promise<JourneyGenerateRecommendationsResponse> {
-    const response = await fetch(`${API_URL()}/journey/recommendations/generate`, {
+    const response = await trackedFetch(`${API_URL()}/journey/recommendations/generate`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
@@ -2096,7 +2134,7 @@ export async function listJourneyDecisions(params?: {
     if (params?.run_id) search.set('run_id', params.run_id)
     if (typeof params?.limit === 'number') search.set('limit', String(params.limit))
     const suffix = search.toString() ? `?${search.toString()}` : ''
-    const response = await fetch(`${API_URL()}/journey/decisions${suffix}`, {
+    const response = await trackedFetch(`${API_URL()}/journey/decisions${suffix}`, {
         headers: getHeaders(),
     })
     if (!response.ok) {
@@ -2108,7 +2146,7 @@ export async function listJourneyDecisions(params?: {
 export async function createJourneyDecision(
     request: JourneyDecisionCreateRequest
 ): Promise<JourneyDecision> {
-    const response = await fetch(`${API_URL()}/journey/decisions`, {
+    const response = await trackedFetch(`${API_URL()}/journey/decisions`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(request),
