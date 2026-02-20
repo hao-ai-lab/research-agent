@@ -49,6 +49,7 @@ const STORAGE_KEY_DESKTOP_SIDEBAR_WIDTH = 'desktopSidebarWidth'
 const STORAGE_KEY_DESKTOP_SIDEBAR_COLLAPSED = 'desktopSidebarCollapsed'
 const STORAGE_KEY_JOURNEY_SUB_TAB = 'journeySubTab'
 const DESKTOP_SIDEBAR_ICON_RAIL_TRIGGER_WIDTH = 136
+const STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN = 'chatContextPanelHidden'
 
 export default function ResearchChat() {
   const router = useRouter()
@@ -112,6 +113,7 @@ export default function ResearchChat() {
   const collapseChats = settings.appearance.chatCollapseAllChats === true
   const collapseArtifactsInChat = settings.appearance.chatCollapseArtifactsInChat === true
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
+  const [chatContextPanelHidden, setChatContextPanelHidden] = useState(false)
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
   // API configuration for auth/connection check
@@ -141,6 +143,11 @@ export default function ResearchChat() {
       setJourneySubTab(storedJourneySubTab)
     }
 
+    const storedContextPanel = window.localStorage.getItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN)
+    if (storedContextPanel != null) {
+      setChatContextPanelHidden(storedContextPanel === 'true')
+    }
+
   }, [])
 
   useEffect(() => {
@@ -154,6 +161,10 @@ export default function ResearchChat() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY_JOURNEY_SUB_TAB, journeySubTab)
   }, [journeySubTab])
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(chatContextPanelHidden))
+  }, [chatContextPanelHidden])
 
   useEffect(() => {
     return () => {
@@ -731,6 +742,8 @@ export default function ResearchChat() {
               ...settings,
               appearance: { ...settings.appearance, chatCollapseAllChats: collapsed },
             })}
+            contextPanelVisible={!chatContextPanelHidden && settings.developer?.showChatContextPanel === true}
+            onContextPanelToggle={() => setChatContextPanelHidden(prev => !prev)}
             reportIsPreviewMode={reportToolbar?.isPreviewMode ?? true}
             onReportPreviewModeChange={reportToolbar?.setPreviewMode}
             onReportAddCell={reportToolbar?.addCell}
@@ -759,6 +772,8 @@ export default function ResearchChat() {
                 contextTokenCount={contextTokenCount}
                 onRefreshContext={handleRefreshExperimentState}
                 scrollToRoundRef={scrollToRoundRef}
+                contextPanelHidden={chatContextPanelHidden}
+                onContextPanelHiddenChange={setChatContextPanelHidden}
               />
             )}
             {activeTab === 'runs' && (
