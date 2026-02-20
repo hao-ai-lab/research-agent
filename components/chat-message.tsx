@@ -811,6 +811,7 @@ function SavedPartRenderer({
 
   if (part.type === 'tool') {
     const durationLabel = formatToolDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
+    const toolView = buildSavedToolViewModel(part.toolName, part.toolInput)
 
     const getStatusIcon = () => {
       switch (part.toolState) {
@@ -836,12 +837,26 @@ function SavedPartRenderer({
       }
     }
 
-    const toolContent = (part.toolInput || part.toolOutput || part.content) ? (
+    const toolContent = (toolView.description || toolView.command || toolView.args || part.toolOutput || part.content) ? (
       <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
-        {part.toolInput && (
+        {toolView.description && (
           <div>
-            <span className="font-medium text-foreground/70">Input:</span>
-            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
+            <span className="font-medium text-foreground/70">Description:</span>{' '}
+            <span>{toolView.description}</span>
+          </div>
+        )}
+        {toolView.command && (
+          <div>
+            <span className="font-medium text-foreground/70">Command:</span>
+            <div className="mt-1">
+              <CodeOutputBox language={toolView.commandLanguage} code={toolView.command} />
+            </div>
+          </div>
+        )}
+        {toolView.args && (
+          <div>
+            <span className="font-medium text-foreground/70">Arguments:</span>
+            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{toolView.args}</pre>
           </div>
         )}
         {part.toolOutput && (
@@ -892,9 +907,9 @@ function SavedPartRenderer({
             {getStatusText()}
           </span>
           {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
-          {!isOpen && part.toolInput && (
-            <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.toolInput}>
-              — {part.toolInput.slice(0, 60)}{part.toolInput.length > 60 ? '…' : ''}
+          {!isOpen && toolView.summary && (
+            <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={toolView.summary}>
+              — {toolView.summary.slice(0, 60)}{toolView.summary.length > 60 ? '…' : ''}
             </span>
           )}
         </CollapsibleTrigger>
@@ -930,4 +945,58 @@ function formatToolDuration(durationMs?: number, startedAt?: number, endedAt?: n
   if (derived == null) return null
   if (derived < 1000) return `${derived}ms`
   return `${(derived / 1000).toFixed(2)}s`
+}
+
+function buildSavedToolViewModel(toolName?: string, toolInput?: string): {
+  description?: string
+  command?: string
+  commandLanguage: string
+  args?: string
+  summary?: string
+} {
+  const trimmedInput = toolInput?.trim() || ''
+  const lowerToolName = (toolName || '').toLowerCase()
+  const isBashLike = lowerToolName === 'bash' || lowerToolName.includes('bash') || lowerToolName.includes('shell')
+
+  let parsedInput: Record<string, unknown> | null = null
+  if (trimmedInput.startsWith('{') && trimmedInput.endsWith('}')) {
+    try {
+      const candidate = JSON.parse(trimmedInput)
+      if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+        parsedInput = candidate as Record<string, unknown>
+      }
+    } catch {
+      parsedInput = null
+    }
+  }
+
+  const description = typeof parsedInput?.description === 'string' ? parsedInput.description : undefined
+  const command = typeof parsedInput?.command === 'string' ? parsedInput.command : undefined
+  const commandLanguage = isBashLike ? 'bash' : 'text'
+
+  let args: string | undefined
+  if (parsedInput) {
+    const argsPayload: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(parsedInput)) {
+      if (key === 'description' || key === 'command') continue
+      argsPayload[key] = value
+    }
+    if (Object.keys(argsPayload).length > 0) {
+      args = JSON.stringify(argsPayload, null, 2)
+    }
+  } else if (trimmedInput && !command) {
+    args = trimmedInput
+  }
+
+  const summary = isBashLike
+    ? description
+    : (description || command || args)
+
+  return {
+    description,
+    command,
+    commandLanguage,
+    args,
+    summary,
+  }
 }

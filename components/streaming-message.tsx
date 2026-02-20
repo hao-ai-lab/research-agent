@@ -202,6 +202,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
     const state = part.toolState || 'pending'
     const durationLabel = formatDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
     const length_to_show = 150
+    const toolView = buildToolViewModel(part.toolName, part.toolDescription, part.toolInput)
 
     // Auto-collapse when tool finishes (completed or error) — only if in collapse/expand mode
     useEffect(() => {
@@ -215,16 +216,24 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
 
     const toolContentBlock = (
         <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
-            {part.toolDescription && (
+            {toolView.description && (
                 <div>
                     <span className="font-medium text-foreground/70">Description:</span>{' '}
-                    <span>{part.toolDescription}</span>
+                    <span>{toolView.description}</span>
                 </div>
             )}
-            {part.toolInput && (
+            {toolView.command && (
                 <div>
-                    <span className="font-medium text-foreground/70">Input:</span>
-                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
+                    <span className="font-medium text-foreground/70">Command:</span>
+                    <div className="mt-1">
+                        <CodeOutputBox language={toolView.commandLanguage} code={toolView.command} />
+                    </div>
+                </div>
+            )}
+            {toolView.args && (
+                <div>
+                    <span className="font-medium text-foreground/70">Arguments:</span>
+                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{toolView.args}</pre>
                 </div>
             )}
             {part.toolOutput && (
@@ -272,9 +281,9 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                     {getToolStateLabel(state)}
                 </span>
                 {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
-                {!isOpen && (part.toolDescription || part.toolInput) && (
-                    <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.toolDescription || part.toolInput}>
-                        — {(part.toolDescription || part.toolInput || '').slice(0, length_to_show)}{(part.toolDescription || part.toolInput || '').length > length_to_show ? '…' : ''}
+                {!isOpen && toolView.summary && (
+                    <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={toolView.summary}>
+                        — {toolView.summary.slice(0, length_to_show)}{toolView.summary.length > length_to_show ? '…' : ''}
                     </span>
                 )}
             </CollapsibleTrigger>
@@ -325,6 +334,66 @@ function ToolStateIcon({ state }: { state: string }) {
             return <AlertCircle className="h-3 w-3 text-red-500" />
         default:
             return <Wrench className="h-3 w-3" />
+    }
+}
+
+type ToolViewModel = {
+    description?: string
+    command?: string
+    commandLanguage: string
+    args?: string
+    summary?: string
+}
+
+function buildToolViewModel(toolName?: string, toolDescription?: string, toolInput?: string): ToolViewModel {
+    const trimmedInput = toolInput?.trim() || ''
+    const lowerToolName = (toolName || '').toLowerCase()
+    const isBashLike = lowerToolName === 'bash' || lowerToolName.includes('bash') || lowerToolName.includes('shell')
+
+    let parsedInput: Record<string, unknown> | null = null
+    if (trimmedInput.startsWith('{') && trimmedInput.endsWith('}')) {
+        try {
+            const candidate = JSON.parse(trimmedInput)
+            if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+                parsedInput = candidate as Record<string, unknown>
+            }
+        } catch {
+            parsedInput = null
+        }
+    }
+
+    const description = (
+        toolDescription ||
+        (typeof parsedInput?.description === 'string' ? parsedInput.description : undefined)
+    )
+
+    const command = typeof parsedInput?.command === 'string' ? parsedInput.command : undefined
+    const commandLanguage = isBashLike ? 'bash' : 'text'
+
+    let args: string | undefined
+    if (parsedInput) {
+        const argsPayload: Record<string, unknown> = {}
+        for (const [key, value] of Object.entries(parsedInput)) {
+            if (key === 'description' || key === 'command') continue
+            argsPayload[key] = value
+        }
+        if (Object.keys(argsPayload).length > 0) {
+            args = JSON.stringify(argsPayload, null, 2)
+        }
+    } else if (trimmedInput && !command) {
+        args = trimmedInput
+    }
+
+    const summary = isBashLike
+        ? description
+        : (description || command || args)
+
+    return {
+        description,
+        command,
+        commandLanguage,
+        args,
+        summary,
     }
 }
 
