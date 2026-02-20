@@ -62,43 +62,7 @@ const HELP_TOPICS = [
                 </ul>
             </div>
         ),
-    },
-    {
-        id: 'insights',
-        icon: Lightbulb,
-        title: 'Insights & Memory',
-        content: (
-            <div className="space-y-4">
-                <p>The system learns from past experiments to give you better advice.</p>
-                <ul className="list-disc pl-5 space-y-2">
-                    <li><strong>Heuristics:</strong> Discovered rules and best practices are stored here.</li>
-                    <li><strong>Contextual Awareness:</strong> These insights are automatically retrieved when you ask related questions in Chat.</li>
-                </ul>
-            </div>
-        ),
-    },
-    {
-        id: 'terminal',
-        icon: Terminal,
-        title: 'Terminal Integration',
-        content: (
-            <div className="space-y-4">
-                <p>A built-in terminal for running custom scripts or managing the environment.</p>
-                <p>The assistant can also read terminal outputs to help debug issues if you ask it to.</p>
-            </div>
-        ),
-    },
-    {
-        id: 'journey',
-        icon: Sparkles,
-        title: 'Our Journey',
-        content: (
-            <div className="space-y-4">
-                <p>A high-level overview of your research progress and milestone achievements.</p>
-                <p>You can use this to quickly catch up on where the project stands and what was tried recently.</p>
-            </div>
-        ),
-    },
+    }
 ]
 
 interface OnboardingHelpDialogProps {
@@ -113,7 +77,7 @@ export function OnboardingHelpDialog({ open, onOpenChange }: OnboardingHelpDialo
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl p-0 h-[80vh] flex flex-col overflow-hidden gap-0">
+            <DialogContent className="max-w-6xl p-0 h-[85vh] flex flex-col overflow-hidden gap-0">
                 <DialogHeader className="px-6 py-4 border-b border-border/60 shrink-0">
                     <DialogTitle className="text-xl">Help & Documentation</DialogTitle>
                     <DialogDescription>
@@ -134,8 +98,8 @@ export function OnboardingHelpDialog({ open, onOpenChange }: OnboardingHelpDialo
                                             key={topic.id}
                                             onClick={() => setActiveTopicId(topic.id)}
                                             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors text-left ${isActive
-                                                    ? 'bg-primary/10 text-primary font-medium'
-                                                    : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                                                ? 'bg-primary/10 text-primary font-medium'
+                                                : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
                                                 }`}
                                         >
                                             <Icon className="h-4 w-4 shrink-0" />
