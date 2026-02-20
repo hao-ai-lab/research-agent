@@ -214,8 +214,7 @@ export function RunsView({
   const [runCreateWorkdir, setRunCreateWorkdir] = useState('')
   const [runCreateSweepId, setRunCreateSweepId] = useState<string>('none')
   const [runCreateAutoStart, setRunCreateAutoStart] = useState(true)
-  const [runCreateGpuwrapEnabled, setRunCreateGpuwrapEnabled] = useState(false)
-  const [runCreateGpuwrapAdvancedOpen, setRunCreateGpuwrapAdvancedOpen] = useState(false)
+  const [runCreateGpuwrapEnabled, setRunCreateGpuwrapEnabled] = useState(cluster?.type === 'local_gpu')
   const [runCreateGpuwrapRetriesInfinite, setRunCreateGpuwrapRetriesInfinite] = useState(true)
   const [runCreateGpuwrapRetries, setRunCreateGpuwrapRetries] = useState('0')
   const [runCreateGpuwrapRetryDelaySeconds, setRunCreateGpuwrapRetryDelaySeconds] = useState('5')
@@ -783,14 +782,13 @@ export function RunsView({
     setRunCreateWorkdir('')
     setRunCreateSweepId('none')
     setRunCreateAutoStart(true)
-    setRunCreateGpuwrapEnabled(false)
-    setRunCreateGpuwrapAdvancedOpen(false)
+    setRunCreateGpuwrapEnabled(cluster?.type === 'local_gpu')
     setRunCreateGpuwrapRetriesInfinite(true)
     setRunCreateGpuwrapRetries('0')
     setRunCreateGpuwrapRetryDelaySeconds('5')
     setRunCreateError(null)
     setRunCreateSubmitting(false)
-  }, [])
+  }, [cluster?.type])
 
   const openCreateRunDialog = useCallback(() => {
     setRunDialogOpen(true)
@@ -2722,66 +2720,56 @@ export function RunsView({
             <div className="space-y-3 rounded-lg border border-border/70 bg-secondary/20 px-3 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-medium text-foreground">Use GPU Wrap</p>
+                  <p className="text-xs font-medium text-foreground">Local GPU Scheduling</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Sidecar selects all currently available GPUs and retries on contention.
+                    Automatically selects available GPUs and retries on contention.
                   </p>
                 </div>
                 <Switch checked={runCreateGpuwrapEnabled} onCheckedChange={setRunCreateGpuwrapEnabled} />
               </div>
               {runCreateGpuwrapEnabled && (
-                <div className="rounded-md border border-border/60 bg-background/70 px-2 py-2">
-                  <button
-                    type="button"
-                    onClick={() => setRunCreateGpuwrapAdvancedOpen((prev) => !prev)}
-                    className="flex w-full items-center justify-between text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    <span>Advanced GPU Wrap Settings</span>
-                    <span>{runCreateGpuwrapAdvancedOpen ? 'Hide' : 'Show'}</span>
-                  </button>
-                  {runCreateGpuwrapAdvancedOpen && (
-                    <div className="mt-2 space-y-2">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-muted-foreground">GPU Retries</label>
-                        <div className="flex items-center gap-2">
-                          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={runCreateGpuwrapRetriesInfinite}
-                              onChange={(e) => setRunCreateGpuwrapRetriesInfinite(e.target.checked)}
-                              className="h-3.5 w-3.5 rounded border-border"
-                            />
-                            ∞ Unlimited
-                          </label>
-                          {!runCreateGpuwrapRetriesInfinite && (
-                            <Input
-                              type="number"
-                              min={0}
-                              value={runCreateGpuwrapRetries}
-                              onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
-                              className="h-8 w-24 text-xs"
-                              placeholder="0"
-                            />
-                          )}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-muted-foreground">Retry Delay (sec)</label>
-                        <Input
-                          type="number"
-                          step="0.1"
-                          min={0.1}
-                          value={runCreateGpuwrapRetryDelaySeconds}
-                          onChange={(event) => setRunCreateGpuwrapRetryDelaySeconds(event.target.value)}
-                          className="h-8 text-xs"
-                        />
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-muted-foreground">GPU Retries</label>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={runCreateGpuwrapRetriesInfinite}
+                            onChange={(e) => setRunCreateGpuwrapRetriesInfinite(e.target.checked)}
+                            className="h-3.5 w-3.5 rounded border-border"
+                          />
+                          ∞ Unlimited
+                        </label>
+                        {!runCreateGpuwrapRetriesInfinite && (
+                          <Input
+                            type="number"
+                            min={0}
+                            value={runCreateGpuwrapRetries}
+                            onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
+                            className="h-8 w-24 text-xs"
+                            placeholder="0"
+                          />
+                        )}
                       </div>
                     </div>
-                  )}
-                  <div className="mt-2 text-[11px] text-muted-foreground">
-                    GPUs are considered available when no processes are running on them.
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-muted-foreground">Retry Delay (sec)</label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min={0.1}
+                        value={runCreateGpuwrapRetryDelaySeconds}
+                        onChange={(event) => setRunCreateGpuwrapRetryDelaySeconds(event.target.value)}
+                        className="h-8 text-xs"
+                      />
+                    </div>
                   </div>
-                </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    GPUs are considered available when no processes are running on them.
+                  </p>
+                </>
               )}
             </div>
             {runCreateError && (

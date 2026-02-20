@@ -128,6 +128,17 @@ def create_run(
         create_body["sweep_id"] = sweep_id.strip()
     if gpuwrap_config:
         create_body["gpuwrap_config"] = gpuwrap_config
+    else:
+        # Auto-enable gpuwrap for local GPU environments when caller
+        # doesn't specify it (e.g. agent-initiated runs).
+        try:
+            cluster_resp = _api_request("GET", "/cluster")
+            if isinstance(cluster_resp, dict):
+                cluster_info = cluster_resp.get("cluster") or cluster_resp
+                if cluster_info.get("type") == "local_gpu":
+                    create_body["gpuwrap_config"] = {"enabled": True}
+        except Exception:
+            pass  # Non-fatal — proceed without gpuwrap
 
     created_run = _api_request("POST", "/runs", payload=create_body)
     if not isinstance(created_run, dict):
