@@ -397,6 +397,16 @@ function detectStandaloneCode(content: string): { language: string; code: string
     return null
 }
 
+function isMarkdownTableSeparator(line: string): boolean {
+    return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)
+}
+
+function parseMarkdownTableRow(line: string): string[] {
+    const trimmed = line.trim()
+    const rawCells = trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|')
+    return rawCells.map((cell) => cell.trim())
+}
+
 /**
  * Streaming text renderer for markdown-like assistant output.
  */
@@ -417,6 +427,7 @@ function renderStreamingText(text: string): React.ReactNode {
     let codeContent = ''
     let codeLanguage = ''
     let codeKey = 0
+    let tableKey = 0
     let listType: 'ul' | 'ol' | null = null
     let listItems: string[] = []
 
@@ -472,6 +483,53 @@ function renderStreamingText(text: string): React.ReactNode {
         const orderedItemMatch = line.match(/^\d+\.\s+(.+)$/)
         const unorderedItemMatch = line.match(/^[-*+]\s+(.+)$/)
         const blockquoteMatch = line.match(/^>\s?(.*)$/)
+        const isHr = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)
+
+        if (
+            line.includes('|')
+            && i + 1 < lines.length
+            && isMarkdownTableSeparator(lines[i + 1])
+        ) {
+            flushList(`list-before-table-${i}`)
+            const currentTableKey = tableKey++
+            const headers = parseMarkdownTableRow(line)
+            i += 1 // Skip separator row
+            const bodyRows: string[][] = []
+            while (i + 1 < lines.length && lines[i + 1].includes('|') && lines[i + 1].trim() !== '') {
+                i += 1
+                bodyRows.push(parseMarkdownTableRow(lines[i]))
+            }
+
+            elements.push(
+                <div key={`table-${currentTableKey}`} className="my-2 w-full overflow-hidden">
+                    <table className="w-full table-fixed border-collapse text-sm">
+                        <thead>
+                            <tr className="border-b border-border/70">
+                                {headers.map((header, headerIndex) => (
+                                    <th key={`th-${headerIndex}`} className="px-2 py-1 text-left font-semibold text-foreground break-words [overflow-wrap:anywhere]">
+                                        {renderStreamingInlineMarkdown(header, `table-head-${currentTableKey}-${headerIndex}`)}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        {bodyRows.length > 0 && (
+                            <tbody>
+                                {bodyRows.map((row, rowIndex) => (
+                                    <tr key={`tr-${rowIndex}`} className="border-b border-border/40">
+                                        {headers.map((_, colIndex) => (
+                                            <td key={`td-${rowIndex}-${colIndex}`} className="px-2 py-1 align-top text-foreground/90 break-words [overflow-wrap:anywhere]">
+                                                {renderStreamingInlineMarkdown(row[colIndex] ?? '', `table-cell-${currentTableKey}-${rowIndex}-${colIndex}`)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        )}
+                    </table>
+                </div>
+            )
+            continue
+        }
 
         if (unorderedItemMatch) {
             if (listType !== 'ul') {
@@ -528,6 +586,10 @@ function renderStreamingText(text: string): React.ReactNode {
             )
             continue
         }
+        if (isHr) {
+            elements.push(<hr key={`hr-${i}`} className="my-2 border-border/60" />)
+            continue
+        }
         if (line.trim() === '') {
             elements.push(<div key={`spacer-${i}`} className="h-2" />)
             continue
@@ -578,7 +640,7 @@ function renderStreamingInlineMarkdown(text: string, keyPrefix: string): React.R
             elements.push(
                 <code
                     key={tokenKey}
-                    className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
+                    className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 break-all [overflow-wrap:anywhere] dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
                 >
                     {token.slice(1, -1)}
                 </code>

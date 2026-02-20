@@ -88,8 +88,8 @@ export function CodeOutputBox({ code, language }: CodeOutputBoxProps) {
           <span>{copied ? 'Copied' : 'Copy code'}</span>
         </Button>
       </div>
-      <div className="max-w-full overflow-x-auto">
-        <pre className="code-output-box m-0 w-max min-w-full whitespace-pre break-normal p-3 font-mono text-sm leading-relaxed [overflow-wrap:normal]">
+      <div className="max-w-full overflow-hidden">
+        <pre className="code-output-box m-0 w-full whitespace-pre-wrap break-words p-3 font-mono text-sm leading-relaxed [overflow-wrap:anywhere]">
           <code
             className={`language-${prismLanguage}`}
             dangerouslySetInnerHTML={highlightedCode ? { __html: highlightedCode } : undefined}
