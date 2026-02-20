@@ -609,9 +609,6 @@ export function ConnectedChatView({
                 layout={layout}
                 skills={skills}
                 isWildLoopActive={wildLoop?.isActive ?? false}
-                wildLoopPaused={wildLoop?.isPaused ?? false}
-                onWildPause={wildLoop ? () => wildLoop.pause() : undefined}
-                onWildResume={wildLoop ? () => wildLoop.resume() : undefined}
                 onWildStop={wildLoop ? () => wildLoop.stop() : undefined}
                 onSteer={wildLoop ? (msg) => {
                     wildLoop.steer(msg)

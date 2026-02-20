@@ -16,7 +16,6 @@ import {
   MicOff,
   Sparkles,
   Play,
-  Pause,
   Square,
   AlertTriangle,
   BarChart3,
@@ -30,7 +29,7 @@ import {
   Cpu,
   Check,
   MoreHorizontal,
-  Lock,
+  Navigation,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -108,9 +107,6 @@ interface ChatInputProps {
   skills?: PromptSkill[]
   // Wild loop steer support
   isWildLoopActive?: boolean
-  wildLoopPaused?: boolean
-  onWildPause?: () => void
-  onWildResume?: () => void
   onWildStop?: () => void
   onSteer?: (message: string, priority: number) => void
   onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void
@@ -162,9 +158,6 @@ export function ChatInput({
   layout = 'docked',
   skills = [],
   isWildLoopActive = false,
-  wildLoopPaused = false,
-  onWildPause,
-  onWildResume,
   onWildStop,
   onSteer,
   onOpenReplyExcerpt,
@@ -1212,8 +1205,8 @@ export function ChatInput({
                       type="button"
                       onClick={() => setMentionFilter(type)}
                       className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${mentionFilter === type
-                          ? 'border-transparent'
-                          : 'border-transparent text-muted-foreground hover:bg-secondary'
+                        ? 'border-transparent'
+                        : 'border-transparent text-muted-foreground hover:bg-secondary'
                         }`}
                       style={
                         mentionFilter === type
@@ -1353,16 +1346,16 @@ export function ChatInput({
                             onModeChange(nextMode)
                           }}
                           className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${nextMode === 'agent'
+                            ? mode === nextMode
+                              ? 'border-border/60 bg-secondary text-foreground'
+                              : 'border-border/40 text-foreground/80 hover:bg-secondary/70'
+                            : nextMode === 'plan'
                               ? mode === nextMode
-                                ? 'border-border/60 bg-secondary text-foreground'
-                                : 'border-border/40 text-foreground/80 hover:bg-secondary/70'
-                              : nextMode === 'plan'
-                                ? mode === nextMode
-                                  ? 'border-orange-500/45 bg-orange-500/18 text-orange-300'
-                                  : 'border-orange-500/25 bg-orange-500/8 text-orange-300/80 hover:bg-orange-500/14'
-                                : mode === nextMode
-                                  ? 'border-violet-500/45 bg-violet-500/18 text-violet-300'
-                                  : 'border-violet-500/25 bg-violet-500/8 text-violet-300/80 hover:bg-violet-500/14'
+                                ? 'border-orange-500/45 bg-orange-500/18 text-orange-300'
+                                : 'border-orange-500/25 bg-orange-500/8 text-orange-300/80 hover:bg-orange-500/14'
+                              : mode === nextMode
+                                ? 'border-violet-500/45 bg-violet-500/18 text-violet-300'
+                                : 'border-violet-500/25 bg-violet-500/8 text-violet-300/80 hover:bg-violet-500/14'
                             }`}
                         >
                           {nextMode === 'agent' ? 'Agent' : nextMode === 'plan' ? 'Plan' : 'Wild'}
@@ -1441,24 +1434,20 @@ export function ChatInput({
           ) : (
             <>
               {/* Mode toggle */}
-              <Popover open={isModeOpen && !isWildLoopActive} onOpenChange={setIsModeOpen}>
+              <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    disabled={isWildLoopActive}
-                    className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${isWildLoopActive
-                        ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300 cursor-not-allowed opacity-70'
-                        : mode === 'agent'
-                          ? 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
-                          : mode === 'wild'
-                            ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
-                            : mode === 'plan'
-                              ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
-                              : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
+                    className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${mode === 'agent'
+                        ? 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
+                        : mode === 'wild'
+                          ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
+                          : mode === 'plan'
+                            ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
+                            : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
                       }`}
-                    title={isWildLoopActive ? 'Mode locked during wild loop' : 'Select mode'}
                   >
-                    {isWildLoopActive ? <Lock className="h-3 w-3" /> : mode === 'agent' ? <MessageSquare className="h-3 w-3" /> : mode === 'wild' ? <Zap className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
+                    {mode === 'agent' ? <MessageSquare className="h-3 w-3" /> : mode === 'wild' ? <Zap className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
                     {mode === 'wild' ? 'Wild' : mode === 'plan' ? 'Plan' : 'Agent'}
                   </button>
                 </PopoverTrigger>
@@ -1619,38 +1608,16 @@ export function ChatInput({
               Stop
             </Button>
           )}
-          {isWildLoopActive && !isStreaming && (
-            <>
-              {wildLoopPaused ? (
-                <Button
-                  onClick={onWildResume}
-                  size="sm"
-                  className="h-9 gap-1.5 px-3 text-xs bg-violet-600 hover:bg-violet-700 text-white"
-                >
-                  <Play className="h-3 w-3" />
-                  Resume
-                </Button>
-              ) : (
-                <Button
-                  onClick={onWildPause}
-                  variant="outline"
-                  size="sm"
-                  className="h-9 gap-1.5 px-3 text-xs border-violet-500/40 text-violet-400 hover:bg-violet-500/10"
-                >
-                  <Pause className="h-3 w-3" />
-                  Pause
-                </Button>
-              )}
-              <Button
-                onClick={onWildStop}
-                variant="outline"
-                size="sm"
-                className="h-9 gap-1.5 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
-              >
-                <Square className="h-3 w-3" />
-                Stop
-              </Button>
-            </>
+          {isWildLoopActive && !isStreaming && onWildStop && (
+            <Button
+              onClick={onWildStop}
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+            >
+              <Square className="h-3 w-3" />
+              Stop
+            </Button>
           )}
 
           {/* Priority selector */}
@@ -1725,14 +1692,14 @@ export function ChatInput({
           <Button
             onClick={handleSubmit}
             disabled={!message.trim() && attachments.length === 0 && !replyExcerpt}
-            size="icon"
+            size={isWildLoopActive && onSteer ? 'sm' : 'icon'}
             className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${isStreaming && onQueue
-                ? 'bg-amber-500 text-white hover:bg-amber-600'
-                : isWildLoopActive && onSteer
-                  ? 'bg-orange-500 text-white hover:bg-orange-600'
-                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
+              ? 'bg-amber-500 text-white hover:bg-amber-600'
+              : isWildLoopActive && onSteer
+                ? 'bg-violet-600 text-white hover:bg-violet-700 gap-1.5 px-3'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90'
               }`}
-            title={`Send with priority P${steerPriority}`}
+            title={isWildLoopActive && onSteer ? `Steer with priority P${steerPriority}` : `Send with priority P${steerPriority}`}
           >
             {isStreaming && onQueue ? (
               <>
@@ -1744,7 +1711,10 @@ export function ChatInput({
                 )}
               </>
             ) : isWildLoopActive && onSteer ? (
-              <Send />
+              <>
+                <Navigation className="h-3.5 w-3.5" />
+                Steer
+              </>
             ) : (
               <Send />
             )}
