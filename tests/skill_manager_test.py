@@ -28,6 +28,7 @@ _spec.loader.exec_module(_server_mod)
 
 PromptSkillManager = _server_mod.PromptSkillManager
 INTERNAL_SKILL_IDS = _server_mod.INTERNAL_SKILL_IDS
+INTERNAL_SKILL_PREFIXES = _server_mod.INTERNAL_SKILL_PREFIXES
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -80,6 +81,22 @@ class TestInternalFlag:
         """Smoke test that the expected internal IDs exist."""
         expected = {"ra_mode_plan"}
         assert INTERNAL_SKILL_IDS == expected
+
+    def test_wild_v2_skills_are_internal(self, manager, tmp_skills_dir):
+        """Skills with wild_v2_ prefix should be marked as internal."""
+        wild_dir = tmp_skills_dir / "wild_v2_planning"
+        wild_dir.mkdir()
+        (wild_dir / "SKILL.md").write_text(
+            "---\nname: Wild V2 Planning\ndescription: Planning skill\ncategory: prompt\n---\nTemplate body.\n"
+        )
+        manager.load_all()
+        skill = manager.get("wild_v2_planning")
+        assert skill is not None
+        assert skill["internal"] is True
+
+    def test_wild_v2_prefix_in_prefixes(self):
+        """Ensure wild_v2_ is registered as an internal prefix."""
+        assert "wild_v2_" in INTERNAL_SKILL_PREFIXES
 
 
 # ---------------------------------------------------------------------------

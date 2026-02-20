@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
   File,
   FileText,
   FolderOpen,
-  GitBranch,
   Plus,
   RefreshCcw,
   RotateCcw,
@@ -32,7 +33,6 @@ import {
   reloadPromptSkills,
   createSkill,
   deleteSkill,
-  installSkill,
   type PromptSkill,
   type SkillFileEntry,
 } from '@/lib/api'
@@ -78,6 +78,7 @@ export function SkillsBrowserView({
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showSystem, setShowSystem] = useState(false)
 
   // Editor state
   const [editorContent, setEditorContent] = useState('')
@@ -86,16 +87,13 @@ export function SkillsBrowserView({
   const [selectedSkill, setSelectedSkill] = useState<PromptSkill | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Create skill state
+  // Create skill state — shown in right panel
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [newSkillName, setNewSkillName] = useState('')
   const [newSkillDesc, setNewSkillDesc] = useState('')
+  const [newSkillCategory, setNewSkillCategory] = useState<'skill' | 'prompt'>('skill')
+  const [newSkillTemplate, setNewSkillTemplate] = useState('')
   const [creating, setCreating] = useState(false)
-
-  // Install skill state
-  const [showInstallForm, setShowInstallForm] = useState(false)
-  const [installUrl, setInstallUrl] = useState('')
-  const [installing, setInstalling] = useState(false)
 
   // Delete confirmation state
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -154,17 +152,26 @@ export function SkillsBrowserView({
     setCreating(true)
     setError(null)
     try {
-      await createSkill({ name: newSkillName.trim(), description: newSkillDesc.trim() })
+      await createSkill({
+        name: newSkillName.trim(),
+        description: newSkillDesc.trim(),
+        category: newSkillCategory,
+        template: newSkillTemplate,
+      })
       setShowCreateForm(false)
       setNewSkillName('')
       setNewSkillDesc('')
+      setNewSkillCategory('skill')
+      setNewSkillTemplate('')
+      setSelected(null)
+      setSelectedSkill(null)
       await loadSkills()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create skill')
     } finally {
       setCreating(false)
     }
-  }, [newSkillName, newSkillDesc, loadSkills])
+  }, [newSkillName, newSkillDesc, newSkillCategory, newSkillTemplate, loadSkills])
 
   const handleDelete = useCallback(async (skillId: string) => {
     setDeleting(true)
@@ -186,22 +193,6 @@ export function SkillsBrowserView({
     }
   }, [selected, loadSkills])
 
-  const handleInstall = useCallback(async () => {
-    if (!installUrl.trim()) return
-    setInstalling(true)
-    setError(null)
-    try {
-      await installSkill({ source: 'git', url: installUrl.trim() })
-      setShowInstallForm(false)
-      setInstallUrl('')
-      await loadSkills()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to install skill')
-    } finally {
-      setInstalling(false)
-    }
-  }, [installUrl, loadSkills])
-
   // --------------------------------------------------------------------------
   // Tree building
   // --------------------------------------------------------------------------
@@ -210,6 +201,8 @@ export function SkillsBrowserView({
     const query = search.toLowerCase()
     return skills
       .filter((skill) => {
+        // Filter system skills
+        if (!showSystem && skill.internal) return false
         if (!query) return true
         return (
           skill.id.toLowerCase().includes(query) ||
@@ -237,7 +230,11 @@ export function SkillsBrowserView({
           ),
         }
       })
-  }, [skills, filesBySkill, search])
+  }, [skills, filesBySkill, search, showSystem])
+
+  // Count for header
+  const visibleCount = treeNodes.length
+  const systemCount = skills.filter((s) => s.internal).length
 
   // --------------------------------------------------------------------------
   // Selection handlers
@@ -245,6 +242,7 @@ export function SkillsBrowserView({
 
   const handleSelectSkill = useCallback(
     (skill: PromptSkill) => {
+      setShowCreateForm(false)
       setSelected({ type: 'skill', skillId: skill.id })
       setSelectedSkill(skill)
       setEditorContent(skill.template)
@@ -255,6 +253,7 @@ export function SkillsBrowserView({
 
   const handleSelectFile = useCallback(
     async (skillId: string, filePath: string) => {
+      setShowCreateForm(false)
       setSelected({ type: 'file', skillId, filePath })
       setSelectedSkill(skills.find((s) => s.id === skillId) || null)
       try {
@@ -343,10 +342,10 @@ export function SkillsBrowserView({
         <div
           role="button"
           tabIndex={0}
-          className={`group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors cursor-pointer select-none ${isSelected
+          className={`group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${isSelected
             ? 'bg-cyan-500/14 text-cyan-100 ring-1 ring-cyan-400/35'
             : 'text-foreground/80 hover:bg-secondary/60 hover:text-foreground'
-            }`}
+            } cursor-pointer`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => {
             if (node.type === 'skill') {
@@ -484,34 +483,17 @@ export function SkillsBrowserView({
             <p className="text-sm text-muted-foreground leading-relaxed">{selectedSkill.description}</p>
           )}
 
-          {/* Variable chips */}
+          {/* Variable chips — display only, no click action */}
           {selectedSkill.variables.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {selectedSkill.variables.map((v) => (
-                <button
+                <span
                   key={v}
-                  type="button"
-                  onClick={() => {
-                    const insertion = `{{${v}}}`
-                    const ta = textareaRef.current
-                    if (ta) {
-                      const pos = ta.selectionStart
-                      const before = editorContent.slice(0, pos)
-                      const after = editorContent.slice(pos)
-                      setEditorContent(before + insertion + after)
-                      setTimeout(() => {
-                        ta.focus()
-                        ta.setSelectionRange(pos + insertion.length, pos + insertion.length)
-                      }, 0)
-                    } else {
-                      setEditorContent((prev) => prev + insertion)
-                    }
-                  }}
-                  className="rounded-full border border-cyan-400/35 bg-cyan-500/12 px-2.5 py-0.5 text-[11px] font-mono text-cyan-200 hover:border-cyan-300/55 hover:bg-cyan-500/22 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45 transition-colors cursor-pointer"
-                  title={`Insert {{${v}}}`}
+                  className="rounded-full border border-cyan-400/35 bg-cyan-500/12 px-2.5 py-0.5 text-[11px] font-mono text-cyan-200"
+                  title={`Variable: {{${v}}}`}
                 >
                   {`{{${v}}}`}
-                </button>
+                </span>
               ))}
             </div>
           )}
@@ -635,6 +617,131 @@ export function SkillsBrowserView({
   }
 
   // --------------------------------------------------------------------------
+  // Render create skill form (shown in right panel)
+  // --------------------------------------------------------------------------
+
+  const renderCreateForm = () => {
+    return (
+      <div className="flex h-full flex-col">
+        {/* Header */}
+        <div className="border-b border-border/40 px-5 py-4">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10">
+              <Plus className="h-4.5 w-4.5 text-emerald-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold text-foreground">Create New Skill</h2>
+              <p className="text-xs text-muted-foreground">Define a new prompt skill with a template and variables.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Form */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Skill Name */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-foreground">
+              Skill Name <span className="text-destructive">*</span>
+            </label>
+            <input
+              type="text"
+              value={newSkillName}
+              onChange={(e) => setNewSkillName(e.target.value)}
+              placeholder="e.g. My Research Helper"
+              className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+              autoFocus
+            />
+            <p className="text-[11px] text-muted-foreground">
+              The name will be used to generate the skill ID (e.g. <span className="font-mono">my_research_helper</span>)
+            </p>
+          </div>
+
+          {/* Description */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-foreground">Description</label>
+            <input
+              type="text"
+              value={newSkillDesc}
+              onChange={(e) => setNewSkillDesc(e.target.value)}
+              placeholder="Brief description of what this skill does"
+              className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
+            />
+          </div>
+
+          {/* Category */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-foreground">Category</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setNewSkillCategory('skill')}
+                className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${newSkillCategory === 'skill'
+                  ? 'border-violet-400/50 bg-violet-500/15 text-violet-300'
+                  : 'border-border/50 bg-background text-muted-foreground hover:bg-secondary/60'
+                  }`}
+              >
+                <Wand2 className="h-3 w-3" />
+                Skill
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewSkillCategory('prompt')}
+                className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${newSkillCategory === 'prompt'
+                  ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-300'
+                  : 'border-border/50 bg-background text-muted-foreground hover:bg-secondary/60'
+                  }`}
+              >
+                <ScrollText className="h-3 w-3" />
+                Prompt
+              </button>
+            </div>
+          </div>
+
+          {/* Initial Template */}
+          <div className="space-y-1.5 flex-1 min-h-0 flex flex-col">
+            <label className="text-xs font-medium text-foreground">Initial Template</label>
+            <textarea
+              value={newSkillTemplate}
+              onChange={(e) => setNewSkillTemplate(e.target.value)}
+              placeholder={`Write your template here...\nUse {{variable_name}} for dynamic placeholders.`}
+              className="flex-1 min-h-[200px] w-full rounded-lg border border-border/50 bg-background/50 p-4 text-[13px] font-mono text-foreground resize-y focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/30 leading-relaxed"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center justify-end gap-2 border-t border-border/40 px-5 py-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setShowCreateForm(false)
+              setNewSkillName('')
+              setNewSkillDesc('')
+              setNewSkillCategory('skill')
+              setNewSkillTemplate('')
+            }}
+            className="text-xs h-7"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            disabled={!newSkillName.trim() || creating}
+            onClick={handleCreate}
+            className="text-xs h-7"
+          >
+            <Plus className="h-3 w-3 mr-1.5" />
+            {creating ? 'Creating…' : 'Create Skill'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // --------------------------------------------------------------------------
   // Main render
   // --------------------------------------------------------------------------
 
@@ -662,114 +769,65 @@ export function SkillsBrowserView({
                 <Wand2 className="h-4 w-4 text-violet-400" />
                 <span className="text-sm font-semibold text-foreground">Prompt Skills Library</span>
                 <span className="text-[10px] text-muted-foreground tabular-nums">
-                  {skills.length}
+                  {visibleCount}
                 </span>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleReload}
-                title="Reload skills from disk"
-                className="h-7 w-7 p-0"
-              >
-                <RefreshCcw className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-1.5 px-3 pb-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowCreateForm(true)}
-                className="flex-1 text-xs h-7 gap-1"
-              >
-                <Plus className="h-3 w-3" />
-                New
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowInstallForm(true)}
-                className="flex-1 text-xs h-7 gap-1"
-              >
-                <GitBranch className="h-3 w-3" />
-                Install
-              </Button>
-            </div>
-
-            {/* Create skill inline form */}
-            {showCreateForm && (
-              <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
-                <input
-                  type="text"
-                  value={newSkillName}
-                  onChange={(e) => setNewSkillName(e.target.value)}
-                  placeholder="Skill name"
-                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-                  autoFocus
-                />
-                <input
-                  type="text"
-                  value={newSkillDesc}
-                  onChange={(e) => setNewSkillDesc(e.target.value)}
-                  placeholder="Description (optional)"
-                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-                />
-                <div className="flex gap-1.5">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => { setShowCreateForm(false); setNewSkillName(''); setNewSkillDesc('') }}
-                    className="flex-1 text-xs h-7"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    disabled={!newSkillName.trim() || creating}
-                    onClick={handleCreate}
-                    className="flex-1 text-xs h-7"
-                  >
-                    {creating ? 'Creating…' : 'Create'}
-                  </Button>
-                </div>
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowCreateForm(true)
+                        setSelected(null)
+                        setSelectedSkill(null)
+                      }}
+                      className="h-7 w-7 p-0"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6} className="text-[11px]">
+                    Create new skill
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleReload}
+                      className="h-7 w-7 p-0"
+                    >
+                      <RefreshCcw className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6} className="text-[11px]">
+                    Reload skills from disk
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowSystem((prev) => !prev)}
+                      className={`h-7 w-7 p-0 ${showSystem ? 'text-foreground bg-secondary/80' : 'text-muted-foreground'}`}
+                    >
+                      {showSystem ? (
+                        <Eye className="h-3.5 w-3.5" />
+                      ) : (
+                        <EyeOff className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6} className="text-[11px]">
+                    {showSystem ? 'Hide' : 'Show'} system skills ({systemCount})
+                  </TooltipContent>
+                </Tooltip>
               </div>
-            )}
-
-            {/* Install from Git inline form */}
-            {showInstallForm && (
-              <div className="border-b border-border/40 px-3 py-3 space-y-2 bg-secondary/20">
-                <input
-                  type="text"
-                  value={installUrl}
-                  onChange={(e) => setInstallUrl(e.target.value)}
-                  placeholder="Git repository URL"
-                  className="h-7 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-                  autoFocus
-                />
-                <div className="flex gap-1.5">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => { setShowInstallForm(false); setInstallUrl('') }}
-                    className="flex-1 text-xs h-7"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    disabled={!installUrl.trim() || installing}
-                    onClick={handleInstall}
-                    className="flex-1 text-xs h-7"
-                  >
-                    {installing ? 'Cloning…' : 'Clone & Install'}
-                  </Button>
-                </div>
-              </div>
-            )}
+            </div>
 
             {/* Delete confirmation */}
             {confirmDeleteId && (
@@ -795,8 +853,8 @@ export function SkillsBrowserView({
               </div>
             )}
 
-            {/* Search */}
-            <div className="px-3 py-2">
+            {/* Search + System filter */}
+            <div className="px-3 py-2 space-y-1.5">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -843,9 +901,11 @@ export function SkillsBrowserView({
         </ResizablePanel>
         <ResizableHandle withHandle className="bg-border/50 hover:bg-cyan-400/30 transition-colors" />
         <ResizablePanel defaultSize={70} minSize={52}>
-          {/* Right panel — editor / detail */}
+          {/* Right panel — editor / detail / create form */}
           <div className="h-full min-w-0 bg-background/50 overflow-hidden">
-            {!selected ? (
+            {showCreateForm ? (
+              renderCreateForm()
+            ) : !selected ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
                 <Wand2 className="h-10 w-10 opacity-20" />
                 <div className="text-center">
