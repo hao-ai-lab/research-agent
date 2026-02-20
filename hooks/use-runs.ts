@@ -91,6 +91,7 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         sweepParams: run.sweep_params ?? null,
         alias: metadata?.alias,
         command: run.command,
+        workdir: run.workdir,
         status,
         progress: run.progress ?? (status === 'running' ? 50 : status === 'completed' ? 100 : 0),
         createdAt,
@@ -120,6 +121,7 @@ function apiRunToExperimentRun(run: Run, metadata?: RunMetadata): ExperimentRun 
         exit_code: normalizedExitCode,
         error: run.error,
         wandb_dir: run.wandb_dir,
+        gpuwrap_config: run.gpuwrap_config ?? null,
     }
 }
 

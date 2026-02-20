@@ -87,6 +87,7 @@ import { useAppSettings } from '@/lib/app-settings'
 
 type DetailsView = 'time' | 'priority'
 type GroupByMode = 'none' | 'sweep'
+type RunDialogMode = 'create' | 'edit-frozen'
 const STORAGE_KEY_RUNS_VIEW_PREFERENCES = 'runsViewPreferences'
 const CHARTS_PAGE_SIZE = 12
 const SWEEPS_PAGE_SIZE = 8
@@ -208,6 +209,7 @@ export function RunsView({
   const [showVisibilityManage, setShowVisibilityManage] = useState(false)
   const [sweepDialogOpen, setSweepDialogOpen] = useState(false)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
+  const [runDialogMode, setRunDialogMode] = useState<RunDialogMode>('create')
   const [runCreateFromRunId, setRunCreateFromRunId] = useState<string | null>(null)
   const [runCreateName, setRunCreateName] = useState('')
   const [runCreateCommand, setRunCreateCommand] = useState('')
@@ -791,8 +793,26 @@ export function RunsView({
   }, [cluster?.type])
 
   const openCreateRunDialog = useCallback(() => {
+    setRunDialogMode('create')
+    resetCreateRunForm()
     setRunDialogOpen(true)
     setRunCreateError(null)
+  }, [resetCreateRunForm])
+
+  const openEditRunDialog = useCallback((run: ExperimentRun) => {
+    setRunDialogMode('edit-frozen')
+    setRunCreateFromRunId(run.id)
+    setRunCreateName(run.alias || run.name || '')
+    setRunCreateCommand(run.command || '')
+    setRunCreateWorkdir(run.workdir || '')
+    setRunCreateSweepId(run.sweepId || 'none')
+    setRunCreateAutoStart(run.status === 'ready' || run.status === 'queued')
+    setRunCreateGpuwrapEnabled(run.gpuwrap_config?.enabled === true)
+    setRunCreateGpuwrapRetriesInfinite(run.gpuwrap_config?.retries == null)
+    setRunCreateGpuwrapRetries(String(run.gpuwrap_config?.retries ?? 0))
+    setRunCreateGpuwrapRetryDelaySeconds(String(run.gpuwrap_config?.retry_delay_seconds ?? 5))
+    setRunCreateError(null)
+    setRunDialogOpen(true)
   }, [])
 
   const handleDuplicateRun = useCallback((runId: string) => {
@@ -1531,7 +1551,6 @@ export function RunsView({
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-foreground truncate"><RunName run={selectedRun} /></span>
                       {selectedRun.isFavorite && <Star className="h-3.5 w-3.5 text-yellow-500 fill-yellow-500 shrink-0" />}
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     </div>
                     <p className="text-xs text-muted-foreground truncate">
                       {selectedRun.config?.model}
@@ -1615,6 +1634,15 @@ export function RunsView({
               </Button>
             )}
             <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => openEditRunDialog(selectedRun)}
+              className="h-7 w-7 text-muted-foreground"
+              title="Edit Run (frozen)"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
               variant={selectedRunPendingAlerts > 0 ? 'default' : 'ghost'}
               size="icon"
               onClick={handleScrollToRunAlerts}
@@ -1671,6 +1699,7 @@ export function RunsView({
             alerts={selectedRunAlerts}
             onSweepSelect={(sweep) => handleSweepClick(sweep)}
             onUpdateRun={onUpdateRun}
+            onOpenEditRun={openEditRunDialog}
             allTags={allTags}
             onCreateTag={onCreateTag}
             sweeps={sweeps}
@@ -1984,6 +2013,7 @@ export function RunsView({
     failed: overview.failed,
     finished: overview.completed,
   }
+  const isRunDialogFrozen = runDialogMode === 'edit-frozen'
 
   // Overview view (default)
   return (
@@ -2611,55 +2641,61 @@ export function RunsView({
         <DialogContent className="max-w-xl p-0 overflow-hidden">
           <div className="border-b border-border px-5 py-4">
             <div className="flex items-center justify-between gap-2">
-              <DialogTitle className="text-sm font-semibold text-foreground">Create Run</DialogTitle>
-              <Select
-                value={runCreateFromRunId ?? undefined}
-                onValueChange={handleDuplicateRun}
-                disabled={sortedRunsForCreate.length === 0}
-              >
-                <SelectTrigger className={`h-7 w-auto gap-1 px-2 text-[11px] border-none ${runCreateFromRunId
-                  ? 'bg-accent/20 text-accent hover:bg-accent/30'
-                  : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
-                  }`}>
-                  <Copy className="h-3 w-3" />
-                  <span className="hidden sm:inline"><SelectValue placeholder="Create from..." /></span>
-                </SelectTrigger>
-                <SelectContent align="end" className="max-w-[360px]">
-                  <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    Create from run...
-                  </div>
-                  {sortedRunsForCreate.length === 0 ? (
-                    <div className="px-2 py-2 text-xs text-muted-foreground">No previous runs yet.</div>
-                  ) : (
-                    sortedRunsForCreate.map((run) => {
-                      const createdAt = run.createdAt || run.startTime
-                      const createdAtLabel = createdAt
-                        ? new Date(createdAt).toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                        : ''
-                      const runTitle = run.alias || run.name || run.id
+              <DialogTitle className="text-sm font-semibold text-foreground">
+                {isRunDialogFrozen ? 'Edit Run (Frozen)' : 'Create Run'}
+              </DialogTitle>
+              {!isRunDialogFrozen && (
+                <Select
+                  value={runCreateFromRunId ?? undefined}
+                  onValueChange={handleDuplicateRun}
+                  disabled={sortedRunsForCreate.length === 0}
+                >
+                  <SelectTrigger className={`h-7 w-auto gap-1 px-2 text-[11px] border-none ${runCreateFromRunId
+                    ? 'bg-accent/20 text-accent hover:bg-accent/30'
+                    : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                    }`}>
+                    <Copy className="h-3 w-3" />
+                    <span className="hidden sm:inline"><SelectValue placeholder="Create from..." /></span>
+                  </SelectTrigger>
+                  <SelectContent align="end" className="max-w-[360px]">
+                    <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      Create from run...
+                    </div>
+                    {sortedRunsForCreate.length === 0 ? (
+                      <div className="px-2 py-2 text-xs text-muted-foreground">No previous runs yet.</div>
+                    ) : (
+                      sortedRunsForCreate.map((run) => {
+                        const createdAt = run.createdAt || run.startTime
+                        const createdAtLabel = createdAt
+                          ? new Date(createdAt).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                          : ''
+                        const runTitle = run.alias || run.name || run.id
 
-                      return (
-                        <SelectItem key={run.id} value={run.id} className="text-xs">
-                          <div className="flex flex-col gap-0.5">
-                            <span className="font-medium">{runTitle}</span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {run.id}{createdAtLabel ? ` · ${createdAtLabel}` : ''}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      )
-                    })
-                  )}
-                </SelectContent>
-              </Select>
+                        return (
+                          <SelectItem key={run.id} value={run.id} className="text-xs">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-medium">{runTitle}</span>
+                              <span className="text-[10px] text-muted-foreground">
+                                {run.id}{createdAtLabel ? ` · ${createdAtLabel}` : ''}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        )
+                      })
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Create a single run and optionally attach it to an existing sweep.
+              {isRunDialogFrozen
+                ? 'Existing runs are frozen. Values are shown for reference.'
+                : 'Create a single run and optionally attach it to an existing sweep.'}
             </p>
           </div>
           <div className="space-y-4 px-5 py-4">
@@ -2670,6 +2706,7 @@ export function RunsView({
                 onChange={(event) => setRunCreateName(event.target.value)}
                 placeholder="mnist-baseline-run"
                 className="h-9 text-sm"
+                disabled={isRunDialogFrozen}
               />
             </div>
             <div className="space-y-1.5">
@@ -2679,6 +2716,7 @@ export function RunsView({
                 onChange={(event) => setRunCreateCommand(event.target.value)}
                 placeholder="python train.py --model ... --lr ..."
                 className="min-h-24 text-xs font-mono"
+                disabled={isRunDialogFrozen}
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -2689,11 +2727,12 @@ export function RunsView({
                   onChange={(event) => setRunCreateWorkdir(event.target.value)}
                   placeholder="/workspace/project"
                   className="h-9 text-sm"
+                  disabled={isRunDialogFrozen}
                 />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-foreground">Attach To Sweep</label>
-                <Select value={runCreateSweepId} onValueChange={setRunCreateSweepId}>
+                <Select value={runCreateSweepId} onValueChange={setRunCreateSweepId} disabled={isRunDialogFrozen}>
                   <SelectTrigger className="h-9 text-xs">
                     <SelectValue />
                   </SelectTrigger>
@@ -2715,7 +2754,7 @@ export function RunsView({
                   Start in queue immediately after creation
                 </p>
               </div>
-              <Switch checked={runCreateAutoStart} onCheckedChange={setRunCreateAutoStart} />
+              <Switch checked={runCreateAutoStart} onCheckedChange={setRunCreateAutoStart} disabled={isRunDialogFrozen} />
             </div>
             <div className="space-y-3 rounded-lg border border-border/70 bg-secondary/20 px-3 py-3">
               <div className="flex items-center justify-between">
@@ -2725,7 +2764,7 @@ export function RunsView({
                     Automatically selects available GPUs and retries on contention.
                   </p>
                 </div>
-                <Switch checked={runCreateGpuwrapEnabled} onCheckedChange={setRunCreateGpuwrapEnabled} />
+                <Switch checked={runCreateGpuwrapEnabled} onCheckedChange={setRunCreateGpuwrapEnabled} disabled={isRunDialogFrozen} />
               </div>
               {runCreateGpuwrapEnabled && (
                 <>
@@ -2739,6 +2778,7 @@ export function RunsView({
                             checked={runCreateGpuwrapRetriesInfinite}
                             onChange={(e) => setRunCreateGpuwrapRetriesInfinite(e.target.checked)}
                             className="h-3.5 w-3.5 rounded border-border"
+                            disabled={isRunDialogFrozen}
                           />
                           ∞ Unlimited
                         </label>
@@ -2750,6 +2790,7 @@ export function RunsView({
                             onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
                             className="h-8 w-24 text-xs"
                             placeholder="0"
+                            disabled={isRunDialogFrozen}
                           />
                         )}
                       </div>
@@ -2763,6 +2804,7 @@ export function RunsView({
                         value={runCreateGpuwrapRetryDelaySeconds}
                         onChange={(event) => setRunCreateGpuwrapRetryDelaySeconds(event.target.value)}
                         className="h-8 text-xs"
+                        disabled={isRunDialogFrozen}
                       />
                     </div>
                   </div>
@@ -2780,11 +2822,17 @@ export function RunsView({
           </div>
           <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
             <Button variant="outline" size="sm" onClick={() => setRunDialogOpen(false)} disabled={runCreateSubmitting}>
-              Cancel
+              {isRunDialogFrozen ? 'Close' : 'Cancel'}
             </Button>
-            <Button size="sm" onClick={() => { void handleSubmitCreateRun() }} disabled={runCreateSubmitting}>
-              {runCreateSubmitting ? 'Creating...' : 'Create Run'}
-            </Button>
+            {isRunDialogFrozen ? (
+              <Button size="sm" disabled>
+                Editing Disabled
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => { void handleSubmitCreateRun() }} disabled={runCreateSubmitting}>
+                {runCreateSubmitting ? 'Creating...' : 'Create Run'}
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

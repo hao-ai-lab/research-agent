@@ -8,6 +8,7 @@ import {
   Package,
   FileCode,
   Copy,
+  Eye,
   Check,
   ChevronDown,
   ChevronRight,
@@ -16,17 +17,16 @@ import {
   X,
   BarChart3,
   AlertTriangle,
-  Bell,
   ScrollText,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { getStatusText, getStatusBadgeClass } from '@/lib/status-utils'
-import { RunName } from './run-name'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Collapsible,
   CollapsibleContent,
@@ -40,7 +40,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   AreaChart,
   Area,
 } from 'recharts'
@@ -56,9 +55,47 @@ interface RunDetailViewProps {
   alerts?: Alert[]
   onSweepSelect?: (sweep: Sweep) => void
   onUpdateRun?: (run: ExperimentRun) => void
+  onOpenEditRun?: (run: ExperimentRun) => void
   allTags: TagDefinition[]
   onCreateTag?: (tag: TagDefinition) => void
   sweeps?: Sweep[]
+}
+
+type RunDetailFieldKey =
+  | 'aliasNotes'
+  | 'tags'
+  | 'chat'
+  | 'summary'
+  | 'gpuwrap'
+  | 'outcome'
+  | 'metrics'
+  | 'alerts'
+  | 'charts'
+  | 'logs'
+  | 'sidecarLogs'
+  | 'terminal'
+  | 'command'
+  | 'artifacts'
+
+type RunDetailFieldVisibility = Record<RunDetailFieldKey, boolean>
+
+const RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY = 'run-detail-field-visibility-v1'
+
+const DEFAULT_FIELD_VISIBILITY: RunDetailFieldVisibility = {
+  aliasNotes: true,
+  tags: true,
+  chat: false,
+  summary: true,
+  gpuwrap: true,
+  outcome: true,
+  metrics: true,
+  alerts: true,
+  charts: true,
+  logs: true,
+  sidecarLogs: true,
+  terminal: false,
+  command: true,
+  artifacts: false,
 }
 
 // Generate chart data from metricSeries (real data) with lossHistory fallback
@@ -208,11 +245,10 @@ function MetricChart({
   )
 }
 
-export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, allTags, onCreateTag, sweeps = [] }: RunDetailViewProps) {
+export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, onOpenEditRun, allTags, onCreateTag, sweeps = [] }: RunDetailViewProps) {
   const [copied, setCopied] = useState(false)
   const [copiedRunId, setCopiedRunId] = useState(false)
   const [copiedSweepId, setCopiedSweepId] = useState(false)
-  const [commandOpen, setCommandOpen] = useState(false)
   const [commandEditing, setCommandEditing] = useState(false)
   const [editedCommand, setEditedCommand] = useState(run.command)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
@@ -221,6 +257,8 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   const [notesOpen, setNotesOpen] = useState(false)
   const [editedNotes, setEditedNotes] = useState(run.notes || '')
   const [tagsDialogOpen, setTagsDialogOpen] = useState(false)
+  const [fieldsPopoverOpen, setFieldsPopoverOpen] = useState(false)
+  const [fieldVisibility, setFieldVisibility] = useState<RunDetailFieldVisibility>(DEFAULT_FIELD_VISIBILITY)
 
   // Charts state
   const [chartsOpen, setChartsOpen] = useState(false)
@@ -272,6 +310,26 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   }, [linkedSweepFromList, run.sweepId])
 
   const linkedSweep = linkedSweepFromList || linkedSweepFromApi
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem(RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Partial<RunDetailFieldVisibility>
+      setFieldVisibility((prev) => ({ ...prev, ...parsed }))
+    } catch {
+      // Ignore invalid persisted values.
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(
+      RUN_DETAIL_FIELD_VISIBILITY_STORAGE_KEY,
+      JSON.stringify(fieldVisibility)
+    )
+  }, [fieldVisibility])
 
   useEffect(() => {
     setEditedCommand(run.command)
@@ -428,222 +486,370 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
   }
 
   const terminalOutcome = getTerminalOutcome()
+  const metricEntries = run.metrics
+    ? Object.entries(run.metrics).filter(([key, val]) => typeof val === 'number' && !key.startsWith('_'))
+    : []
+  const gpuwrapEnabled = run.gpuwrap_config?.enabled === true
+
+  const toggleFieldVisibility = (field: RunDetailFieldKey) => {
+    setFieldVisibility((prev) => ({ ...prev, [field]: !prev[field] }))
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="p-3 space-y-3">
-            {/* Alias */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider shrink-0">Alias</span>
-              {aliasEditing ? (
-                <div className="flex items-center gap-1 flex-1">
-                  <Input
-                    value={editedAlias}
-                    onChange={(e) => setEditedAlias(e.target.value)}
-                    placeholder="Enter alias..."
-                    className="h-7 text-xs flex-1"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveAlias()
-                      if (e.key === 'Escape') handleCancelAlias()
-                    }}
-                  />
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleSaveAlias}>
-                    <Check className="h-3 w-3 text-green-500" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCancelAlias}>
-                    <X className="h-3 w-3 text-muted-foreground" />
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1 flex-1 min-w-0">
-                  {run.alias ? (
-                    <span className="text-sm font-medium truncate">{run.alias}</span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground italic">No alias set</span>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 shrink-0"
-                    onClick={() => setAliasEditing(true)}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                </div>
+            <div className="flex items-center justify-end gap-2">
+              {onOpenEditRun && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => onOpenEditRun(run)}
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </Button>
               )}
-            </div>
-
-            {/* Tags */}
-            <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto rounded-lg border border-border bg-card px-2 py-1.5">
-              {run.tags && run.tags.length > 0 ? (
-                run.tags.map((tagName) => {
-                  const tag = allTags.find((t) => t.name === tagName)
-                  return (
-                    <span
-                      key={tagName}
-                      className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                      style={{
-                        backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
-                        color: tag?.color || '#4ade80',
-                      }}
-                    >
-                      {tagName}
-                    </span>
-                  )
-                })
-              ) : (
-                <span className="text-[10px] text-muted-foreground">No tags</span>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 shrink-0"
-                onClick={() => setTagsDialogOpen(true)}
-              >
-                <Plus className="h-3 w-3" />
-              </Button>
-            </div>
-
-            {/* IDs */}
-            <div className="rounded-lg border border-border bg-card p-2 space-y-2">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Run ID</p>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0"
-                      onClick={() => copyValue(run.id, setCopiedRunId)}
-                    >
-                      {copiedRunId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                    </Button>
+              <Popover open={fieldsPopoverOpen} onOpenChange={setFieldsPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                    <Eye className="h-3 w-3" />
+                    Fields
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-56 p-2">
+                  <div className="space-y-1">
+                    {([
+                      ['aliasNotes', 'Alias & notes'],
+                      ['tags', 'Tags'],
+                      ['chat', 'Chat'],
+                      ['summary', 'Summary'],
+                      ['gpuwrap', 'GPU wrap'],
+                      ['outcome', 'Outcome'],
+                      ['metrics', 'Metrics'],
+                      ['alerts', 'Alerts'],
+                      ['charts', 'Charts'],
+                      ['logs', 'Logs'],
+                      ['sidecarLogs', 'Sidecar logs'],
+                      ['terminal', 'Terminal'],
+                      ['command', 'Command'],
+                      ['artifacts', 'Artifacts'],
+                    ] as Array<[RunDetailFieldKey, string]>).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-secondary"
+                        onClick={() => toggleFieldVisibility(key)}
+                      >
+                        <span>{label}</span>
+                        {fieldVisibility[key] ? <Check className="h-3.5 w-3.5 text-green-500" /> : <X className="h-3.5 w-3.5 text-muted-foreground" />}
+                      </button>
+                    ))}
                   </div>
-                  <p className="text-xs font-mono text-foreground truncate">{run.id}</p>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {fieldVisibility.aliasNotes && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-card p-2">
+                  <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Alias</div>
+                  {aliasEditing ? (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        value={editedAlias}
+                        onChange={(e) => setEditedAlias(e.target.value)}
+                        placeholder="Enter alias..."
+                        className="h-7 text-xs flex-1"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveAlias()
+                          if (e.key === 'Escape') handleCancelAlias()
+                        }}
+                      />
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleSaveAlias}>
+                        <Check className="h-3 w-3 text-green-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCancelAlias}>
+                        <X className="h-3 w-3 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 min-w-0">
+                      {run.alias ? (
+                        <span className="text-sm font-medium truncate">{run.alias}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">No alias set</span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 shrink-0"
+                        onClick={() => setAliasEditing(true)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
-                <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
-                    {run.sweepId && (
+                <div className="rounded-lg border border-border bg-card p-2">
+                  <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Notes</div>
+                  {notesOpen ? (
+                    <>
+                      <Textarea
+                        placeholder="Add notes about this run..."
+                        value={editedNotes}
+                        onChange={(e) => setEditedNotes(e.target.value)}
+                        className="min-h-[60px] text-xs resize-none"
+                      />
+                      <div className="mt-2 flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setNotesOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button size="sm" className="h-6 text-xs" onClick={handleSaveNotes}>
+                          Save
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setNotesOpen(true)}
+                      className="w-full text-left rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground hover:bg-secondary transition-colors"
+                    >
+                      {run.notes ? (
+                        <span className="line-clamp-2">{run.notes}</span>
+                      ) : (
+                        <span className="italic">Add notes...</span>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {fieldVisibility.tags && (
+              <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto rounded-lg border border-border bg-card px-2 py-1.5">
+                {run.tags && run.tags.length > 0 ? (
+                  run.tags.map((tagName) => {
+                    const tag = allTags.find((t) => t.name === tagName)
+                    return (
+                      <span
+                        key={tagName}
+                        className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                        style={{
+                          backgroundColor: tag ? `${tag.color}20` : '#4ade8020',
+                          color: tag?.color || '#4ade80',
+                        }}
+                      >
+                        {tagName}
+                      </span>
+                    )
+                  })
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">No tags</span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 shrink-0"
+                  onClick={() => setTagsDialogOpen(true)}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+
+            {fieldVisibility.chat && (
+              <div className="rounded-lg border border-border bg-card p-2 text-xs">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Chat Session</p>
+                <p className="mt-1 font-mono text-foreground">{run.chatSessionId || 'Not linked'}</p>
+              </div>
+            )}
+
+            {fieldVisibility.summary && (
+              <div className="rounded-lg border border-border bg-card p-2 space-y-2">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Run ID</p>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 shrink-0"
-                        onClick={() => copyValue(run.sweepId!, setCopiedSweepId)}
+                        onClick={() => copyValue(run.id, setCopiedRunId)}
                       >
-                        {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        {copiedRunId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
                       </Button>
+                    </div>
+                    <p className="text-xs font-mono text-foreground truncate">{run.id}</p>
+                  </div>
+
+                  <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sweep</p>
+                      {run.sweepId && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0"
+                          onClick={() => copyValue(run.sweepId!, setCopiedSweepId)}
+                        >
+                          {copiedSweepId ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        </Button>
+                      )}
+                    </div>
+                    {linkedSweep ? (
+                      <button
+                        type="button"
+                        onClick={() => onSweepSelect?.(linkedSweep)}
+                        className="mt-1 flex w-full items-center justify-between rounded-md border border-border/50 bg-secondary/35 px-2 py-1.5 text-left transition-colors hover:bg-secondary/60 disabled:cursor-default disabled:hover:bg-secondary/35"
+                        disabled={!onSweepSelect}
+                      >
+                        <span className="truncate text-xs font-medium text-foreground">
+                          {linkedSweep.config.name || linkedSweep.id}
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      </button>
+                    ) : (
+                      <p className="mt-1 text-xs font-mono text-foreground truncate">
+                        {run.sweepId
+                          ? (isLoadingLinkedSweep ? `Loading ${run.sweepId}...` : run.sweepId)
+                          : 'No sweep'}
+                      </p>
+                    )}
+                    {linkedSweep && (
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="truncate text-[10px] font-mono text-muted-foreground">{linkedSweep.id}</span>
+                        <Badge variant="outline" className="h-4 text-[9px] capitalize">
+                          {linkedSweep.status}
+                        </Badge>
+                      </div>
                     )}
                   </div>
-                  {linkedSweep ? (
-                    <button
-                      type="button"
-                      onClick={() => onSweepSelect?.(linkedSweep)}
-                      className="mt-1 flex w-full items-center justify-between rounded-md border border-border/50 bg-secondary/35 px-2 py-1.5 text-left transition-colors hover:bg-secondary/60 disabled:cursor-default disabled:hover:bg-secondary/35"
-                      disabled={!onSweepSelect}
-                    >
-                      <span className="truncate text-xs font-medium text-foreground">
-                        {linkedSweep.config.name || linkedSweep.id}
-                      </span>
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    </button>
-                  ) : (
-                    <p className="mt-1 text-xs font-mono text-foreground truncate">
-                      {run.sweepId
-                        ? (isLoadingLinkedSweep ? `Loading ${run.sweepId}...` : run.sweepId)
-                        : 'No sweep'}
-                    </p>
-                  )}
-                  {linkedSweep && (
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="truncate text-[10px] font-mono text-muted-foreground">{linkedSweep.id}</span>
-                      <Badge variant="outline" className="h-4 text-[9px] capitalize">
-                        {linkedSweep.status}
-                      </Badge>
+                </div>
+
+                {fieldVisibility.command && (
+                  <div className="rounded-md border border-border/60 bg-secondary/25 p-2">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Command</p>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 gap-1 text-[10px]"
+                          onClick={copyCommand}
+                        >
+                          {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                          Copy
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 gap-1 text-[10px]"
+                          onClick={() => setCommandEditing((prev) => !prev)}
+                          disabled={!onUpdateRun || run.status === 'running'}
+                        >
+                          <Pencil className="h-3 w-3" />
+                          {commandEditing ? 'Close' : 'Edit'}
+                        </Button>
+                      </div>
                     </div>
-                  )}
+                    {commandEditing ? (
+                      <>
+                        <Textarea
+                          value={editedCommand}
+                          onChange={(e) => setEditedCommand(e.target.value)}
+                          className="min-h-[96px] resize-y font-mono text-xs"
+                          placeholder="Enter run command..."
+                        />
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={handleCancelCommand}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={handleSaveCommand}
+                            disabled={!editedCommand.trim()}
+                          >
+                            Save
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="rounded bg-muted/50 px-2 py-1.5">
+                        <code className="whitespace-pre-wrap break-all text-[11px] font-mono text-foreground">
+                          {run.command}
+                        </code>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-5">
+                  <div>
+                    <p className="uppercase tracking-wide">Status</p>
+                    <Badge variant="outline" className={`mt-1 h-5 text-[9px] ${getStatusBadgeClass(run.status)}`}>
+                      {getStatusText(run.status)}
+                    </Badge>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-wide">Start</p>
+                    <p className="text-foreground">
+                      {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
+                        ? formatTimestamp(run.startedAt || run.startTime)
+                        : '--'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-wide">Created</p>
+                    <p className="text-foreground">{formatTimestamp(run.createdAt)}</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-wide">Running Time</p>
+                    <p className="text-foreground">
+                      {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
+                        ? formatDuration(run.startedAt || run.startTime, run.endTime)
+                        : '--'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-wide">Exit Code</p>
+                    <p className="text-foreground">
+                      {typeof run.exit_code === 'number' ? run.exit_code : '--'}
+                    </p>
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div className="grid grid-cols-2 gap-2 rounded-md bg-secondary/35 px-2 py-2 text-[10px] text-muted-foreground sm:grid-cols-5">
-                <div>
-                  <p className="uppercase tracking-wide">Status</p>
-                  <Badge variant="outline" className={`mt-1 h-5 text-[9px] ${getStatusBadgeClass(run.status)}`}>
-                    {getStatusText(run.status)}
-                  </Badge>
-                </div>
-                <div>
-                  <p className="uppercase tracking-wide">Start</p>
-                  <p className="text-foreground">
-                    {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
-                      ? formatTimestamp(run.startedAt || run.startTime)
-                      : '--'}
+            {fieldVisibility.gpuwrap && (
+              <div className={`rounded-md border px-2 py-1.5 text-[11px] ${gpuwrapEnabled ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-border bg-secondary/40 text-muted-foreground'}`}>
+                <p className="font-medium">GPU Wrap: {gpuwrapEnabled ? 'Enabled' : 'Disabled'}</p>
+                {gpuwrapEnabled && (
+                  <p className="mt-0.5">
+                    Retries: {run.gpuwrap_config?.retries == null ? 'Unlimited' : run.gpuwrap_config?.retries} · Retry delay: {run.gpuwrap_config?.retry_delay_seconds ?? 5}s
                   </p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-wide">Created</p>
-                  <p className="text-foreground">{formatTimestamp(run.createdAt)}</p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-wide">Running Time</p>
-                  <p className="text-foreground">
-                    {(run.startedAt || run.status === 'running' || run.status === 'completed' || run.status === 'failed' || run.status === 'canceled')
-                      ? formatDuration(run.startedAt || run.startTime, run.endTime)
-                      : '--'}
-                  </p>
-                </div>
-                <div>
-                  <p className="uppercase tracking-wide">Exit Code</p>
-                  <p className="text-foreground">
-                    {typeof run.exit_code === 'number' ? run.exit_code : '--'}
-                  </p>
-                </div>
+                )}
               </div>
-            </div>
+            )}
 
-            {terminalOutcome.state && (
+            {fieldVisibility.outcome && terminalOutcome.state && (
               <div className={`rounded-md border px-2 py-1.5 text-[11px] ${terminalOutcome.className}`}>
                 <p className="font-medium">Outcome: {terminalOutcome.summary}</p>
                 {terminalOutcome.detail && (
                   <p className="mt-0.5 break-words">{terminalOutcome.detail}</p>
                 )}
               </div>
-            )}
-
-            {/* Notes Preview/Edit */}
-            {notesOpen ? (
-              <div className="rounded-lg border border-border bg-card p-2">
-                <Textarea
-                  placeholder="Add notes about this run..."
-                  value={editedNotes}
-                  onChange={(e) => setEditedNotes(e.target.value)}
-                  className="min-h-[60px] text-xs resize-none border-0 p-0 focus-visible:ring-0"
-                />
-                <div className="flex justify-end gap-2 mt-2">
-                  <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setNotesOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button size="sm" className="h-6 text-xs" onClick={handleSaveNotes}>
-                    Save
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setNotesOpen(true)}
-                className="w-full text-left rounded-lg bg-secondary/50 px-3 py-2 text-xs text-muted-foreground hover:bg-secondary transition-colors"
-              >
-                {run.notes ? (
-                  <span className="line-clamp-1">{run.notes}</span>
-                ) : (
-                  <span className="italic">Add notes...</span>
-                )}
-              </button>
             )}
 
             {/* Status and Progress */}
@@ -664,31 +870,21 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
             )}
 
             {/* Metrics */}
-            <Collapsible open={run.metrics !== undefined} disabled={!run.metrics}>
+            {fieldVisibility.metrics && metricEntries.length > 0 && (
               <div className="grid grid-cols-3 gap-2">
-                {run.metrics ? (
-                  <>
-                    {Object.entries(run.metrics)
-                      .filter(([key, val]) => typeof val === 'number' && !key.startsWith('_'))
-                      .slice(0, 6)
-                      .map(([key, val]) => (
-                        <div key={key} className="text-center p-2 rounded-lg bg-card border border-border">
-                          <p className="text-[10px] text-muted-foreground mb-0.5 truncate" title={key}>{key}</p>
-                          <p className="text-sm font-semibold text-foreground">
-                            {typeof val === 'number' ? (Number.isInteger(val) ? val : val.toFixed(4)) : String(val)}
-                          </p>
-                        </div>
-                      ))}
-                  </>
-                ) : (
-                  <div className="col-span-3 text-center p-3 rounded-lg bg-card border border-border border-dashed">
-                    <p className="text-[10px] text-muted-foreground">No metrics collected yet</p>
+                {metricEntries.slice(0, 6).map(([key, val]) => (
+                  <div key={key} className="text-center p-2 rounded-lg bg-card border border-border">
+                    <p className="text-[10px] text-muted-foreground mb-0.5 truncate" title={key}>{key}</p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {typeof val === 'number' ? (Number.isInteger(val) ? val : val.toFixed(4)) : String(val)}
+                    </p>
                   </div>
-                )}
+                ))}
               </div>
-            </Collapsible>
+            )}
 
             {/* Alerts */}
+            {fieldVisibility.alerts && (
             <div id={`run-alerts-${run.id}`}>
               <Collapsible open={alertsOpen} onOpenChange={setAlertsOpen}>
                 <div className={`rounded-lg border bg-card overflow-hidden ${runAlerts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
@@ -756,9 +952,10 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
                 </div>
               </Collapsible>
             </div>
+            )}
 
             {/* Charts Section */}
-            {hasChartData(run) && allMetrics.length > 0 && (
+            {fieldVisibility.charts && hasChartData(run) && allMetrics.length > 0 && (
               <Collapsible open={chartsOpen} onOpenChange={setChartsOpen}>
                 <div className="rounded-lg border border-border bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
@@ -820,7 +1017,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
             )}
 
             {/* Charts Section - Empty State */}
-            {!hasChartData(run) && (
+            {fieldVisibility.charts && !hasChartData(run) && (
               <Collapsible>
                 <div className="rounded-lg border border-border border-dashed bg-card overflow-hidden">
                   <CollapsibleTrigger asChild>
@@ -841,195 +1038,115 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
               </Collapsible>
             )}
 
-
-            {/* Logs Section */}
-            <Collapsible open={logsOpen} onOpenChange={setLogsOpen}>
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <FileCode className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-xs font-medium text-foreground">Logs</span>
-                      {run.status === 'running' && (
-                        <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                      )}
-                    </div>
-                    {logsOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border">
-                    <LogViewer
-                      runId={run.id}
-                      isFullPage={logsFullPage}
-                      onExpand={() => setLogsFullPage(true)}
-                      showHeader={false}
-                      className="rounded-none border-0 bg-transparent"
-                    />
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-
-            {/* Terminal Section */}
-            <Collapsible open={terminalOpen} onOpenChange={setTerminalOpen}>
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <Terminal className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-xs font-medium text-foreground">Terminal</span>
-                      {(run as any).tmux_window && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
-                          {(run as any).tmux_window}
-                        </span>
-                      )}
-                    </div>
-                    {terminalOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border">
-                    <TmuxTerminalPanel
-                      runId={run.id}
-                      tmuxWindow={(run as any).tmux_window}
-                      tmuxPane={(run as any).tmux_pane}
-                      showHeader={false}
-                      className="rounded-none border-0 bg-transparent"
-                    />
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-
-            {/* Sidecar Logs Section */}
-            <Collapsible open={sidecarLogsOpen} onOpenChange={setSidecarLogsOpen}>
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <ScrollText className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-xs font-medium text-foreground">Sidecar Logs</span>
-                      {run.status === 'running' && (
-                        <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                      )}
-                    </div>
-                    {sidecarLogsOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border">
-                    <LogViewer
-                      runId={run.id}
-                      logSource="sidecar"
-                      showHeader={false}
-                      className="rounded-none border-0 bg-transparent"
-                    />
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-
-            {/* Command */}
-            <Collapsible open={commandOpen} onOpenChange={setCommandOpen}>
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <CollapsibleTrigger asChild>
-                  <button type="button" className="flex w-full items-center justify-between p-3">
-                    <div className="flex items-center gap-2">
-                      <Terminal className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-xs font-medium text-foreground">Command</span>
-                    </div>
-                    {commandOpen ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="border-t border-border px-3 pb-3">
-                    <div className="mt-2 space-y-2">
-                      {commandEditing ? (
-                        <>
-                          <Textarea
-                            value={editedCommand}
-                            onChange={(e) => setEditedCommand(e.target.value)}
-                            className="min-h-[96px] resize-y font-mono text-xs"
-                            placeholder="Enter run command..."
-                          />
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs"
-                              onClick={handleCancelCommand}
-                            >
-                              Cancel
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="h-7 text-xs"
-                              onClick={handleSaveCommand}
-                              disabled={!editedCommand.trim()}
-                            >
-                              Save
-                            </Button>
+            {(fieldVisibility.logs || fieldVisibility.sidecarLogs) && (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {fieldVisibility.logs && (
+                  <Collapsible open={logsOpen} onOpenChange={setLogsOpen}>
+                    <div className="rounded-lg border border-border bg-card overflow-hidden">
+                      <CollapsibleTrigger asChild>
+                        <button type="button" className="flex w-full items-center justify-between p-3">
+                          <div className="flex items-center gap-2">
+                            <FileCode className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-xs font-medium text-foreground">Logs</span>
+                            {run.status === 'running' && (
+                              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                            )}
                           </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="rounded bg-muted/50 px-2 py-1.5">
-                            <code className="whitespace-pre-wrap break-all text-[11px] font-mono text-foreground">
-                              {run.command}
-                            </code>
-                          </div>
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 gap-1.5 text-xs"
-                              onClick={copyCommand}
-                            >
-                              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                              Copy
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 gap-1.5 text-xs"
-                              onClick={() => setCommandEditing(true)}
-                              disabled={!onUpdateRun || run.status === 'running'}
-                            >
-                              <Pencil className="h-3 w-3" />
-                              Edit
-                            </Button>
-                          </div>
-                          {run.status === 'running' && (
-                            <p className="text-[11px] text-muted-foreground">
-                              Stop the run before editing its command.
-                            </p>
+                          {logsOpen ? (
+                            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                           )}
-                        </>
-                      )}
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="border-t border-border">
+                          <LogViewer
+                            runId={run.id}
+                            isFullPage={logsFullPage}
+                            onExpand={() => setLogsFullPage(true)}
+                            showHeader={false}
+                            className="rounded-none border-0 bg-transparent"
+                          />
+                        </div>
+                      </CollapsibleContent>
                     </div>
-                  </div>
-                </CollapsibleContent>
+                  </Collapsible>
+                )}
+
+                {fieldVisibility.sidecarLogs && (
+                  <Collapsible open={sidecarLogsOpen} onOpenChange={setSidecarLogsOpen}>
+                    <div className="rounded-lg border border-border bg-card overflow-hidden">
+                      <CollapsibleTrigger asChild>
+                        <button type="button" className="flex w-full items-center justify-between p-3">
+                          <div className="flex items-center gap-2">
+                            <ScrollText className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-xs font-medium text-foreground">Sidecar Logs</span>
+                            {run.status === 'running' && (
+                              <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                            )}
+                          </div>
+                          {sidecarLogsOpen ? (
+                            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                          )}
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="border-t border-border">
+                          <LogViewer
+                            runId={run.id}
+                            logSource="sidecar"
+                            showHeader={false}
+                            className="rounded-none border-0 bg-transparent"
+                          />
+                        </div>
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
+                )}
               </div>
-            </Collapsible>
+            )}
+
+            {fieldVisibility.terminal && (
+              <Collapsible open={terminalOpen} onOpenChange={setTerminalOpen}>
+                <div className="rounded-lg border border-border bg-card overflow-hidden">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-center justify-between p-3">
+                      <div className="flex items-center gap-2">
+                        <Terminal className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium text-foreground">Terminal</span>
+                        {(run as any).tmux_window && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
+                            {(run as any).tmux_window}
+                          </span>
+                        )}
+                      </div>
+                      {terminalOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="border-t border-border">
+                      <TmuxTerminalPanel
+                        runId={run.id}
+                        tmuxWindow={(run as any).tmux_window}
+                        tmuxPane={(run as any).tmux_pane}
+                        showHeader={false}
+                        className="rounded-none border-0 bg-transparent"
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            )}
 
             {/* Artifacts */}
+            {fieldVisibility.artifacts && (
             <Collapsible open={artifactsOpen} onOpenChange={setArtifactsOpen}>
               <div className={`rounded-lg border bg-card overflow-hidden ${run.artifacts && run.artifacts.length > 0 ? 'border-border' : 'border-border border-dashed'}`}>
                 <CollapsibleTrigger asChild>
@@ -1080,6 +1197,7 @@ export function RunDetailView({ run, alerts = [], onSweepSelect, onUpdateRun, al
                 </CollapsibleContent>
               </div>
             </Collapsible>
+            )}
           </div>
         </ScrollArea>
       </div>
