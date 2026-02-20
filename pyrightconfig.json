@@ -1,0 +1,15 @@
+{
+    "extraPaths": [
+        "server"
+    ],
+    "pythonVersion": "3.12",
+    "pythonPlatform": "Darwin",
+    "executionEnvironments": [
+        {
+            "root": "server",
+            "extraPaths": [
+                "."
+            ]
+        }
+    ]
+}
