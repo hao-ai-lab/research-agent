@@ -50,6 +50,9 @@ from core.state import (
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
 
+# Telemetry lifecycle events
+from integrations.telemetry import emit_chat_event  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Module-level references.  Wired at init().
 # ---------------------------------------------------------------------------
@@ -178,6 +181,7 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "last_status": "idle",
     }
     save_chat_state()
+    emit_chat_event("chat_created", session_id, model_provider=session_model_provider, model_id=session_model_id)
     return {
         "id": session_id,
         "title": title,
@@ -451,6 +455,7 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
     """Run the OpenCode stream for a chat session independent of HTTP clients."""
     session_stop_flags.pop(session_id, None)
     logger.debug("Starting background chat worker for session %s run %s (mode=%s)", session_id, runtime.run_id, mode)
+    emit_chat_event("chat_message_sent", session_id, metadata={"mode": mode, "run_id": runtime.run_id})
 
     try:
         session = chat_sessions.get(session_id)
@@ -489,6 +494,7 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
         runtime.status = "failed"
         runtime.error = str(e)
         logger.error("Chat worker failed for session %s: %s", session_id, e, exc_info=True)
+        emit_chat_event("chat_failed", session_id, metadata={"error": str(e)[:200]})
         await _append_runtime_event(runtime, {"type": "error", "message": str(e)})
     finally:
         parts = runtime.parts_accumulator.finalize()
@@ -526,6 +532,7 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
         save_chat_state()
 
         await _append_runtime_event(runtime, {"type": "session_status", "status": "idle"})
+        emit_chat_event("chat_completed", session_id, metadata={"status": runtime.status, "run_id": runtime.run_id})
         await _finalize_runtime(session_id, runtime)
 
         active_chat_tasks.pop(session_id, None)
