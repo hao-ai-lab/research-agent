@@ -582,10 +582,6 @@ export function ConnectedChatView({
                 onSend={handleSend}
                 onStop={() => {
                     stopStreaming()
-                    // Also pause wild loop if active
-                    if (wildLoop?.isActive && !wildLoop.isPaused) {
-                        wildLoop.pause()
-                    }
                 }}
                 mode={mode}
                 onModeChange={onModeChange}
@@ -613,6 +609,10 @@ export function ConnectedChatView({
                 layout={layout}
                 skills={skills}
                 isWildLoopActive={wildLoop?.isActive ?? false}
+                wildLoopPaused={wildLoop?.isPaused ?? false}
+                onWildPause={wildLoop ? () => wildLoop.pause() : undefined}
+                onWildResume={wildLoop ? () => wildLoop.resume() : undefined}
+                onWildStop={wildLoop ? () => wildLoop.stop() : undefined}
                 onSteer={wildLoop ? (msg) => {
                     wildLoop.steer(msg)
                 } : undefined}

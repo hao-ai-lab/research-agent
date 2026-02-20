@@ -13,6 +13,8 @@ import {
   X,
   Zap,
   Play,
+  Pause,
+  Square,
   AlertTriangle,
   BarChart3,
   MessageSquare,
@@ -25,6 +27,7 @@ import {
   Check,
   Sparkles,
   Wand2,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,6 +88,10 @@ interface ChatInputProps {
   layout?: "docked" | "centered";
   skills?: PromptSkill[];
   isWildLoopActive?: boolean;
+  wildLoopPaused?: boolean;
+  onWildPause?: () => void;
+  onWildResume?: () => void;
+  onWildStop?: () => void;
   onSteer?: (message: string, priority: number) => void;
   onOpenReplyExcerpt?: (excerpt: { fileName: string; text: string }) => void;
   contextTokenCount?: number;
@@ -151,6 +158,10 @@ export function ChatInput({
   layout = "docked",
   skills = [],
   isWildLoopActive = false,
+  wildLoopPaused = false,
+  onWildPause,
+  onWildResume,
+  onWildStop,
   onSteer,
   onOpenReplyExcerpt,
   modelOptions = [],
@@ -1156,21 +1167,27 @@ export function ChatInput({
           </Button>
 
           {/* Mode toggle */}
-          <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
+          <Popover open={isModeOpen && !isWildLoopActive} onOpenChange={setIsModeOpen}>
             <PopoverTrigger asChild>
               <button
                 type="button"
+                disabled={isWildLoopActive}
                 className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                  mode === "agent"
-                    ? "border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
-                    : mode === "wild"
-                      ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300"
-                      : mode === "plan"
-                        ? "border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300"
-                        : "border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300"
+                  isWildLoopActive
+                    ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300 cursor-not-allowed opacity-70"
+                    : mode === "agent"
+                      ? "border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
+                      : mode === "wild"
+                        ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300"
+                        : mode === "plan"
+                          ? "border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300"
+                          : "border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300"
                 }`}
+                title={isWildLoopActive ? "Mode locked during wild loop" : "Select mode"}
               >
-                {mode === "agent" ? (
+                {isWildLoopActive ? (
+                  <Lock className="h-3 w-3" />
+                ) : mode === "agent" ? (
                   <MessageSquare className="h-3 w-3" />
                 ) : mode === "wild" ? (
                   <Zap className="h-3 w-3" />
@@ -1362,6 +1379,39 @@ export function ChatInput({
             >
               Stop
             </Button>
+          )}
+          {isWildLoopActive && !isStreaming && (
+            <>
+              {wildLoopPaused ? (
+                <Button
+                  onClick={onWildResume}
+                  size="sm"
+                  className="h-9 gap-1.5 px-3 text-xs bg-violet-600 hover:bg-violet-700 text-white"
+                >
+                  <Play className="h-3 w-3" />
+                  Resume
+                </Button>
+              ) : (
+                <Button
+                  onClick={onWildPause}
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-1.5 px-3 text-xs border-violet-500/40 text-violet-400 hover:bg-violet-500/10"
+                >
+                  <Pause className="h-3 w-3" />
+                  Pause
+                </Button>
+              )}
+              <Button
+                onClick={onWildStop}
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 px-3 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+              >
+                <Square className="h-3 w-3" />
+                Stop
+              </Button>
+            </>
           )}
           <Button
             onClick={handleSubmit}

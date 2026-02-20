@@ -45,6 +45,7 @@ const phaseConfig: Record<WildLoopPhase, { icon: string; label: string; color: s
 interface WildLoopNavProps {
   isActive: boolean
   isPaused: boolean
+  isStopped: boolean
   phase: WildLoopPhase
   iteration: number
   goal: string | null
@@ -187,7 +188,7 @@ export function FloatingNav({
       )}
 
       {/* Wild Loop status — compact pill + popover */}
-      {isChat && wl?.isActive && (
+      {isChat && wl && (wl.isActive || wl.isPaused || wl.isStopped) && (
         <WildLoopNavDropdown {...wl} />
       )}
 
@@ -334,15 +335,13 @@ export function FloatingNav({
 
 function WildLoopNavDropdown({
   isPaused,
+  isStopped,
   phase,
   iteration,
   goal,
   startedAt,
   runStats,
   activeAlerts = [],
-  onPause,
-  onResume,
-  onStop,
 }: WildLoopNavProps) {
   const [elapsed, setElapsed] = useState('0:00')
 
@@ -367,19 +366,31 @@ function WildLoopNavDropdown({
   const hasJobs = runStats && runStats.total > 0
   const alertCount = activeAlerts.length
 
+  // Badge colors based on state
+  const pillBorder = isStopped
+    ? 'border-red-500/30 bg-red-500/10'
+    : isPaused
+      ? 'border-amber-500/30 bg-amber-500/10'
+      : 'border-violet-500/30 bg-violet-500/10'
+  const pillIcon = isStopped ? '⏹' : isPaused ? '⏸' : cfg.icon
+  const pillLabel = isStopped ? 'Stopped' : isPaused ? 'Paused' : cfg.label
+  const pillColor = isStopped ? 'text-red-400' : isPaused ? 'text-amber-400' : cfg.color
+
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-violet-500/20 shrink-0 ${cfg.color}`}
+          className={`flex items-center gap-1.5 rounded-full border ${pillBorder} px-2.5 py-1 text-xs font-medium transition-colors hover:opacity-80 shrink-0 ${pillColor}`}
         >
-          <span className="text-sm leading-none">{cfg.icon}</span>
-          <span className="hidden sm:inline">{cfg.label}</span>
+          <span className="text-sm leading-none">{pillIcon}</span>
+          <span className="hidden sm:inline">{pillLabel}</span>
           <span className="rounded-full bg-violet-500/20 px-1.5 py-px text-[10px] font-semibold text-violet-300">
             #{iteration}
           </span>
-          <span className="text-[10px] text-muted-foreground tabular-nums">{elapsed}</span>
+          {!isStopped && (
+            <span className="text-[10px] text-muted-foreground tabular-nums">{elapsed}</span>
+          )}
           {alertCount > 0 && (
             <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
           )}
@@ -446,24 +457,6 @@ function WildLoopNavDropdown({
           </div>
         )}
 
-        {/* Controls */}
-        <div className="flex items-center gap-2 px-4 py-3">
-          {isPaused ? (
-            <Button size="sm" onClick={onResume} className="h-7 gap-1.5 text-xs bg-violet-600 hover:bg-violet-700">
-              <Play className="h-3 w-3" />
-              Resume
-            </Button>
-          ) : (
-            <Button size="sm" variant="outline" onClick={onPause} className="h-7 gap-1.5 text-xs">
-              <Pause className="h-3 w-3" />
-              Pause
-            </Button>
-          )}
-          <Button size="sm" variant="outline" onClick={onStop} className="h-7 gap-1.5 text-xs text-red-400 border-red-500/30 hover:bg-red-500/10">
-            <Square className="h-3 w-3" />
-            Stop
-          </Button>
-        </div>
       </PopoverContent>
     </Popover>
   )

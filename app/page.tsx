@@ -713,9 +713,10 @@ export default function ResearchChat() {
             sessions={sessions}
             onSessionChange={handleSessionChange}
             contextTokenCount={contextTokenCount}
-            wildLoop={wildLoop.isActive ? {
+            wildLoop={(wildLoop.isActive || wildLoop.isPaused || wildLoop.isStopped) ? {
               isActive: wildLoop.isActive,
               isPaused: wildLoop.isPaused,
+              isStopped: wildLoop.isStopped,
               phase: wildLoop.phase,
               iteration: wildLoop.iteration,
               goal: wildLoop.goal,
