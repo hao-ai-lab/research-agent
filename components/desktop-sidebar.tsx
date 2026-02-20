@@ -29,8 +29,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useApiConfig } from '@/lib/api-config'
-import type { Alert, ChatSession, ChatSessionStatus } from '@/lib/api'
+import type { Alert, ChatSession, ChatSessionStatus, ChatMessageData } from '@/lib/api'
+import { getSession } from '@/lib/api'
 import type { ExperimentRun, Sweep } from '@/lib/types'
+import { MessageSquare } from 'lucide-react'
 import type { AppTab, HomeTab } from '@/lib/navigation'
 import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
 import { NavTabButton } from '@/components/navigation/nav-tab-button'
@@ -53,6 +55,10 @@ interface DesktopSidebarProps {
   alerts?: Alert[]
   currentSessionId?: string | null
   isCurrentSessionStreaming?: boolean
+  /** Messages for the currently active session (avoids redundant API fetch) */
+  currentMessages?: ChatMessageData[]
+  /** Callback when a round is clicked in the hover card */
+  onScrollToRound?: (sessionId: string, roundIndex: number) => void
   onTabChange: (tab: HomeTab | 'contextual') => void
   onNewChat: () => Promise<void> | void
   onSelectSession: (sessionId: string) => Promise<void> | void
@@ -100,6 +106,8 @@ export function DesktopSidebar({
   alerts = [],
   currentSessionId = null,
   isCurrentSessionStreaming = false,
+  currentMessages,
+  onScrollToRound,
   onTabChange,
   onNewChat,
   onSelectSession,
@@ -120,6 +128,99 @@ export function DesktopSidebar({
 }: DesktopSidebarProps) {
   const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null)
   const [isRunsMenuOpen, setIsRunsMenuOpen] = useState(false)
+
+  // Cache for lazily-fetched session rounds (non-current sessions)
+  type RoundPreview = { content: string; roundIndex: number }
+  const [roundsCache, setRoundsCache] = useState<Record<string, RoundPreview[]>>({})
+  const fetchingRef = useRef<Set<string>>(new Set())
+
+  /** Compute rounds from a messages array */
+  const computeRounds = useCallback((msgs: ChatMessageData[]): RoundPreview[] => {
+    const rounds: RoundPreview[] = []
+    let roundIdx = 0
+    for (const msg of msgs) {
+      if (msg.role === 'user' && msg.content?.trim()) {
+        rounds.push({ content: msg.content, roundIndex: roundIdx })
+        roundIdx++
+      }
+    }
+    return rounds
+  }, [])
+
+  /** Fetch rounds for a session on hover (uses cache or current messages) */
+  const fetchRoundsForSession = useCallback(async (sessionId: string) => {
+    // Already cached
+    if (roundsCache[sessionId]) return
+
+    // Use current messages if this is the active session
+    if (sessionId === currentSessionId && currentMessages) {
+      const rounds = computeRounds(currentMessages)
+      setRoundsCache(prev => ({ ...prev, [sessionId]: rounds }))
+      return
+    }
+
+    // Already fetching
+    if (fetchingRef.current.has(sessionId)) return
+    fetchingRef.current.add(sessionId)
+
+    try {
+      const sessionData = await getSession(sessionId)
+      const rounds = computeRounds(sessionData.messages)
+      setRoundsCache(prev => ({ ...prev, [sessionId]: rounds }))
+    } catch {
+      // Silently fail — hover card will show "No rounds" or loading
+    } finally {
+      fetchingRef.current.delete(sessionId)
+    }
+  }, [roundsCache, currentSessionId, currentMessages, computeRounds])
+
+  // Keep cache for current session in sync with live messages
+  useEffect(() => {
+    if (currentSessionId && currentMessages) {
+      const rounds = computeRounds(currentMessages)
+      setRoundsCache(prev => ({ ...prev, [currentSessionId]: rounds }))
+    }
+  }, [currentSessionId, currentMessages, computeRounds])
+
+  /** Render the inside of a rounds HoverCard */
+  const renderRoundsHoverContent = useCallback((sessionId: string, sessionTitle: string) => {
+    const rounds = roundsCache[sessionId]
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 pb-1 border-b border-border/60">
+          <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+          <p className="text-xs font-medium text-foreground truncate">{sessionTitle || 'Untitled chat'}</p>
+          {rounds && <span className="ml-auto text-[10px] text-muted-foreground">{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>}
+        </div>
+        {!rounds ? (
+          <p className="text-xs text-muted-foreground py-1">Loading…</p>
+        ) : rounds.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-1">No messages yet</p>
+        ) : (
+          <div className="max-h-[240px] overflow-y-auto space-y-0.5">
+            {rounds.map((round) => (
+              <button
+                key={round.roundIndex}
+                type="button"
+                className="flex w-full items-start gap-2 rounded px-1.5 py-1 text-left text-xs transition-colors hover:bg-secondary/70"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onScrollToRound?.(sessionId, round.roundIndex)
+                }}
+              >
+                <span className="shrink-0 mt-px inline-flex h-4 min-w-4 items-center justify-center rounded bg-secondary text-[10px] font-medium text-muted-foreground">
+                  {round.roundIndex + 1}
+                </span>
+                <span className="min-w-0 line-clamp-2 text-foreground">
+                  {round.content.length > 80 ? round.content.slice(0, 77) + '…' : round.content}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }, [roundsCache, onScrollToRound])
 
   const getRunStatusMeta = useCallback((status: ExperimentRun['status']) => {
     switch (status) {
@@ -489,28 +590,36 @@ export function DesktopSidebar({
                           />
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onTabChange('chat')
-                            void onSelectSession(session.id)
-                          }}
-                          className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
-                        >
-                          <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
-                            <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
-                            {renderSessionStatusIcon(getSessionStatus(session))}
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
-                              </TooltipTrigger>
-                              <TooltipContent>{session.title || 'Untitled chat'}</TooltipContent>
-                            </Tooltip>
-                          </span>
-                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                            {formatRelativeTime(new Date(session.created_at * 1000))}
-                          </span>
-                        </button>
+                        <HoverCard openDelay={300} closeDelay={100}>
+                          <HoverCardTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onTabChange('chat')
+                                void onSelectSession(session.id)
+                              }}
+                              onMouseEnter={() => void fetchRoundsForSession(session.id)}
+                              className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                            >
+                              <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
+                                <Star className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                                {renderSessionStatusIcon(getSessionStatus(session))}
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{session.title || 'Untitled chat'}</TooltipContent>
+                                </Tooltip>
+                              </span>
+                              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                {formatRelativeTime(new Date(session.created_at * 1000))}
+                              </span>
+                            </button>
+                          </HoverCardTrigger>
+                          <HoverCardContent side="right" align="start" className="w-72 p-2.5">
+                            {renderRoundsHoverContent(session.id, session.title)}
+                          </HoverCardContent>
+                        </HoverCard>
                       )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -585,27 +694,35 @@ export function DesktopSidebar({
                           autoFocus
                         />
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onTabChange('chat')
-                            void onSelectSession(session.id)
-                          }}
-                          className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
-                        >
-                          <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
-                            {renderSessionStatusIcon(getSessionStatus(session))}
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
-                              </TooltipTrigger>
-                              <TooltipContent>{session.title || 'Untitled chat'}</TooltipContent>
-                            </Tooltip>
-                          </span>
-                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                            {formatRelativeTime(new Date(session.created_at * 1000))}
-                          </span>
-                        </button>
+                        <HoverCard openDelay={300} closeDelay={100}>
+                          <HoverCardTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onTabChange('chat')
+                                void onSelectSession(session.id)
+                              }}
+                              onMouseEnter={() => void fetchRoundsForSession(session.id)}
+                              className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-left"
+                            >
+                              <span className="inline-flex min-w-0 items-center gap-1 truncate text-foreground">
+                                {renderSessionStatusIcon(getSessionStatus(session))}
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="min-w-0 truncate">{session.title || 'Untitled chat'}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{session.title || 'Untitled chat'}</TooltipContent>
+                                </Tooltip>
+                              </span>
+                              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                {formatRelativeTime(new Date(session.created_at * 1000))}
+                              </span>
+                            </button>
+                          </HoverCardTrigger>
+                          <HoverCardContent side="right" align="start" className="w-72 p-2.5">
+                            {renderRoundsHoverContent(session.id, session.title)}
+                          </HoverCardContent>
+                        </HoverCard>
                       )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
