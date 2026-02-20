@@ -340,11 +340,12 @@ export function SkillsBrowserView({
 
     return (
       <div key={node.id}>
-        <button
-          type="button"
-          className={`group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${isSelected
-              ? 'bg-cyan-500/14 text-cyan-100 ring-1 ring-cyan-400/35'
-              : 'text-foreground/80 hover:bg-secondary/60 hover:text-foreground'
+        <div
+          role="button"
+          tabIndex={0}
+          className={`group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors cursor-pointer select-none ${isSelected
+            ? 'bg-cyan-500/14 text-cyan-100 ring-1 ring-cyan-400/35'
+            : 'text-foreground/80 hover:bg-secondary/60 hover:text-foreground'
             }`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => {
@@ -355,6 +356,19 @@ export function SkillsBrowserView({
               handleSelectFile(node.skillId, node.filePath)
             } else if (node.type === 'directory') {
               toggleNode(node.id)
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              if (node.type === 'skill') {
+                toggleNode(node.id)
+                if (node.skill) handleSelectSkill(node.skill)
+              } else if (node.type === 'file' && node.filePath) {
+                handleSelectFile(node.skillId, node.filePath)
+              } else if (node.type === 'directory') {
+                toggleNode(node.id)
+              }
             }
           }}
         >
@@ -423,7 +437,7 @@ export function SkillsBrowserView({
                 : `${(node.fileEntry.size / 1024).toFixed(1)}KB`}
             </span>
           )}
-        </button>
+        </div>
 
         {/* Children */}
         {isExpanded && node.children?.map((child) => renderTreeNode(child, depth + 1))}
@@ -457,8 +471,8 @@ export function SkillsBrowserView({
                   {selectedSkill.name}
                 </h2>
                 <span className={`text-[10px] rounded-full px-1.5 py-0.5 font-medium ${selectedSkill.category === 'skill'
-                    ? 'bg-violet-500/15 text-violet-400'
-                    : 'bg-cyan-500/15 text-cyan-400'
+                  ? 'bg-violet-500/15 text-violet-400'
+                  : 'bg-cyan-500/15 text-cyan-400'
                   }`}>
                   {selectedSkill.category === 'skill' ? 'Skill' : 'Prompt'}
                 </span>
