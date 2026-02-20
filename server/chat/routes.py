@@ -44,6 +44,7 @@ from core.state import (
     plans,
     runs,
     sweeps,
+    cluster_state,
     save_chat_state,
 )
 
@@ -341,17 +342,74 @@ def _build_experiment_context() -> str:
     return "\n".join(lines)
 
 
+def _build_api_catalog(server_url: str) -> str:
+    """Build a static API catalog for chat mode prompts."""
+    s = server_url
+    return f"""| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `{s}/runs` | GET | List all runs |
+| `{s}/runs` | POST | Create a run (`name`, `command`, `workdir`, `sweep_id`, `auto_start`, `gpuwrap_config`) |
+| `{s}/runs/{{id}}` | GET | Get run details & status |
+| `{s}/runs/{{id}}/start` | POST | Start a queued/ready run |
+| `{s}/runs/{{id}}/stop` | POST | Stop a running job |
+| `{s}/runs/{{id}}/logs` | GET | Get run logs |
+| `{s}/runs/{{id}}/rerun` | POST | Rerun a finished/failed run |
+| `{s}/sweeps` | GET | List all sweeps |
+| `{s}/sweeps` | POST | Create a parameterized sweep |
+| `{s}/sweeps/wild` | POST | Create a tracking sweep (`name`, `goal`) |
+| `{s}/sweeps/{{id}}` | GET | Get sweep details & progress |
+| `{s}/alerts` | GET | List alerts |
+| `{s}/plans` | GET | List experiment plans |
+| `{s}/plans` | POST | Create a new plan |
+| `{s}/cluster` | GET | Get cluster state & run summary |
+| `{s}/cluster/detect` | POST | Auto-detect cluster type/capacity |
+| `{s}/docs` | GET | API docs UI |
+| `{s}/openapi.json` | GET | OpenAPI schema |"""
+
+
+def _build_cluster_summary() -> str:
+    """Build a human-readable summary of current cluster state."""
+    cs = cluster_state
+    ctype = cs.get("type", "unknown")
+    gpu_count = cs.get("gpu_count")
+    status = cs.get("status", "unknown")
+    source = cs.get("source", "unset")
+
+    if ctype == "unknown" and source == "unset":
+        return (
+            "Cluster has not been detected yet. "
+            "Run `POST /cluster/detect` to discover compute topology."
+        )
+
+    parts = [f"**Cluster type**: `{ctype}`"]
+    if gpu_count is not None:
+        parts.append(f"**GPU count**: {gpu_count}")
+    parts.append(f"**Status**: {status}")
+    if cs.get("label"):
+        parts.append(f"**Label**: {cs['label']}")
+    return "\n".join(f"- {p}" for p in parts)
+
+
 def _build_agent_state(_message: str) -> dict:
     """Build template variables for agent (default chat) mode."""
+    server_url = get_server_callback_url()
+    token = USER_AUTH_TOKEN or ""
+    auth_header = f'-H "X-Auth-Token: {token}"' if token else ""
     return {
         "experiment_context": _build_experiment_context(),
-        "server_url": get_server_callback_url(),
-        "auth_token": USER_AUTH_TOKEN or "",
+        "server_url": server_url,
+        "auth_token": token,
+        "api_catalog": _build_api_catalog(server_url),
+        "cluster_state": _build_cluster_summary(),
+        "auth_header": auth_header,
     }
 
 
 def _build_plan_state(message: str) -> dict:
     """Build template variables for plan mode."""
+    server_url = get_server_callback_url()
+    token = USER_AUTH_TOKEN or ""
+    auth_header = f'-H "X-Auth-Token: {token}"' if token else ""
     # Summarize existing plans for context
     existing_plans_summary = "No existing plans."
     if plans:
@@ -363,8 +421,11 @@ def _build_plan_state(message: str) -> dict:
         "goal": message,
         "experiment_context": _build_experiment_context(),
         "existing_plans": existing_plans_summary,
-        "server_url": get_server_callback_url(),
-        "auth_token": USER_AUTH_TOKEN or "",
+        "server_url": server_url,
+        "auth_token": token,
+        "api_catalog": _build_api_catalog(server_url),
+        "cluster_state": _build_cluster_summary(),
+        "auth_header": auth_header,
     }
 
 
