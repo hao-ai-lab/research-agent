@@ -445,14 +445,6 @@ export function SettingsDialog({
           type: 'toggle' as const,
           value: settings.developer?.showJourneyPanel === true,
         },
-        {
-          id: 'showChatContextPanel',
-          label: 'Chat Context Panel',
-          description: 'Show or hide the right-side context panel in chat',
-          icon: settings.developer?.showChatContextPanel === true ? Eye : EyeOff,
-          type: 'toggle' as const,
-          value: settings.developer?.showChatContextPanel === true,
-        },
       ],
     },
     {
@@ -1039,12 +1031,6 @@ export function SettingsDialog({
                   onSettingsChange({
                     ...settings,
                     developer: { ...settings.developer, showJourneyPanel: checked },
-                  })
-                }
-                if (item.id === 'showChatContextPanel') {
-                  onSettingsChange({
-                    ...settings,
-                    developer: { ...settings.developer, showChatContextPanel: checked },
                   })
                 }
               }}

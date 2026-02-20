@@ -113,7 +113,7 @@ export default function ResearchChat() {
   const collapseChats = settings.appearance.chatCollapseAllChats === true
   const collapseArtifactsInChat = settings.appearance.chatCollapseArtifactsInChat === true
   const [chatDraftInsert, setChatDraftInsert] = useState<{ id: number; text: string } | null>(null)
-  const [chatContextPanelHidden, setChatContextPanelHidden] = useState(false)
+  const [chatContextPanelHidden, setChatContextPanelHidden] = useState(true)
   const [focusAuthTokenInApp, setFocusAuthTokenInApp] = useState(false)
 
   // API configuration for auth/connection check
@@ -742,7 +742,7 @@ export default function ResearchChat() {
               ...settings,
               appearance: { ...settings.appearance, chatCollapseAllChats: collapsed },
             })}
-            contextPanelVisible={!chatContextPanelHidden && settings.developer?.showChatContextPanel === true}
+            contextPanelVisible={!chatContextPanelHidden}
             onContextPanelToggle={() => setChatContextPanelHidden(prev => !prev)}
             reportIsPreviewMode={reportToolbar?.isPreviewMode ?? true}
             onReportPreviewModeChange={reportToolbar?.setPreviewMode}
