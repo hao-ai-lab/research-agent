@@ -11,36 +11,23 @@ Run with: python server.py --workdir /path/to/project
 """
 
 import argparse
-import glob
-from dataclasses import dataclass
 import json
-import math
 import os
-import re
-import shlex
 import sys
 import time
-import uuid
 import logging
-import asyncio
-import shutil
-import socket
-import subprocess
-from typing import Any, Callable, Dict, Optional, AsyncIterator, List
+from typing import Dict, Optional
 
 
 from agent.wild_loop_v2 import WildV2Engine
 from memory.store import MemoryStore
 from integrations.slack_handler import slack_notifier
 
-import httpx
 import uvicorn
-import libtmux
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 
 # Configure logging — explicit handlers so uvicorn.run() can't override them
 _log_formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
@@ -64,30 +51,17 @@ from core import config  # noqa: E402
 # IMPORTANT: mutable path variables (config.WORKDIR, config.DATA_DIR, *_FILE) must be
 # accessed as config.VARNAME so they reflect post-init_paths() values.
 from core.config import (  # noqa: E402
-    _SERVER_FILE_DIR,
-    OPENCODE_CONFIG,
     OPENCODE_URL,
-    OPENCODE_USERNAME,
-    OPENCODE_PASSWORD,
     MODEL_PROVIDER,
     MODEL_ID,
-    RUNTIME_RESEARCH_AGENT_KEY,
-    RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED,
-    RUNTIME_RESEARCH_AGENT_KEY_LOCK,
     USER_AUTH_TOKEN,
     TMUX_SESSION_NAME,
     SERVER_CALLBACK_URL,
     FRONTEND_STATIC_DIR,
-    AUTH_PROTECTED_PREFIXES,
     requires_api_auth,
     init_paths,
     get_auth,
-    get_default_opencode_config,
     set_runtime_research_agent_key,
-    apply_runtime_research_agent_key,
-    _parse_optional_int,
-    load_available_opencode_models,
-    get_session_model,
 )
 
 
@@ -140,20 +114,7 @@ async def auth_middleware(request: Request, call_next):
 # =============================================================================
 
 from core.models import (  # noqa: E402
-    ChatMessage, ChatRequest, CreateSessionRequest, UpdateSessionRequest,
-    SystemPromptUpdate, SessionModelUpdate,
-    GpuwrapConfig, RunCreate, RunStatusUpdate, RunUpdate,
-    SweepCreate, SweepUpdate,
-    AlertRecord, CreateAlertRequest, RespondAlertRequest,
-    RunRerunRequest, WildModeRequest,
-    PLAN_STATUSES, PlanCreate, PlanUpdate,
-    ClusterUpdateRequest, ClusterDetectRequest,
-    JourneyNextActionsRequest,
-    JOURNEY_ACTOR_VALUES, JOURNEY_REC_STATUS_VALUES,
-    JOURNEY_PRIORITY_VALUES, JOURNEY_DECISION_STATUS_VALUES,
-    JourneyEventCreate, JourneyRecommendationCreate,
-    JourneyRecommendationRespondRequest, JourneyDecisionCreate,
-    MemoryCreateRequest, MemoryUpdateRequest,
+    JOURNEY_ACTOR_VALUES,
 )
 
 
@@ -161,7 +122,7 @@ from core.models import (  # noqa: E402
 # Prompt Skill Manager  (extracted to skills_manager.py)
 # =============================================================================
 
-from skills.manager import PromptSkillManager, INTERNAL_SKILL_IDS, INTERNAL_SKILL_PREFIXES, _is_internal_skill  # noqa: E402
+from skills.manager import PromptSkillManager  # noqa: E402
 import skills.routes as skills_routes  # noqa: E402
 
 # Initialize the prompt skill manager
@@ -172,27 +133,15 @@ prompt_skill_manager = PromptSkillManager()
 # State  (extracted to state.py)
 # =============================================================================
 
-import core.state as _state  # noqa: E402
 from core.state import (  # noqa: E402
     # Global state dicts — these are mutable references, so server.py and state.py
     # share the same dict objects. Mutations like chat_sessions["x"] = y propagate.
     chat_sessions, runs, sweeps, active_alerts, plans,
-    journey_events, journey_recommendations, journey_decisions,
-    wild_mode_enabled, session_stop_flags, active_chat_tasks,
-    active_chat_streams, _wandb_metrics_cache,
+    journey_events, _wandb_metrics_cache,
     # Cluster
-    CLUSTER_TYPE_VALUES, CLUSTER_STATUS_VALUES, CLUSTER_SOURCE_VALUES,
-    cluster_state, _default_cluster_state,
-    _cluster_type_label, _cluster_type_description,
-    _normalize_cluster_type, _normalize_cluster_status,
-    _normalize_cluster_source, _normalize_cluster_state,
+    cluster_state, _normalize_cluster_state,
     # Metrics constants
-    STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS, STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS,
-    STREAM_RUNTIME_RETENTION_SECONDS,
-    LOSS_KEYS, VAL_LOSS_KEYS, ACCURACY_KEYS, EPOCH_KEYS, STEP_KEYS,
-    MAX_HISTORY_POINTS, MAX_METRIC_SERIES_KEYS, IGNORED_METRIC_KEYS,
-    # Save/load functions
-    save_chat_state, load_chat_state,
+    LOSS_KEYS, VAL_LOSS_KEYS, ACCURACY_KEYS, EPOCH_KEYS, MAX_METRIC_SERIES_KEYS, save_chat_state, load_chat_state,
     save_runs_state,
     save_alerts_state, load_alerts_state,
     save_plans_state, load_plans_state,
@@ -204,50 +153,6 @@ from core.state import (  # noqa: E402
 )
 
 
-def _get_run_log_content(run_id: str) -> str:
-    """Return log tail for a run as plain text (for engine callbacks)."""
-    run = runs.get(run_id)
-    if not run:
-        return "Run not found"
-    run_dir = run.get("run_dir")
-    if not run_dir:
-        return "No run directory"
-    log_file = os.path.join(run_dir, "run.log")
-    if not os.path.exists(log_file):
-        return "No log file"
-    try:
-        with open(log_file, "r") as f:
-            content = f.read()
-        return content[-5000:] if len(content) > 5000 else content
-    except Exception as e:
-        return f"Error reading log: {e}"
-
-
-def _create_sweep_sync(spec: dict) -> dict:
-    """Synchronous sweep creation wrapper for engine callbacks."""
-    sweep_id = uuid.uuid4().hex[:12]
-    created_at = time.time()
-    sweep_data = {
-        "name": spec.get("name", f"sweep-{sweep_id}"),
-        "base_command": spec.get("base_command", ""),
-        "workdir": spec.get("workdir"),
-        "parameters": spec.get("parameters", {}),
-        "max_runs": spec.get("max_runs"),
-        "status": "pending",
-        "run_ids": [],
-        "created_at": created_at,
-    }
-    sweeps[sweep_id] = sweep_data
-    return {"id": sweep_id, **sweep_data}
-
-
-def _start_sweep_sync(sweep_id: str, parallel: int = 1):
-    """Synchronous sweep start wrapper for engine callbacks."""
-    if sweep_id not in sweeps:
-        return
-    sweep = sweeps[sweep_id]
-    sweep["status"] = "running"
-    sweep["parallel"] = parallel
 
 
 # Wild Loop V2 engine (ralph-style)
@@ -541,34 +446,17 @@ def _run_response_payload(run_id: str, run: dict) -> dict:
 
 from runs.helpers import (  # noqa: E402
     RUN_STATUS_ACTIVE,
-    RUN_STATUS_PENDING,
     RUN_STATUS_TERMINAL,
-    SWEEP_STATUS_TERMINAL,
-    SWEEP_STATUS_EDITABLE,
     _coerce_exit_code,
-    _terminal_status_from_exit_code,
-    _reconcile_run_terminal_state,
     _reconcile_all_run_terminal_states,
     _normalize_sweep_status,
-    _coerce_optional_text,
-    _coerce_optional_int,
-    _coerce_optional_bool,
-    _json_clone,
     _derive_sweep_creation_context,
     _ensure_sweep_creation_context,
-    _compute_sweep_progress,
-    _infer_sweep_status,
     recompute_sweep_state,
     recompute_all_sweep_states,
     _sync_run_membership_with_sweep,
-    _run_command_capture,
-    _count_gpu_devices,
-    _count_slurm_nodes,
-    _count_kubernetes_nodes,
-    _count_ssh_hosts,
     _infer_cluster_from_environment,
     _current_run_summary,
-    get_tmux_server,
     get_or_create_session,
     _normalize_gpuwrap_config,
     launch_run_in_tmux,
@@ -584,14 +472,11 @@ from chat.streaming import (  # noqa: E402
     fetch_opencode_session_title,
     send_prompt_to_opencode,
     should_stop_session,
-    StreamPartsAccumulator,
     ChatStreamRuntime,
     _persist_active_stream_snapshot,
     _append_runtime_event,
     _finalize_runtime,
     _stream_runtime_events,
-    run_opencode_session,
-    parse_opencode_event,
     stream_opencode_events,
 )
 
@@ -795,17 +680,6 @@ app.include_router(log_routes.router)
 # Main
 # =============================================================================
 
-def start_opencode_server_subprocess(args):
-    # Start OpenCode server subprocess
-    opencode_process = subprocess.Popen(
-        ["opencode", "serve"],
-        cwd=args.workdir,
-        # TODO: Open up logging
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-    logger.info(f"Started OpenCode server (PID: {opencode_process.pid}) in {args.workdir}")
-    return
 
 
 # =============================================================================
@@ -836,7 +710,7 @@ def main():
     if "--run-sidecar" in sys.argv:
         sidecar_index = sys.argv.index("--run-sidecar")
         sidecar_argv = sys.argv[sidecar_index + 1 :]
-        from tools import job_sidecar
+        from agent import job_sidecar
 
         job_sidecar.main(sidecar_argv)
         return
@@ -866,9 +740,6 @@ def main():
     if not USER_AUTH_TOKEN:
         logger.info("RESEARCH_AGENT_USER_AUTH_TOKEN is not set — running without server-side auth.")
         logger.info("   You can set your auth token in the GUI Settings page, or export the env var for remote access.")
-    
-    # Start OpenCode server subprocess
-    # start_opencode_server_subprocess(args)
     
     # Load state
     load_chat_state()

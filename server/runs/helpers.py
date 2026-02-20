@@ -619,8 +619,8 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
         gpuwrap_config_file = None
 
     # Get sidecar path
-    server_dir = os.path.dirname(os.path.abspath(__file__))
-    sidecar_path = os.path.join(server_dir, "job_sidecar.py")
+    server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sidecar_path = os.path.join(server_dir, "agent", "job_sidecar.py")
 
     # Build sidecar command
     server_url = SERVER_CALLBACK_URL

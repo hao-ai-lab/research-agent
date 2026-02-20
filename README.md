@@ -92,7 +92,7 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run de
 ├── scripts/research-agent  # Master CLI (install/onboard/start/tunnel/status/stop)
 ├── server/                 # Python FastAPI backend
 │   ├── server.py           # Main server
-│   ├── job_sidecar.py      # tmux job execution sidecar
+│   ├── agent/job_sidecar.py # tmux job execution sidecar
 │   ├── opencode.json       # OpenCode provider config
 │   └── requirements.txt    # Python dependencies
 └── tests/story/            # Test scenarios

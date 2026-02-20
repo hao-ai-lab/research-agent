@@ -50,7 +50,7 @@ log "Building one-file backend binary"
   --specpath "${PYINSTALLER_SPEC}" \
   --add-data "${SERVER_DIR}/opencode.json:." \
   --add-data "${SERVER_DIR}/gpuwrap_detect.py:." \
-  --hidden-import job_sidecar \
+  --hidden-import agent.job_sidecar \
   --hidden-import core \
   --hidden-import core.config \
   --hidden-import core.models \

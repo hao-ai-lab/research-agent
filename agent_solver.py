@@ -93,7 +93,7 @@ def run_modal_solver(
 
             The repository is a Next.js + FastAPI application. Key files:
             - Frontend: app/, components/, hooks/, lib/
-            - Backend: server/server.py, server/job_sidecar.py, server/wild_loop.py
+            - Backend: server/server.py, server/agent/job_sidecar.py, server/wild_loop.py
             - Config: package.json, next.config.mjs, tsconfig.json
         """)
 
