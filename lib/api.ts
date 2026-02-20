@@ -839,7 +839,7 @@ export interface WildV2Status {
     active: boolean
     session_id?: string
     goal?: string
-    status?: string  // running | paused | done | failed
+    status?: string  // running | paused | stopped | done | failed
     iteration?: number
     max_iterations?: number
     plan?: string
@@ -890,12 +890,13 @@ export async function startWildV2(params: {
 }
 
 /**
- * Stop the active V2 wild session.
+ * Stop a V2 wild session.
  */
-export async function stopWildV2(): Promise<WildV2Status> {
+export async function stopWildV2(chatSessionId?: string): Promise<WildV2Status> {
     const response = await trackedFetch(`${API_URL()}/wild/v2/stop`, {
         method: 'POST',
-        headers: getHeaders()
+        headers: getHeaders(true),
+        body: JSON.stringify({ chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to stop wild v2: ${response.statusText}`)
@@ -906,8 +907,11 @@ export async function stopWildV2(): Promise<WildV2Status> {
 /**
  * Get V2 wild session status.
  */
-export async function getWildV2Status(): Promise<WildV2Status> {
-    const response = await trackedFetch(`${API_URL()}/wild/v2/status`, {
+export async function getWildV2Status(chatSessionId?: string): Promise<WildV2Status> {
+    const params = new URLSearchParams()
+    if (chatSessionId) params.set('chat_session_id', chatSessionId)
+    const qs = params.toString()
+    const response = await trackedFetch(`${API_URL()}/wild/v2/status${qs ? `?${qs}` : ''}`, {
         headers: getHeaders()
     })
     if (!response.ok) {
@@ -917,12 +921,13 @@ export async function getWildV2Status(): Promise<WildV2Status> {
 }
 
 /**
- * Pause the V2 wild session.
+ * Pause a V2 wild session.
  */
-export async function pauseWildV2(): Promise<WildV2Status> {
+export async function pauseWildV2(chatSessionId?: string): Promise<WildV2Status> {
     const response = await trackedFetch(`${API_URL()}/wild/v2/pause`, {
         method: 'POST',
-        headers: getHeaders()
+        headers: getHeaders(true),
+        body: JSON.stringify({ chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to pause wild v2: ${response.statusText}`)
@@ -931,12 +936,13 @@ export async function pauseWildV2(): Promise<WildV2Status> {
 }
 
 /**
- * Resume the V2 wild session.
+ * Resume a V2 wild session.
  */
-export async function resumeWildV2(): Promise<WildV2Status> {
+export async function resumeWildV2(chatSessionId?: string): Promise<WildV2Status> {
     const response = await trackedFetch(`${API_URL()}/wild/v2/resume`, {
         method: 'POST',
-        headers: getHeaders()
+        headers: getHeaders(true),
+        body: JSON.stringify({ chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to resume wild v2: ${response.statusText}`)
@@ -947,11 +953,11 @@ export async function resumeWildV2(): Promise<WildV2Status> {
 /**
  * Inject user context for the next V2 iteration.
  */
-export async function steerWildV2(context: string): Promise<{ ok: boolean }> {
+export async function steerWildV2(context: string, chatSessionId?: string): Promise<{ ok: boolean }> {
     const response = await trackedFetch(`${API_URL()}/wild/v2/steer`, {
         method: 'POST',
         headers: getHeaders(true),
-        body: JSON.stringify({ context }),
+        body: JSON.stringify({ context, chat_session_id: chatSessionId ?? null }),
     })
     if (!response.ok) {
         throw new Error(`Failed to steer wild v2: ${response.statusText}`)

@@ -68,7 +68,7 @@ class WildV2Session:
 
     session_id: str
     goal: str
-    status: str = "running"          # running | paused | done | failed
+    status: str = "running"          # running | paused | stopped | done | failed
     iteration: int = 0
     max_iterations: int = 25
     plan: str = ""
@@ -157,6 +157,11 @@ class WildV2Engine:
         self._chat_sessions = chat_sessions or {}
         self._send_chat_message = send_chat_message
 
+        # Per-chat session registry (keyed by chat_session_id)
+        self._sessions: dict[str, WildV2Session] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+
+        # Legacy single-session compat (points to most recently started)
         self._session: Optional[WildV2Session] = None
         self._task: Optional[asyncio.Task] = None
 
@@ -167,11 +172,18 @@ class WildV2Engine:
 
     @property
     def session(self) -> Optional[WildV2Session]:
+        """Legacy compat: returns the most recently started session."""
         return self._session
 
     @property
     def is_active(self) -> bool:
-        return self._session is not None and self._session.status == "running"
+        return any(s.status == "running" for s in self._sessions.values())
+
+    def _get_session(self, chat_session_id: Optional[str]) -> Optional[WildV2Session]:
+        """Look up a session by chat_session_id."""
+        if chat_session_id and chat_session_id in self._sessions:
+            return self._sessions[chat_session_id]
+        return None
 
     # -- Lifecycle --
 
@@ -188,12 +200,15 @@ class WildV2Engine:
         """Start a new V2 wild session."""
         logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d autonomy=%s", goal[:80], chat_session_id, max_iterations, autonomy_level)
 
-        if self._session and self._session.status == "running":
-            logger.info("[wild-v2] Existing session running, stopping first")
-            self.stop()
+        # If this chat already has a running session, stop it first
+        if chat_session_id and chat_session_id in self._sessions:
+            existing = self._sessions[chat_session_id]
+            if existing.status == "running":
+                logger.info("[wild-v2] Existing session for chat %s running, stopping first", chat_session_id)
+                self.stop(chat_session_id)
 
         sid = f"wild-{uuid.uuid4().hex[:8]}"
-        self._session = WildV2Session(
+        session = WildV2Session(
             session_id=sid,
             goal=goal,
             max_iterations=max_iterations,
@@ -204,6 +219,13 @@ class WildV2Engine:
             away_duration_minutes=away_duration_minutes,
             evo_sweep_enabled=evo_sweep_enabled,
         )
+
+        # Register in per-chat session registry
+        if chat_session_id:
+            self._sessions[chat_session_id] = session
+
+        # Legacy compat
+        self._session = session
 
         # Create session storage dir
         session_dir = self._session_dir(sid)
@@ -231,7 +253,10 @@ class WildV2Engine:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                self._task = loop.create_task(self._run_loop())
+                task = loop.create_task(self._run_loop(session))
+                if chat_session_id:
+                    self._tasks[chat_session_id] = task
+                self._task = task  # legacy compat
                 logger.info("[wild-v2] Async loop task created successfully")
             else:
                 logger.error("[wild-v2] Event loop is not running!")
@@ -239,64 +264,97 @@ class WildV2Engine:
             logger.error("[wild-v2] No running event loop, cannot start")
 
         logger.info("[wild-v2] Started session %s: goal=%s max_iter=%d", sid, goal[:80], max_iterations)
-        return self._session.to_dict()
+        return session.to_dict()
 
-    def stop(self) -> dict:
-        """Stop the active session."""
-        if not self._session:
+    def stop(self, chat_session_id: Optional[str] = None) -> dict:
+        """Stop a session. Uses chat_session_id to find the session, falls back to legacy _session."""
+        session = self._get_session(chat_session_id) if chat_session_id else self._session
+        if not session:
             return {"stopped": False}
 
-        self._session.status = "done"
-        self._session.finished_at = time.time()
+        session.status = "stopped"
+        session.finished_at = time.time()
 
-        if self._task and not self._task.done():
-            self._task.cancel()
+        # Cancel the async task
+        task = self._tasks.get(chat_session_id or "") if chat_session_id else self._task
+        if task and not task.done():
+            task.cancel()
+        if chat_session_id and chat_session_id in self._tasks:
+            self._tasks.pop(chat_session_id, None)
+        if session is self._session:
             self._task = None
 
-        self._save_state(self._session.session_id)
-        logger.info("[wild-v2] Stopped session %s at iteration %d", self._session.session_id, self._session.iteration)
-        return self._session.to_dict()
+        # NOTE: Do NOT remove from self._sessions — keep for state inspection
+        self._save_state(session.session_id)
+        logger.info("[wild-v2] Stopped session %s at iteration %d", session.session_id, session.iteration)
+        return session.to_dict()
 
-    def pause(self) -> dict:
-        if self._session:
-            self._session.status = "paused"
-            self._save_state(self._session.session_id)
-        return self._session.to_dict() if self._session else {}
+    def pause(self, chat_session_id: Optional[str] = None) -> dict:
+        session = self._get_session(chat_session_id) if chat_session_id else self._session
+        if session and session.status == "running":
+            session.status = "paused"
+            self._save_state(session.session_id)
+        return session.to_dict() if session else {}
 
-    def resume(self) -> dict:
-        if self._session and self._session.status == "paused":
-            self._session.status = "running"
-            self._save_state(self._session.session_id)
+    def resume(self, chat_session_id: Optional[str] = None) -> dict:
+        session = self._get_session(chat_session_id) if chat_session_id else self._session
+        if session and session.status == "paused":
+            session.status = "running"
+            self._save_state(session.session_id)
             try:
                 loop = asyncio.get_event_loop()
-                if loop.is_running() and (not self._task or self._task.done()):
-                    self._task = loop.create_task(self._run_loop())
+                task = self._tasks.get(chat_session_id or "") if chat_session_id else self._task
+                if loop.is_running() and (not task or task.done()):
+                    new_task = loop.create_task(self._run_loop(session))
+                    if chat_session_id:
+                        self._tasks[chat_session_id] = new_task
+                    if session is self._session:
+                        self._task = new_task
             except RuntimeError:
                 pass
-        return self._session.to_dict() if self._session else {}
+        return session.to_dict() if session else {}
 
-    def steer(self, context: str) -> dict:
-        """Inject user context for the next iteration."""
-        if self._session:
-            self._session.steer_context = context
-            # Also save to file
-            ctx_path = os.path.join(self._session_dir(self._session.session_id), "context.md")
-            with open(ctx_path, "w") as f:
-                f.write(context)
+    def steer(self, context: str, chat_session_id: Optional[str] = None) -> dict:
+        """Inject user context for the next iteration.
+
+        Wraps the user text in a steer template if render_fn is available.
+        """
+        session = self._get_session(chat_session_id) if chat_session_id else self._session
+        if not session:
+            return {"ok": False, "error": "no session"}
+
+        # Try to render through the steer skill template
+        wrapped = context
+        if self._render_fn:
+            try:
+                rendered = self._render_fn("wild_v2_steer", {"user_message": context, "goal": session.goal})
+                if rendered:
+                    wrapped = rendered
+            except Exception:
+                pass  # Fallback to raw context
+
+        session.steer_context = wrapped
+        # Also save to file
+        ctx_path = os.path.join(self._session_dir(session.session_id), "context.md")
+        with open(ctx_path, "w") as f:
+            f.write(wrapped)
         return {"ok": True}
 
-    def get_status(self) -> dict:
-        """Return current session state for API."""
-        if not self._session:
+    def get_status(self, chat_session_id: Optional[str] = None) -> dict:
+        """Return session state for API.
+
+        If chat_session_id is provided, returns that session's state.
+        Otherwise falls back to the legacy single-session for backward compat.
+        """
+        session = self._get_session(chat_session_id) if chat_session_id else self._session
+        if not session:
             return {"active": False}
 
-        d = self._session.to_dict()
-        d["active"] = self._session.status == "running"
-
-        # System health is served via /wild/v2/system-health endpoint
+        d = session.to_dict()
+        d["active"] = session.status == "running"
 
         # Add file contents from disk
-        sid = self._session.session_id
+        sid = session.session_id
         session_dir = self._session_dir(sid)
         d["session_dir"] = session_dir
         d["workdir"] = self._get_workdir()
@@ -351,25 +409,27 @@ class WildV2Engine:
     # Events are now API-driven — the agent curls /wild/v2/events/{session_id}
     # Event storage/resolution is managed by the server, not the engine.
 
-    def get_plan(self) -> str:
+    def get_plan(self, chat_session_id: Optional[str] = None) -> str:
         """Return current plan/tasks markdown from disk."""
-        if not self._session:
+        session = self._get_session(chat_session_id) if chat_session_id else self._session
+        if not session:
             return ""
         tasks_path = os.path.join(
-            self._session_dir(self._session.session_id), "tasks.md"
+            self._session_dir(session.session_id), "tasks.md"
         )
         try:
             with open(tasks_path) as f:
                 return f.read()
         except FileNotFoundError:
-            return self._session.plan
+            return session.plan
 
-    def get_iteration_log(self) -> str:
+    def get_iteration_log(self, chat_session_id: Optional[str] = None) -> str:
         """Return the iteration log from disk."""
-        if not self._session:
+        session = self._get_session(chat_session_id) if chat_session_id else self._session
+        if not session:
             return ""
         log_path = os.path.join(
-            self._session_dir(self._session.session_id), "iteration_log.md"
+            self._session_dir(session.session_id), "iteration_log.md"
         )
         try:
             with open(log_path) as f:
@@ -442,9 +502,11 @@ class WildV2Engine:
             self._append_to_chat(session, prompt, full_text, session.iteration)
         return full_text
 
-    async def _run_loop(self):
+    async def _run_loop(self, session: Optional[WildV2Session] = None):
         """The ralph-style main loop running as an async background task."""
-        session = self._session
+        # Support legacy callers that don't pass session
+        if session is None:
+            session = self._session
         if not session:
             logger.error("[wild-v2] _run_loop called but no session!")
             return

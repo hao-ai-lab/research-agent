@@ -216,8 +216,8 @@ export default function ResearchChat() {
   } = chatSession
   const { sendMessage } = chatSession
 
-  // Wild loop hook
-  const wildLoop = useWildLoop()
+  // Wild loop hook (per-chat: passes currentSessionId so it polls the right session)
+  const wildLoop = useWildLoop(currentSessionId)
 
   // Load prompt skills for slash commands
   const [promptSkills, setPromptSkills] = useState<PromptSkill[]>([])

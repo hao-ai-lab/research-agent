@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger("research-agent-server")
@@ -43,8 +43,18 @@ class WildV2StartRequest(BaseModel):
     wait_seconds: float = 30.0
     evo_sweep_enabled: bool = False
 
+class WildV2StopRequest(BaseModel):
+    chat_session_id: Optional[str] = None
+
+class WildV2PauseRequest(BaseModel):
+    chat_session_id: Optional[str] = None
+
+class WildV2ResumeRequest(BaseModel):
+    chat_session_id: Optional[str] = None
+
 class WildV2SteerRequest(BaseModel):
     context: str
+    chat_session_id: Optional[str] = None
 
 class WildV2ResolveRequest(BaseModel):
     event_ids: list
@@ -68,27 +78,31 @@ async def wild_v2_start(req: WildV2StartRequest):
 
 
 @router.post("/wild/v2/stop")
-async def wild_v2_stop():
-    """Stop the active V2 wild session."""
-    return _wild_v2_engine.stop()
+async def wild_v2_stop(req: WildV2StopRequest):
+    """Stop a V2 wild session."""
+    return _wild_v2_engine.stop(chat_session_id=req.chat_session_id)
 
 
 @router.post("/wild/v2/pause")
-async def wild_v2_pause():
-    """Pause the V2 wild session."""
-    return _wild_v2_engine.pause()
+async def wild_v2_pause(req: WildV2PauseRequest):
+    """Pause a V2 wild session."""
+    return _wild_v2_engine.pause(chat_session_id=req.chat_session_id)
 
 
 @router.post("/wild/v2/resume")
-async def wild_v2_resume():
-    """Resume the V2 wild session."""
-    return _wild_v2_engine.resume()
+async def wild_v2_resume(req: WildV2ResumeRequest):
+    """Resume a V2 wild session."""
+    return _wild_v2_engine.resume(chat_session_id=req.chat_session_id)
 
 
 @router.get("/wild/v2/status")
-async def wild_v2_status():
-    """Get current V2 session state, plan, and history."""
-    return _wild_v2_engine.get_status()
+async def wild_v2_status(chat_session_id: Optional[str] = Query(None)):
+    """Get V2 session state, plan, and history.
+
+    If chat_session_id is provided, returns that session's state.
+    Otherwise, falls back to the most recently started session.
+    """
+    return _wild_v2_engine.get_status(chat_session_id=chat_session_id)
 
 
 @router.get("/wild/v2/events/{session_id}")
@@ -139,21 +153,21 @@ async def wild_v2_system_health():
 
 
 @router.get("/wild/v2/plan/{session_id}")
-async def wild_v2_plan(session_id: str):
+async def wild_v2_plan(session_id: str, chat_session_id: Optional[str] = Query(None)):
     """Get the current tasks/plan markdown (reads tasks.md from disk)."""
-    return {"plan": _wild_v2_engine.get_plan()}
+    return {"plan": _wild_v2_engine.get_plan(chat_session_id=chat_session_id)}
 
 
 @router.get("/wild/v2/iteration-log/{session_id}")
-async def wild_v2_iteration_log(session_id: str):
+async def wild_v2_iteration_log(session_id: str, chat_session_id: Optional[str] = Query(None)):
     """Get the iteration log markdown."""
-    return {"log": _wild_v2_engine.get_iteration_log()}
+    return {"log": _wild_v2_engine.get_iteration_log(chat_session_id=chat_session_id)}
 
 
 @router.post("/wild/v2/steer")
 async def wild_v2_steer(req: WildV2SteerRequest):
     """Inject user context for the next iteration."""
-    return _wild_v2_engine.steer(req.context)
+    return _wild_v2_engine.steer(req.context, chat_session_id=req.chat_session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +175,18 @@ async def wild_v2_steer(req: WildV2SteerRequest):
 # ---------------------------------------------------------------------------
 
 @router.get("/wild/v2/evo-sweep/{session_id}")
-async def wild_v2_evo_sweep_status(session_id: str):
+async def wild_v2_evo_sweep_status(session_id: str, chat_session_id: Optional[str] = Query(None)):
     """Get the current evolutionary sweep status for a session."""
-    session = _wild_v2_engine._session  # type: ignore[attr-defined]
-    if not session or session.session_id != session_id:
+    # Try to find session by chat_session_id first, fall back to wild session_id match
+    session = None
+    if chat_session_id:
+        session = _wild_v2_engine._get_session(chat_session_id)
+    if not session:
+        # Legacy: search by wild session_id
+        session = _wild_v2_engine._session
+        if session and session.session_id != session_id:
+            session = None
+    if not session:
         return {"active": False, "message": "No active session matches"}
     controller = getattr(session, "_evo_controller", None)
     if controller is None:
@@ -177,10 +199,16 @@ async def wild_v2_evo_sweep_status(session_id: str):
 
 
 @router.post("/wild/v2/evo-sweep/{session_id}/stop")
-async def wild_v2_evo_sweep_stop(session_id: str):
+async def wild_v2_evo_sweep_stop(session_id: str, chat_session_id: Optional[str] = Query(None)):
     """Stop an in-progress evolutionary sweep."""
-    session = _wild_v2_engine._session  # type: ignore[attr-defined]
-    if not session or session.session_id != session_id:
+    session = None
+    if chat_session_id:
+        session = _wild_v2_engine._get_session(chat_session_id)
+    if not session:
+        session = _wild_v2_engine._session
+        if session and session.session_id != session_id:
+            session = None
+    if not session:
         return {"stopped": False, "message": "No active session matches"}
     controller = getattr(session, "_evo_controller", None)
     if controller is None:
