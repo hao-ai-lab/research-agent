@@ -29,6 +29,9 @@ BACKEND_BINARY_BASE_URL="${RESEARCH_AGENT_BACKEND_BINARY_BASE_URL:-}"
 BACKEND_BINARY_SHA256="${RESEARCH_AGENT_BACKEND_BINARY_SHA256:-}"
 FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_FRONTEND_BUNDLE_URL:-}"
 FRONTEND_BUNDLE_BASE_URL="${RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL:-}"
+INSTALL_MODE="${RESEARCH_AGENT_INSTALL_MODE:-runtime}"
+CHANNEL="${RESEARCH_AGENT_CHANNEL:-stable}"
+REPO_URL="${RESEARCH_AGENT_REPO_URL:-https://github.com/hao-ai-lab/research-agent}"
 AUTH_TOKEN_FILE="${AUTH_TOKEN_FILE_DEFAULT}"
 PROJECT_ROOT=""
 PROJECT_NAME=""
@@ -82,6 +85,9 @@ Commands:
 Common options:
   --project-root <path>  Project root for runs/data (defaults to current directory)
   --install-dir <path>   Installed app directory (default: script parent)
+  --mode <runtime|source> Install mode (default: runtime)
+  --channel <stable|latest|commit:SHA> Release channel (default: stable)
+  --repo-url <url>       Source repository URL (for source mode)
   --frontend-port <n>    Override frontend port
   --backend-port <n>     Override backend port
   --opencode-port <n>    Override OpenCode port (default: 4096)
@@ -94,6 +100,8 @@ Common options:
 
 Examples:
   research-agent install
+  research-agent install --mode source --channel latest
+  research-agent install --mode source --channel commit:abcdef1234
   research-agent fetch-backend --backend-binary-base-url https://example.com/releases
   research-agent fetch-frontend --frontend-bundle-base-url https://example.com/releases
   research-agent build-backend
@@ -129,6 +137,9 @@ load_machine_config() {
     BACKEND_BINARY_SHA256="${RESEARCH_AGENT_BACKEND_BINARY_SHA256:-$BACKEND_BINARY_SHA256}"
     FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_FRONTEND_BUNDLE_URL:-$FRONTEND_BUNDLE_URL}"
     FRONTEND_BUNDLE_BASE_URL="${RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL:-$FRONTEND_BUNDLE_BASE_URL}"
+    INSTALL_MODE="${RESEARCH_AGENT_INSTALL_MODE:-$INSTALL_MODE}"
+    CHANNEL="${RESEARCH_AGENT_CHANNEL:-$CHANNEL}"
+    REPO_URL="${RESEARCH_AGENT_REPO_URL:-$REPO_URL}"
     AUTH_TOKEN_FILE="${RESEARCH_AGENT_AUTH_TOKEN_FILE:-$AUTH_TOKEN_FILE}"
   fi
 }
@@ -144,8 +155,111 @@ save_machine_config() {
     printf 'RESEARCH_AGENT_BACKEND_BINARY_SHA256=%q\n' "$BACKEND_BINARY_SHA256"
     printf 'RESEARCH_AGENT_FRONTEND_BUNDLE_URL=%q\n' "$FRONTEND_BUNDLE_URL"
     printf 'RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL=%q\n' "$FRONTEND_BUNDLE_BASE_URL"
+    printf 'RESEARCH_AGENT_INSTALL_MODE=%q\n' "$INSTALL_MODE"
+    printf 'RESEARCH_AGENT_CHANNEL=%q\n' "$CHANNEL"
+    printf 'RESEARCH_AGENT_REPO_URL=%q\n' "$REPO_URL"
     printf 'RESEARCH_AGENT_AUTH_TOKEN_FILE=%q\n' "$AUTH_TOKEN_FILE"
   } >"$CONFIG_FILE"
+}
+
+normalize_install_mode() {
+  case "$1" in
+    runtime|source)
+      printf '%s\n' "$1"
+      ;;
+    *)
+      die "Invalid install mode: $1 (expected runtime or source)"
+      ;;
+  esac
+}
+
+normalize_channel() {
+  case "$1" in
+    stable)
+      printf 'stable\n'
+      ;;
+    latest|nightly|main|master)
+      printf 'latest\n'
+      ;;
+    commit:*)
+      local commit_sha="${1#commit:}"
+      [ -n "$commit_sha" ] || die "Invalid channel: $1 (missing commit SHA)"
+      printf 'commit:%s\n' "$commit_sha"
+      ;;
+    *)
+      die "Invalid channel: $1 (expected stable, latest, or commit:<sha>)"
+      ;;
+  esac
+}
+
+resolve_source_ref() {
+  case "$CHANNEL" in
+    latest)
+      printf 'origin/main\n'
+      ;;
+    stable)
+      local latest_tag
+      latest_tag="$(git tag --sort=-v:refname | head -n1 || true)"
+      if [ -n "$latest_tag" ]; then
+        printf '%s\n' "$latest_tag"
+      else
+        printf 'origin/main\n'
+      fi
+      ;;
+    commit:*)
+      printf '%s\n' "${CHANNEL#commit:}"
+      ;;
+    *)
+      die "Unsupported source channel: ${CHANNEL}"
+      ;;
+  esac
+}
+
+sync_source_tree() {
+  require_cmd git
+  mkdir -p "$INSTALL_DIR"
+
+  if [ -d "${INSTALL_DIR}/.git" ]; then
+    log "Updating source checkout in ${INSTALL_DIR}"
+  else
+    if [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
+      die "Install dir is not empty and not a git repo: ${INSTALL_DIR}"
+    fi
+    log "Cloning ${REPO_URL} into ${INSTALL_DIR}"
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+
+  (
+    cd "$INSTALL_DIR"
+    git remote set-url origin "$REPO_URL"
+    git fetch --tags --prune origin
+
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+      die "Source install has local changes in ${INSTALL_DIR}; stash/commit before updating."
+    fi
+
+    local ref
+    ref="$(resolve_source_ref)"
+    case "$CHANNEL" in
+      latest)
+        git checkout -B main origin/main
+        ;;
+      stable)
+        if [ "$ref" = "origin/main" ]; then
+          git checkout -B main origin/main
+        else
+          git checkout --detach "$ref"
+        fi
+        ;;
+      commit:*)
+        git checkout --detach "$ref"
+        ;;
+    esac
+
+    local head_sha
+    head_sha="$(git rev-parse --short HEAD)"
+    log "Source channel '${CHANNEL}' resolved to ${head_sha}"
+  )
 }
 
 generate_auth_token() {
@@ -954,6 +1068,18 @@ cmd_install() {
         FRONTEND_BUNDLE_BASE_URL="${2:-}"
         shift 2
         ;;
+      --mode)
+        INSTALL_MODE="${2:-}"
+        shift 2
+        ;;
+      --channel)
+        CHANNEL="${2:-}"
+        shift 2
+        ;;
+      --repo-url)
+        REPO_URL="${2:-}"
+        shift 2
+        ;;
       -h|--help)
         usage
         return 0
@@ -964,8 +1090,16 @@ cmd_install() {
     esac
   done
 
+  INSTALL_MODE="$(normalize_install_mode "$INSTALL_MODE")"
+  CHANNEL="$(normalize_channel "$CHANNEL")"
+
   if [ -n "$install_dir_override" ]; then
+    mkdir -p "$install_dir_override"
     INSTALL_DIR="$(cd "$install_dir_override" && pwd)"
+  fi
+
+  if [ "$INSTALL_MODE" = "source" ]; then
+    sync_source_tree
   fi
 
   if [ -f "${INSTALL_DIR}/package.json" ]; then
@@ -1335,6 +1469,7 @@ cmd_status() {
 
   printf 'Project root: %s\n' "$PROJECT_ROOT"
   printf 'Install dir:  %s\n' "$INSTALL_DIR"
+  printf 'Mode/channel: %s / %s\n' "$INSTALL_MODE" "$CHANNEL"
   printf 'Tmux session: %s\n' "$TMUX_SESSION_NAME"
   local frontend_static_dir
   frontend_static_dir="$(get_frontend_static_dir || true)"

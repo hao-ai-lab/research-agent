@@ -5,6 +5,16 @@ set -euo pipefail
 INSTALL_DIR="${RESEARCH_AGENT_INSTALL_DIR:-${HOME}/.research-agent/app}"
 DEFAULT_BACKEND_BINARY_URL="https://drive.google.com/uc?export=download&id=1CIdMPZzF2GceTZkSwK_8_8T9crN1cfDl"
 DEFAULT_FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_DEFAULT_FRONTEND_BUNDLE_URL:-https://drive.google.com/uc?export=download&id=14kuhcyxGBtBl_oa774AaIcW4-FtyE7QR}"
+INSTALL_MODE="${RESEARCH_AGENT_INSTALL_MODE:-runtime}"
+CHANNEL="${RESEARCH_AGENT_CHANNEL:-stable}"
+REPO_URL="${RESEARCH_AGENT_REPO_URL:-https://github.com/GindaChen/v0-research-agent-mobile.git}"
+RELEASES_BASE_URL="${RESEARCH_AGENT_RELEASES_BASE_URL:-}"
+BACKEND_BINARY_URL_OVERRIDE="${RESEARCH_AGENT_BACKEND_BINARY_URL:-}"
+BACKEND_BINARY_BASE_URL_OVERRIDE="${RESEARCH_AGENT_BACKEND_BINARY_BASE_URL:-}"
+BACKEND_BINARY_SHA256_OVERRIDE="${RESEARCH_AGENT_BACKEND_BINARY_SHA256:-}"
+FRONTEND_BUNDLE_URL_OVERRIDE="${RESEARCH_AGENT_FRONTEND_BUNDLE_URL:-}"
+FRONTEND_BUNDLE_BASE_URL_OVERRIDE="${RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL:-}"
+DEV_ONLY=0
 
 log() {
   printf '[install.sh] %s\n' "$*"
@@ -15,8 +25,114 @@ die() {
   exit 1
 }
 
+normalize_install_mode() {
+  case "$1" in
+    runtime|source)
+      printf '%s\n' "$1"
+      ;;
+    *)
+      die "Invalid mode: $1 (expected runtime or source)"
+      ;;
+  esac
+}
+
+normalize_channel() {
+  case "$1" in
+    stable)
+      printf 'stable\n'
+      ;;
+    latest|nightly|main|master)
+      printf 'latest\n'
+      ;;
+    commit:*)
+      [ -n "${1#commit:}" ] || die "Invalid channel: $1 (missing commit SHA)"
+      printf '%s\n' "$1"
+      ;;
+    *)
+      die "Invalid channel: $1 (expected stable, latest, or commit:<sha>)"
+      ;;
+  esac
+}
+
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v bash >/dev/null 2>&1 || die "bash is required"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dev)
+      DEV_ONLY=1
+      shift
+      ;;
+    --install-dir)
+      [ -n "${2:-}" ] || die "Missing value for --install-dir"
+      mkdir -p "${2:-}"
+      INSTALL_DIR="$(cd "${2:-}" && pwd)"
+      shift 2
+      ;;
+    --mode)
+      INSTALL_MODE="${2:-}"
+      shift 2
+      ;;
+    --channel)
+      CHANNEL="${2:-}"
+      shift 2
+      ;;
+    --repo-url)
+      REPO_URL="${2:-}"
+      shift 2
+      ;;
+    --releases-base-url)
+      RELEASES_BASE_URL="${2:-}"
+      shift 2
+      ;;
+    --backend-binary-url)
+      BACKEND_BINARY_URL_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    --backend-binary-base-url)
+      BACKEND_BINARY_BASE_URL_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    --backend-binary-sha256)
+      BACKEND_BINARY_SHA256_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    --frontend-bundle-url)
+      FRONTEND_BUNDLE_URL_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    --frontend-bundle-base-url)
+      FRONTEND_BUNDLE_BASE_URL_OVERRIDE="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      cat <<EOF
+Usage: install.sh [options]
+
+Options:
+  --dev                          Run prerequisite checks only
+  --install-dir <path>           Install location (default: ~/.research-agent/app)
+  --mode <runtime|source>        Install mode (default: runtime)
+  --channel <stable|latest|commit:SHA>
+                                 Release channel (default: stable)
+  --repo-url <url>               Source repository URL (source mode)
+  --releases-base-url <url>      Base URL for runtime channels (expects /<channel>/ files)
+  --backend-binary-url <url>     Explicit backend binary URL
+  --backend-binary-base-url <url> Base URL for platform backend binaries
+  --backend-binary-sha256 <hex>  Expected SHA256 for backend binary
+  --frontend-bundle-url <url>    Explicit frontend bundle URL
+  --frontend-bundle-base-url <url> Base URL for frontend tarball
+EOF
+      exit 0
+      ;;
+    *)
+      die "Unknown option: $1"
+      ;;
+  esac
+done
+
+INSTALL_MODE="$(normalize_install_mode "$INSTALL_MODE")"
+CHANNEL="$(normalize_channel "$CHANNEL")"
 
 # ── Prerequisite checks (shared by both full install and --dev mode) ─────────
 
@@ -124,7 +240,7 @@ run_prereq_checks() {
 
 # ── --dev mode: prereq checks only, skip artifact downloads ──────────────────
 
-if [ "${1:-}" = "--dev" ]; then
+if [ "$DEV_ONLY" -eq 1 ]; then
   run_prereq_checks
   log ""
   log "============================================================"
@@ -161,6 +277,46 @@ fi
 # ── Full install (artifact-based) ────────────────────────────────────────────
 
 run_prereq_checks
+
+if [ "$INSTALL_MODE" = "source" ]; then
+  command -v git >/dev/null 2>&1 || die "git is required for --mode source"
+  mkdir -p "$INSTALL_DIR"
+
+  if [ ! -d "${INSTALL_DIR}/.git" ]; then
+    if [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
+      die "Install dir is not empty and not a git repo: ${INSTALL_DIR}"
+    fi
+    log "Cloning source repository into ${INSTALL_DIR}"
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+
+  [ -x "${INSTALL_DIR}/scripts/research-agent" ] || die "Missing CLI script at ${INSTALL_DIR}/scripts/research-agent"
+
+  log "Running source install bootstrap (channel=${CHANNEL})"
+  "${INSTALL_DIR}/scripts/research-agent" install \
+    --install-dir "$INSTALL_DIR" \
+    --mode source \
+    --channel "$CHANNEL" \
+    --repo-url "$REPO_URL"
+
+  cat <<EOF
+
+Install complete (source mode, channel=${CHANNEL}).
+
+Next step (from your research project root):
+  research-agent start --project-root "\$PWD"
+
+Optional public tunnel:
+  research-agent tunnel --project-root "\$PWD"
+EOF
+  exit 0
+fi
+
+if [ "$CHANNEL" != "stable" ] && [ -z "$BACKEND_BINARY_URL_OVERRIDE" ] && [ -z "$FRONTEND_BUNDLE_URL_OVERRIDE" ] && [ -z "$BACKEND_BINARY_BASE_URL_OVERRIDE" ] && [ -z "$FRONTEND_BUNDLE_BASE_URL_OVERRIDE" ]; then
+  [ -n "$RELEASES_BASE_URL" ] || die "Channel '${CHANNEL}' requires --releases-base-url or explicit backend/frontend URL overrides."
+  BACKEND_BINARY_BASE_URL_OVERRIDE="${RELEASES_BASE_URL%/}/${CHANNEL}"
+  FRONTEND_BUNDLE_BASE_URL_OVERRIDE="${RELEASES_BASE_URL%/}/${CHANNEL}"
+fi
 
 mkdir -p "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/server/dist"
 
@@ -1565,27 +1721,27 @@ __RESEARCH_AGENT_EMBEDDED__
 fi
 chmod +x "${INSTALL_DIR}/scripts/research-agent"
 
-log "Running install bootstrap (artifact-first, no git clone)"
+log "Running install bootstrap (artifact-first, channel=${CHANNEL})"
 install_args=(install --install-dir "$INSTALL_DIR")
 
-BACKEND_BINARY_URL="${RESEARCH_AGENT_BACKEND_BINARY_URL:-$DEFAULT_BACKEND_BINARY_URL}"
+BACKEND_BINARY_URL="${BACKEND_BINARY_URL_OVERRIDE:-$DEFAULT_BACKEND_BINARY_URL}"
 if [ -n "$BACKEND_BINARY_URL" ]; then
   install_args+=(--backend-binary-url "$BACKEND_BINARY_URL")
 fi
 
-FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_FRONTEND_BUNDLE_URL:-$DEFAULT_FRONTEND_BUNDLE_URL}"
+FRONTEND_BUNDLE_URL="${FRONTEND_BUNDLE_URL_OVERRIDE:-$DEFAULT_FRONTEND_BUNDLE_URL}"
 if [ -n "$FRONTEND_BUNDLE_URL" ]; then
   install_args+=(--frontend-bundle-url "$FRONTEND_BUNDLE_URL")
 fi
 
-if [ -n "${RESEARCH_AGENT_BACKEND_BINARY_BASE_URL:-}" ]; then
-  install_args+=(--backend-binary-base-url "$RESEARCH_AGENT_BACKEND_BINARY_BASE_URL")
+if [ -n "$BACKEND_BINARY_BASE_URL_OVERRIDE" ]; then
+  install_args+=(--backend-binary-base-url "$BACKEND_BINARY_BASE_URL_OVERRIDE")
 fi
-if [ -n "${RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL:-}" ]; then
-  install_args+=(--frontend-bundle-base-url "$RESEARCH_AGENT_FRONTEND_BUNDLE_BASE_URL")
+if [ -n "$FRONTEND_BUNDLE_BASE_URL_OVERRIDE" ]; then
+  install_args+=(--frontend-bundle-base-url "$FRONTEND_BUNDLE_BASE_URL_OVERRIDE")
 fi
-if [ -n "${RESEARCH_AGENT_BACKEND_BINARY_SHA256:-}" ]; then
-  install_args+=(--backend-binary-sha256 "$RESEARCH_AGENT_BACKEND_BINARY_SHA256")
+if [ -n "$BACKEND_BINARY_SHA256_OVERRIDE" ]; then
+  install_args+=(--backend-binary-sha256 "$BACKEND_BINARY_SHA256_OVERRIDE")
 fi
 
 "${INSTALL_DIR}/scripts/research-agent" "${install_args[@]}"
