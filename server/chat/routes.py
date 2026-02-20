@@ -22,7 +22,7 @@ from core.config import (
     OPENCODE_URL,
     MODEL_PROVIDER,
     MODEL_ID,
-    SERVER_CALLBACK_URL,
+    get_server_callback_url,
     USER_AUTH_TOKEN,
     get_auth,
     get_session_model,
@@ -345,7 +345,7 @@ def _build_agent_state(_message: str) -> dict:
     """Build template variables for agent (default chat) mode."""
     return {
         "experiment_context": _build_experiment_context(),
-        "server_url": SERVER_CALLBACK_URL,
+        "server_url": get_server_callback_url(),
         "auth_token": USER_AUTH_TOKEN or "",
     }
 
@@ -363,7 +363,7 @@ def _build_plan_state(message: str) -> dict:
         "goal": message,
         "experiment_context": _build_experiment_context(),
         "existing_plans": existing_plans_summary,
-        "server_url": SERVER_CALLBACK_URL,
+        "server_url": get_server_callback_url(),
         "auth_token": USER_AUTH_TOKEN or "",
     }
 
@@ -383,8 +383,16 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
     mode_note = ""
     provenance = None
 
+    # Only prepend the mode preamble on the first message of the session.
+    # OpenCode maintains multi-turn history, so subsequent turns already
+    # have the system context from the first exchange.
+    # NOTE: The current user message is already appended to session["messages"]
+    # before this function is called (see chat_endpoint line 663-664), so the
+    # first turn has exactly 1 message; subsequent turns have > 1.
+    is_first_turn = len(session.get("messages", [])) <= 1
+
     config = MODE_REGISTRY.get(mode)
-    if config:
+    if config and is_first_turn:
         variables = config.build_state(message)
         skill = _prompt_skill_manager.get(config.skill_id)
         rendered = _prompt_skill_manager.render(config.skill_id, variables)
@@ -414,8 +422,9 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
             "prompt_type": mode,
         }
 
+    # Chat linking note only needed on first turn — OpenCode retains it in context.
     chat_linking_note = ""
-    if session_id:
+    if session_id and is_first_turn:
         chat_linking_note = (
             "[CHAT LINKAGE]\n"
             "For experiment API creations (`POST /runs`, `POST /sweeps`, "

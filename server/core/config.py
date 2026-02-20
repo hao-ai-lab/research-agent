@@ -72,6 +72,17 @@ PLANS_DATA_FILE = ""
 JOURNEY_STATE_FILE = ""
 TMUX_SESSION_NAME = os.environ.get("RESEARCH_AGENT_TMUX_SESSION", "research-agent")
 SERVER_CALLBACK_URL = "http://127.0.0.1:10000"
+
+
+def get_server_callback_url() -> str:
+    """Return the current server callback URL."""
+    return SERVER_CALLBACK_URL
+
+
+def set_server_callback_url(url: str) -> None:
+    """Update the server callback URL (called at startup with the actual port)."""
+    global SERVER_CALLBACK_URL
+    SERVER_CALLBACK_URL = url
 FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
 
 
