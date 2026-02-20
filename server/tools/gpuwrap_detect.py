@@ -2,7 +2,7 @@
 """GPU availability detector for sidecar GPU scheduling.
 
 Uses NVML (pynvml) when available and falls back to nvidia-smi parsing.
-Returns *all* currently available GPUs based on memory/utilization thresholds.
+Returns *all* currently available GPUs based on whether processes are running.
 """
 
 from __future__ import annotations
@@ -163,51 +163,25 @@ def shutil_which(binary: str) -> str | None:
     return None
 
 
-def _is_available(
-    gpu: dict[str, Any],
-    max_memory_used_mb: int,
-    max_utilization: int,
-) -> bool:
-    return (
-        int(gpu.get("memory_used_mb", 0)) <= max_memory_used_mb
-        and int(gpu.get("utilization_gpu", 0)) <= max_utilization
-    )
-
-
-def _split_availability(
+def build_payload(
     gpus: list[dict[str, Any]],
-    max_memory_used_mb: int,
-    max_utilization: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    source: str,
+) -> dict[str, Any]:
     available: list[dict[str, Any]] = []
     occupied: list[dict[str, Any]] = []
     for gpu in gpus:
-        if _is_available(gpu, max_memory_used_mb=max_memory_used_mb, max_utilization=max_utilization):
+        if int(gpu.get("process_count", 0)) == 0:
             available.append(gpu)
         else:
             occupied.append(gpu)
     available.sort(key=lambda row: int(row.get("index", 0)))
     occupied.sort(key=lambda row: int(row.get("index", 0)))
-    return available, occupied
-
-
-def build_payload(
-    gpus: list[dict[str, Any]],
-    source: str,
-    max_memory_used_mb: int,
-    max_utilization: int,
-) -> dict[str, Any]:
-    available, occupied = _split_availability(
-        gpus=gpus,
-        max_memory_used_mb=max_memory_used_mb,
-        max_utilization=max_utilization,
-    )
     selected_indices = [int(g["index"]) for g in available]
     occupied_indices = [int(g["index"]) for g in occupied]
     cuda_visible_devices = ",".join(str(i) for i in selected_indices)
     return {
         "source": source,
-        "selection_reason": "all_available_threshold_filtered",
+        "selection_reason": "no_running_processes",
         "total_gpu_count": len(gpus),
         "selected_gpu_indices": selected_indices,
         "selected_gpu_details": available,
@@ -215,18 +189,12 @@ def build_payload(
         "occupied_gpu_details": occupied,
         "cuda_visible_devices": cuda_visible_devices,
         "all_gpu_details": gpus,
-        "thresholds": {
-            "max_memory_used_mb": max_memory_used_mb,
-            "max_utilization": max_utilization,
-        },
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Detect currently available GPUs for shared hosts")
-    parser.add_argument("--max-memory-used-mb", type=int, default=200)
-    parser.add_argument("--max-utilization", type=int, default=40)
-    args = parser.parse_args()
+    parser.parse_args()
 
     gpus, nvml_error = _collect_from_nvml()
     source = "pynvml"
@@ -242,8 +210,6 @@ def main() -> int:
     payload = build_payload(
         gpus=gpus,
         source=source if gpus else "none",
-        max_memory_used_mb=max(0, int(args.max_memory_used_mb)),
-        max_utilization=max(0, int(args.max_utilization)),
     )
     if errors:
         payload["errors"] = errors

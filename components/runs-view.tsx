@@ -216,10 +216,9 @@ export function RunsView({
   const [runCreateAutoStart, setRunCreateAutoStart] = useState(true)
   const [runCreateGpuwrapEnabled, setRunCreateGpuwrapEnabled] = useState(false)
   const [runCreateGpuwrapAdvancedOpen, setRunCreateGpuwrapAdvancedOpen] = useState(false)
-  const [runCreateGpuwrapRetries, setRunCreateGpuwrapRetries] = useState('2')
-  const [runCreateGpuwrapRetryDelaySeconds, setRunCreateGpuwrapRetryDelaySeconds] = useState('8')
-  const [runCreateGpuwrapMaxMemoryUsedMb, setRunCreateGpuwrapMaxMemoryUsedMb] = useState('200')
-  const [runCreateGpuwrapMaxUtilization, setRunCreateGpuwrapMaxUtilization] = useState('40')
+  const [runCreateGpuwrapRetriesInfinite, setRunCreateGpuwrapRetriesInfinite] = useState(true)
+  const [runCreateGpuwrapRetries, setRunCreateGpuwrapRetries] = useState('0')
+  const [runCreateGpuwrapRetryDelaySeconds, setRunCreateGpuwrapRetryDelaySeconds] = useState('5')
   const [runCreateError, setRunCreateError] = useState<string | null>(null)
   const [runCreateSubmitting, setRunCreateSubmitting] = useState(false)
   const [isSelectedRunRefreshing, setIsSelectedRunRefreshing] = useState(false)
@@ -780,10 +779,9 @@ export function RunsView({
     setRunCreateAutoStart(true)
     setRunCreateGpuwrapEnabled(false)
     setRunCreateGpuwrapAdvancedOpen(false)
-    setRunCreateGpuwrapRetries('2')
-    setRunCreateGpuwrapRetryDelaySeconds('8')
-    setRunCreateGpuwrapMaxMemoryUsedMb('200')
-    setRunCreateGpuwrapMaxUtilization('40')
+    setRunCreateGpuwrapRetriesInfinite(true)
+    setRunCreateGpuwrapRetries('0')
+    setRunCreateGpuwrapRetryDelaySeconds('5')
     setRunCreateError(null)
     setRunCreateSubmitting(false)
   }, [])
@@ -873,19 +871,17 @@ export function RunsView({
       enabled: runCreateGpuwrapEnabled,
     }
     if (runCreateGpuwrapEnabled) {
-      const retries = parseIntField(runCreateGpuwrapRetries, 'GPU Retries', 0, 20)
-      if (retries == null) return
+      if (runCreateGpuwrapRetriesInfinite) {
+        gpuwrapConfig.retries = null
+      } else {
+        const retries = parseIntField(runCreateGpuwrapRetries, 'GPU Retries', 0)
+        if (retries == null) return
+        gpuwrapConfig.retries = retries
+      }
       const retryDelaySeconds = parseFloatField(runCreateGpuwrapRetryDelaySeconds, 'Retry Delay', 0)
       if (retryDelaySeconds == null) return
-      const maxMemoryUsedMb = parseIntField(runCreateGpuwrapMaxMemoryUsedMb, 'Max Memory Used', 0)
-      if (maxMemoryUsedMb == null) return
-      const maxUtilization = parseIntField(runCreateGpuwrapMaxUtilization, 'Max Utilization', 0, 100)
-      if (maxUtilization == null) return
 
-      gpuwrapConfig.retries = retries
       gpuwrapConfig.retry_delay_seconds = retryDelaySeconds
-      gpuwrapConfig.max_memory_used_mb = maxMemoryUsedMb
-      gpuwrapConfig.max_utilization = maxUtilization
     }
 
     const request: CreateRunRequest = {
@@ -915,10 +911,9 @@ export function RunsView({
     resetCreateRunForm,
     runCreateAutoStart,
     runCreateGpuwrapEnabled,
+    runCreateGpuwrapRetriesInfinite,
     runCreateGpuwrapRetries,
     runCreateGpuwrapRetryDelaySeconds,
-    runCreateGpuwrapMaxMemoryUsedMb,
-    runCreateGpuwrapMaxUtilization,
     runCreateCommand,
     runCreateName,
     runCreateSubmitting,
@@ -1119,10 +1114,10 @@ export function RunsView({
                         <Badge
                           variant="outline"
                           className={`shrink-0 text-[9px] px-1 py-0 mt-0.5 ${alert.severity === 'critical'
-                              ? 'border-destructive/50 bg-destructive/10 text-destructive'
-                              : alert.severity === 'warning'
-                                ? 'border-warning/50 bg-warning/10 text-warning'
-                                : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
+                            ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                            : alert.severity === 'warning'
+                              ? 'border-warning/50 bg-warning/10 text-warning'
+                              : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
                             }`}
                         >
                           {alert.severity}
@@ -2771,17 +2766,30 @@ export function RunsView({
                     <span>{runCreateGpuwrapAdvancedOpen ? 'Hide' : 'Show'}</span>
                   </button>
                   {runCreateGpuwrapAdvancedOpen && (
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <div className="mt-2 space-y-2">
                       <div className="space-y-1">
                         <label className="text-[11px] font-medium text-muted-foreground">GPU Retries</label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={20}
-                          value={runCreateGpuwrapRetries}
-                          onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
-                          className="h-8 text-xs"
-                        />
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={runCreateGpuwrapRetriesInfinite}
+                              onChange={(e) => setRunCreateGpuwrapRetriesInfinite(e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border-border"
+                            />
+                            ∞ Unlimited
+                          </label>
+                          {!runCreateGpuwrapRetriesInfinite && (
+                            <Input
+                              type="number"
+                              min={0}
+                              value={runCreateGpuwrapRetries}
+                              onChange={(event) => setRunCreateGpuwrapRetries(event.target.value)}
+                              className="h-8 w-24 text-xs"
+                              placeholder="0"
+                            />
+                          )}
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <label className="text-[11px] font-medium text-muted-foreground">Retry Delay (sec)</label>
@@ -2794,31 +2802,10 @@ export function RunsView({
                           className="h-8 text-xs"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-muted-foreground">Max Memory Used (MB)</label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={runCreateGpuwrapMaxMemoryUsedMb}
-                          onChange={(event) => setRunCreateGpuwrapMaxMemoryUsedMb(event.target.value)}
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-muted-foreground">Max Utilization (%)</label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={runCreateGpuwrapMaxUtilization}
-                          onChange={(event) => setRunCreateGpuwrapMaxUtilization(event.target.value)}
-                          className="h-8 text-xs"
-                        />
-                      </div>
                     </div>
                   )}
                   <div className="mt-2 text-[11px] text-muted-foreground">
-                    GPUs are considered available when memory used is at or below this threshold and utilization is at or below the max utilization threshold.
+                    GPUs are considered available when no processes are running on them.
                   </div>
                 </div>
               )}

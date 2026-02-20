@@ -64,10 +64,8 @@ class SessionModelUpdate(BaseModel):
 
 class GpuwrapConfig(BaseModel):
     enabled: Optional[bool] = None
-    retries: Optional[int] = Field(default=None, ge=0, le=20)
+    retries: Optional[int] = Field(default=None, ge=-1)
     retry_delay_seconds: Optional[float] = Field(default=None, gt=0, le=600)
-    max_memory_used_mb: Optional[int] = Field(default=None, ge=0, le=10_000_000)
-    max_utilization: Optional[int] = Field(default=None, ge=0, le=100)
 
 
 class RunCreate(BaseModel):
