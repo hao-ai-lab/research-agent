@@ -39,6 +39,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card'
 import {
   Popover,
   PopoverContent,
@@ -1093,14 +1094,53 @@ export function RunsView({
               style={{ backgroundColor: run.color || '#4ade80' }}
             />
             {hasPendingAlerts && (
-              <div className="relative shrink-0" title={`${pendingAlertCount} pending alert${pendingAlertCount > 1 ? 's' : ''}`}>
-                <AlertTriangle className="h-4 w-4 text-warning alert-triangle-shake" />
-                {pendingAlertCount > 1 && (
-                  <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
-                    {pendingAlertCount}
-                  </span>
-                )}
-              </div>
+              <HoverCard openDelay={200} closeDelay={100}>
+                <HoverCardTrigger asChild>
+                  <button
+                    type="button"
+                    className="relative shrink-0 cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); handleRunClick(run) }}
+                  >
+                    <AlertTriangle className="h-4 w-4 text-warning alert-triangle-shake" />
+                    {pendingAlertCount > 1 && (
+                      <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground">
+                        {pendingAlertCount}
+                      </span>
+                    )}
+                  </button>
+                </HoverCardTrigger>
+                <HoverCardContent side="right" align="start" className="w-72 p-3">
+                  <p className="text-xs font-medium text-foreground mb-2">
+                    {pendingAlertCount} Pending Alert{pendingAlertCount > 1 ? 's' : ''}
+                  </p>
+                  <div className="space-y-1.5">
+                    {runAlerts.filter(a => a.status === 'pending').slice(0, 3).map(alert => (
+                      <div key={alert.id} className="flex items-start gap-2 rounded-md bg-secondary/40 px-2 py-1.5">
+                        <Badge
+                          variant="outline"
+                          className={`shrink-0 text-[9px] px-1 py-0 mt-0.5 ${alert.severity === 'critical'
+                              ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                              : alert.severity === 'warning'
+                                ? 'border-warning/50 bg-warning/10 text-warning'
+                                : 'border-blue-400/50 bg-blue-400/10 text-blue-400'
+                            }`}
+                        >
+                          {alert.severity}
+                        </Badge>
+                        <p className="text-[11px] text-muted-foreground line-clamp-2">{alert.message}</p>
+                      </div>
+                    ))}
+                    {runAlerts.filter(a => a.status === 'pending').length > 3 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        +{runAlerts.filter(a => a.status === 'pending').length - 3} more
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/70 mt-2 italic">
+                    Click to view details →
+                  </p>
+                </HoverCardContent>
+              </HoverCard>
             )}
             <h4 className="font-medium text-sm text-foreground truncate">
               <RunName run={run} />
