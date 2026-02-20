@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, ChevronRight, Type, Code, BarChart3, Sparkles, PanelLeftOpen, PanelRightOpen, PanelRightClose, Pause, Play, Square, Target } from 'lucide-react'
+import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, ChevronRight, Type, Code, BarChart3, Sparkles, PanelLeftOpen, PanelRightOpen, PanelRightClose, Pause, Play, Square, Target, MessageSquarePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -41,6 +41,8 @@ const phaseConfig: Record<WildLoopPhase, { icon: string; label: string; color: s
   paused: { icon: '⏯️', label: 'Paused', color: 'text-amber-400' },
   waiting_for_human: { icon: '🙋', label: 'Needs Input', color: 'text-red-400' },
 }
+
+const FEEDBACK_ISSUE_URL = 'https://github.com/hao-ai-lab/research-agent/issues/new'
 
 interface WildLoopNavProps {
   isActive: boolean
@@ -200,6 +202,18 @@ export function FloatingNav({
 
       {/* Spacer to push icons to the right */}
       <div className="flex-1" />
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button asChild variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+            <a href={FEEDBACK_ISSUE_URL} target="_blank" rel="noopener noreferrer">
+              <MessageSquarePlus className="h-4 w-4" />
+              <span className="sr-only">Submit feedback</span>
+            </a>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Submit feedback</TooltipContent>
+      </Tooltip>
 
       {/* Right side buttons - only show in chat */}
       {isChat && (

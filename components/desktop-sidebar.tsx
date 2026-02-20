@@ -15,6 +15,7 @@ import {
   Settings,
   Star,
   HelpCircle,
+  MessageSquarePlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -42,6 +43,7 @@ import { OnboardingHelpDialog } from '@/components/onboarding-help-dialog'
 
 const ICON_RAIL_WIDTH = 72
 const ICON_RAIL_TRIGGER_WIDTH = 136
+const FEEDBACK_ISSUE_URL = 'https://github.com/hao-ai-lab/research-agent/issues/new'
 
 interface DesktopSidebarProps {
   activeTab: AppTab
@@ -1001,6 +1003,17 @@ export function DesktopSidebar({
             <HelpCircle className="h-4 w-4" />
             {!isIconRail && <span>Help &amp; Support</span>}
           </button>
+          <a
+            href={FEEDBACK_ISSUE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={isIconRail ? 'Submit Feedback' : undefined}
+            className={`flex w-full items-center rounded-lg border border-transparent text-left transition-colors hover:bg-secondary/60 ${isIconRail ? 'justify-center px-2 py-2 text-muted-foreground hover:text-foreground' : 'gap-3 px-3 py-2 text-sm text-muted-foreground hover:text-foreground'
+              }`}
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+            {!isIconRail && <span>Submit feedback</span>}
+          </a>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
