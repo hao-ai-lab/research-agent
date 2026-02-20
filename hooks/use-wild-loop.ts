@@ -98,12 +98,21 @@ export function useWildLoop(chatSessionId?: string | null): UseWildLoopResult {
   chatSessionIdRef.current = chatSessionId
 
   // ---- Poll backend status every 2s (re-poll on chatSessionId change) ----
+  // IMPORTANT: When chatSessionId is null (new chat / no session), do NOT poll.
+  // Otherwise the backend falls back to the global _session pointer and leaks
+  // another chat's wild state into the empty chat — causing phantom badges and
+  // broken submissions.
   useEffect(() => {
+    if (!chatSessionId) {
+      setStatus(null) // clear stale state from previous session
+      return
+    }
+
     let cancelled = false
 
     const poll = async () => {
       try {
-        const s = await getWildV2Status(chatSessionId ?? undefined)
+        const s = await getWildV2Status(chatSessionId)
         if (!cancelled) setStatus(s)
       } catch (err) {
         console.warn('[wild-loop-v2] Status poll failed:', err)
