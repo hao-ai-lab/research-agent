@@ -50,13 +50,16 @@ image = (
         "mv /root/.opencode/bin/opencode /usr/local/bin/opencode",
         "which opencode"
     )
-    # Copy the full repo into the image
-    .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
-    # Install frontend deps (dev mode, no static export needed)
+    # Install pnpm globally (stable layer, rarely changes)
+    .run_commands("npm install -g pnpm")
+    # Copy only lockfiles so the pnpm-install layer is cached when deps don't change
+    .add_local_file("package.json", "/app/package.json")
+    .add_local_file("pnpm-lock.yaml", "/app/pnpm-lock.yaml")
     .run_commands(
-        "npm install -g pnpm",
         "cd /app && pnpm install --frozen-lockfile || cd /app && pnpm install",
     )
+    # Copy the rest of the app code (busts cache on every commit, but node_modules stays cached)
+    .add_local_dir(".", "/app", copy=True, ignore=["node_modules", ".next", ".git", "out", "dist", ".ra-venv", "__pycache__"])
 )
 
 # ---------------------------------------------------------------------------
