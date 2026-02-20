@@ -29,9 +29,9 @@ import subprocess
 from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
 
-from wild_loop_v2 import WildV2Engine
-from memory_store import MemoryStore
-from slack_handler import slack_notifier
+from agent.wild_loop_v2 import WildV2Engine
+from memory.store import MemoryStore
+from integrations.slack_handler import slack_notifier
 
 import httpx
 import uvicorn
@@ -58,12 +58,12 @@ logger.propagate = False  # Don't depend on root logger (uvicorn resets it)
 # Configuration  (extracted to config.py)
 # =============================================================================
 
-import config  # noqa: E402
+from core import config  # noqa: E402
 
 # Re-export immutable constants and functions so existing code keeps working.
 # IMPORTANT: mutable path variables (config.WORKDIR, config.DATA_DIR, *_FILE) must be
 # accessed as config.VARNAME so they reflect post-init_paths() values.
-from config import (  # noqa: E402
+from core.config import (  # noqa: E402
     _SERVER_FILE_DIR,
     OPENCODE_CONFIG,
     OPENCODE_URL,
@@ -139,7 +139,7 @@ async def auth_middleware(request: Request, call_next):
 # Models  (extracted to models.py)
 # =============================================================================
 
-from models import (  # noqa: E402
+from core.models import (  # noqa: E402
     ChatMessage, ChatRequest, CreateSessionRequest, UpdateSessionRequest,
     SystemPromptUpdate, SessionModelUpdate,
     GpuwrapConfig, RunCreate, RunStatusUpdate, RunUpdate,
@@ -161,8 +161,8 @@ from models import (  # noqa: E402
 # Prompt Skill Manager  (extracted to skills_manager.py)
 # =============================================================================
 
-from skills_manager import PromptSkillManager, INTERNAL_SKILL_IDS, INTERNAL_SKILL_PREFIXES, _is_internal_skill  # noqa: E402
-import skills_routes  # noqa: E402
+from skills.manager import PromptSkillManager, INTERNAL_SKILL_IDS, INTERNAL_SKILL_PREFIXES, _is_internal_skill  # noqa: E402
+import skills.routes as skills_routes  # noqa: E402
 
 # Initialize the prompt skill manager
 prompt_skill_manager = PromptSkillManager()
@@ -172,8 +172,8 @@ prompt_skill_manager = PromptSkillManager()
 # State  (extracted to state.py)
 # =============================================================================
 
-import state as _state  # noqa: E402
-from state import (  # noqa: E402
+import core.state as _state  # noqa: E402
+from core.state import (  # noqa: E402
     # Global state dicts — these are mutable references, so server.py and state.py
     # share the same dict objects. Mutations like chat_sessions["x"] = y propagate.
     chat_sessions, runs, sweeps, active_alerts, plans,
@@ -537,7 +537,7 @@ def _run_response_payload(run_id: str, run: dict) -> dict:
 # Run/Sweep State Helpers + Cluster Detection + Tmux  (extracted to run_helpers.py)
 # =============================================================================
 
-from run_helpers import (  # noqa: E402
+from runs.helpers import (  # noqa: E402
     RUN_STATUS_ACTIVE,
     RUN_STATUS_PENDING,
     RUN_STATUS_TERMINAL,
@@ -577,7 +577,7 @@ from run_helpers import (  # noqa: E402
 # OpenCode Integration  (extracted to chat_streaming.py)
 # =============================================================================
 
-from chat_streaming import (  # noqa: E402
+from chat.streaming import (  # noqa: E402
     get_opencode_session_for_chat,
     fetch_opencode_session_title,
     send_prompt_to_opencode,
@@ -618,7 +618,7 @@ async def health_json():
 # Journey Endpoints  (extracted to journey_routes.py)
 # =============================================================================
 
-import journey_routes  # noqa: E402
+import integrations.journey_routes as journey_routes  # noqa: E402
 journey_routes.init(
     record_journey_event_fn=_record_journey_event,
     send_prompt_to_opencode_fn=send_prompt_to_opencode,
@@ -632,7 +632,7 @@ app.include_router(journey_routes.router)
 # Git Diff / File Browser Endpoints  (extracted to git_routes.py)
 # =============================================================================
 
-import git_routes  # noqa: E402
+import integrations.git_routes as git_routes  # noqa: E402
 app.include_router(git_routes.router)
 
 
@@ -642,7 +642,7 @@ app.include_router(git_routes.router)
 # Chat Endpoints  (extracted to chat_routes.py)
 # =============================================================================
 
-import chat_routes  # noqa: E402
+import chat.routes as chat_routes  # noqa: E402
 chat_routes.init(
     prompt_skill_manager=prompt_skill_manager,
     get_opencode_session_for_chat_fn=get_opencode_session_for_chat,
@@ -669,7 +669,7 @@ app.include_router(chat_routes.router)
 # Run, Alert, Metrics, Wild Mode Endpoints  (extracted to run_routes.py)
 # =============================================================================
 
-import run_routes  # noqa: E402
+import runs.routes as run_routes  # noqa: E402
 run_routes.init(
     runs_dict=runs,
     sweeps_dict=sweeps,
@@ -705,7 +705,7 @@ app.include_router(run_routes.router)
 # Wild Loop V2 + Evolutionary Sweep Endpoints  (extracted to wild_routes.py)
 # =============================================================================
 
-import wild_routes  # noqa: E402
+import agent.wild_routes as wild_routes  # noqa: E402
 wild_routes.init(wild_v2_engine, active_alerts, runs, WildV2Engine)
 app.include_router(wild_routes.router)
 
@@ -716,7 +716,7 @@ app.include_router(wild_routes.router)
 # Memory Bank Endpoints  (extracted to memory_routes.py)
 # =============================================================================
 
-import memory_routes  # noqa: E402
+import memory.routes as memory_routes  # noqa: E402
 memory_routes.init(memory_store)
 app.include_router(memory_routes.router)
 
@@ -727,7 +727,7 @@ app.include_router(memory_routes.router)
 # Cluster Endpoints  (extracted to cluster_routes.py)
 # =============================================================================
 
-import cluster_routes  # noqa: E402
+import integrations.cluster_routes as cluster_routes  # noqa: E402
 cluster_routes.init(cluster_state, save_settings_state, _current_run_summary, _infer_cluster_from_environment)
 app.include_router(cluster_routes.router)
 
@@ -738,7 +738,7 @@ app.include_router(cluster_routes.router)
 # Slack Integration Endpoints  (extracted to slack_routes.py)
 # =============================================================================
 
-import slack_routes  # noqa: E402
+import integrations.slack_routes as slack_routes  # noqa: E402
 slack_routes.init(slack_notifier, save_settings_state)
 app.include_router(slack_routes.router)
 
@@ -759,7 +759,7 @@ app.include_router(skills_routes.router)
 # Sweep Endpoints  (extracted to sweep_routes.py)
 # =============================================================================
 
-import sweep_routes  # noqa: E402
+import runs.sweep_routes as sweep_routes  # noqa: E402
 sweep_routes.init(
     sweeps_dict=sweeps,
     runs_dict=runs,
@@ -782,7 +782,7 @@ app.include_router(sweep_routes.router)
 # Log & Artifact Endpoints  (extracted to log_routes.py)
 # =============================================================================
 
-import log_routes  # noqa: E402
+import runs.log_routes as log_routes  # noqa: E402
 log_routes.init(runs)
 app.include_router(log_routes.router)
 
@@ -810,7 +810,7 @@ def start_opencode_server_subprocess(args):
 # Plan Endpoints  (extracted to plan_routes.py)
 # =============================================================================
 
-import plan_routes  # noqa: E402
+import integrations.plan_routes as plan_routes  # noqa: E402
 plan_routes.init(plans, save_plans_state)
 app.include_router(plan_routes.router)
 

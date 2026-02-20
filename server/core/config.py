@@ -20,7 +20,7 @@ logger = logging.getLogger("research-agent-server")
 # OpenCode / Model Configuration
 # =============================================================================
 
-_SERVER_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+_SERVER_FILE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def get_default_opencode_config() -> str:

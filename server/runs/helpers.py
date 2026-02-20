@@ -18,14 +18,14 @@ from typing import Any, Optional
 import libtmux
 from fastapi import HTTPException
 
-import config
-from config import (
+from core import config
+from core.config import (
     SERVER_CALLBACK_URL,
     USER_AUTH_TOKEN,
     TMUX_SESSION_NAME,
 )
-from models import GpuwrapConfig
-from state import (
+from core.models import GpuwrapConfig
+from core.state import (
     runs,
     sweeps,
     save_runs_state,

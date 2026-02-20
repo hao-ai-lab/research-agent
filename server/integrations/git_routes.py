@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-import config
+from core import config
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()

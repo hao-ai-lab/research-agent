@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-import config
+from core import config
 
 logger = logging.getLogger("research-agent-server")
 

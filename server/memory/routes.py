@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from models import MemoryCreateRequest, MemoryUpdateRequest
+from core.models import MemoryCreateRequest, MemoryUpdateRequest
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()

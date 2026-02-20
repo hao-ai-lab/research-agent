@@ -51,6 +51,36 @@ log "Building one-file backend binary"
   --add-data "${SERVER_DIR}/opencode.json:." \
   --add-data "${SERVER_DIR}/gpuwrap_detect.py:." \
   --hidden-import job_sidecar \
+  --hidden-import core \
+  --hidden-import core.config \
+  --hidden-import core.models \
+  --hidden-import core.state \
+  --hidden-import chat \
+  --hidden-import chat.routes \
+  --hidden-import chat.streaming \
+  --hidden-import runs \
+  --hidden-import runs.routes \
+  --hidden-import runs.helpers \
+  --hidden-import runs.sweep_routes \
+  --hidden-import runs.log_routes \
+  --hidden-import runs.evo_sweep \
+  --hidden-import agent \
+  --hidden-import agent.wild_loop_v2 \
+  --hidden-import agent.wild_routes \
+  --hidden-import agent.v2_prompts \
+  --hidden-import skills \
+  --hidden-import skills.manager \
+  --hidden-import skills.routes \
+  --hidden-import memory \
+  --hidden-import memory.store \
+  --hidden-import memory.routes \
+  --hidden-import integrations \
+  --hidden-import integrations.slack_handler \
+  --hidden-import integrations.slack_routes \
+  --hidden-import integrations.git_routes \
+  --hidden-import integrations.journey_routes \
+  --hidden-import integrations.cluster_routes \
+  --hidden-import integrations.plan_routes \
   "${SERVER_DIR}/server.py"
 
 if [ -x "${DIST_DIR}/${BIN_NAME}" ]; then

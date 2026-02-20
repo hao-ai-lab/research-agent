@@ -14,7 +14,7 @@ from typing import Dict, Optional
 
 import yaml
 
-from config import _SERVER_FILE_DIR
+from core.config import _SERVER_FILE_DIR
 
 logger = logging.getLogger("research-agent-server")
 

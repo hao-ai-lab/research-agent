@@ -17,8 +17,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from starlette.responses import StreamingResponse
 
-import config
-from config import (
+from core import config
+from core.config import (
     OPENCODE_URL,
     MODEL_PROVIDER,
     MODEL_ID,
@@ -28,14 +28,14 @@ from config import (
     get_session_model,
     load_available_opencode_models,
 )
-from models import (
+from core.models import (
     CreateSessionRequest,
     UpdateSessionRequest,
     ChatRequest,
     SessionModelUpdate,
     SystemPromptUpdate,
 )
-from state import (
+from core.state import (
     chat_sessions,
     active_alerts,
     active_chat_tasks,
