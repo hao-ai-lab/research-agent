@@ -45,7 +45,8 @@ export interface UseWildLoopResult {
   activeAlerts: Alert[]
 
   // V2-specific
-  v2Status: string | null        // running | paused | done | failed
+  isStopped: boolean
+  v2Status: string | null        // running | paused | stopped | done | failed
   tasks: string                  // tasks.md content
   history: WildV2IterationHistory[]
   noProgressStreak: number
@@ -83,7 +84,7 @@ const DEFAULT_RUN_STATS: RunStats = { total: 0, running: 0, completed: 0, failed
  * Unlike V1, there is NO prompt polling, no autoSend, no response-complete bridge.
  * The backend handles all iteration logic.
  */
-export function useWildLoop(): UseWildLoopResult {
+export function useWildLoop(chatSessionId?: string | null): UseWildLoopResult {
   // ---- State (derived from backend polling) ----
   const [status, setStatus] = useState<WildV2Status | null>(null)
   const statusRef = useRef(status)
@@ -92,13 +93,17 @@ export function useWildLoop(): UseWildLoopResult {
   // Store the latest WildModeSetup so start() can include evo_sweep_enabled
   const setupRef = useRef<WildModeSetup | null>(null)
 
-  // ---- Poll backend status every 2s ----
+  // Track chatSessionId so lifecycle calls use the right one
+  const chatSessionIdRef = useRef(chatSessionId)
+  chatSessionIdRef.current = chatSessionId
+
+  // ---- Poll backend status every 2s (re-poll on chatSessionId change) ----
   useEffect(() => {
     let cancelled = false
 
     const poll = async () => {
       try {
-        const s = await getWildV2Status()
+        const s = await getWildV2Status(chatSessionId ?? undefined)
         if (!cancelled) setStatus(s)
       } catch (err) {
         console.warn('[wild-loop-v2] Status poll failed:', err)
@@ -111,7 +116,7 @@ export function useWildLoop(): UseWildLoopResult {
       cancelled = true
       clearInterval(id)
     }
-  }, [])
+  }, [chatSessionId])
 
   // ---- Lifecycle actions ----
 
@@ -131,8 +136,9 @@ export function useWildLoop(): UseWildLoopResult {
 
   const stop = useCallback(async () => {
     try {
-      console.log('[wild-loop-v2] Stopping')
-      const s = await stopWildV2()
+      const csid = chatSessionIdRef.current
+      console.log('[wild-loop-v2] Stopping (chatSession=%s)', csid)
+      const s = await stopWildV2(csid ?? undefined)
       setStatus(s)
     } catch (err) {
       console.error('[wild-loop-v2] Stop failed:', err)
@@ -141,8 +147,9 @@ export function useWildLoop(): UseWildLoopResult {
 
   const pause = useCallback(async () => {
     try {
-      console.log('[wild-loop-v2] Pausing')
-      const s = await pauseWildV2()
+      const csid = chatSessionIdRef.current
+      console.log('[wild-loop-v2] Pausing (chatSession=%s)', csid)
+      const s = await pauseWildV2(csid ?? undefined)
       setStatus(s)
     } catch (err) {
       console.error('[wild-loop-v2] Pause failed:', err)
@@ -151,8 +158,9 @@ export function useWildLoop(): UseWildLoopResult {
 
   const resume = useCallback(async () => {
     try {
-      console.log('[wild-loop-v2] Resuming')
-      const s = await resumeWildV2()
+      const csid = chatSessionIdRef.current
+      console.log('[wild-loop-v2] Resuming (chatSession=%s)', csid)
+      const s = await resumeWildV2(csid ?? undefined)
       setStatus(s)
     } catch (err) {
       console.error('[wild-loop-v2] Resume failed:', err)
@@ -161,8 +169,9 @@ export function useWildLoop(): UseWildLoopResult {
 
   const steer = useCallback(async (context: string) => {
     try {
-      console.log('[wild-loop-v2] Steering with context:', context.slice(0, 50))
-      await steerWildV2(context)
+      const csid = chatSessionIdRef.current
+      console.log('[wild-loop-v2] Steering (chatSession=%s) context:', csid, context.slice(0, 50))
+      await steerWildV2(context, csid ?? undefined)
     } catch (err) {
       console.error('[wild-loop-v2] Steer failed:', err)
     }
@@ -201,6 +210,7 @@ export function useWildLoop(): UseWildLoopResult {
 
   const isActive = status?.active ?? false
   const isPaused = status?.status === 'paused'
+  const isStopped = status?.status === 'stopped'
   const v2Status = status?.status ?? null
   const iteration = status?.iteration ?? 0
   const maxIterations = status?.max_iterations ?? 25
@@ -215,7 +225,7 @@ export function useWildLoop(): UseWildLoopResult {
   // Map V2 status to V1-compatible phase for UI components that use it
   const phase: WildLoopPhase = isActive
     ? isPaused ? 'paused' : 'exploring'
-    : 'idle'
+    : isStopped ? 'paused' : 'idle'
 
   // Derive stage from iteration progress
   const stage: WildLoopStage = 'exploring'
@@ -250,6 +260,7 @@ export function useWildLoop(): UseWildLoopResult {
   return {
     isActive,
     isPaused,
+    isStopped,
     phase,
     stage,
     iteration,

@@ -613,15 +613,8 @@ export function ConnectedChatView({
                 layout={layout}
                 skills={skills}
                 isWildLoopActive={wildLoop?.isActive ?? false}
-                onSteer={wildLoop ? (msg, priority) => {
-                    wildLoop.insertIntoQueue({
-                        id: `steer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                        priority,
-                        title: msg.length > 50 ? msg.slice(0, 47) + '...' : msg,
-                        prompt: msg,
-                        type: 'steer',
-                        createdAt: Date.now(),
-                    }, 0) // Insert at front of queue
+                onSteer={wildLoop ? (msg) => {
+                    wildLoop.steer(msg)
                 } : undefined}
                 onOpenReplyExcerpt={handleOpenReplyExcerpt}
                 contextTokenCount={contextTokenCount}
