@@ -64,6 +64,8 @@ interface ConnectedChatViewProps {
     skills?: PromptSkill[]
     contextTokenCount?: number
     onRefreshContext?: () => Promise<void>
+    /** Ref that will be populated with a function to scroll to a specific round index */
+    scrollToRoundRef?: React.MutableRefObject<((roundIndex: number) => void) | null>
 }
 
 /**
@@ -93,6 +95,7 @@ export function ConnectedChatView({
     skills = [],
     contextTokenCount = 0,
     onRefreshContext,
+    scrollToRoundRef,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
@@ -205,6 +208,24 @@ export function ConnectedChatView({
         if (!scrollRef.current) return null
         return scrollRef.current.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')
     }, [])
+
+    // Populate the scrollToRoundRef so the parent (sidebar) can scroll to a round
+    useEffect(() => {
+        if (!scrollToRoundRef) return
+        scrollToRoundRef.current = (roundIndex: number) => {
+            // Small delay to allow DOM to settle after session switch
+            requestAnimationFrame(() => {
+                const viewport = getScrollViewport()
+                if (!viewport) return
+                const target = viewport.querySelector<HTMLElement>(`[data-round-index="${roundIndex}"]`)
+                if (target) {
+                    autoScrollEnabledRef.current = false  // disable auto-scroll so it doesn't fight
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+            })
+        }
+        return () => { scrollToRoundRef.current = null }
+    }, [scrollToRoundRef, getScrollViewport])
 
     // Reset to sticky auto-scroll when opening/switching sessions.
     useEffect(() => {
@@ -732,57 +753,63 @@ export function ConnectedChatView({
                                             <div className="mt-4 space-y-1 px-2.5 min-w-0">
                                                 {collapseChats
                                                     ? messagePairs.map((pair, index) => (
-                                                        <CollapsedChatPair
-                                                            key={`${pair.user.id}-${index}`}
-                                                            pair={pair}
-                                                            collapseArtifacts={collapseArtifactsInChat}
-                                                            sweeps={sweeps}
-                                                            runs={runs}
-                                                            alerts={alerts}
-                                                            onEditSweep={onEditSweep}
-                                                            onLaunchSweep={onLaunchSweep}
-                                                            onRunClick={onRunClick}
-                                                            onReplyToSelection={handleReplyToSelection}
-                                                        />
+                                                        <div key={`${pair.user.id}-${index}`} data-round-index={index}>
+                                                            <CollapsedChatPair
+                                                                pair={pair}
+                                                                collapseArtifacts={collapseArtifactsInChat}
+                                                                sweeps={sweeps}
+                                                                runs={runs}
+                                                                alerts={alerts}
+                                                                onEditSweep={onEditSweep}
+                                                                onLaunchSweep={onLaunchSweep}
+                                                                onRunClick={onRunClick}
+                                                                onReplyToSelection={handleReplyToSelection}
+                                                            />
+                                                        </div>
                                                     ))
-                                                    : displayMessages.map((message, index) => {
-                                                        // Find the previous user message for context extraction
-                                                        let prevUserContent: string | undefined
-                                                        if (message.role === 'assistant') {
-                                                            for (let i = index - 1; i >= 0; i--) {
-                                                                if (displayMessages[i].role === 'user') {
-                                                                    prevUserContent = displayMessages[i].content
-                                                                    break
+                                                    : (() => {
+                                                        let userRoundCounter = 0
+                                                        return displayMessages.map((message, index) => {
+                                                            // Find the previous user message for context extraction
+                                                            let prevUserContent: string | undefined
+                                                            if (message.role === 'assistant') {
+                                                                for (let i = index - 1; i >= 0; i--) {
+                                                                    if (displayMessages[i].role === 'user') {
+                                                                        prevUserContent = displayMessages[i].content
+                                                                        break
+                                                                    }
                                                                 }
                                                             }
-                                                        }
-                                                        return (
-                                                            <div
-                                                                key={message.id}
-                                                                className={message.role === 'user'
-                                                                    ? 'sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85'
-                                                                    : undefined}
-                                                                style={message.source === 'agent_wild' ? {
-                                                                    borderLeft: '3px solid #a855f7',
-                                                                    paddingLeft: '8px',
-                                                                    marginLeft: '4px',
-                                                                } : undefined}
-                                                            >
-                                                                <ChatMessage
-                                                                    message={message}
-                                                                    collapseArtifacts={collapseArtifactsInChat}
-                                                                    sweeps={sweeps}
-                                                                    runs={runs}
-                                                                    alerts={alerts}
-                                                                    onEditSweep={onEditSweep}
-                                                                    onLaunchSweep={onLaunchSweep}
-                                                                    onRunClick={onRunClick}
-                                                                    onReplyToSelection={handleReplyToSelection}
-                                                                    previousUserContent={prevUserContent}
-                                                                />
-                                                            </div>
-                                                        )
-                                                    })}
+                                                            const roundIndex = message.role === 'user' ? userRoundCounter++ : undefined
+                                                            return (
+                                                                <div
+                                                                    key={message.id}
+                                                                    className={message.role === 'user'
+                                                                        ? 'sticky top-0 z-20 -mx-2.5 mb-1 border-b border-border/60 bg-background/95 px-2.5 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85'
+                                                                        : undefined}
+                                                                    style={message.source === 'agent_wild' ? {
+                                                                        borderLeft: '3px solid #a855f7',
+                                                                        paddingLeft: '8px',
+                                                                        marginLeft: '4px',
+                                                                    } : undefined}
+                                                                    {...(roundIndex != null ? { 'data-round-index': roundIndex } : {})}
+                                                                >
+                                                                    <ChatMessage
+                                                                        message={message}
+                                                                        collapseArtifacts={collapseArtifactsInChat}
+                                                                        sweeps={sweeps}
+                                                                        runs={runs}
+                                                                        alerts={alerts}
+                                                                        onEditSweep={onEditSweep}
+                                                                        onLaunchSweep={onLaunchSweep}
+                                                                        onRunClick={onRunClick}
+                                                                        onReplyToSelection={handleReplyToSelection}
+                                                                        previousUserContent={prevUserContent}
+                                                                    />
+                                                                </div>
+                                                            )
+                                                        })
+                                                    })()}
 
                                                 {/* Streaming message */}
                                                 {streamingState.isStreaming && (

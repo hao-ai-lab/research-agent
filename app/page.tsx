@@ -63,6 +63,7 @@ export default function ResearchChat() {
   const sidebarWidthRef = useRef(DESKTOP_SIDEBAR_DEFAULT_WIDTH)
   const pendingSidebarWidthRef = useRef<number | null>(null)
   const sidebarRafRef = useRef<number | null>(null)
+  const scrollToRoundRef = useRef<((roundIndex: number) => void) | null>(null)
 
   // Use real API data via useRuns hook
   const {
@@ -612,6 +613,19 @@ export default function ResearchChat() {
     }
   }, [startNewChat, selectSession])
 
+  // Handle round navigation from sidebar hover card
+  const handleScrollToRound = useCallback(async (sessionId: string, roundIndex: number) => {
+    // Switch to chat tab and select the session first
+    handleTabChange('chat')
+    if (sessionId !== currentSessionId) {
+      await selectSession(sessionId)
+    }
+    // Defer scrolling to allow the DOM to update after session switch
+    setTimeout(() => {
+      scrollToRoundRef.current?.(roundIndex)
+    }, 200)
+  }, [handleTabChange, currentSessionId, selectSession])
+
   // Compute context token count from chat session messages
   const contextTokenCount = useMemo(() => {
     const { messages, streamingState } = chatSession
@@ -676,6 +690,8 @@ export default function ResearchChat() {
           onToggleCollapse={() => setDesktopSidebarHidden(true)}
           onWidthChange={handleSidebarWidthChange}
           onResizeEnd={handleSidebarResizeEnd}
+          currentMessages={chatSession.messages}
+          onScrollToRound={handleScrollToRound}
         />
 
         <section className="mobile-viewport-wrapper flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -742,6 +758,7 @@ export default function ResearchChat() {
                 skills={promptSkills}
                 contextTokenCount={contextTokenCount}
                 onRefreshContext={handleRefreshExperimentState}
+                scrollToRoundRef={scrollToRoundRef}
               />
             )}
             {activeTab === 'runs' && (
