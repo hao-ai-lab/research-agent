@@ -18,6 +18,8 @@ import { getTelemetryUrl, getResearchAgentKey } from './api-config'
 
 export interface TelemetryEvent {
     event: string
+    category?: string
+    source?: string
     method?: string
     path?: string
     status?: number
@@ -61,6 +63,8 @@ class TelemetryClient {
     ) {
         this.queue.push({
             event: 'api_request',
+            category: 'frontend_request',
+            source: 'frontend',
             method,
             path,
             status,

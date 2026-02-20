@@ -30,6 +30,9 @@ from core.models import (
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
 
+# Telemetry lifecycle events
+from integrations.telemetry import emit_run_event  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Module-level references.  Wired at init().
 # ---------------------------------------------------------------------------
@@ -175,6 +178,8 @@ async def create_run(req: RunCreate):
         )
 
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
+    emit_run_event("run_created", run_id, chat_session_id=req.chat_session_id or "", sweep_id=req.sweep_id or "",
+                   metadata={"name": req.name, "status": initial_status})
 
     if initial_status == "queued":
         try:
@@ -331,6 +336,8 @@ async def stop_run(run_id: str):
     if run.get("sweep_id"):
         _recompute_sweep_state(run["sweep_id"])
     _save_runs_state()
+    emit_run_event("run_stopped", run_id, chat_session_id=run.get("chat_session_id") or "",
+                   sweep_id=run.get("sweep_id") or "")
 
     return {"message": "Run stopped"}
 
@@ -492,6 +499,9 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
     if run.get("sweep_id"):
         _recompute_sweep_state(run["sweep_id"])
     _save_runs_state()
+    emit_run_event(f"run_{next_status}", run_id, chat_session_id=run.get("chat_session_id") or "",
+                   sweep_id=run.get("sweep_id") or "",
+                   metadata={"exit_code": run.get("exit_code")})
     return {"message": "Status updated"}
 
 
