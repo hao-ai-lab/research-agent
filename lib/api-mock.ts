@@ -38,6 +38,8 @@ import type {
     JourneyRecommendationRespondRequest,
     JourneyDecisionCreateRequest,
     JourneyGenerateRecommendationsResponse,
+    ReportBugIssueRequest,
+    ReportBugIssueResponse,
     RepoDiffFileStatus,
     RepoDiffLine,
     RepoDiffFile,
@@ -1776,4 +1778,18 @@ export async function createJourneyDecision(
         note: created.title,
     })
     return created
+}
+
+export async function reportBugIssue(
+    request: ReportBugIssueRequest
+): Promise<ReportBugIssueResponse> {
+    await delay(120)
+    const title = request.title?.trim() || `Bug: ${request.description.slice(0, 64).trim()}`
+    return {
+        ok: true,
+        repo: 'mock/research-agent',
+        issue_url: 'https://github.com/mock/research-agent/issues/1',
+        issue_title: title,
+        label: 'Bug',
+    }
 }

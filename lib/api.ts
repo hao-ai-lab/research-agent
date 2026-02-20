@@ -1980,6 +1980,20 @@ export interface JourneyGenerateRecommendationsResponse {
     source?: string
 }
 
+export interface ReportBugIssueRequest {
+    description: string
+    session_id?: string
+    title?: string
+}
+
+export interface ReportBugIssueResponse {
+    ok: boolean
+    repo: string
+    issue_url: string
+    issue_title: string
+    label: string
+}
+
 export async function getJourneyNextActions(
     request: JourneyNextActionsRequest
 ): Promise<JourneyNextActionsResponse> {
@@ -2119,6 +2133,21 @@ export async function createJourneyDecision(
     })
     if (!response.ok) {
         throw new Error(`Failed to create journey decision: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+export async function reportBugIssue(
+    request: ReportBugIssueRequest
+): Promise<ReportBugIssueResponse> {
+    const response = await trackedFetch(`${API_URL()}/integrations/github/report-bug`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || `Failed to report bug issue: ${response.statusText}`)
     }
     return response.json()
 }

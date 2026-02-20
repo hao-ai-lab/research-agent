@@ -647,6 +647,9 @@ app.include_router(journey_routes.router)
 import integrations.git_routes as git_routes  # noqa: E402
 app.include_router(git_routes.router)
 
+import integrations.github_routes as github_routes  # noqa: E402
+app.include_router(github_routes.router)
+
 
 
 

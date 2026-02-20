@@ -52,7 +52,7 @@ import {
 import { useAppSettings } from '@/lib/app-settings'
 import { useIsMobile } from '@/components/ui/use-mobile'
 
-export type ChatMode = 'agent' | 'wild' | 'sweep' | 'plan'
+export type ChatMode = 'agent' | 'wild' | 'sweep' | 'plan' | 'report'
 
 export type MentionType = ReferenceTokenType
 

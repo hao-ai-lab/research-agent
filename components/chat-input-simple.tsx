@@ -50,7 +50,7 @@ import { useAppSettings } from "@/lib/app-settings";
 import { useIsMobile } from "@/components/ui/use-mobile";
 
 // Re-export types matching the original chat-input.tsx so imports stay compatible.
-export type ChatMode = "agent" | "wild" | "sweep" | "plan";
+export type ChatMode = "agent" | "wild" | "sweep" | "plan" | "report";
 export type MentionType = ReferenceTokenType;
 
 export interface MentionItem {
@@ -170,6 +170,7 @@ export function ChatInput({
   } | null>(null);
   const [isAttachOpen, setIsAttachOpen] = useState(false);
   const [isModeOpen, setIsModeOpen] = useState(false);
+  const [isAdvancedModesOpen, setIsAdvancedModesOpen] = useState(false);
   const [isModelOpen, setIsModelOpen] = useState(false);
   const [isQueueExpanded, setIsQueueExpanded] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
@@ -804,6 +805,10 @@ export function ChatInput({
   // Mention type color map for filter pills
   // =========================================================================
   const mentionTypeColorMap = REFERENCE_TYPE_COLOR_MAP;
+  const inputPlaceholder =
+    mode === "report"
+      ? "Describe the bug you hit. I will open a Bug issue on GitHub."
+      : "Ask me about your research";
 
   // =========================================================================
   // Render
@@ -1075,7 +1080,7 @@ export function ChatInput({
               highlightedMessage
             ) : (
               <span className="text-muted-foreground">
-                Ask me about your research
+                {inputPlaceholder}
               </span>
             )}
           </div>
@@ -1089,7 +1094,7 @@ export function ChatInput({
               if (highlightRef.current)
                 highlightRef.current.scrollTop = e.currentTarget.scrollTop;
             }}
-            placeholder="Ask me about your research"
+            placeholder={inputPlaceholder}
             disabled={disabled}
             rows={1}
             className="relative z-10 w-full resize-none bg-transparent px-4 py-3 text-base leading-6 text-transparent caret-foreground placeholder:text-transparent focus:outline-none disabled:opacity-50"
@@ -1152,7 +1157,13 @@ export function ChatInput({
           </Button>
 
           {/* Mode toggle */}
-          <Popover open={isModeOpen} onOpenChange={setIsModeOpen}>
+          <Popover
+            open={isModeOpen}
+            onOpenChange={(open) => {
+              setIsModeOpen(open);
+              if (!open) setIsAdvancedModesOpen(false);
+            }}
+          >
             <PopoverTrigger asChild>
               <button
                 type="button"
@@ -1161,6 +1172,8 @@ export function ChatInput({
                     ? "border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
                     : mode === "wild"
                       ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300"
+                      : mode === "report"
+                        ? "border border-red-500/35 bg-red-500/14 text-red-700 dark:border-red-400/50 dark:bg-red-500/24 dark:text-red-300"
                       : mode === "plan"
                         ? "border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300"
                         : "border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300"
@@ -1170,10 +1183,18 @@ export function ChatInput({
                   <MessageSquare className="h-3 w-3" />
                 ) : mode === "wild" ? (
                   <Zap className="h-3 w-3" />
+                ) : mode === "report" ? (
+                  <AlertTriangle className="h-3 w-3" />
                 ) : (
                   <ClipboardList className="h-3 w-3" />
                 )}
-                {mode === "wild" ? "Wild" : mode === "plan" ? "Plan" : "Agent"}
+                {mode === "wild"
+                  ? "Wild"
+                  : mode === "plan"
+                    ? "Plan"
+                    : mode === "report"
+                      ? "Report"
+                      : "Agent"}
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-56 p-1.5">
@@ -1238,6 +1259,40 @@ export function ChatInput({
                     </p>
                   </div>
                 </button>
+                <div className="mt-1 border-t border-border/60 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsAdvancedModesOpen((prev) => !prev)}
+                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary"
+                  >
+                    <span>Advanced</span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${isAdvancedModesOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                  {isAdvancedModesOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onModeChange("report");
+                        setIsModeOpen(false);
+                      }}
+                      className={`mt-1 flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === "report" ? "bg-red-500/10 border border-red-500/35 dark:bg-red-500/18 dark:border-red-400/45" : "hover:bg-secondary"}`}
+                    >
+                      <AlertTriangle
+                        className={`h-4 w-4 mt-0.5 shrink-0 ${mode === "report" ? "text-red-600 dark:text-red-300" : "text-muted-foreground"}`}
+                      />
+                      <div>
+                        <p className="text-xs font-medium text-foreground">
+                          Report Mode
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Create a GitHub bug issue from your message
+                        </p>
+                      </div>
+                    </button>
+                  )}
+                </div>
               </div>
             </PopoverContent>
           </Popover>
