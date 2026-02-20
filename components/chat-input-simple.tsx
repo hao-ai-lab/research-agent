@@ -203,11 +203,7 @@ export function ChatInput({
   // ---- insert draft ----
   useEffect(() => {
     if (!insertDraft?.text) return;
-    setMessage((prev) => {
-      if (!prev) return insertDraft.text;
-      const sep = prev.endsWith(" ") ? "" : " ";
-      return `${prev}${sep}${insertDraft.text}`;
-    });
+    setMessage(insertDraft.text);
     setTimeout(() => textareaRef.current?.focus(), 0);
   }, [insertDraft?.id, insertDraft?.text]);
 

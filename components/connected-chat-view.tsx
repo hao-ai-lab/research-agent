@@ -414,6 +414,7 @@ export function ConnectedChatView({
 
     // Handle send - create session if needed, start wild loop if in wild mode
     const handleSend = useCallback(async (message: string, _attachments?: File[], msgMode?: ChatMode) => {
+        setStarterDraftInsert(null)
         let sessionId = currentSessionId
         if (!sessionId) {
             sessionId = await createNewSession()
