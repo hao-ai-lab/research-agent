@@ -135,6 +135,18 @@ async def auth_middleware(request: Request, call_next):
     
     return await call_next(request)
 
+
+# =============================================================================
+# Telemetry  (extracted to integrations/telemetry.py)
+# =============================================================================
+
+import integrations.telemetry as _telemetry_mod  # noqa: E402
+
+@app.middleware("http")
+async def _telemetry_mw(request: Request, call_next):
+    return await _telemetry_mod.telemetry_middleware(request, call_next)
+
+
 # =============================================================================
 # Models  (extracted to models.py)
 # =============================================================================
@@ -880,6 +892,11 @@ def main():
         cluster_state.update(_normalize_cluster_state(inferred))
         save_settings_state()
     maybe_mount_frontend_static()
+
+    # Initialize telemetry
+    _telemetry_endpoint = os.environ.get("TELEMETRY_ENDPOINT_URL", "")
+    _telemetry_key = os.environ.get("RESEARCH_AGENT_KEY", "") or RUNTIME_RESEARCH_AGENT_KEY or ""
+    _telemetry_mod.init(endpoint_url=_telemetry_endpoint, api_key=_telemetry_key)
     
     logger.info(f"Starting Research Agent Server on {args.host}:{args.port}")
     logger.info(f"Working directory: {config.WORKDIR}")
