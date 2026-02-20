@@ -20,7 +20,7 @@ from fastapi import HTTPException
 
 from core import config
 from core.config import (
-    SERVER_CALLBACK_URL,
+    get_server_callback_url,
     USER_AUTH_TOKEN,
     TMUX_SESSION_NAME,
 )
@@ -642,7 +642,7 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     sidecar_path = os.path.join(server_dir, "tools", "job_sidecar.py")
 
     # Build sidecar command
-    server_url = SERVER_CALLBACK_URL
+    server_url = get_server_callback_url()
     run_workdir = run_data.get("workdir") or config.WORKDIR
 
     if getattr(sys, "frozen", False):

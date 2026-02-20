@@ -76,7 +76,8 @@ from core.config import (  # noqa: E402
     RUNTIME_RESEARCH_AGENT_KEY_LOCK,
     USER_AUTH_TOKEN,
     TMUX_SESSION_NAME,
-    SERVER_CALLBACK_URL,
+    get_server_callback_url,
+    set_server_callback_url,
     FRONTEND_STATIC_DIR,
     AUTH_PROTECTED_PREFIXES,
     requires_api_auth,
@@ -268,7 +269,7 @@ wild_v2_engine = WildV2Engine(
     model_provider=MODEL_PROVIDER,
     model_id=MODEL_ID,
     get_workdir=lambda: config.WORKDIR,
-    server_url=SERVER_CALLBACK_URL,
+    server_url=get_server_callback_url(),
     auth_token=USER_AUTH_TOKEN,
     get_auth=get_auth,
     render_fn=prompt_skill_manager.render,
@@ -840,7 +841,7 @@ def maybe_mount_frontend_static():
     app.mount("/", StaticFiles(directory=FRONTEND_STATIC_DIR, html=True), name="frontend-static")
 
 def main():
-    global SERVER_CALLBACK_URL
+
     global TMUX_SESSION_NAME
 
     if "--run-sidecar" in sys.argv:
@@ -864,7 +865,7 @@ def main():
     
     # Initialize paths
     init_paths(args.workdir)
-    SERVER_CALLBACK_URL = f"http://127.0.0.1:{args.port}"
+    set_server_callback_url(f"http://127.0.0.1:{args.port}")
     TMUX_SESSION_NAME = args.tmux_session
     
     # Check required environment variables
