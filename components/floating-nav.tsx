@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Pause, Play, Square, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -200,48 +201,61 @@ export function FloatingNav({
         <div className="flex items-center gap-1 shrink-0">
           {/* Collapse All Chats Button */}
           {onCollapseChatsChange && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onCollapseChatsChange(!collapseChats)}
-              className={`h-8 w-8 ${collapseChats ? 'bg-secondary text-secondary-foreground' : ''}`}
-              title={collapseChats ? 'Expand all chats' : 'Collapse all chats'}
-            >
-              <PanelLeftOpen className="h-4 w-4" />
-              <span className="sr-only">{collapseChats ? 'Expand all chats' : 'Collapse all chats'}</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onCollapseChatsChange(!collapseChats)}
+                  className={`h-8 w-8 ${collapseChats ? 'bg-secondary text-secondary-foreground' : ''}`}
+                >
+                  <PanelLeftOpen className="h-4 w-4" />
+                  <span className="sr-only">{collapseChats ? 'Expand all chats' : 'Collapse all chats'}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{collapseChats ? 'Expand all chats' : 'Collapse all chats'}</TooltipContent>
+            </Tooltip>
           )}
           {/* Export Button */}
           {onExportSession && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onExportSession}
-              className="h-8 w-8"
-              title="Export session as Markdown"
-            >
-              <Download className="h-4 w-4" />
-              <span className="sr-only">Export session</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onExportSession}
+                  className="h-8 w-8"
+                >
+                  <Download className="h-4 w-4" />
+                  <span className="sr-only">Export session</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Export session as Markdown</TooltipContent>
+            </Tooltip>
           )}
           {/* Alert Button with Badge */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onAlertClick}
-            className="h-8 w-8 relative"
-          >
-            <Bell className="h-4 w-4" />
-            {eventCount > 0 && (
-              <Badge
-                variant="destructive"
-                className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] flex items-center justify-center"
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onAlertClick}
+                className="h-8 w-8 relative"
               >
-                {eventCount > 99 ? '99+' : eventCount}
-              </Badge>
-            )}
-            <span className="sr-only">View alerts ({eventCount})</span>
-          </Button>
+                <Bell className="h-4 w-4" />
+                {eventCount > 0 && (
+                  <Badge
+                    variant="destructive"
+                    className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] flex items-center justify-center"
+                  >
+                    {eventCount > 99 ? '99+' : eventCount}
+                  </Badge>
+                )}
+                <span className="sr-only">View alerts ({eventCount})</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>View alerts ({eventCount})</TooltipContent>
+          </Tooltip>
         </div>
       )}
 

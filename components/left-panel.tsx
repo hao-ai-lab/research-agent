@@ -54,15 +54,15 @@ const NAV_ITEM_CONFIG = {
   },
 } as const
 
-export function LeftPanel({ 
-  open, 
-  onOpenChange, 
+export function LeftPanel({
+  open,
+  onOpenChange,
   onSettingsClick,
   activeTab,
   onTabChange,
 }: LeftPanelProps) {
   const { settings } = useAppSettings()
-  
+
   const handleNavClick = (tab: 'chat' | 'runs' | 'charts' | 'insights' | 'journey') => {
     onTabChange(tab)
     onOpenChange(false)
@@ -96,19 +96,18 @@ export function LeftPanel({
               {navItems.map((item) => {
                 const config = NAV_ITEM_CONFIG[item.id as LeftPanelItemId]
                 if (!config) return null
-                
+
                 const Icon = config.icon
-                
+
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => handleNavClick(item.id as 'chat' | 'runs' | 'charts' | 'insights')}
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                      activeTab === item.id
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === item.id
                         ? 'bg-secondary text-foreground'
                         : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-                    }`}
+                      }`}
                   >
                     <Icon className="h-4 w-4" />
                     {config.label}
@@ -139,18 +138,19 @@ export function LeftPanel({
               <HelpCircle className="h-4 w-4" />
               Help & Support
             </button>
-            <button
-              type="button"
-              onClick={() => handleNavClick('journey')}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                activeTab === 'journey'
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-              }`}
-            >
-              <Sparkles className="h-4 w-4" />
-              Our Journey
-            </button>
+            {settings.developer?.showJourneyPanel && (
+              <button
+                type="button"
+                onClick={() => handleNavClick('journey')}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${activeTab === 'journey'
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  }`}
+              >
+                <Sparkles className="h-4 w-4" />
+                Our Journey
+              </button>
+            )}
           </div>
         </div>
       </SheetContent>

@@ -475,6 +475,7 @@ export function DesktopSidebar({
                     if (item.tab === 'report') return settings.developer?.showReportPanel
                     if (item.tab === 'terminal') return settings.developer?.showTerminalPanel
                     if (item.tab === 'contextual') return settings.developer?.showContextualPanel
+                    if (item.tab === 'journey') return settings.developer?.showJourneyPanel
 
                     const configItem = settings.leftPanel?.items.find((i) => i.id === item.tab)
                     if (configItem) return configItem.visible
@@ -506,7 +507,12 @@ export function DesktopSidebar({
                             onMouseEnter={() => setIsRunsMenuOpen(true)}
                             onMouseLeave={() => setIsRunsMenuOpen(false)}
                           >
-                            <DropdownMenuItem onSelect={() => onTabChange('runs')}>
+                            <DropdownMenuItem onSelect={() => {
+                              if (typeof window !== 'undefined' && window.location.hash) {
+                                window.location.hash = ''
+                              }
+                              onTabChange('runs')
+                            }}>
                               <span className="font-medium">View All Runs</span>
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
