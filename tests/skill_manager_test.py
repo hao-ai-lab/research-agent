@@ -36,11 +36,11 @@ INTERNAL_SKILL_IDS = _server_mod.INTERNAL_SKILL_IDS
 @pytest.fixture
 def tmp_skills_dir(tmp_path):
     """Create a temp directory pre-populated with one internal + one user skill."""
-    # Internal skill: wild_alert
-    wild = tmp_path / "wild_alert"
-    wild.mkdir()
-    (wild / "SKILL.md").write_text(
-        "---\nname: Wild Loop — Alert Handler\ndescription: Handles alerts\ncategory: skill\n---\nTemplate body for alert.\n"
+    # Internal skill: ra_mode_plan
+    internal = tmp_path / "ra_mode_plan"
+    internal.mkdir()
+    (internal / "SKILL.md").write_text(
+        "---\nname: Research Agent — Plan Mode\ndescription: Plans research tasks\ncategory: skill\n---\nTemplate body for planning.\n"
     )
 
     # User skill: my_custom_skill
@@ -66,7 +66,7 @@ def manager(tmp_skills_dir):
 class TestInternalFlag:
     def test_internal_flag_set_for_internal_skills(self, manager):
         """Internal skills should have internal=True."""
-        skill = manager.get("wild_alert")
+        skill = manager.get("ra_mode_plan")
         assert skill is not None
         assert skill["internal"] is True
 
@@ -78,8 +78,7 @@ class TestInternalFlag:
 
     def test_all_internal_ids_defined(self):
         """Smoke test that the expected internal IDs exist."""
-        expected = {"wild_alert", "wild_analyzing", "wild_exploring",
-                    "wild_monitoring", "wild_system", "ra_mode_plan"}
+        expected = {"ra_mode_plan"}
         assert INTERNAL_SKILL_IDS == expected
 
 
@@ -136,9 +135,9 @@ class TestDeleteSkill:
     def test_delete_internal_skill_blocked(self, manager):
         """Deleting an internal skill should raise ValueError."""
         with pytest.raises(ValueError, match="Cannot delete internal skill"):
-            manager.delete("wild_alert")
+            manager.delete("ra_mode_plan")
         # Skill still exists
-        assert manager.get("wild_alert") is not None
+        assert manager.get("ra_mode_plan") is not None
 
     def test_delete_nonexistent_raises(self, manager):
         """Deleting a skill that doesn't exist should raise KeyError."""
@@ -147,7 +146,7 @@ class TestDeleteSkill:
 
     def test_update_internal_skill_allowed(self, manager):
         """Internal skills CAN be updated even though they can't be deleted."""
-        updated = manager.update("wild_alert", "new template body")
+        updated = manager.update("ra_mode_plan", "new template body")
         assert updated is not None
         assert "new template body" in updated["template"]
 
@@ -159,8 +158,8 @@ class TestDeleteSkill:
 class TestSearch:
     def test_search_by_name(self, manager):
         """Search should find skills by name substring."""
-        results = manager.search("wild")
-        assert any(r["id"] == "wild_alert" for r in results)
+        results = manager.search("plan")
+        assert any(r["id"] == "ra_mode_plan" for r in results)
 
     def test_search_by_description(self, manager):
         """Search should find skills by description."""
@@ -169,7 +168,7 @@ class TestSearch:
 
     def test_search_by_template(self, manager):
         """Search should find skills by template body content."""
-        results = manager.search("alert")
+        results = manager.search("planning")
         assert len(results) >= 1
 
     def test_search_empty_query_returns_all(self, manager):
@@ -233,8 +232,8 @@ class TestInstallFromGit:
     def test_install_duplicate_raises(self, manager, monkeypatch):
         """Installing to an existing ID should raise ValueError."""
         with pytest.raises(ValueError, match="already exists"):
-            manager.install_from_git("https://github.com/user/wild_alert.git",
-                                     name="wild_alert")
+            manager.install_from_git("https://github.com/user/ra_mode_plan.git",
+                                     name="ra_mode_plan")
 
     def test_install_no_skill_md_raises(self, manager, tmp_skills_dir, monkeypatch):
         """If the cloned repo has no SKILL.md, raise FileNotFoundError."""
