@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { CodeOutputBox } from '@/components/code-output-box'
@@ -203,6 +203,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
     const durationLabel = formatDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
     const length_to_show = 150
     const toolView = buildToolViewModel(part.toolName, part.toolDescription, part.toolInput)
+    const [copied, setCopied] = useState(false)
 
     // Auto-collapse when tool finishes (completed or error) — only if in collapse/expand mode
     useEffect(() => {
@@ -215,7 +216,7 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
     }, [state, toolMode])
 
     const toolContentBlock = (
-        <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+        <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,9rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
             {toolView.description && (
                 <div>
                     <span className="font-medium text-foreground/70">Description:</span>{' '}
@@ -224,10 +225,39 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
             )}
             {toolView.command && (
                 <div>
-                    <span className="font-medium text-foreground/70">Command:</span>
-                    <div className="mt-1">
-                        <CodeOutputBox language={toolView.commandLanguage} code={toolView.command} />
-                    </div>
+                    {toolView.shellLike ? (
+                        <div className="mt-1 rounded-md border border-border/60 bg-background/60 px-3 py-2 font-mono text-sm text-foreground">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0 whitespace-pre-wrap break-all">
+                                    <span className="mr-2 text-foreground/80">$</span>
+                                    <span className="break-all">{toolView.command}</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        try {
+                                            await navigator.clipboard.writeText(toolView.command || '')
+                                            setCopied(true)
+                                            setTimeout(() => setCopied(false), 1200)
+                                        } catch {
+                                            setCopied(false)
+                                        }
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded border border-border/70 px-2 py-1 text-xs text-muted-foreground hover:bg-secondary"
+                                >
+                                    <Copy className="h-3 w-3" />
+                                    <span>{copied ? 'Copied' : 'Copy'}</span>
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <span className="font-medium text-foreground/70">Command:</span>
+                            <div className="mt-1">
+                                <CodeOutputBox language={toolView.commandLanguage} code={toolView.command} />
+                            </div>
+                        </>
+                    )}
                 </div>
             )}
             {toolView.args && (
@@ -238,8 +268,14 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
             )}
             {part.toolOutput && (
                 <div>
-                    <span className="font-medium text-foreground/70">Output:</span>
-                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
+                    {toolView.shellLike ? (
+                        <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden text-foreground">{part.toolOutput}</pre>
+                    ) : (
+                        <>
+                            <span className="font-medium text-foreground/70">Output:</span>
+                            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
+                        </>
+                    )}
                 </div>
             )}
             {(part.toolStartedAt || part.toolEndedAt) && (
@@ -343,6 +379,7 @@ type ToolViewModel = {
     commandLanguage: string
     args?: string
     summary?: string
+    shellLike: boolean
 }
 
 function buildToolViewModel(toolName?: string, toolDescription?: string, toolInput?: string): ToolViewModel {
@@ -394,6 +431,7 @@ function buildToolViewModel(toolName?: string, toolDescription?: string, toolInp
         commandLanguage,
         args,
         summary,
+        shellLike: isBashLike,
     }
 }
 
