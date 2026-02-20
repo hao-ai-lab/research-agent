@@ -66,6 +66,9 @@ interface ConnectedChatViewProps {
     onRefreshContext?: () => Promise<void>
     /** Ref that will be populated with a function to scroll to a specific round index */
     scrollToRoundRef?: React.MutableRefObject<((roundIndex: number) => void) | null>
+    /** External control for context panel visibility */
+    contextPanelHidden?: boolean
+    onContextPanelHiddenChange?: (hidden: boolean) => void
 }
 
 /**
@@ -96,13 +99,18 @@ export function ConnectedChatView({
     contextTokenCount = 0,
     onRefreshContext,
     scrollToRoundRef,
+    contextPanelHidden: contextPanelHiddenProp,
+    onContextPanelHiddenChange,
 }: ConnectedChatViewProps) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const autoScrollEnabledRef = useRef(true)
     const isMobile = useIsMobile()
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [mobilePanelTab, setMobilePanelTab] = useState<'chat' | 'context'>('chat')
-    const [contextPanelHidden, setContextPanelHidden] = useState(false)
+    const [localContextPanelHidden, setLocalContextPanelHidden] = useState(false)
+    // Use parent-controlled state if provided, otherwise fall back to local state
+    const contextPanelHidden = contextPanelHiddenProp ?? localContextPanelHidden
+    const setContextPanelHidden = onContextPanelHiddenChange ?? setLocalContextPanelHidden
     const [starterDraftInsert, setStarterDraftInsert] = useState<{ id: number; text: string } | null>(null)
     const [starterReplyExcerptInsert, setStarterReplyExcerptInsert] = useState<{
         id: number
@@ -181,16 +189,19 @@ export function ConnectedChatView({
         onSessionChange?.(currentSessionId)
     }, [currentSessionId, onSessionChange])
 
+    // Only persist/load from localStorage when NOT externally controlled
     useEffect(() => {
+        if (contextPanelHiddenProp != null) return  // parent controls
         if (typeof window === 'undefined') return
         const stored = window.localStorage.getItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN)
-        setContextPanelHidden(stored === 'true')
-    }, [])
+        setLocalContextPanelHidden(stored === 'true')
+    }, [contextPanelHiddenProp])
 
     useEffect(() => {
+        if (contextPanelHiddenProp != null) return  // parent controls
         if (typeof window === 'undefined') return
-        window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(contextPanelHidden))
-    }, [contextPanelHidden])
+        window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(localContextPanelHidden))
+    }, [localContextPanelHidden, contextPanelHiddenProp])
 
     useEffect(() => {
         if (showChatContextPanel && !wasChatContextPanelEnabledRef.current) {
@@ -873,17 +884,6 @@ export function ConnectedChatView({
                 </Sheet>
             </div>
             {!isMobile && showChatContextPanel && !contextPanelHidden && contextPanelElement}
-            {!isMobile && showChatContextPanel && contextPanelHidden && (
-                <button
-                    type="button"
-                    onClick={() => setContextPanelHidden(false)}
-                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-border bg-background/95 p-2 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
-                    title="Show context panel"
-                    aria-label="Show context panel"
-                >
-                    <PanelRightOpen className="h-4 w-4" />
-                </button>
-            )}
         </div>
     )
 }
