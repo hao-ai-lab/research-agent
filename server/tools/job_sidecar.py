@@ -732,7 +732,7 @@ def _env_float(name: str, default: float) -> float:
 
 def resolve_gpuwrap_settings(gpuwrap_config: dict | None) -> dict:
     config = gpuwrap_config if isinstance(gpuwrap_config, dict) else {}
-    enabled = _truthy(config["enabled"]) if "enabled" in config else _truthy(os.environ.get("RESEARCH_AGENT_GPUWRAP_ENABLED", "1"))
+    enabled = _truthy(config["enabled"]) if "enabled" in config else False
     retries = int(config.get("retries", _env_int("RESEARCH_AGENT_GPUWRAP_RETRIES", 2)))
     retry_delay_seconds = float(config.get("retry_delay_seconds", _env_float("RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS", 8.0)))
     max_memory_used_mb = int(config.get("max_memory_used_mb", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB", 200)))
