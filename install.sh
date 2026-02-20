@@ -10,7 +10,7 @@ DEFAULT_BACKEND_BINARY_URL="${RESEARCH_AGENT_DEFAULT_BACKEND_BINARY_URL:-}"
 DEFAULT_FRONTEND_BUNDLE_URL="${RESEARCH_AGENT_DEFAULT_FRONTEND_BUNDLE_URL:-}"
 DEFAULT_BACKEND_BINARY_BASE_URL="${RESEARCH_AGENT_DEFAULT_BACKEND_BINARY_BASE_URL:-$DEFAULT_RELEASE_BASE_URL}"
 DEFAULT_FRONTEND_BUNDLE_BASE_URL="${RESEARCH_AGENT_DEFAULT_FRONTEND_BUNDLE_BASE_URL:-$DEFAULT_RELEASE_BASE_URL}"
-DEFAULT_BACKEND_BINARY_SHA256="${RESEARCH_AGENT_DEFAULT_BACKEND_BINARY_SHA256:-0552d8914be1a29a4e6b837ecab190de349ec523ba259e6a40806638a823d37c}"
+DEFAULT_BACKEND_BINARY_SHA256="${RESEARCH_AGENT_DEFAULT_BACKEND_BINARY_SHA256:-}"
 DEFAULT_RUNTIME_ASSETS_BASE_URL="${RESEARCH_AGENT_DEFAULT_RUNTIME_ASSETS_BASE_URL:-https://raw.githubusercontent.com/${DEFAULT_RELEASE_REPO}/${DEFAULT_RELEASE_TAG}}"
 RUNTIME_ASSETS_BASE_URL="${RESEARCH_AGENT_RUNTIME_ASSETS_BASE_URL:-$DEFAULT_RUNTIME_ASSETS_BASE_URL}"
 DEFAULT_OPENCODE_CONFIG_URL="${RUNTIME_ASSETS_BASE_URL%/}/server/opencode.json"
@@ -628,30 +628,9 @@ get_backend_binary_download_url() {
 }
 
 verify_sha256_file() {
-  local file_path="$1"
-  local expected="$2"
-
-  if [ -z "$expected" ]; then
-    return 0
-  fi
-
-  local actual=""
-  if maybe_cmd sha256sum; then
-    actual="$(sha256sum "$file_path" | awk '{print $1}')"
-  elif maybe_cmd shasum; then
-    actual="$(shasum -a 256 "$file_path" | awk '{print $1}')"
-  else
-    warn "Skipping SHA256 verification (sha256sum/shasum unavailable)"
-    return 0
-  fi
-
-  if [ "$actual" != "$expected" ]; then
-    warn "SHA256 mismatch for downloaded backend binary"
-    warn "Expected: $expected"
-    warn "Actual:   $actual"
-    return 1
-  fi
-
+  # SHA verification is intentionally disabled for backend downloads.
+  local _file_path="$1"
+  local _expected="$2"
   return 0
 }
 

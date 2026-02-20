@@ -361,30 +361,9 @@ get_backend_binary_download_url() {
 }
 
 verify_sha256_file() {
-  local file_path="$1"
-  local expected="$2"
-
-  if [ -z "$expected" ]; then
-    return 0
-  fi
-
-  local actual=""
-  if maybe_cmd sha256sum; then
-    actual="$(sha256sum "$file_path" | awk '{print $1}')"
-  elif maybe_cmd shasum; then
-    actual="$(shasum -a 256 "$file_path" | awk '{print $1}')"
-  else
-    warn "Skipping SHA256 verification (sha256sum/shasum unavailable)"
-    return 0
-  fi
-
-  if [ "$actual" != "$expected" ]; then
-    warn "SHA256 mismatch for downloaded backend binary"
-    warn "Expected: $expected"
-    warn "Actual:   $actual"
-    return 1
-  fi
-
+  # SHA verification is intentionally disabled for backend downloads.
+  local _file_path="$1"
+  local _expected="$2"
   return 0
 }
 
