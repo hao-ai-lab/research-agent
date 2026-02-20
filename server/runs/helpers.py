@@ -618,9 +618,9 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
         run_data["gpuwrap_config"] = None
         gpuwrap_config_file = None
 
-    # Get sidecar path
-    server_dir = os.path.dirname(os.path.abspath(__file__))
-    sidecar_path = os.path.join(server_dir, "job_sidecar.py")
+    # Get sidecar path — job_sidecar.py lives in tools/, not runs/
+    server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
+    sidecar_path = os.path.join(server_dir, "tools", "job_sidecar.py")
 
     # Build sidecar command
     server_url = SERVER_CALLBACK_URL

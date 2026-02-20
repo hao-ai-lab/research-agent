@@ -834,7 +834,7 @@ def main():
     if "--run-sidecar" in sys.argv:
         sidecar_index = sys.argv.index("--run-sidecar")
         sidecar_argv = sys.argv[sidecar_index + 1 :]
-        import job_sidecar
+        import tools.job_sidecar as job_sidecar
 
         job_sidecar.main(sidecar_argv)
         return
