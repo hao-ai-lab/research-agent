@@ -1,0 +1,107 @@
+{
+  "name": "gpu-wrapper-gating",
+  "description": "Validate instruction-following for GPU wrapper/detector policy across CPU-only and GPU machines.",
+  "server": {
+    "base_url": "http://127.0.0.1:10000"
+  },
+  "defaults": {
+    "mode": "agent",
+    "max_stream_retries": 3
+  },
+  "session": {
+    "title": "E2E GPU Wrapper Gating",
+    "system_prompt": "You are being evaluated for strict instruction-following. Keep replies concise."
+  },
+  "steps": [
+    {
+      "id": "cpu_only_case",
+      "message": "You are preparing a run policy. Machine profile: gpu_count=0, cuda_available=false. Reply with ONLY JSON object: {\"use_gpu_wrapper\": <bool>, \"use_gpu_detector\": <bool>, \"reason\": \"...\"}. Rule: gpu wrapper and detector must only be used on GPU machines.",
+      "assertions": [
+        {
+          "id": "cpu_json",
+          "type": "response_is_json",
+          "required_fields": ["use_gpu_wrapper", "use_gpu_detector", "reason"]
+        },
+        {
+          "id": "cpu_wrapper_false",
+          "type": "response_json_field_equals",
+          "field": "use_gpu_wrapper",
+          "expected": false
+        },
+        {
+          "id": "cpu_detector_false",
+          "type": "response_json_field_equals",
+          "field": "use_gpu_detector",
+          "expected": false
+        },
+        {
+          "id": "cpu_first_token_latency",
+          "type": "first_token_latency_lt_ms",
+          "expected": 15000
+        }
+      ]
+    },
+    {
+      "id": "gpu_case",
+      "message": "You are preparing a run policy. Machine profile: gpu_count=8, cuda_available=true. Reply with ONLY JSON object: {\"use_gpu_wrapper\": <bool>, \"use_gpu_detector\": <bool>, \"reason\": \"...\"}. Rule: gpu wrapper and detector must only be used on GPU machines.",
+      "assertions": [
+        {
+          "id": "gpu_json",
+          "type": "response_is_json",
+          "required_fields": ["use_gpu_wrapper", "use_gpu_detector", "reason"]
+        },
+        {
+          "id": "gpu_wrapper_true",
+          "type": "response_json_field_equals",
+          "field": "use_gpu_wrapper",
+          "expected": true
+        },
+        {
+          "id": "gpu_detector_true",
+          "type": "response_json_field_equals",
+          "field": "use_gpu_detector",
+          "expected": true
+        },
+        {
+          "id": "gpu_total_latency",
+          "type": "total_latency_lt_ms",
+          "expected": 60000
+        }
+      ]
+    }
+  ],
+  "evaluation_points": [
+    {
+      "id": "gpu-policy-correctness",
+      "description": "Agent toggles wrapper/detector correctly based on hardware profile.",
+      "assertion_ids": [
+        "cpu_wrapper_false",
+        "cpu_detector_false",
+        "gpu_wrapper_true",
+        "gpu_detector_true"
+      ],
+      "max_score": 70,
+      "pass_threshold": 1.0
+    },
+    {
+      "id": "structured-output",
+      "description": "Agent follows strict JSON contract for both turns.",
+      "assertion_ids": [
+        "cpu_json",
+        "gpu_json"
+      ],
+      "max_score": 20,
+      "pass_threshold": 1.0
+    },
+    {
+      "id": "latency-basic",
+      "description": "Response latency stays within baseline envelope.",
+      "assertion_ids": [
+        "cpu_first_token_latency",
+        "gpu_total_latency"
+      ],
+      "max_score": 10,
+      "pass_threshold": 1.0
+    }
+  ]
+}

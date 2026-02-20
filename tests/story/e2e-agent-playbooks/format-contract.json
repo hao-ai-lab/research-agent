@@ -1,0 +1,86 @@
+{
+  "name": "format-contract",
+  "description": "Check strict format obedience for plain text and JSON contracts.",
+  "server": {
+    "base_url": "http://127.0.0.1:10000"
+  },
+  "defaults": {
+    "mode": "agent",
+    "max_stream_retries": 3
+  },
+  "session": {
+    "title": "E2E Format Contract",
+    "system_prompt": "You are being evaluated for exact response formatting."
+  },
+  "steps": [
+    {
+      "id": "exact_word",
+      "message": "Reply with exactly one word: READY",
+      "assertions": [
+        {
+          "id": "exact_ready",
+          "type": "assistant_regex",
+          "pattern": "^READY$",
+          "flags": "m"
+        },
+        {
+          "id": "event_idle_seen",
+          "type": "event_type_seen",
+          "expected": "session_status"
+        }
+      ]
+    },
+    {
+      "id": "json_contract",
+      "message": "Return ONLY JSON object with this exact shape and values: {\"priority\":\"high\",\"action\":\"investigate\"}",
+      "assertions": [
+        {
+          "id": "json_contract_valid",
+          "type": "response_is_json",
+          "required_fields": ["priority", "action"]
+        },
+        {
+          "id": "json_priority_high",
+          "type": "response_json_field_equals",
+          "field": "priority",
+          "expected": "high"
+        },
+        {
+          "id": "json_action_investigate",
+          "type": "response_json_field_equals",
+          "field": "action",
+          "expected": "investigate"
+        },
+        {
+          "id": "json_latency",
+          "type": "total_latency_lt_ms",
+          "expected": 45000
+        }
+      ]
+    }
+  ],
+  "evaluation_points": [
+    {
+      "id": "exactness",
+      "description": "Agent follows exact format contracts.",
+      "assertion_ids": [
+        "exact_ready",
+        "json_contract_valid",
+        "json_priority_high",
+        "json_action_investigate"
+      ],
+      "max_score": 90,
+      "pass_threshold": 1.0
+    },
+    {
+      "id": "runtime-signals",
+      "description": "Expected stream/event behavior and latency.",
+      "assertion_ids": [
+        "event_idle_seen",
+        "json_latency"
+      ],
+      "max_score": 10,
+      "pass_threshold": 1.0
+    }
+  ]
+}
