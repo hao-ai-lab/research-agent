@@ -14,6 +14,7 @@ import {
   Plus,
   Settings,
   Star,
+  HelpCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -37,6 +38,7 @@ import type { AppTab, HomeTab } from '@/lib/navigation'
 import { PRIMARY_NAV_ITEMS } from '@/components/navigation/nav-items'
 import { NavTabButton } from '@/components/navigation/nav-tab-button'
 import { useAppSettings } from '@/lib/app-settings'
+import { OnboardingHelpDialog } from '@/components/onboarding-help-dialog'
 
 const ICON_RAIL_WIDTH = 72
 const ICON_RAIL_TRIGGER_WIDTH = 136
@@ -128,6 +130,7 @@ export function DesktopSidebar({
 }: DesktopSidebarProps) {
   const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null)
   const [isRunsMenuOpen, setIsRunsMenuOpen] = useState(false)
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
 
   // Cache for lazily-fetched session rounds (non-current sessions)
   type RoundPreview = { content: string; roundIndex: number }
@@ -987,7 +990,17 @@ export function DesktopSidebar({
           </div>
         </ScrollArea>
 
-        <div className={`shrink-0 border-t border-border/80 ${isIconRail ? 'p-2' : 'p-3'}`}>
+        <div className={`shrink-0 border-t border-border/80 flex flex-col gap-1 ${isIconRail ? 'p-2' : 'p-3'}`}>
+          <button
+            type="button"
+            title={isIconRail ? 'Help & Documentation' : undefined}
+            onClick={() => setIsHelpOpen(true)}
+            className={`flex w-full items-center rounded-lg border border-transparent text-left transition-colors hover:bg-secondary/60 ${isIconRail ? 'justify-center px-2 py-2 text-muted-foreground hover:text-foreground' : 'gap-3 px-3 py-2 text-sm text-muted-foreground hover:text-foreground'
+              }`}
+          >
+            <HelpCircle className="h-4 w-4" />
+            {!isIconRail && <span>Help &amp; Support</span>}
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1036,6 +1049,7 @@ export function DesktopSidebar({
             }`}
         />
       )}
+      <OnboardingHelpDialog open={isHelpOpen} onOpenChange={setIsHelpOpen} />
     </aside>
   )
 }
