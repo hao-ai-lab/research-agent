@@ -521,6 +521,59 @@ export function useChatSession(): UseChatSessionResult {
             if (!delta) {
                 return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false, provenance: undefined }
             }
+            if (event.ptype === 'tool') {
+                setStreamingState(prev => {
+                    const sourceId = partId || `tool-${prev.toolCalls.length}`
+                    const existingPartIndex = prev.parts.findIndex(
+                        p => p.type === 'tool' && (p.sourceId ?? p.id) === sourceId
+                    )
+                    const existingPart = existingPartIndex >= 0 ? prev.parts[existingPartIndex] : undefined
+                    const existingOutput = existingPart?.toolOutput || ''
+                    const nextOutput = `${existingOutput}${delta}`
+
+                    const nextParts = existingPartIndex >= 0
+                        ? prev.parts.map((p, idx) => idx === existingPartIndex ? {
+                            ...p,
+                            toolName: event.name || p.toolName,
+                            toolState: p.toolState || 'running',
+                            toolOutput: nextOutput,
+                        } : p)
+                        : [...prev.parts, {
+                            id: sourceId,
+                            sourceId,
+                            type: 'tool' as const,
+                            content: '',
+                            toolName: event.name,
+                            toolState: 'running' as const,
+                            toolOutput: delta,
+                        }]
+
+                    const existingToolIndex = prev.toolCalls.findIndex(t => t.id === sourceId)
+                    const nextToolCall: ToolCallState = existingToolIndex >= 0
+                        ? {
+                            ...prev.toolCalls[existingToolIndex],
+                            name: event.name || prev.toolCalls[existingToolIndex].name,
+                            state: prev.toolCalls[existingToolIndex].state || 'running',
+                            output: nextOutput,
+                        }
+                        : {
+                            id: sourceId,
+                            name: event.name,
+                            state: 'running',
+                            output: delta,
+                        }
+                    const nextToolCalls = existingToolIndex >= 0
+                        ? prev.toolCalls.map((tool, idx) => idx === existingToolIndex ? nextToolCall : tool)
+                        : [...prev.toolCalls, nextToolCall]
+
+                    return {
+                        ...prev,
+                        parts: nextParts,
+                        toolCalls: nextToolCalls,
+                    }
+                })
+                return { textDelta: '', thinkingDelta: '', sawToolPart: true, done: false, provenance: undefined }
+            }
             const partType = event.ptype === 'reasoning' ? 'thinking' : 'text'
 
             setStreamingState(prev => {

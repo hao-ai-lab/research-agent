@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { CodeOutputBox } from '@/components/code-output-box'
@@ -202,6 +202,8 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
     const state = part.toolState || 'pending'
     const durationLabel = formatDuration(part.toolDurationMs, part.toolStartedAt, part.toolEndedAt)
     const length_to_show = 150
+    const toolView = buildToolViewModel(part.toolName, part.toolDescription, part.toolInput)
+    const [copied, setCopied] = useState(false)
 
     // Auto-collapse when tool finishes (completed or error) — only if in collapse/expand mode
     useEffect(() => {
@@ -214,23 +216,66 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
     }, [state, toolMode])
 
     const toolContentBlock = (
-        <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,7.5rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
-            {part.toolDescription && (
+        <div className="w-full rounded-lg border border-border/50 bg-secondary/30 p-3 leading-relaxed text-muted-foreground space-y-2 max-h-[var(--app-streaming-tool-box-height,9rem)] overflow-y-auto" style={{ fontSize: 'var(--app-thinking-tool-font-size, 14px)' }}>
+            {toolView.description && (
                 <div>
                     <span className="font-medium text-foreground/70">Description:</span>{' '}
-                    <span>{part.toolDescription}</span>
+                    <span>{toolView.description}</span>
                 </div>
             )}
-            {part.toolInput && (
+            {toolView.command && (
                 <div>
-                    <span className="font-medium text-foreground/70">Input:</span>
-                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolInput}</pre>
+                    {toolView.shellLike ? (
+                        <div className="mt-1 rounded-md border border-border/60 bg-background/60 px-3 py-2 font-mono text-sm text-foreground">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0 whitespace-pre-wrap break-all">
+                                    <span className="mr-2 text-foreground/80">$</span>
+                                    <span className="break-all">{toolView.command}</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        try {
+                                            await navigator.clipboard.writeText(toolView.command || '')
+                                            setCopied(true)
+                                            setTimeout(() => setCopied(false), 1200)
+                                        } catch {
+                                            setCopied(false)
+                                        }
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded border border-border/70 px-2 py-1 text-xs text-muted-foreground hover:bg-secondary"
+                                >
+                                    <Copy className="h-3 w-3" />
+                                    <span>{copied ? 'Copied' : 'Copy'}</span>
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <span className="font-medium text-foreground/70">Command:</span>
+                            <div className="mt-1">
+                                <CodeOutputBox language={toolView.commandLanguage} code={toolView.command} />
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
+            {toolView.args && (
+                <div>
+                    <span className="font-medium text-foreground/70">Arguments:</span>
+                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{toolView.args}</pre>
                 </div>
             )}
             {part.toolOutput && (
                 <div>
-                    <span className="font-medium text-foreground/70">Output:</span>
-                    <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
+                    {toolView.shellLike ? (
+                        <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden text-foreground">{part.toolOutput}</pre>
+                    ) : (
+                        <>
+                            <span className="font-medium text-foreground/70">Output:</span>
+                            <pre className="mt-1 whitespace-pre-wrap break-all overflow-hidden">{part.toolOutput}</pre>
+                        </>
+                    )}
                 </div>
             )}
             {(part.toolStartedAt || part.toolEndedAt) && (
@@ -272,9 +317,9 @@ function StreamingToolPart({ part }: { part: StreamingPart }) {
                     {getToolStateLabel(state)}
                 </span>
                 {durationLabel && <span className="text-muted-foreground/70">({durationLabel})</span>}
-                {!isOpen && (part.toolDescription || part.toolInput) && (
-                    <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={part.toolDescription || part.toolInput}>
-                        — {(part.toolDescription || part.toolInput || '').slice(0, length_to_show)}{(part.toolDescription || part.toolInput || '').length > length_to_show ? '…' : ''}
+                {!isOpen && toolView.summary && (
+                    <span className="ml-1 truncate text-muted-foreground/50 max-w-[200px]" title={toolView.summary}>
+                        — {toolView.summary.slice(0, length_to_show)}{toolView.summary.length > length_to_show ? '…' : ''}
                     </span>
                 )}
             </CollapsibleTrigger>
@@ -325,6 +370,68 @@ function ToolStateIcon({ state }: { state: string }) {
             return <AlertCircle className="h-3 w-3 text-red-500" />
         default:
             return <Wrench className="h-3 w-3" />
+    }
+}
+
+type ToolViewModel = {
+    description?: string
+    command?: string
+    commandLanguage: string
+    args?: string
+    summary?: string
+    shellLike: boolean
+}
+
+function buildToolViewModel(toolName?: string, toolDescription?: string, toolInput?: string): ToolViewModel {
+    const trimmedInput = toolInput?.trim() || ''
+    const lowerToolName = (toolName || '').toLowerCase()
+    const isBashLike = lowerToolName === 'bash' || lowerToolName.includes('bash') || lowerToolName.includes('shell')
+
+    let parsedInput: Record<string, unknown> | null = null
+    if (trimmedInput.startsWith('{') && trimmedInput.endsWith('}')) {
+        try {
+            const candidate = JSON.parse(trimmedInput)
+            if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+                parsedInput = candidate as Record<string, unknown>
+            }
+        } catch {
+            parsedInput = null
+        }
+    }
+
+    const description = (
+        toolDescription ||
+        (typeof parsedInput?.description === 'string' ? parsedInput.description : undefined)
+    )
+
+    const command = typeof parsedInput?.command === 'string' ? parsedInput.command : undefined
+    const commandLanguage = isBashLike ? 'bash' : 'text'
+
+    let args: string | undefined
+    if (parsedInput) {
+        const argsPayload: Record<string, unknown> = {}
+        for (const [key, value] of Object.entries(parsedInput)) {
+            if (key === 'description' || key === 'command') continue
+            argsPayload[key] = value
+        }
+        if (Object.keys(argsPayload).length > 0) {
+            args = JSON.stringify(argsPayload, null, 2)
+        }
+    } else if (trimmedInput && !command) {
+        args = trimmedInput
+    }
+
+    const summary = isBashLike
+        ? description
+        : (description || command || args)
+
+    return {
+        description,
+        command,
+        commandLanguage,
+        args,
+        summary,
+        shellLike: isBashLike,
     }
 }
 

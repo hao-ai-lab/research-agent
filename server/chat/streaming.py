@@ -218,6 +218,9 @@ class StreamPartsAccumulator:
             return
         if ptype == "tool":
             self._flush_text_buffer()
+            if event.get("type") == "part_delta":
+                self._consume_tool_output_delta(event)
+                return
             self._consume_tool_update(event)
             return
         if event.get("type") == "session_status":
@@ -290,6 +293,37 @@ class StreamPartsAccumulator:
         existing_part["tool_started_at"] = event.get("tool_started_at")
         existing_part["tool_ended_at"] = event.get("tool_ended_at")
         existing_part["tool_duration_ms"] = event.get("tool_duration_ms")
+        if tool_name:
+            existing_part["tool_name"] = tool_name
+
+    def _consume_tool_output_delta(self, event: dict):
+        part_id = event.get("id")
+        if not isinstance(part_id, str) or not part_id:
+            return
+
+        delta = event.get("delta")
+        if not isinstance(delta, str) or delta == "":
+            return
+
+        existing_index = self._tool_index_by_id.get(part_id)
+        tool_name = event.get("name")
+        if existing_index is None:
+            self._parts.append(
+                {
+                    "id": part_id,
+                    "type": "tool",
+                    "content": "",
+                    "tool_name": tool_name,
+                    "tool_state": "running",
+                    "tool_output": delta,
+                }
+            )
+            self._tool_index_by_id[part_id] = len(self._parts) - 1
+            return
+
+        existing_part = self._parts[existing_index]
+        existing_part["tool_state"] = existing_part.get("tool_state") or "running"
+        existing_part["tool_output"] = f"{existing_part.get('tool_output') or ''}{delta}"
         if tool_name:
             existing_part["tool_name"] = tool_name
 
@@ -561,6 +595,14 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
         part_id = props.get("partID")
         if field in ("text", "reasoning"):
             return {"type": "part_delta", "id": part_id, "ptype": field, "delta": delta}
+        if field in ("output", "stdout", "stderr"):
+            return {
+                "type": "part_delta",
+                "id": part_id,
+                "ptype": "tool",
+                "delta": delta,
+                "name": _extract_tool_name(part),
+            }
 
     elif etype == "message.part.updated":
         ptype = part.get("type")
