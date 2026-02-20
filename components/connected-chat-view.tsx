@@ -726,7 +726,7 @@ export function ConnectedChatView({
                                                 runs={runs}
                                                 sweeps={sweeps}
                                                 alerts={alerts}
-                                                flavor={starterCardFlavor}
+                                                flavor={starterCardFlavor === 'none' ? undefined : starterCardFlavor}
                                                 customTemplates={customTemplates}
                                                 onEditTemplate={handleEditTemplate}
                                                 onPromptSelect={(prompt) => {
