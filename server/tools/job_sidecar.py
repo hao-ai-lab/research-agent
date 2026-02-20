@@ -733,16 +733,15 @@ def _env_float(name: str, default: float) -> float:
 def resolve_gpuwrap_settings(gpuwrap_config: dict | None) -> dict:
     config = gpuwrap_config if isinstance(gpuwrap_config, dict) else {}
     enabled = _truthy(config["enabled"]) if "enabled" in config else False
-    retries = int(config.get("retries", _env_int("RESEARCH_AGENT_GPUWRAP_RETRIES", 2)))
-    retry_delay_seconds = float(config.get("retry_delay_seconds", _env_float("RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS", 8.0)))
-    max_memory_used_mb = int(config.get("max_memory_used_mb", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB", 200)))
-    max_utilization = int(config.get("max_utilization", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_UTILIZATION", 40)))
+    raw_retries = config.get("retries", _env_int("RESEARCH_AGENT_GPUWRAP_RETRIES", -1))
+    retries: int | None = None  # unlimited by default
+    if raw_retries is not None and int(raw_retries) >= 0:
+        retries = int(raw_retries)
+    retry_delay_seconds = float(config.get("retry_delay_seconds", _env_float("RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS", 5.0)))
     return {
         "enabled": enabled,
-        "retries": max(0, retries),
+        "retries": retries,
         "retry_delay_seconds": max(0.1, retry_delay_seconds),
-        "max_memory_used_mb": max(0, max_memory_used_mb),
-        "max_utilization": min(100, max(0, max_utilization)),
     }
 
 
@@ -755,10 +754,6 @@ def detect_available_cuda_devices(settings: dict) -> tuple[str, dict | None]:
     cmd = [
         sys.executable,
         detect_script,
-        "--max-memory-used-mb",
-        str(settings["max_memory_used_mb"]),
-        "--max-utilization",
-        str(settings["max_utilization"]),
     ]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -807,16 +802,20 @@ def emit_gpu_retry_alert(
     server_url: str,
     job_id: str,
     attempt: int,
-    total_attempts: int,
+    total_attempts: int | None,
     reason: str,
     auth_token: str | None = None,
 ) -> None:
+    if total_attempts is None:
+        attempt_label = f"attempt {attempt}"
+    else:
+        attempt_label = f"attempt {attempt}/{total_attempts}"
     trigger_alert(
         server_url=server_url,
         job_id=job_id,
         message=(
             f"GPU contention detected ({reason}). "
-            f"Auto-retrying attempt {attempt + 1}/{total_attempts}."
+            f"Auto-retrying {attempt_label}."
         ),
         choices=["Acknowledge"],
         severity="warning",
@@ -901,12 +900,13 @@ def monitor_job(
     check_interval = 2
     alert_state: dict = {}
     metrics_lines_posted = 0
-    total_attempts = settings["retries"] + 1
+    retries = settings["retries"]  # None = unlimited, 0 = no retry, N = N retries
+    total_attempts: int | None = None if retries is None else retries + 1
     attempt = 0
     final_exit_code: str | None = None
     final_error: str | None = None
 
-    while attempt < total_attempts:
+    while total_attempts is None or attempt < total_attempts:
         attempt += 1
         if os.path.exists(completion_file):
             os.remove(completion_file)
@@ -926,11 +926,8 @@ def monitor_job(
             if detector_payload is None:
                 logger.warning("GPU detector unavailable; running without CUDA_VISIBLE_DEVICES pinning")
             elif not cuda_visible_devices:
-                reason = (
-                    f"no GPUs available now "
-                    f"(memory<={settings['max_memory_used_mb']}MB, util<={settings['max_utilization']}%)"
-                )
-                if attempt < total_attempts:
+                reason = "all GPUs have running processes"
+                if total_attempts is None or attempt < total_attempts:
                     emit_gpu_retry_alert(
                         server_url=server_url,
                         job_id=job_id,
@@ -1045,7 +1042,7 @@ def monitor_job(
         final_exit_code = attempt_exit_code
         tail = _read_log_tail_since(log_file, attempt_log_start)
         retryable_conflict = settings["enabled"] and _looks_like_gpu_conflict(tail)
-        if retryable_conflict and attempt < total_attempts:
+        if retryable_conflict and (total_attempts is None or attempt < total_attempts):
             emit_gpu_retry_alert(
                 server_url=server_url,
                 job_id=job_id,

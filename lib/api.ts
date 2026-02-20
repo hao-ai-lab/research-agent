@@ -448,10 +448,8 @@ export interface Run {
 
 export interface GpuwrapConfig {
     enabled?: boolean
-    retries?: number
+    retries?: number | null  // null = unlimited, 0 = no retry
     retry_delay_seconds?: number
-    max_memory_used_mb?: number
-    max_utilization?: number
 }
 
 export interface Alert {
