@@ -9,6 +9,11 @@ It combines:
 - OpenCode for agent execution and streaming
 - tmux-based background execution for long-running jobs
 
+Try it yourself
+```bash
+curl -fsSL "https://raw.githubusercontent.com/hao-ai-lab/research-agent/v0.1.0-0219/install.sh" | bash
+```
+
 Demo: https://hao-ai-lab--research-agent-main-preview-app.modal.run
 
 ## Architecture
