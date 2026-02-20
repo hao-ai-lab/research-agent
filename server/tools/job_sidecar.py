@@ -15,7 +15,6 @@ import logging
 import os
 import re
 import shlex
-import shutil
 import sys
 import time
 import math
@@ -874,25 +873,10 @@ def monitor_job(
     if os.path.exists(completion_file):
         os.remove(completion_file)
     
-    # Setup log capture via pipe-pane with ANSI stripping.
-    # Strategy (mirrors tmux-logging plugin):
-    #   1. ansifilter — C-based, fastest, handles all sequences
-    #   2. strip_ansi_filter.py — our Python fallback
-    #   3. raw cat — last resort if nothing else is available
+    # Setup log capture via pipe-pane
     try:
         logger.info(f"Piping pane output to {log_file}")
-        if shutil.which("ansifilter"):
-            pipe_cmd = f"ansifilter >> {log_file}"
-            logger.info("Using ansifilter for ANSI stripping (native C)")
-        else:
-            filter_script = _resolve_sidecar_script("strip_ansi_filter.py")
-            if filter_script:
-                pipe_cmd = f"{sys.executable} {shlex.quote(filter_script)} >> {log_file}"
-                logger.info("Using strip_ansi_filter.py for ANSI stripping")
-            else:
-                logger.warning("No ANSI filter available; falling back to raw capture")
-                pipe_cmd = f"cat >> {log_file}"
-        job_pane.cmd("pipe-pane", pipe_cmd)
+        job_pane.cmd("pipe-pane", f"cat >> {log_file}")
     except Exception as e:
         logger.error(f"Failed to setup pipe-pane: {e}")
     
