@@ -161,7 +161,7 @@ class WildV2Engine:
         self._task: Optional[asyncio.Task] = None
 
         # Memory store — injected after construction by server.py
-        self.memory_store = None  # type: ignore[assignment]
+        self.memory_store: Optional[Any] = None
 
     # -- Properties --
 

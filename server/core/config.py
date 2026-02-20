@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import httpx
 
@@ -120,9 +120,9 @@ def requires_api_auth(path: str) -> bool:
     return False
 
 
-def get_auth() -> Optional[httpx.BasicAuth]:
-    """Get HTTP basic auth if password is configured."""
-    return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else None
+def get_auth() -> Any:
+    """Get HTTP basic auth if password is configured; returns USE_CLIENT_DEFAULT when no password."""
+    return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else httpx.USE_CLIENT_DEFAULT
 
 
 def set_runtime_research_agent_key(raw_key: Optional[str]) -> None:
@@ -242,7 +242,8 @@ def load_available_opencode_models() -> list[dict[str, Any]]:
         seen.add(key)
 
         model_data = data if isinstance(data, dict) else {}
-        limit = model_data.get("limit") if isinstance(model_data.get("limit"), dict) else {}
+        raw_limit = model_data.get("limit")
+        limit = raw_limit if isinstance(raw_limit, dict) else {}
         context_limit = _parse_optional_int(limit.get("context"))
         output_limit = _parse_optional_int(limit.get("output"))
         display_name = model_data.get("name")

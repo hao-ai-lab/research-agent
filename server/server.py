@@ -518,8 +518,10 @@ def _run_response_payload(run_id: str, run: dict) -> dict:
     if parsed_history:
         payload["lossHistory"] = parsed_history
 
-    parsed_metrics = parsed.get("metrics") if isinstance(parsed.get("metrics"), dict) else {}
-    existing_metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    raw_parsed_metrics = parsed.get("metrics")
+    parsed_metrics = raw_parsed_metrics if isinstance(raw_parsed_metrics, dict) else {}
+    raw_existing_metrics = payload.get("metrics")
+    existing_metrics = raw_existing_metrics if isinstance(raw_existing_metrics, dict) else {}
     merged_metrics = {
         "loss": parsed_metrics.get("loss", existing_metrics.get("loss")),
         "accuracy": parsed_metrics.get("accuracy", existing_metrics.get("accuracy")),
@@ -834,7 +836,7 @@ def main():
     if "--run-sidecar" in sys.argv:
         sidecar_index = sys.argv.index("--run-sidecar")
         sidecar_argv = sys.argv[sidecar_index + 1 :]
-        import job_sidecar
+        from tools import job_sidecar
 
         job_sidecar.main(sidecar_argv)
         return
