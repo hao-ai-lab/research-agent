@@ -15,7 +15,9 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from core import config
+from core.config import resolve_session_workdir
 import core.state as state
+from core.state import chat_sessions
 from core.models import (
     AlertRecord,
     CreateAlertRequest,
@@ -135,10 +137,20 @@ async def create_run(req: RunCreate):
     initial_status = "queued" if req.auto_start else "ready"
     gpuwrap_config = _normalize_gpuwrap_config(req.gpuwrap_config)
 
+    # Resolve workdir: explicit request > session override > server default
+    if req.workdir:
+        effective_workdir = req.workdir
+    elif req.chat_session_id:
+        effective_workdir = resolve_session_workdir(
+            chat_sessions.get(req.chat_session_id, {})
+        )
+    else:
+        effective_workdir = config.WORKDIR
+
     run_data = {
         "name": req.name,
         "command": req.command,
-        "workdir": req.workdir or config.WORKDIR,
+        "workdir": effective_workdir,
         "status": initial_status,
         "created_at": time.time(),
         "is_archived": False,
