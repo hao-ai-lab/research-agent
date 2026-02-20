@@ -1,18 +1,24 @@
 # Research Agent
 
-An AI-powered research assistant for ML experiment tracking. Provides a mobile-first web interface for monitoring training runs, chatting with an AI assistant, managing hyperparameter sweeps, and autonomous "Wild Mode" research loops.
+AI-powered research assistant for ML experiment tracking.
 
-**Demo**: https://hao-ai-lab--research-agent-main-preview-app.modal.run
+It combines:
 
+- A Next.js frontend for runs, sweeps, charts, events, and chat
+- A FastAPI backend for orchestration and APIs
+- OpenCode for agent execution and streaming
+- tmux-based background execution for long-running jobs
+
+Demo: https://hao-ai-lab--research-agent-main-preview-app.modal.run
 
 ## Architecture
 
-```
+```text
 ┌─────────────┐    ┌─────────────┐    ┌──────────────────┐    ┌─────────────┐
 │   Frontend  │───▶│   Server    │───▶│     OpenCode     │───▶│   Gateway   │
-│  (Next.js)  │    │  (FastAPI)  │    │  (localhost:4096) │    │   (Modal)   │
+│  (Next.js)  │    │  (FastAPI)  │    │  (localhost:4096)│    │   (Modal)   │
 └─────────────┘    └─────────────┘    └──────────────────┘    └─────────────┘
-     :3000             :10000                                        │
+     :3000+            :10000+                                       │
                           │                                          ▼
                     ┌─────────────┐                           ┌─────────────┐
                     │    tmux     │                           │  Anthropic  │
@@ -22,107 +28,108 @@ An AI-powered research assistant for ML experiment tracking. Provides a mobile-f
 
 ## Prerequisites
 
-- **Node.js** 20.9+ and **npm**
-- **Python** 3.10+
-- **tmux** (for background job execution)
-- **OpenCode** CLI (`npm install -g opencode-ai`), auto-attempted by installer
-- **ngrok** (optional, for public tunnel URLs)
-- **uv** (optional, preferred for isolated backend environment)
+- Node.js 20+
+- npm
+- Python 3.10+
+- tmux
+- OpenCode CLI (`opencode`)
+- `uv` (recommended for backend env setup)
+- `ngrok` (optional, only for `research-agent tunnel`)
 
-## Quick Start
+## Quick Start (Recommended)
 
-### 1. YOLO install
-
-Don't do YOLO install if you are a developer since you will get staled code. Go to manual setup below if you are a developer.
+Use the lifecycle manager:
 
 ```bash
-curl -fL "https://drive.google.com/uc?export=download&id=1mjKPk8lYI8YCdwYbdIrgLGDb_PWNIwGS" | bash
+research-agent start --project-root "$PWD"
 ```
 
-## Manual Setup (Advanced)
+This starts OpenCode, backend, and frontend in a tmux session and writes runtime info to `.agents/ra-runtime.env`.
+
+Useful commands:
 
 ```bash
-git clone https://github.com/GindaChen/v0-research-agent-mobile.git
-cd v0-research-agent-mobile
+research-agent status
+research-agent tunnel
+research-agent stop
+```
+
+## Local Developer Setup (Source Mode)
+
+```bash
+# from repo root
 bash install.sh --dev
-nvm use 20               # activate Node 20 installed by install.sh
+nvm use 20
 npm install
+
 uv venv .ra-venv
 uv pip install --python .ra-venv/bin/python -r server/requirements.txt
+```
+
+Start each service in its own terminal:
+
+```bash
+# Terminal 1: OpenCode
 export RESEARCH_AGENT_USER_AUTH_TOKEN="$(openssl rand -hex 16)"
-echo $RESEARCH_AGENT_USER_AUTH_TOKEN  # Store this token for future use!
 export OPENCODE_CONFIG="$(pwd)/server/opencode.json"
 opencode serve
 ```
 
-Then in another terminal:
 ```bash
-cd v0-research-agent-mobile/server
+# Terminal 2: Backend
+cd server
 ../.ra-venv/bin/python server.py --workdir /path/to/your/research/project --port 10000
 ```
 
-Then in another terminal:
 ```bash
-cd v0-research-agent-mobile
-NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000
+# Terminal 3: Frontend
+NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
 ## Environment Variables
 
-| Variable                         | Required | Description                       | Default                 |
-| -------------------------------- | -------- | --------------------------------- | ----------------------- |
-| `RESEARCH_AGENT_USER_AUTH_TOKEN` | Yes      | Auth token for frontend ↔ server  | —                       |
-| `RESEARCH_AGENT_KEY`             | No       | API key for the Anthropic gateway | —                       |
-| `OPENCODE_URL`                   | No       | Override OpenCode URL             | `http://localhost:4096` |
-| `OPENCODE_PASSWORD`              | No       | HTTP Basic Auth for OpenCode      | —                       |
+| Variable                         | Required | Description                                                                 | Default                 |
+| -------------------------------- | -------- | --------------------------------------------------------------------------- | ----------------------- |
+| `RESEARCH_AGENT_USER_AUTH_TOKEN` | No       | Auth token enforced by backend when set                                     | unset                   |
+| `RESEARCH_AGENT_KEY`             | No       | API key for Anthropic gateway used by provider config                       | unset                   |
+| `OPENCODE_URL`                   | No       | OpenCode base URL used by backend                                           | `http://127.0.0.1:4096` |
+| `OPENCODE_SERVER_PASSWORD`       | No       | HTTP Basic Auth password for OpenCode server                                | unset                   |
+| `NEXT_PUBLIC_API_URL`            | Yes*     | Frontend API base URL in source dev mode                                    | none                    |
+| `NEXT_PUBLIC_USE_MOCK`           | No       | Use demo/mock frontend data (`true`/`false`)                                | `false` in local setup  |
+| `RESEARCH_AGENT_STATE_DIR`       | No       | Manager state directory (`config.env`, token, onboarding marker)            | `~/.research-agent`     |
+| `RESEARCH_AGENT_INSTALL_DIR`     | No       | Manager install directory for app runtime                                   | `~/.research-agent/app` |
+
+\* Required when running frontend from source with `npm run dev`.
 
 ## Project Structure
 
-```
+```text
 ├── app/                    # Next.js App Router
-│   ├── globals.css         # Global styles & CSS variables
-│   ├── layout.tsx          # Root layout
-│   └── page.tsx            # Main application entry
 ├── components/             # React components
-│   ├── ui/                 # shadcn/ui base components
-│   └── *.tsx               # Feature components (chat, runs, sweeps, etc.)
-├── hooks/                  # Custom React hooks
-├── lib/                    # Utilities and type definitions
-├── install.sh              # curl|bash installer entrypoint
-├── scripts/research-agent  # Master CLI (install/onboard/start/tunnel/status/stop)
-├── server/                 # Python FastAPI backend
-│   ├── server.py           # Main server
-│   ├── job_sidecar.py      # tmux job execution sidecar
-│   ├── opencode.json       # OpenCode provider config
-│   └── requirements.txt    # Python dependencies
-└── tests/story/            # Test scenarios
+├── hooks/                  # Custom hooks
+├── lib/                    # Shared utilities and API config
+├── cli/research-agent.mjs  # Node launcher for CLI runtime bootstrap
+├── scripts/research-agent  # Lifecycle manager (install/onboard/start/tunnel/status/stop)
+├── server/                 # FastAPI backend + agent runtime
+├── tests/                  # Python tests
+└── install.sh              # Installer / developer prerequisite setup
 ```
 
-## Tech Stack
-
-| Layer           | Technology                                   |
-| --------------- | -------------------------------------------- |
-| Frontend        | Next.js 16, React 19, TypeScript             |
-| Styling         | Tailwind CSS 4.x, shadcn/ui                  |
-| Backend         | FastAPI, Uvicorn                             |
-| AI Layer        | OpenCode CLI → Modal Gateway → Anthropic API |
-| Job Execution   | tmux + libtmux                               |
-| Package Manager | npm + uv                                     |
-
-## Development
+## Frontend Commands
 
 ```bash
-npm run dev       # Start dev server (frontend)
-npm run build     # Production build
-npm run start     # Start production server
-npm run lint      # Run ESLint
+npm run dev
+npm run build
+npm run start
+npm run lint
 ```
 
 ## Troubleshooting
 
-| Problem                     | Solution                                                                            |
-| --------------------------- | ----------------------------------------------------------------------------------- |
-| Text not streaming          | Check OpenCode is running: `curl http://localhost:4096/`                            |
-| Jobs not starting           | Verify tmux session: `tmux list-sessions`                                           |
-| OpenCode config not loading | Use absolute path: `OPENCODE_CONFIG=/absolute/path/to/opencode.json opencode serve` |
-| Frontend can't reach server | Ensure server is running on port 10000 and not blocked by firewall                  |
+| Problem                     | Check |
+| --------------------------- | ----- |
+| Text not streaming          | `curl http://127.0.0.1:4096/` and verify OpenCode is up |
+| Jobs not starting           | `tmux list-sessions` and confirm research-agent session exists |
+| OpenCode config ignored     | start with `OPENCODE_CONFIG=/absolute/path/to/server/opencode.json opencode serve` |
+| Frontend cannot reach API   | verify backend port and `NEXT_PUBLIC_API_URL` value |
+| Runtime status unclear      | run `research-agent status` and inspect `.agents/ra-runtime.env` |
