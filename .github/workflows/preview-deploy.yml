@@ -69,7 +69,71 @@ jobs:
           MODAL_PREVIEW_OPENCODE_URL: ${{ format('https://{0}--research-agent-preview-pr-{1}-preview-opencode.modal.run', github.repository_owner, github.event.pull_request.number) }}
           RESEARCH_AGENT_USER_AUTH_TOKEN: ${{ env.PREVIEW_AUTH_TOKEN }}
 
+      - name: Comment preview URL on PR
+        id: comment-preview
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_AUTH_TOKEN: ${{ env.PREVIEW_AUTH_TOKEN }}
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const sha = context.sha.slice(0, 7);
+            const appSlug = `research-agent-preview-pr-${prNumber}`;
+            const previewUrl = `https://${context.repo.owner}--${appSlug}-preview-app.modal.run`;
+            const opencodeUrl = `https://${context.repo.owner}--${appSlug}-preview-opencode.modal.run`;
+            const serverUrl = `https://${context.repo.owner}--${appSlug}-preview-server.modal.run`;
+            const previewAuthToken = process.env.PREVIEW_AUTH_TOKEN;
+            const setupPayload = Buffer.from(
+              JSON.stringify({ apiUrl: serverUrl, authToken: previewAuthToken }),
+              'utf8'
+            ).toString('base64url');
+            const setupUrl = `${previewUrl}/#setup=${setupPayload}`;
+
+            // Look for an existing preview bot comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('<!-- preview-bot -->')
+            );
+
+            const body = [
+              '<!-- preview-bot -->',
+              '## 🚀 Preview Deployed',
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| **Preview (Setup)** | [${setupUrl}](${setupUrl}) |`,
+              `| **Preview (Clean)** | [Open App](${previewUrl}) |`,
+              `| **OpenCode** | [${opencodeUrl}](${opencodeUrl}) |`,
+              `| **Server** | [${serverUrl}](${serverUrl}) |`,
+              `| **Commit** | \`${sha}\` |`,
+              `| **Status** | ⏳ Verifying health… |`,
+              '',
+              '> `Open App` preloads URL + auth token into local settings for this preview.',
+              `> Updated at ${new Date().toISOString()}`,
+            ].join('\n');
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
       - name: Verify deployed preview health
+        id: health-check
         run: |
           set -euo pipefail
 
@@ -157,10 +221,12 @@ jobs:
         env:
           PREVIEW_AUTH_TOKEN: ${{ env.PREVIEW_AUTH_TOKEN }}
 
-      - name: Comment preview URL on PR
+      - name: Update comment with health status
+        if: always() && steps.comment-preview.outcome == 'success'
         uses: actions/github-script@v7
         env:
           PREVIEW_AUTH_TOKEN: ${{ env.PREVIEW_AUTH_TOKEN }}
+          HEALTH_OUTCOME: ${{ steps.health-check.outcome }}
         with:
           script: |
             const prNumber = context.payload.pull_request.number;
@@ -176,7 +242,10 @@ jobs:
             ).toString('base64url');
             const setupUrl = `${previewUrl}/#setup=${setupPayload}`;
 
-            // Look for an existing preview bot comment to update
+            const healthy = process.env.HEALTH_OUTCOME === 'success';
+            const statusEmoji = healthy ? '✅' : '❌';
+            const statusText = healthy ? 'Deployed' : 'Health check failed';
+
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -197,7 +266,7 @@ jobs:
               `| **OpenCode** | [${opencodeUrl}](${opencodeUrl}) |`,
               `| **Server** | [${serverUrl}](${serverUrl}) |`,
               `| **Commit** | \`${sha}\` |`,
-              `| **Status** | ✅ Deployed |`,
+              `| **Status** | ${statusEmoji} ${statusText} |`,
               '',
               '> `Open App` preloads URL + auth token into local settings for this preview.',
               `> Updated at ${new Date().toISOString()}`,
