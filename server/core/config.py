@@ -77,7 +77,15 @@ FRONTEND_STATIC_DIR = os.environ.get("RESEARCH_AGENT_FRONTEND_DIR", "").strip()
 
 def init_paths(workdir: str):
     """Initialize all paths based on workdir."""
-    global WORKDIR, DATA_DIR, CHAT_DATA_FILE, JOBS_DATA_FILE, ALERTS_DATA_FILE, SETTINGS_DATA_FILE, PLANS_DATA_FILE, JOURNEY_STATE_FILE
+    global \
+        WORKDIR, \
+        DATA_DIR, \
+        CHAT_DATA_FILE, \
+        JOBS_DATA_FILE, \
+        ALERTS_DATA_FILE, \
+        SETTINGS_DATA_FILE, \
+        PLANS_DATA_FILE, \
+        JOURNEY_STATE_FILE
     WORKDIR = os.path.abspath(workdir)
     DATA_DIR = os.path.join(WORKDIR, ".agents")
     CHAT_DATA_FILE = os.path.join(DATA_DIR, "chat_data.json")
@@ -125,7 +133,7 @@ def get_auth() -> Any:
     return httpx.BasicAuth(OPENCODE_USERNAME, OPENCODE_PASSWORD) if OPENCODE_PASSWORD else httpx.USE_CLIENT_DEFAULT
 
 
-def set_runtime_research_agent_key(raw_key: Optional[str]) -> None:
+def set_runtime_research_agent_key(raw_key: str | None) -> None:
     """Store a frontend-provided RESEARCH_AGENT_KEY for this backend process."""
     global RUNTIME_RESEARCH_AGENT_KEY
     normalized = str(raw_key or "").strip()
@@ -137,7 +145,7 @@ def set_runtime_research_agent_key(raw_key: Optional[str]) -> None:
     os.environ["RESEARCH_AGENT_KEY"] = normalized
 
 
-async def apply_runtime_research_agent_key(client: Optional[httpx.AsyncClient] = None) -> None:
+async def apply_runtime_research_agent_key(client: httpx.AsyncClient | None = None) -> None:
     """Best-effort sync of runtime RESEARCH_AGENT_KEY into the running OpenCode config."""
     global RUNTIME_RESEARCH_AGENT_KEY_LAST_APPLIED
 
@@ -212,7 +220,8 @@ async def apply_runtime_research_agent_key(client: Optional[httpx.AsyncClient] =
 # Model Helpers
 # =============================================================================
 
-def _parse_optional_int(value: Any) -> Optional[int]:
+
+def _parse_optional_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -250,17 +259,19 @@ def load_available_opencode_models() -> list[dict[str, Any]]:
         if not isinstance(display_name, str) or not display_name.strip():
             display_name = model
 
-        entries.append({
-            "provider_id": provider,
-            "model_id": model,
-            "name": display_name.strip(),
-            "context_limit": context_limit,
-            "output_limit": output_limit,
-            "is_default": provider == MODEL_PROVIDER and model == MODEL_ID,
-        })
+        entries.append(
+            {
+                "provider_id": provider,
+                "model_id": model,
+                "name": display_name.strip(),
+                "context_limit": context_limit,
+                "output_limit": output_limit,
+                "is_default": provider == MODEL_PROVIDER and model == MODEL_ID,
+            }
+        )
 
     try:
-        with open(OPENCODE_CONFIG, "r", encoding="utf-8") as fh:
+        with open(OPENCODE_CONFIG, encoding="utf-8") as fh:
             config = json.load(fh)
     except Exception as e:
         logger.warning("Failed to load OpenCode config %s: %s", OPENCODE_CONFIG, e)

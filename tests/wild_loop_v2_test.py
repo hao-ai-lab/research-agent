@@ -10,15 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
 
-from agent.wild_loop_v2 import (
-    WildV2Engine,
-    WildV2Session,
-    parse_plan,
-    parse_promise,
-    parse_summary,
-)
 from agent.v2_prompts import (
     PromptContext,
     build_iteration_prompt,
@@ -27,11 +20,18 @@ from agent.v2_prompts import (
     parse_continue,
     parse_reflection,
 )
-
+from agent.wild_loop_v2 import (
+    WildV2Engine,
+    WildV2Session,
+    parse_plan,
+    parse_promise,
+    parse_summary,
+)
 
 # ---------------------------------------------------------------------------
 # Signal Parsers
 # ---------------------------------------------------------------------------
+
 
 class TestParsePromise:
     def test_done(self):
@@ -74,6 +74,7 @@ class TestParseSummary:
 # WildV2Session
 # ---------------------------------------------------------------------------
 
+
 class TestWildV2Session:
     def test_defaults(self):
         s = WildV2Session(session_id="test-1", goal="Build a model")
@@ -94,6 +95,7 @@ class TestWildV2Session:
 # ---------------------------------------------------------------------------
 # WildV2Engine — unit tests (no real OpenCode)
 # ---------------------------------------------------------------------------
+
 
 class TestWildV2Engine:
     def setup_method(self):
@@ -151,10 +153,7 @@ class TestWildV2Engine:
         self.engine.steer("Focus on data preprocessing")
         assert self.engine.session.steer_context == "Focus on data preprocessing"
 
-        ctx_path = os.path.join(
-            self.tmpdir, ".agents", "wild",
-            self.engine.session.session_id, "context.md"
-        )
+        ctx_path = os.path.join(self.tmpdir, ".agents", "wild", self.engine.session.session_id, "context.md")
         assert os.path.isfile(ctx_path)
         with open(ctx_path) as f:
             assert "data preprocessing" in f.read()
@@ -193,6 +192,7 @@ class TestWildV2Engine:
 
     def test_build_prompt_with_render_fn(self):
         """Verify prompts use render_fn when provided."""
+
         def mock_render(skill_id, variables):
             return f"RENDERED:{skill_id}:{variables['goal']}"
 
@@ -212,6 +212,7 @@ class TestWildV2Engine:
 
     def test_prompt_fallback_without_render_fn(self):
         """Verify prompts use a render_fn that returns goal-containing text."""
+
         def mock_render(skill_id, variables):
             return f"[{skill_id}] Goal: {variables.get('goal', '?')} at iteration {variables.get('iteration', 0)}"
 
@@ -224,6 +225,7 @@ class TestWildV2Engine:
 
     def test_api_catalog_in_prompt(self):
         """Verify the API catalog appears in iteration prompts."""
+
         def mock_render(skill_id, variables):
             return f"[{skill_id}] {variables.get('goal', '')} {variables.get('api_catalog', '')}"
 
@@ -256,6 +258,7 @@ class TestWildV2Engine:
 # ---------------------------------------------------------------------------
 # Async loop tests  (mock OpenCode)
 # ---------------------------------------------------------------------------
+
 
 def _mock_render(skill_id, variables):
     """Simple render function for tests — returns a minimal prompt with the goal."""
@@ -315,9 +318,7 @@ def test_loop_done_signal():
         assert engine.session.status == "done"
         assert engine.session.iteration == 1  # 1 execution iteration
         # tasks.md on disk should exist
-        tasks_path = os.path.join(
-            tmpdir, ".agents", "wild", engine.session.session_id, "tasks.md"
-        )
+        tasks_path = os.path.join(tmpdir, ".agents", "wild", engine.session.session_id, "tasks.md")
         assert os.path.isfile(tasks_path)
         # History should be: planning (iter 0) + execution (iter 1) + reflection
         assert len(engine.session.history) == 3
@@ -333,9 +334,7 @@ def test_loop_done_signal():
         assert "100%" in engine.session.reflection
 
         # Iteration log should have been written
-        log_path = os.path.join(
-            tmpdir, ".agents", "wild", engine.session.session_id, "iteration_log.md"
-        )
+        log_path = os.path.join(tmpdir, ".agents", "wild", engine.session.session_id, "iteration_log.md")
         assert os.path.isfile(log_path)
         with open(log_path) as f:
             log_content = f.read()
@@ -436,6 +435,7 @@ def test_loop_waiting_signal():
 # Reflection Parsers
 # ---------------------------------------------------------------------------
 
+
 class TestParseReflection:
     def test_extracts_reflection(self):
         text = "Before\n<reflection>Learned a lot about the codebase.</reflection>\nAfter"
@@ -484,6 +484,7 @@ class TestBuildReflectionPrompt:
             server_url="http://localhost:10000",
             session_id="s1",
         )
+
         def mock_render(skill_id, variables):
             return f"RENDERED:{skill_id}:goal={variables['goal']}"
 
@@ -512,6 +513,7 @@ class TestBuildReflectionPrompt:
 # ---------------------------------------------------------------------------
 # Async Reflection Tests
 # ---------------------------------------------------------------------------
+
 
 def test_loop_done_with_reflection_continue():
     """Agent says DONE, reflection says continue, resumes for one more iteration."""
@@ -542,10 +544,7 @@ def test_loop_done_with_reflection_continue():
                 # Iteration 2 — DONE again
                 return "Step 2 done.\n<summary>Did step 2.</summary>\n<promise>DONE</promise>"
             # Second reflection — STOP
-            return (
-                "<reflection>All done. 100% progress.</reflection>\n"
-                "<continue>no</continue>"
-            )
+            return "<reflection>All done. 100% progress.</reflection>\n<continue>no</continue>"
 
         engine._create_opencode_session = AsyncMock(return_value="oc-test-1")
         engine._run_opencode = mock_run
@@ -586,10 +585,7 @@ def test_planning_display_message_uses_user_goal():
         async def mock_send_chat(_chat_session_id, _prompt, display_message):
             captured_display_messages.append(display_message)
             if len(captured_display_messages) == 1:
-                return (
-                    "<plan>\n# Tasks\n- [ ] Execute the plan\n</plan>\n"
-                    "<summary>Planning done.</summary>"
-                )
+                return "<plan>\n# Tasks\n- [ ] Execute the plan\n</plan>\n<summary>Planning done.</summary>"
             return "<summary>Done.</summary>\n<promise>DONE</promise>"
 
         def mock_render(_skill_id, variables):

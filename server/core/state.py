@@ -23,21 +23,20 @@ logger = logging.getLogger("research-agent-server")
 # Global State Dictionaries
 # =============================================================================
 
-chat_sessions: Dict[str, dict] = {}
-runs: Dict[str, dict] = {}
-sweeps: Dict[str, dict] = {}
-active_alerts: Dict[str, dict] = {}
-plans: Dict[str, dict] = {}
-journey_events: Dict[str, dict] = {}
-journey_recommendations: Dict[str, dict] = {}
-journey_decisions: Dict[str, dict] = {}
+chat_sessions: dict[str, dict] = {}
+runs: dict[str, dict] = {}
+sweeps: dict[str, dict] = {}
+active_alerts: dict[str, dict] = {}
+plans: dict[str, dict] = {}
+journey_events: dict[str, dict] = {}
+journey_recommendations: dict[str, dict] = {}
+journey_decisions: dict[str, dict] = {}
 wild_mode_enabled: bool = False
-session_stop_flags: Dict[str, bool] = {}
-active_chat_tasks: Dict[str, asyncio.Task] = {}
-active_chat_streams: Dict[str, Any] = {}  # Dict[str, ChatStreamRuntime] — forward ref
+session_stop_flags: dict[str, bool] = {}
+active_chat_tasks: dict[str, asyncio.Task] = {}
+active_chat_streams: dict[str, Any] = {}  # Dict[str, ChatStreamRuntime] — forward ref
 
-_wandb_metrics_cache: Dict[str, dict] = {}
-
+_wandb_metrics_cache: dict[str, dict] = {}
 
 
 # =============================================================================
@@ -102,7 +101,7 @@ def _cluster_type_description(cluster_type: str) -> str:
     return mapping.get(cluster_type, "Cluster has not been configured yet.")
 
 
-def _normalize_cluster_type(raw_type: Optional[str]) -> str:
+def _normalize_cluster_type(raw_type: str | None) -> str:
     if not raw_type:
         return "unknown"
     value = raw_type.strip().lower().replace("-", "_")
@@ -118,14 +117,14 @@ def _normalize_cluster_type(raw_type: Optional[str]) -> str:
     return value if value in CLUSTER_TYPE_VALUES else "unknown"
 
 
-def _normalize_cluster_status(raw_status: Optional[str]) -> str:
+def _normalize_cluster_status(raw_status: str | None) -> str:
     if not raw_status:
         return "unknown"
     value = raw_status.strip().lower()
     return value if value in CLUSTER_STATUS_VALUES else "unknown"
 
 
-def _normalize_cluster_source(raw_source: Optional[str]) -> str:
+def _normalize_cluster_source(raw_source: str | None) -> str:
     if not raw_source:
         return "unset"
     value = raw_source.strip().lower()
@@ -185,6 +184,7 @@ IGNORED_METRIC_KEYS = set(STEP_KEYS) | {
 # Save / Load Functions
 # =============================================================================
 
+
 def save_chat_state():
     """Persist chat sessions to disk."""
     try:
@@ -199,7 +199,7 @@ def load_chat_state():
     global chat_sessions
     if os.path.exists(config.CHAT_DATA_FILE):
         try:
-            with open(config.CHAT_DATA_FILE, "r") as f:
+            with open(config.CHAT_DATA_FILE) as f:
                 data = json.load(f)
                 chat_sessions = data.get("chat_sessions", {})
                 for session in chat_sessions.values():
@@ -236,14 +236,10 @@ def load_alerts_state():
     global active_alerts
     if os.path.exists(config.ALERTS_DATA_FILE):
         try:
-            with open(config.ALERTS_DATA_FILE, "r") as f:
+            with open(config.ALERTS_DATA_FILE) as f:
                 data = json.load(f)
                 loaded = data.get("alerts", [])
-                active_alerts = {
-                    alert["id"]: alert
-                    for alert in loaded
-                    if isinstance(alert, dict) and alert.get("id")
-                }
+                active_alerts = {alert["id"]: alert for alert in loaded if isinstance(alert, dict) and alert.get("id")}
         except Exception as e:
             logger.error(f"Error loading alerts state: {e}")
 
@@ -262,14 +258,10 @@ def load_plans_state():
     global plans
     if os.path.exists(config.PLANS_DATA_FILE):
         try:
-            with open(config.PLANS_DATA_FILE, "r") as f:
+            with open(config.PLANS_DATA_FILE) as f:
                 data = json.load(f)
                 loaded = data.get("plans", [])
-                plans = {
-                    plan["id"]: plan
-                    for plan in loaded
-                    if isinstance(plan, dict) and plan.get("id")
-                }
+                plans = {plan["id"]: plan for plan in loaded if isinstance(plan, dict) and plan.get("id")}
         except Exception as e:
             logger.error(f"Error loading plans state: {e}")
 
@@ -297,25 +289,19 @@ def load_journey_state():
     global journey_events, journey_recommendations, journey_decisions
     if os.path.exists(config.JOURNEY_STATE_FILE):
         try:
-            with open(config.JOURNEY_STATE_FILE, "r") as f:
+            with open(config.JOURNEY_STATE_FILE) as f:
                 data = json.load(f)
                 loaded_events = data.get("events", [])
                 loaded_recommendations = data.get("recommendations", [])
                 loaded_decisions = data.get("decisions", [])
                 journey_events = {
-                    item["id"]: item
-                    for item in loaded_events
-                    if isinstance(item, dict) and item.get("id")
+                    item["id"]: item for item in loaded_events if isinstance(item, dict) and item.get("id")
                 }
                 journey_recommendations = {
-                    item["id"]: item
-                    for item in loaded_recommendations
-                    if isinstance(item, dict) and item.get("id")
+                    item["id"]: item for item in loaded_recommendations if isinstance(item, dict) and item.get("id")
                 }
                 journey_decisions = {
-                    item["id"]: item
-                    for item in loaded_decisions
-                    if isinstance(item, dict) and item.get("id")
+                    item["id"]: item for item in loaded_decisions if isinstance(item, dict) and item.get("id")
                 }
         except Exception as e:
             logger.error(f"Error loading journey state: {e}")
@@ -325,6 +311,7 @@ def load_journey_state():
 # Journey Helpers
 # =============================================================================
 
+
 def _journey_new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -333,7 +320,8 @@ def _journey_new_id(prefix: str) -> str:
 # Metrics Helpers
 # =============================================================================
 
-def _to_float(value: object) -> Optional[float]:
+
+def _to_float(value: object) -> float | None:
     """Convert primitive numeric values to float."""
     if isinstance(value, bool):
         return None
@@ -349,7 +337,7 @@ def _to_float(value: object) -> Optional[float]:
     return None
 
 
-def _first_numeric(row: dict, keys: tuple[str, ...]) -> Optional[float]:
+def _first_numeric(row: dict, keys: tuple[str, ...]) -> float | None:
     for key in keys:
         if key in row:
             value = _to_float(row.get(key))
@@ -378,7 +366,7 @@ def _is_metric_key(key: object) -> bool:
     return True
 
 
-def _find_wandb_dir_from_run_dir(run_dir: Optional[str]) -> Optional[str]:
+def _find_wandb_dir_from_run_dir(run_dir: str | None) -> str | None:
     """Scan the predictable wandb_data/ path inside run_dir for a WandB run directory."""
     if not run_dir:
         return None
@@ -389,7 +377,7 @@ def _find_wandb_dir_from_run_dir(run_dir: Optional[str]) -> Optional[str]:
     return matches[-1] if matches else None
 
 
-def _resolve_metrics_file(wandb_dir: Optional[str]) -> Optional[str]:
+def _resolve_metrics_file(wandb_dir: str | None) -> str | None:
     """Resolve likely metrics file paths from a wandb run directory."""
     if not wandb_dir:
         return None
@@ -423,4 +411,3 @@ def _downsample_history(history: list[dict], max_points: int = MAX_HISTORY_POINT
     if sampled[-1] != history[-1]:
         sampled.append(history[-1])
     return sampled[:max_points]
-

@@ -7,15 +7,16 @@ No inline fallback templates — the SKILL.md files are the single source of tru
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
-
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Signal parsers
 # ---------------------------------------------------------------------------
 
-def parse_promise(text: str) -> Optional[str]:
+
+def parse_promise(text: str) -> str | None:
     """Parse <promise>...</promise> from agent output."""
     m = re.search(r"<promise>([\s\S]*?)</promise>", text)
     if m:
@@ -23,19 +24,19 @@ def parse_promise(text: str) -> Optional[str]:
     return None
 
 
-def parse_plan(text: str) -> Optional[str]:
+def parse_plan(text: str) -> str | None:
     """Parse <plan>...</plan> from agent output."""
     m = re.search(r"<plan>([\s\S]*?)</plan>", text)
     return m.group(1).strip() if m else None
 
 
-def parse_summary(text: str) -> Optional[str]:
+def parse_summary(text: str) -> str | None:
     """Parse <summary>...</summary> from agent output."""
     m = re.search(r"<summary>([\s\S]*?)</summary>", text)
     return m.group(1).strip() if m else None
 
 
-def parse_reflection(text: str) -> Optional[str]:
+def parse_reflection(text: str) -> str | None:
     """Parse <reflection>...</reflection> from agent output."""
     m = re.search(r"<reflection>([\s\S]*?)</reflection>", text)
     return m.group(1).strip() if m else None
@@ -81,17 +82,20 @@ def parse_memories(text: str) -> list:
             tag = "general"
             content = line
         if content:
-            results.append({
-                "tag": tag,
-                "title": content[:80],  # first 80 chars as title
-                "content": content,
-            })
+            results.append(
+                {
+                    "tag": tag,
+                    "title": content[:80],  # first 80 chars as title
+                    "content": content,
+                }
+            )
     return results
 
 
 # ---------------------------------------------------------------------------
 # Reflection prompt (after DONE signal)
 # ---------------------------------------------------------------------------
+
 
 def build_reflection_prompt(
     ctx: "PromptContext",
@@ -113,10 +117,7 @@ def build_reflection_prompt(
             "The user would appreciate you continuing autonomously."
         )
     elif ctx.autonomy_level == "full":
-        avail_str = (
-            "The user is present but has set autonomy to 'full'. "
-            "Continue working without asking questions."
-        )
+        avail_str = "The user is present but has set autonomy to 'full'. Continue working without asking questions."
     elif ctx.autonomy_level == "cautious":
         avail_str = (
             "The user is present and wants to be consulted on important decisions. "
@@ -169,6 +170,7 @@ def build_reflection_prompt(
 # Prompt context — plain data, no behaviour
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PromptContext:
     """All the data a prompt builder needs.  Constructed per-iteration."""
@@ -176,12 +178,12 @@ class PromptContext:
     goal: str
     iteration: int
     max_iterations: int
-    workdir: str              # absolute path to the user's project root
-    tasks_path: str           # absolute path to tasks.md
-    log_path: str             # absolute path to iteration_log.md
+    workdir: str  # absolute path to the user's project root
+    tasks_path: str  # absolute path to tasks.md
+    log_path: str  # absolute path to iteration_log.md
     server_url: str
     session_id: str
-    auth_token: str = ""      # auth token for API requests
+    auth_token: str = ""  # auth token for API requests
 
     # Dynamic state
     steer_context: str = ""
@@ -196,7 +198,7 @@ class PromptContext:
 
     # User availability context
     autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
-    away_duration_minutes: int = 0    # 0 = user is present
+    away_duration_minutes: int = 0  # 0 = user is present
     user_wants_questions: bool = True  # False when autonomy is "full" or user is AFK
 
     # Memory bank (active lessons from past sessions)
@@ -206,6 +208,7 @@ class PromptContext:
 # ---------------------------------------------------------------------------
 # Computed sections (injected as template variables)
 # ---------------------------------------------------------------------------
+
 
 def _steer_section(ctx: PromptContext) -> str:
     if not ctx.steer_context:
@@ -254,14 +257,18 @@ def _api_catalog(ctx: PromptContext) -> str:
     s = ctx.server_url
     sid = ctx.session_id
     auth_header = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
-    auth_note = f"""### Authentication
+    auth_note = (
+        f"""### Authentication
 
 **All API requests require the auth header.** Include this in every `curl` call:
 ```
 {auth_header}
 ```
 
-""" if ctx.auth_token else ""
+"""
+        if ctx.auth_token
+        else ""
+    )
     return f"""{auth_note}### Preferred Tool Calls (MCP)
 - `mcp__research-agent__create_run` — Fixed-schema run creation (`name`, `command`, `workdir`, `sweep_id`, `launch_policy`)
 - `mcp__research-agent__start_run` — Start a run by id
@@ -370,6 +377,7 @@ Include this in your response when you want to launch an evolutionary sweep:
 # Planning prompt (iteration 0)
 # ---------------------------------------------------------------------------
 
+
 def build_planning_prompt(
     ctx: PromptContext,
     render_fn: Callable,
@@ -408,6 +416,7 @@ def build_planning_prompt(
 # ---------------------------------------------------------------------------
 # Iteration prompt (iterations 1+)
 # ---------------------------------------------------------------------------
+
 
 def build_iteration_prompt(
     ctx: PromptContext,

@@ -11,9 +11,8 @@ import re
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
-
 from core import config
+from fastapi import APIRouter, HTTPException, Query
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -33,7 +32,8 @@ _HUNK_HEADER_RE = re.compile(r"^@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run_git_command(args: List[str], timeout_seconds: int = 10) -> subprocess.CompletedProcess:
+
+def _run_git_command(args: list[str], timeout_seconds: int = 10) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", config.WORKDIR, *args],
         capture_output=True,
@@ -50,8 +50,8 @@ def _is_git_repo() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-def _collect_changed_files(limit: int) -> List[Dict[str, str]]:
-    files_by_path: Dict[str, str] = {}
+def _collect_changed_files(limit: int) -> list[dict[str, str]]:
+    files_by_path: dict[str, str] = {}
 
     diff_names = _run_git_command(["diff", "--name-status", "-z", "HEAD", "--"], timeout_seconds=15)
     if diff_names.returncode != 0:
@@ -94,26 +94,21 @@ def _collect_changed_files(limit: int) -> List[Dict[str, str]]:
             if path:
                 files_by_path[path] = "added"
 
-    changed = [
-        {"path": path, "status": files_by_path[path]}
-        for path in sorted(files_by_path.keys())
-    ]
+    changed = [{"path": path, "status": files_by_path[path]} for path in sorted(files_by_path.keys())]
     return changed[:limit]
 
 
-def _parse_unified_diff(diff_text: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> List[Dict[str, Any]]:
-    parsed: List[Dict[str, Any]] = []
-    old_line: Optional[int] = None
-    new_line: Optional[int] = None
+def _parse_unified_diff(diff_text: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> list[dict[str, Any]]:
+    parsed: list[dict[str, Any]] = []
+    old_line: int | None = None
+    new_line: int | None = None
 
     for raw_line in diff_text.splitlines():
         if raw_line.startswith(("diff --git ", "index ", "--- ", "+++ ")):
             continue
 
         if raw_line.startswith("Binary files "):
-            parsed.append(
-                {"type": "hunk", "text": "Binary file changed.", "oldLine": None, "newLine": None}
-            )
+            parsed.append({"type": "hunk", "text": "Binary file changed.", "oldLine": None, "newLine": None})
             break
 
         if raw_line.startswith("\\ No newline at end of file"):
@@ -161,7 +156,7 @@ def _parse_unified_diff(diff_text: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_
     return parsed
 
 
-def _build_untracked_file_lines(path: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> List[Dict[str, Any]]:
+def _build_untracked_file_lines(path: str, max_lines: int = GIT_DIFF_MAX_LINES_PER_FILE) -> list[dict[str, Any]]:
     workdir_real = os.path.realpath(config.WORKDIR)
     file_path = os.path.realpath(os.path.join(config.WORKDIR, path))
 
@@ -181,7 +176,7 @@ def _build_untracked_file_lines(path: str, max_lines: int = GIT_DIFF_MAX_LINES_P
         return [{"type": "hunk", "text": "Binary file added.", "oldLine": None, "newLine": None}]
 
     lines = content.decode("utf-8", errors="replace").splitlines()
-    parsed: List[Dict[str, Any]] = [
+    parsed: list[dict[str, Any]] = [
         {"type": "hunk", "text": f"@@ -0,0 +1,{len(lines)} @@", "oldLine": None, "newLine": None}
     ]
 
@@ -205,8 +200,8 @@ def _build_untracked_file_lines(path: str, max_lines: int = GIT_DIFF_MAX_LINES_P
     return parsed
 
 
-def _build_file_diff(path: str, status: str, unified: int) -> Dict[str, Any]:
-    lines: List[Dict[str, Any]] = []
+def _build_file_diff(path: str, status: str, unified: int) -> dict[str, Any]:
+    lines: list[dict[str, Any]] = []
 
     if status == "added":
         tracked_check = _run_git_command(["ls-files", "--error-unmatch", "--", path], timeout_seconds=5)
@@ -251,7 +246,7 @@ def _build_file_diff(path: str, status: str, unified: int) -> Dict[str, Any]:
     }
 
 
-def _resolve_repo_path(relative_path: str) -> Optional[str]:
+def _resolve_repo_path(relative_path: str) -> str | None:
     """Resolve repository-relative file path and block traversal outside config.WORKDIR."""
     if not relative_path:
         return None
@@ -271,6 +266,7 @@ def _resolve_repo_path(relative_path: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Route Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/git/diff")
 async def get_repo_diff(

@@ -7,17 +7,17 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
 
 from core.config import (
-    _parse_optional_int,
-    requires_api_auth,
-    get_session_model,
-    get_default_opencode_config,
     _SERVER_FILE_DIR,
+    _parse_optional_int,
+    get_default_opencode_config,
+    get_session_model,
+    requires_api_auth,
 )
-
 
 # ---------------------------------------------------------------------------
 # _parse_optional_int
 # ---------------------------------------------------------------------------
+
 
 class TestParseOptionalInt:
     def test_int(self):
@@ -44,6 +44,7 @@ class TestParseOptionalInt:
 # requires_api_auth
 # ---------------------------------------------------------------------------
 
+
 class TestRequiresApiAuth:
     def test_sessions_path(self):
         assert requires_api_auth("/sessions") is True
@@ -69,6 +70,7 @@ class TestRequiresApiAuth:
 # get_session_model
 # ---------------------------------------------------------------------------
 
+
 class TestGetSessionModel:
     def test_with_session_values(self):
         session = {"model_provider": "custom", "model_id": "gpt-4"}
@@ -93,6 +95,7 @@ class TestGetSessionModel:
 # ---------------------------------------------------------------------------
 # get_default_opencode_config
 # ---------------------------------------------------------------------------
+
 
 class TestGetDefaultOpenCodeConfig:
     def test_returns_string(self):

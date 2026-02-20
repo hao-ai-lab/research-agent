@@ -12,10 +12,8 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
-
-from core import config
 import core.state as state
+from core import config
 from core.models import (
     AlertRecord,
     CreateAlertRequest,
@@ -26,6 +24,7 @@ from core.models import (
     RunUpdate,
     WildModeRequest,
 )
+from fastapi import APIRouter, HTTPException, Query, Request
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -57,16 +56,27 @@ _wandb_metrics_cache = None
 
 
 def init(
-    runs_dict, sweeps_dict, active_alerts_dict,
-    save_runs_state_fn, save_alerts_state_fn, save_settings_state_fn,
-    launch_run_in_tmux_fn, recompute_sweep_state_fn,
-    reconcile_all_run_terminal_states_fn, run_response_payload_fn,
-    sync_run_membership_with_sweep_fn, record_journey_event_fn,
-    normalize_gpuwrap_config_fn, coerce_exit_code_fn,
-    slack_notifier, get_or_create_session_fn,
+    runs_dict,
+    sweeps_dict,
+    active_alerts_dict,
+    save_runs_state_fn,
+    save_alerts_state_fn,
+    save_settings_state_fn,
+    launch_run_in_tmux_fn,
+    recompute_sweep_state_fn,
+    reconcile_all_run_terminal_states_fn,
+    run_response_payload_fn,
+    sync_run_membership_with_sweep_fn,
+    record_journey_event_fn,
+    normalize_gpuwrap_config_fn,
+    coerce_exit_code_fn,
+    slack_notifier,
+    get_or_create_session_fn,
     run_status_terminal_set,
-    load_run_metrics_fn, find_wandb_dir_from_run_dir_fn,
-    get_wandb_curve_data_fn, wandb_metrics_cache_dict,
+    load_run_metrics_fn,
+    find_wandb_dir_from_run_dir_fn,
+    get_wandb_curve_data_fn,
+    wandb_metrics_cache_dict,
 ):
     """Wire in all shared state, helpers and callbacks from server.py."""
     global _runs, _sweeps, _active_alerts
@@ -107,10 +117,11 @@ def init(
 # Run Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/runs")
 async def list_runs(
     archived: bool = Query(False, description="Include archived runs"),
-    limit: int = Query(100, description="Max runs to return")
+    limit: int = Query(100, description="Max runs to return"),
 ):
     """List all runs."""
     _reconcile_all_run_terminal_states()
@@ -336,7 +347,7 @@ async def stop_run(run_id: str):
 
 
 @router.post("/runs/{run_id}/rerun")
-async def rerun_run(run_id: str, req: Optional[RunRerunRequest] = None):
+async def rerun_run(run_id: str, req: RunRerunRequest | None = None):
     """Create a new run based on an existing run."""
     if run_id not in _runs:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -499,6 +510,7 @@ async def update_run_status(run_id: str, update: RunStatusUpdate):
 # Alert Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/runs/{run_id}/alerts")
 async def create_alert(run_id: str, req: CreateAlertRequest):
     """Create a new alert for a run (called by sidecar)."""
@@ -587,6 +599,7 @@ async def respond_to_alert(alert_id: str, req: RespondAlertRequest):
 # Metrics Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/runs/{run_id}/metrics")
 async def post_run_metrics(run_id: str, request: Request):
     """Accept metrics rows from the sidecar and append to stored metrics file."""
@@ -640,6 +653,7 @@ async def get_run_metrics(run_id: str):
 # ---------------------------------------------------------------------------
 # Wild Mode
 # ---------------------------------------------------------------------------
+
 
 @router.get("/wild-mode")
 async def get_wild_mode():

@@ -11,29 +11,29 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from typing import Any, Optional
 
 import httpx
-from fastapi import HTTPException
-
 from core import config
 from core.config import (
-    OPENCODE_URL,
-    MODEL_PROVIDER,
     MODEL_ID,
+    MODEL_PROVIDER,
+    OPENCODE_URL,
     apply_runtime_research_agent_key,
     get_auth,
     get_session_model,
 )
 from core.state import (
-    chat_sessions,
-    active_chat_streams,
-    session_stop_flags,
-    save_chat_state,
-    STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS,
-    STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS,
     STREAM_RUNTIME_RETENTION_SECONDS,
+    STREAM_SNAPSHOT_SAVE_INTERVAL_EVENTS,
+    STREAM_SNAPSHOT_SAVE_INTERVAL_SECONDS,
+    active_chat_streams,
+    chat_sessions,
+    save_chat_state,
+    session_stop_flags,
 )
+from fastapi import HTTPException
 
 logger = logging.getLogger("research-agent-server")
 
@@ -41,6 +41,7 @@ logger = logging.getLogger("research-agent-server")
 # =============================================================================
 # OpenCode Session Management
 # =============================================================================
+
 
 async def get_opencode_session_for_chat(chat_session_id: str) -> str:
     """Get or create an OpenCode session for a specific chat session."""
@@ -68,7 +69,7 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
         return opencode_id
 
 
-async def fetch_opencode_session_title(opencode_session_id: str) -> Optional[str]:
+async def fetch_opencode_session_title(opencode_session_id: str) -> str | None:
     """Fetch the auto-generated title from an OpenCode session."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
@@ -97,13 +98,9 @@ async def send_prompt_to_opencode(
     await apply_runtime_research_agent_key(client)
     prompt_payload = {
         "model": {"providerID": model_provider, "modelID": model_id},
-        "parts": [{"type": "text", "text": content}]
+        "parts": [{"type": "text", "text": content}],
     }
-    resp = await client.post(
-        f"{OPENCODE_URL}/session/{session_id}/prompt_async",
-        json=prompt_payload,
-        auth=get_auth()
-    )
+    resp = await client.post(f"{OPENCODE_URL}/session/{session_id}/prompt_async", json=prompt_payload, auth=get_auth())
     resp.raise_for_status()
 
 
@@ -116,7 +113,8 @@ def should_stop_session(session_id: str) -> bool:
 # Tool Parsing Utilities
 # =============================================================================
 
-def _extract_tool_name(part: dict) -> Optional[str]:
+
+def _extract_tool_name(part: dict) -> str | None:
     """Best-effort extraction for tool part names across OpenCode versions."""
     state = part.get("state") if isinstance(part, dict) else {}
     if not isinstance(state, dict):
@@ -136,7 +134,7 @@ def _extract_tool_name(part: dict) -> Optional[str]:
     return None
 
 
-def _coerce_tool_text(value: Any) -> Optional[str]:
+def _coerce_tool_text(value: Any) -> str | None:
     """Convert tool input/output payloads to readable text."""
     if value is None:
         return None
@@ -196,6 +194,7 @@ def _extract_tool_data(part: dict) -> dict[str, Any]:
 # StreamPartsAccumulator
 # =============================================================================
 
+
 class StreamPartsAccumulator:
     """
     Collect ordered message parts while preserving type transitions.
@@ -207,7 +206,7 @@ class StreamPartsAccumulator:
 
     def __init__(self):
         self._parts: list[dict[str, Any]] = []
-        self._text_buffer: Optional[dict[str, Any]] = None
+        self._text_buffer: dict[str, Any] | None = None
         self._tool_index_by_id: dict[str, int] = {}
         self._text_segment_counts: dict[str, int] = {}
 
@@ -240,7 +239,11 @@ class StreamPartsAccumulator:
 
         part_id = event.get("id")
         part_type = "thinking" if event.get("ptype") == "reasoning" else "text"
-        if self._text_buffer and self._text_buffer.get("source_id") == part_id and self._text_buffer.get("type") == part_type:
+        if (
+            self._text_buffer
+            and self._text_buffer.get("source_id") == part_id
+            and self._text_buffer.get("type") == part_type
+        ):
             self._text_buffer["content"] += delta
             return
 
@@ -306,6 +309,7 @@ class StreamPartsAccumulator:
 # ChatStreamRuntime
 # =============================================================================
 
+
 class ChatStreamRuntime:
     """In-memory runtime state for a single in-flight assistant response."""
 
@@ -313,7 +317,7 @@ class ChatStreamRuntime:
         self.session_id = session_id
         self.run_id = uuid.uuid4().hex[:12]
         self.status = "running"
-        self.error: Optional[str] = None
+        self.error: str | None = None
         self.started_at = time.time()
         self.updated_at = self.started_at
         self.full_text = ""
@@ -325,7 +329,7 @@ class ChatStreamRuntime:
         self.last_persist_sequence = 0
         self.subscribers: set[asyncio.Queue] = set()
         self.lock = asyncio.Lock()
-        self.cleanup_task: Optional[asyncio.Task] = None
+        self.cleanup_task: asyncio.Task | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -344,6 +348,7 @@ class ChatStreamRuntime:
 # =============================================================================
 # Stream Helpers
 # =============================================================================
+
 
 def _public_stream_event(event: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in event.items() if not str(k).startswith("_")}
@@ -452,7 +457,7 @@ async def _stream_runtime_events(
     session_id: str,
     *,
     from_seq: int = 1,
-    run_id: Optional[str] = None,
+    run_id: str | None = None,
 ) -> AsyncIterator[str]:
     runtime = active_chat_streams.get(session_id)
     if runtime is None:
@@ -502,6 +507,7 @@ async def _stream_runtime_events(
 # OpenCode SSE Parser & Streamer
 # =============================================================================
 
+
 async def run_opencode_session(chat_session_id: str, opencode_session_id: str, content: str) -> tuple[str, str, list]:
     """Run a prompt and return full text, thinking, and ordered parts."""
     session = chat_sessions.get(chat_session_id)
@@ -521,7 +527,9 @@ async def run_opencode_session(chat_session_id: str, opencode_session_id: str, c
             session_model_provider,
             session_model_id,
         )
-        async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(client, opencode_session_id):
+        async for event, text_delta, thinking_delta, _tool_update in stream_opencode_events(
+            client, opencode_session_id
+        ):
             if should_stop_session(chat_session_id):
                 break
             full_text += text_delta
@@ -531,7 +539,7 @@ async def run_opencode_session(chat_session_id: str, opencode_session_id: str, c
     return full_text, full_thinking, parts_accumulator.finalize()
 
 
-def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[dict]:
+def parse_opencode_event(event_data: dict, target_session_id: str) -> dict | None:
     """Parse an OpenCode SSE event and translate it to our protocol."""
     payload = event_data.get("payload", {})
     if not isinstance(payload, dict):
@@ -596,7 +604,7 @@ def parse_opencode_event(event_data: dict, target_session_id: str) -> Optional[d
 
 async def stream_opencode_events(
     client: httpx.AsyncClient, session_id: str
-) -> AsyncIterator[tuple[dict, str, str, Optional[dict]]]:
+) -> AsyncIterator[tuple[dict, str, str, dict | None]]:
     """Stream parsed OpenCode events with text/thinking deltas and tool updates."""
     url = f"{OPENCODE_URL}/global/event"
     headers = {"Accept": "text/event-stream"}

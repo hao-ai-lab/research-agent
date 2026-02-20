@@ -30,6 +30,7 @@ def init(slack_notifier, save_settings_state):
 # Request model
 # ---------------------------------------------------------------------------
 
+
 class SlackConfigRequest(BaseModel):
     bot_token: str
     channel: str
@@ -42,6 +43,7 @@ class SlackConfigRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/integrations/slack/configure")
 async def configure_slack(req: SlackConfigRequest):

@@ -10,18 +10,16 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
-from starlette.responses import StreamingResponse
-
 from core import config
 from core.config import (
-    OPENCODE_URL,
-    MODEL_PROVIDER,
     MODEL_ID,
+    MODEL_PROVIDER,
+    OPENCODE_URL,
     SERVER_CALLBACK_URL,
     USER_AUTH_TOKEN,
     get_auth,
@@ -29,23 +27,25 @@ from core.config import (
     load_available_opencode_models,
 )
 from core.models import (
-    CreateSessionRequest,
-    UpdateSessionRequest,
     ChatRequest,
+    CreateSessionRequest,
     SessionModelUpdate,
     SystemPromptUpdate,
+    UpdateSessionRequest,
 )
 from core.state import (
-    chat_sessions,
     active_alerts,
-    active_chat_tasks,
     active_chat_streams,
-    session_stop_flags,
+    active_chat_tasks,
+    chat_sessions,
     plans,
     runs,
-    sweeps,
     save_chat_state,
+    session_stop_flags,
+    sweeps,
 )
+from fastapi import APIRouter, HTTPException, Query
+from starlette.responses import StreamingResponse
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -110,9 +110,11 @@ def init(
 # Session CRUD
 # ---------------------------------------------------------------------------
 
+
 @router.get("/sessions")
 async def list_sessions():
     """List all chat sessions."""
+
     def resolve_session_status(session_id: str, session: dict[str, Any]) -> str:
         has_pending_human_input = any(
             alert.get("status") == "pending" and alert.get("session_id") == session_id
@@ -139,15 +141,17 @@ async def list_sessions():
         if not isinstance(session, dict):
             continue
         session_model_provider, session_model_id = get_session_model(session)
-        sessions.append({
-            "id": sid,
-            "title": session.get("title", "New Chat"),
-            "created_at": session.get("created_at"),
-            "message_count": len(session.get("messages", [])),
-            "model_provider": session_model_provider,
-            "model_id": session_model_id,
-            "status": resolve_session_status(sid, session),
-        })
+        sessions.append(
+            {
+                "id": sid,
+                "title": session.get("title", "New Chat"),
+                "created_at": session.get("created_at"),
+                "message_count": len(session.get("messages", [])),
+                "model_provider": session_model_provider,
+                "model_id": session_model_id,
+                "status": resolve_session_status(sid, session),
+            }
+        )
     sessions.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return sessions
 
@@ -159,7 +163,7 @@ async def list_models():
 
 
 @router.post("/sessions")
-async def create_session(req: Optional[CreateSessionRequest] = None):
+async def create_session(req: CreateSessionRequest | None = None):
     """Create a new chat session."""
     requested_provider = req.model_provider if req else None
     requested_model_id = req.model_id if req else None
@@ -293,9 +297,11 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
 # Mode Registry: data-driven prompt builder
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ModeConfig:
     """Declares how to build a mode-specific prompt preamble."""
+
     skill_id: str
     build_state: Callable[[str], dict]  # (message) -> template variables
 
@@ -305,12 +311,9 @@ def _build_experiment_context() -> str:
     lines = ["\n--- Current Experiment State ---"]
     _recompute_all_sweep_states()
 
-    active_runs = [{"id": rid, **r} for rid, r in runs.items()
-                   if r.get("status") in ["running", "queued", "launching"]]
-    finished_runs = [{"id": rid, **r} for rid, r in runs.items()
-                     if r.get("status") == "finished"]
-    failed_runs = [{"id": rid, **r} for rid, r in runs.items()
-                   if r.get("status") == "failed"]
+    active_runs = [{"id": rid, **r} for rid, r in runs.items() if r.get("status") in ["running", "queued", "launching"]]
+    finished_runs = [{"id": rid, **r} for rid, r in runs.items() if r.get("status") == "finished"]
+    failed_runs = [{"id": rid, **r} for rid, r in runs.items() if r.get("status") == "failed"]
 
     lines.append(f"Active runs: {len(active_runs)}")
     for r in active_runs[:5]:
@@ -324,8 +327,10 @@ def _build_experiment_context() -> str:
         lines.append(f"Sweeps: {len(active_sweeps)}")
         for s in active_sweeps[:3]:
             p = s.get("progress", {})
-            lines.append(f"  - {s['id']}: {s.get('name', '?')} "
-                         f"[{p.get('completed', 0)}/{p.get('total', 0)} done, {p.get('failed', 0)} failed]")
+            lines.append(
+                f"  - {s['id']}: {s.get('name', '?')} "
+                f"[{p.get('completed', 0)}/{p.get('total', 0)} done, {p.get('failed', 0)} failed]"
+            )
 
     pending_alerts = [a for a in active_alerts.values() if a.get("status") == "pending"]
     if pending_alerts:
@@ -364,13 +369,13 @@ def _build_plan_state(message: str) -> dict:
     }
 
 
-MODE_REGISTRY: Dict[str, ModeConfig] = {
+MODE_REGISTRY: dict[str, ModeConfig] = {
     "agent": ModeConfig(skill_id="ra_mode_agent", build_state=_build_agent_state),
     "plan": ModeConfig(skill_id="ra_mode_plan", build_state=_build_plan_state),
 }
 
 
-def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session_id: Optional[str] = None) -> tuple:
+def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session_id: str | None = None) -> tuple:
     """Build the full prompt for a chat turn, prepending mode-specific preamble.
 
     Returns (content: str, provenance: dict | None).
@@ -416,7 +421,7 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
             "[CHAT LINKAGE]\n"
             "For experiment API creations (`POST /runs`, `POST /sweeps`, "
             "`POST /sweeps/wild`, `POST /sweeps/{id}/runs`), include "
-            f"`\"chat_session_id\": \"{session_id}\"` in JSON bodies.\n"
+            f'`"chat_session_id": "{session_id}"` in JSON bodies.\n'
             "Use `null` only when intentionally creating entities not tied to this chat.\n"
             "[/CHAT LINKAGE]\n\n"
         )
@@ -433,6 +438,7 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
 # ---------------------------------------------------------------------------
 # Chat Worker
 # ---------------------------------------------------------------------------
+
 
 def _log_background_chat_task(task: asyncio.Task) -> None:
     try:
@@ -472,7 +478,9 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
             )
             logger.debug("Sent prompt to OpenCode session %s", opencode_session_id)
 
-            async for event, _text_delta, _thinking_delta, _tool_update in _stream_opencode_events(client, opencode_session_id):
+            async for event, _text_delta, _thinking_delta, _tool_update in _stream_opencode_events(
+                client, opencode_session_id
+            ):
                 if _should_stop_session(session_id):
                     runtime.status = "stopped"
                     break
@@ -506,7 +514,6 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
                     "timestamp": time.time(),
                 }
                 session.setdefault("messages", []).append(assistant_msg)
-
 
         # Auto-name: fetch title from OpenCode only once (after the first exchange)
         session = chat_sessions.get(session_id)
@@ -560,8 +567,12 @@ async def _send_chat_for_v2(chat_session_id: str, prompt: str, display_message: 
 
     This is the callback passed to WildV2Engine.send_chat_message.
     """
-    logger.info("[wild-v2-chat] _send_chat_for_v2 called: session=%s, prompt_len=%d, display=%s",
-                chat_session_id, len(prompt), display_message)
+    logger.info(
+        "[wild-v2-chat] _send_chat_for_v2 called: session=%s, prompt_len=%d, display=%s",
+        chat_session_id,
+        len(prompt),
+        display_message,
+    )
 
     if chat_session_id not in chat_sessions:
         logger.error("[wild-v2-chat] Chat session %s not found!", chat_session_id)
@@ -572,8 +583,11 @@ async def _send_chat_for_v2(chat_session_id: str, prompt: str, display_message: 
     # Check if there's already an active stream on this session
     existing_runtime = active_chat_streams.get(chat_session_id)
     if existing_runtime and existing_runtime.status == "running":
-        logger.warning("[wild-v2-chat] Session %s already has an active stream (run=%s), waiting for it to finish...",
-                       chat_session_id, existing_runtime.run_id)
+        logger.warning(
+            "[wild-v2-chat] Session %s already has an active stream (run=%s), waiting for it to finish...",
+            chat_session_id,
+            existing_runtime.run_id,
+        )
         # Wait for the existing task to complete before starting a new one
         existing_task = active_chat_tasks.get(chat_session_id)
         if existing_task:
@@ -613,8 +627,9 @@ async def _send_chat_for_v2(chat_session_id: str, prompt: str, display_message: 
         logger.warning("[wild-v2-chat] No task found in active_chat_tasks for session %s", chat_session_id)
 
     full_text = runtime.full_text or ""
-    logger.info("[wild-v2-chat] Got %d chars from chat session %s (status=%s)",
-                len(full_text), chat_session_id, runtime.status)
+    logger.info(
+        "[wild-v2-chat] Got %d chars from chat session %s (status=%s)", len(full_text), chat_session_id, runtime.status
+    )
     return full_text
 
 
@@ -628,8 +643,9 @@ def wire_v2_engine():
 # Chat Streaming Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/sessions/{session_id}/stream")
-async def stream_session(session_id: str, from_seq: int = Query(1, ge=1), run_id: Optional[str] = Query(None)):
+async def stream_session(session_id: str, from_seq: int = Query(1, ge=1), run_id: str | None = Query(None)):
     """Attach/re-attach to an in-flight chat stream with catch-up replay."""
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -705,10 +721,7 @@ async def stop_session(session_id: str):
     if opencode_session_id:
         try:
             async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.post(
-                    f"{OPENCODE_URL}/session/{opencode_session_id}/abort",
-                    auth=get_auth()
-                )
+                resp = await client.post(f"{OPENCODE_URL}/session/{opencode_session_id}/abort", auth=get_auth())
                 logger.info(f"Aborted OpenCode session {opencode_session_id}: {resp.status_code}")
         except Exception as e:
             logger.warning(f"Failed to abort OpenCode session {opencode_session_id}: {e}")

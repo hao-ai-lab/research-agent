@@ -18,8 +18,9 @@ import re
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -62,22 +63,23 @@ logger = logging.getLogger("wild_loop_v2")
 # Session state
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WildV2Session:
     """In-memory state for a single wild v2 session."""
 
     session_id: str
     goal: str
-    status: str = "running"          # running | paused | done | failed
+    status: str = "running"  # running | paused | done | failed
     iteration: int = 0
     max_iterations: int = 25
     plan: str = ""
     history: list = field(default_factory=list)
     started_at: float = 0.0
-    finished_at: Optional[float] = None
-    steer_context: str = ""          # user-injected context for next iter
-    chat_session_id: Optional[str] = None
-    wait_seconds: float = 30.0       # sleep between iterations when WAITING
+    finished_at: float | None = None
+    steer_context: str = ""  # user-injected context for next iter
+    chat_session_id: str | None = None
+    wait_seconds: float = 30.0  # sleep between iterations when WAITING
 
     # Per-iteration OpenCode session IDs (for debugging)
     opencode_sessions: list = field(default_factory=list)
@@ -86,12 +88,12 @@ class WildV2Session:
     reflection: str = ""
 
     # Struggle detection
-    no_progress_streak: int = 0      # consecutive iterations with no file changes
-    short_iteration_count: int = 0   # iterations < 30s
+    no_progress_streak: int = 0  # consecutive iterations with no file changes
+    short_iteration_count: int = 0  # iterations < 30s
 
     # User availability context
     autonomy_level: str = "balanced"  # "cautious" | "balanced" | "full"
-    away_duration_minutes: int = 0    # 0 = user is present
+    away_duration_minutes: int = 0  # 0 = user is present
 
     # Evolutionary sweep mode
     evo_sweep_enabled: bool = False
@@ -123,6 +125,7 @@ class WildV2Session:
 # Engine
 # ---------------------------------------------------------------------------
 
+
 class WildV2Engine:
     """Ralph-style autonomous loop engine."""
 
@@ -132,18 +135,18 @@ class WildV2Engine:
         opencode_url: str = "http://127.0.0.1:4096",
         model_provider: str = "opencode",
         model_id: str = "minimax-m2.5-free",
-        get_workdir: Optional[Callable[[], str]] = None,
+        get_workdir: Callable[[], str] | None = None,
         server_url: str = "http://127.0.0.1:10000",
-        auth_token: Optional[str] = None,
-        get_auth: Optional[Callable] = None,
+        auth_token: str | None = None,
+        get_auth: Callable | None = None,
         # Skill-based prompt rendering
-        render_fn: Optional[Callable] = None,
-        save_chat_state: Optional[Callable] = None,
-        chat_sessions: Optional[dict] = None,
+        render_fn: Callable | None = None,
+        save_chat_state: Callable | None = None,
+        chat_sessions: dict | None = None,
         # Chat streaming callback: (chat_session_id, prompt, display_message) -> response_text
         # When provided, V2 routes iterations through the frontend's chat session
         # so responses stream live in the UI.
-        send_chat_message: Optional[Callable[..., Any]] = None,
+        send_chat_message: Callable[..., Any] | None = None,
     ):
         self._opencode_url = opencode_url
         self._model_provider = model_provider
@@ -157,16 +160,16 @@ class WildV2Engine:
         self._chat_sessions = chat_sessions or {}
         self._send_chat_message = send_chat_message
 
-        self._session: Optional[WildV2Session] = None
-        self._task: Optional[asyncio.Task] = None
+        self._session: WildV2Session | None = None
+        self._task: asyncio.Task | None = None
 
         # Memory store — injected after construction by server.py
-        self.memory_store: Optional[Any] = None
+        self.memory_store: Any | None = None
 
     # -- Properties --
 
     @property
-    def session(self) -> Optional[WildV2Session]:
+    def session(self) -> WildV2Session | None:
         return self._session
 
     @property
@@ -178,7 +181,7 @@ class WildV2Engine:
     def start(
         self,
         goal: str,
-        chat_session_id: Optional[str] = None,
+        chat_session_id: str | None = None,
         max_iterations: int = 25,
         wait_seconds: float = 30.0,
         autonomy_level: str = "balanced",
@@ -186,7 +189,13 @@ class WildV2Engine:
         evo_sweep_enabled: bool = False,
     ) -> dict:
         """Start a new V2 wild session."""
-        logger.info("[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d autonomy=%s", goal[:80], chat_session_id, max_iterations, autonomy_level)
+        logger.info(
+            "[wild-v2] start() called: goal=%s chat_session=%s max_iter=%d autonomy=%s",
+            goal[:80],
+            chat_session_id,
+            max_iterations,
+            autonomy_level,
+        )
 
         if self._session and self._session.status == "running":
             logger.info("[wild-v2] Existing session running, stopping first")
@@ -213,7 +222,9 @@ class WildV2Engine:
         # Create tasks.md — the agent reads/writes this directly on disk
         tasks_path = os.path.join(session_dir, "tasks.md")
         with open(tasks_path, "w") as f:
-            f.write(f"# Tasks\n\n## Goal\n{goal}\n\n## Tasks\n- [ ] (Agent will decompose the goal into tasks on iteration 1)\n")
+            f.write(
+                f"# Tasks\n\n## Goal\n{goal}\n\n## Tasks\n- [ ] (Agent will decompose the goal into tasks on iteration 1)\n"
+            )
 
         # Create empty iteration log
         log_path = os.path.join(session_dir, "iteration_log.md")
@@ -301,7 +312,9 @@ class WildV2Engine:
         d["session_dir"] = session_dir
         d["workdir"] = self._get_workdir()
         d["opencode_pwd"] = None
-        d["opencode_pwd_note"] = "OpenCode does not expose a direct cwd endpoint; prompt assumes cd to workdir each iteration."
+        d["opencode_pwd_note"] = (
+            "OpenCode does not expose a direct cwd endpoint; prompt assumes cd to workdir each iteration."
+        )
 
         # Read iteration_log.md
         log_path = os.path.join(session_dir, "iteration_log.md")
@@ -355,9 +368,7 @@ class WildV2Engine:
         """Return current plan/tasks markdown from disk."""
         if not self._session:
             return ""
-        tasks_path = os.path.join(
-            self._session_dir(self._session.session_id), "tasks.md"
-        )
+        tasks_path = os.path.join(self._session_dir(self._session.session_id), "tasks.md")
         try:
             with open(tasks_path) as f:
                 return f.read()
@@ -368,9 +379,7 @@ class WildV2Engine:
         """Return the iteration log from disk."""
         if not self._session:
             return ""
-        log_path = os.path.join(
-            self._session_dir(self._session.session_id), "iteration_log.md"
-        )
+        log_path = os.path.join(self._session_dir(self._session.session_id), "iteration_log.md")
         try:
             with open(log_path) as f:
                 return f.read()
@@ -418,12 +427,12 @@ class WildV2Engine:
         if self._send_chat_message and session.chat_session_id:
             logger.info("[wild-v2] Routing through chat session %s for live streaming", session.chat_session_id)
             try:
-                full_text = await self._send_chat_message(
-                    session.chat_session_id, prompt, display_msg
-                )
+                full_text = await self._send_chat_message(session.chat_session_id, prompt, display_msg)
                 logger.info("[wild-v2] Chat message returned, response length=%d", len(full_text))
             except Exception as chat_err:
-                logger.error("[wild-v2] Chat message failed: %s, falling back to direct OpenCode", chat_err, exc_info=True)
+                logger.error(
+                    "[wild-v2] Chat message failed: %s, falling back to direct OpenCode", chat_err, exc_info=True
+                )
                 oc_session_id = await self._create_opencode_session()
                 if not oc_session_id:
                     logger.error("[wild-v2] Fallback OpenCode session creation also failed!")
@@ -450,8 +459,12 @@ class WildV2Engine:
             return
 
         logger.info("[wild-v2] _run_loop STARTED for session %s (goal=%s)", session.session_id, session.goal[:80])
-        logger.info("[wild-v2] chat_session_id=%s, max_iterations=%d, has_callback=%s",
-                    session.chat_session_id, session.max_iterations, bool(self._send_chat_message))
+        logger.info(
+            "[wild-v2] chat_session_id=%s, max_iterations=%d, has_callback=%s",
+            session.chat_session_id,
+            session.max_iterations,
+            bool(self._send_chat_message),
+        )
 
         try:
             # ============================================================
@@ -463,10 +476,7 @@ class WildV2Engine:
             ctx = self._build_context(session)
             planning_prompt = build_planning_prompt(ctx, render_fn=self._render_fn)
             display_msg = (
-                "[Wild V2 — Step #0]\n"
-                "Role: plan\n"
-                f"Goal: {session.goal}\n"
-                "Task: Create a concrete step-by-step plan."
+                f"[Wild V2 — Step #0]\nRole: plan\nGoal: {session.goal}\nTask: Create a concrete step-by-step plan."
             )
             logger.debug("[wild-v2] Planning prompt built, length=%d chars", len(planning_prompt))
 
@@ -518,15 +528,13 @@ class WildV2Engine:
             # ============================================================
             # ITERATIONS 1+: EXECUTION
             # ============================================================
-            while (
-                session.status == "running"
-                and session.iteration < session.max_iterations
-            ):
+            while session.status == "running" and session.iteration < session.max_iterations:
                 iter_start = time.time()
                 session.iteration += 1
                 logger.info(
                     "[wild-v2] ========== Iteration %d/%d START ==========",
-                    session.iteration, session.max_iterations,
+                    session.iteration,
+                    session.max_iterations,
                 )
 
                 # Snapshot files before iteration (for change detection)
@@ -537,9 +545,7 @@ class WildV2Engine:
                 prompt = build_iteration_prompt(ctx, render_fn=self._render_fn)
                 step_goal = self._current_step_goal(session)
                 display_msg = (
-                    f"[Wild V2 — Step #{session.iteration}/{session.max_iterations}]\n"
-                    "Role: run\n"
-                    f"Goal: {step_goal}"
+                    f"[Wild V2 — Step #{session.iteration}/{session.max_iterations}]\nRole: run\nGoal: {step_goal}"
                 )
                 logger.debug("[wild-v2] Prompt built, length=%d chars", len(prompt))
                 logger.debug("[wild-v2] Display message: %s", display_msg)
@@ -551,16 +557,24 @@ class WildV2Engine:
                     session.status = "failed"
                     break
 
-                logger.info("[wild-v2] Response received: %d chars (preview: %s)",
-                           len(full_text), full_text[:100].replace('\n', ' ') if full_text else "<empty>")
+                logger.info(
+                    "[wild-v2] Response received: %d chars (preview: %s)",
+                    len(full_text),
+                    full_text[:100].replace("\n", " ") if full_text else "<empty>",
+                )
 
                 # 3. Parse response
                 promise = parse_promise(full_text)
                 new_plan = parse_plan(full_text)
                 summary = parse_summary(full_text) or full_text[:300]
                 evo_sweep_config = parse_evo_sweep(full_text) if session.evo_sweep_enabled else None
-                logger.info("[wild-v2] Parsed: promise=%s, has_plan=%s, evo_sweep=%s, summary=%s",
-                           promise, bool(new_plan), bool(evo_sweep_config), summary[:80].replace('\n', ' '))
+                logger.info(
+                    "[wild-v2] Parsed: promise=%s, has_plan=%s, evo_sweep=%s, summary=%s",
+                    promise,
+                    bool(new_plan),
+                    bool(evo_sweep_config),
+                    summary[:80].replace("\n", " "),
+                )
 
                 # 4. Update plan in memory (tasks.md is managed by agent on disk)
                 if new_plan:
@@ -578,8 +592,13 @@ class WildV2Engine:
                 files_after = self._snapshot_files()
                 files_modified = self._diff_files(files_before, files_after)
                 errors = self._extract_errors(full_text)
-                logger.info("[wild-v2] Iteration %d metrics: duration=%.1fs, files_modified=%d, errors=%d",
-                           session.iteration, iter_duration, len(files_modified), len(errors))
+                logger.info(
+                    "[wild-v2] Iteration %d metrics: duration=%.1fs, files_modified=%d, errors=%d",
+                    session.iteration,
+                    iter_duration,
+                    len(files_modified),
+                    len(errors),
+                )
 
                 # Struggle detection
                 if not files_modified:
@@ -608,9 +627,14 @@ class WildV2Engine:
 
                 # 6b. Run evolutionary sweep if signaled
                 if evo_sweep_config and session.evo_sweep_enabled:
-                    logger.info("[wild-v2] 🧬 Evo sweep triggered! target=%s metric=%s",
-                               evo_sweep_config.target_script, evo_sweep_config.fitness_metric)
-                    evo_sweep_config.workdir = evo_sweep_config.workdir or session.workdir or os.environ.get("WORKDIR", ".")
+                    logger.info(
+                        "[wild-v2] 🧬 Evo sweep triggered! target=%s metric=%s",
+                        evo_sweep_config.target_script,
+                        evo_sweep_config.fitness_metric,
+                    )
+                    evo_sweep_config.workdir = (
+                        evo_sweep_config.workdir or session.workdir or os.environ.get("WORKDIR", ".")
+                    )
                     controller = EvoSweepController(
                         server_url=self._server_url,
                         auth_token=self._auth_token,
@@ -650,8 +674,13 @@ class WildV2Engine:
                 self._save_state(session.session_id)
 
                 # 11. Check promise
-                logger.info("[wild-v2] ========== Iteration %d/%d END (promise=%s, duration=%.1fs) ==========",
-                           session.iteration, session.max_iterations, promise, iter_duration)
+                logger.info(
+                    "[wild-v2] ========== Iteration %d/%d END (promise=%s, duration=%.1fs) ==========",
+                    session.iteration,
+                    session.max_iterations,
+                    promise,
+                    iter_duration,
+                )
 
                 if promise == "DONE":
                     logger.info("[wild-v2] Agent signaled DONE at iteration %d — running reflection", session.iteration)
@@ -720,7 +749,9 @@ class WildV2Engine:
                         else:
                             logger.info("[wild-v2] Reflection decided to STOP")
                     except Exception as reflect_err:
-                        logger.warning("[wild-v2] Reflection step failed: %s — stopping anyway", reflect_err, exc_info=True)
+                        logger.warning(
+                            "[wild-v2] Reflection step failed: %s — stopping anyway", reflect_err, exc_info=True
+                        )
 
                     session.status = "done"
                     session.finished_at = time.time()
@@ -754,7 +785,7 @@ class WildV2Engine:
 
     # -- OpenCode interaction --
 
-    async def _create_opencode_session(self) -> Optional[str]:
+    async def _create_opencode_session(self) -> str | None:
         """Create a fresh OpenCode session."""
         try:
             async with httpx.AsyncClient() as client:
@@ -794,7 +825,9 @@ class WildV2Engine:
                 url = f"{self._opencode_url}/global/event"
                 headers = {"Accept": "text/event-stream"}
                 async with client.stream(
-                    "GET", url, headers=headers,
+                    "GET",
+                    url,
+                    headers=headers,
                     auth=self._get_auth() if self._get_auth else None,
                 ) as response:
                     async for line in response.aiter_lines():
@@ -826,8 +859,7 @@ class WildV2Engine:
                                     break
 
                             # Simple done detection: session idle
-                            if (event_type == "session.updated"
-                                and props.get("id") == session_id):
+                            if event_type == "session.updated" and props.get("id") == session_id:
                                 if props.get("busy") is False:
                                     logger.info("[wild-v2] SSE: session %s no longer busy", session_id)
                                     break
@@ -855,8 +887,12 @@ class WildV2Engine:
         the endpoint.
         """
         health = {
-            "running": 0, "queued": 0, "completed": 0,
-            "failed": 0, "total": 0, "max_concurrent": 5,
+            "running": 0,
+            "queued": 0,
+            "completed": 0,
+            "failed": 0,
+            "total": 0,
+            "max_concurrent": 5,
         }
         for r in runs_dict.values():
             status = r.get("status", "")
@@ -873,9 +909,7 @@ class WildV2Engine:
 
     # -- Chat session integration --
 
-    def _append_to_chat(
-        self, session: WildV2Session, prompt: str, response: str, iteration: int
-    ):
+    def _append_to_chat(self, session: WildV2Session, prompt: str, response: str, iteration: int):
         """Append iteration messages to the chat session so UI shows full history."""
         if not session.chat_session_id or not self._chat_sessions:
             return
@@ -887,20 +921,24 @@ class WildV2Engine:
         messages = chat.setdefault("messages", [])
 
         # Add user message (the prompt, but abbreviated for display)
-        messages.append({
-            "role": "user",
-            "content": f"[Wild V2 — Iteration {iteration}/{session.max_iterations}]\n\n{prompt[:200]}...",
-            "timestamp": time.time(),
-            "wild_v2_iteration": iteration,
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": f"[Wild V2 — Iteration {iteration}/{session.max_iterations}]\n\n{prompt[:200]}...",
+                "timestamp": time.time(),
+                "wild_v2_iteration": iteration,
+            }
+        )
 
         # Add assistant response
-        messages.append({
-            "role": "assistant",
-            "content": response,
-            "timestamp": time.time(),
-            "wild_v2_iteration": iteration,
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": response,
+                "timestamp": time.time(),
+                "wild_v2_iteration": iteration,
+            }
+        )
 
         if self._save_chat_state:
             self._save_chat_state()
@@ -913,7 +951,10 @@ class WildV2Engine:
             # Check if there are changes
             result = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True,
+                text=True,
+                cwd=self._get_workdir(),
+                timeout=10,
             )
             if not result.stdout.strip():
                 logger.debug("[wild-v2] No changes to commit")
@@ -922,14 +963,18 @@ class WildV2Engine:
             # Stage all changes (respecting .gitignore)
             subprocess.run(
                 ["git", "add", "-A"],
-                capture_output=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True,
+                cwd=self._get_workdir(),
+                timeout=10,
             )
 
             # Commit
             msg = f"wild-v2: iteration {session.iteration} — {session.goal[:50]}"
             subprocess.run(
                 ["git", "commit", "-m", msg, "--no-verify"],
-                capture_output=True, cwd=self._get_workdir(), timeout=30,
+                capture_output=True,
+                cwd=self._get_workdir(),
+                timeout=30,
             )
             logger.info("[wild-v2] Git commit: %s", msg)
         except Exception as err:
@@ -943,7 +988,10 @@ class WildV2Engine:
         try:
             result = subprocess.run(
                 ["git", "ls-files", "-s"],
-                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True,
+                text=True,
+                cwd=self._get_workdir(),
+                timeout=10,
             )
             for line in result.stdout.strip().split("\n"):
                 if line:
@@ -953,7 +1001,10 @@ class WildV2Engine:
             # Also include unstaged files
             result2 = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, cwd=self._get_workdir(), timeout=10,
+                capture_output=True,
+                text=True,
+                cwd=self._get_workdir(),
+                timeout=10,
             )
             for line in result2.stdout.strip().split("\n"):
                 if line:
@@ -981,11 +1032,21 @@ class WildV2Engine:
         errors = []
         for line in text.split("\n"):
             lower = line.lower()
-            if any(kw in lower for kw in (
-                "error:", "failed:", "exception:", "traceback",
-                "typeerror", "syntaxerror", "referenceerror",
-                "assertionerror", "importerror", "modulenotfounderror",
-            )):
+            if any(
+                kw in lower
+                for kw in (
+                    "error:",
+                    "failed:",
+                    "exception:",
+                    "traceback",
+                    "typeerror",
+                    "syntaxerror",
+                    "referenceerror",
+                    "assertionerror",
+                    "importerror",
+                    "modulenotfounderror",
+                )
+            ):
                 cleaned = line.strip()[:200]
                 if cleaned and cleaned not in errors:
                     errors.append(cleaned)
@@ -1000,9 +1061,7 @@ class WildV2Engine:
             files_str = ", ".join(record.get("files_modified", [])[:10]) or "none"
             errors_str = ""
             if record.get("errors"):
-                errors_str = "\n  Errors:\n" + "\n".join(
-                    f"  - {e[:120]}" for e in record["errors"][:5]
-                )
+                errors_str = "\n  Errors:\n" + "\n".join(f"  - {e[:120]}" for e in record["errors"][:5])
 
             entry = (
                 f"## Iteration {record['iteration']}\n"

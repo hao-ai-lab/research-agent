@@ -9,17 +9,16 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
-
 from core.models import ClusterDetectRequest, ClusterUpdateRequest
 from core.state import (
-    _normalize_cluster_state,
-    _normalize_cluster_type,
-    _normalize_cluster_status,
-    _normalize_cluster_source,
-    _cluster_type_label,
     _cluster_type_description,
+    _cluster_type_label,
+    _normalize_cluster_source,
+    _normalize_cluster_state,
+    _normalize_cluster_status,
+    _normalize_cluster_type,
 )
+from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -46,6 +45,7 @@ def init(cluster_state_dict, save_settings_fn, current_run_summary_fn, infer_clu
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/cluster")
 async def get_cluster_state_endpoint():
     """Get the persisted cluster state and current run summary."""
@@ -53,7 +53,7 @@ async def get_cluster_state_endpoint():
 
 
 @router.post("/cluster/detect")
-async def detect_cluster(req: Optional[ClusterDetectRequest] = None):
+async def detect_cluster(req: ClusterDetectRequest | None = None):
     """Auto-detect cluster setup, or apply a user-specified preferred type."""
     detected = _infer_cluster_fn()
     preferred_type = _normalize_cluster_type(req.preferred_type) if req else "unknown"

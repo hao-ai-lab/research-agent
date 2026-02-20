@@ -1,7 +1,8 @@
 """Tests for slack_handler.py – SlackNotifier class."""
+
 import json
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Ensure slack_sdk is available (the handler gracefully degrades if not)
 from integrations.slack_handler import SlackNotifier
@@ -56,9 +57,7 @@ class TestSlackNotifierConfigure(unittest.TestCase):
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.__getitem__ = lambda self, key: "invalid_auth"
-        mock_client.auth_test.side_effect = SlackApiError(
-            message="invalid_auth", response=mock_response
-        )
+        mock_client.auth_test.side_effect = SlackApiError(message="invalid_auth", response=mock_response)
         MockWebClient.return_value = mock_client
 
         notifier = SlackNotifier()

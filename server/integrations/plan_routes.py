@@ -5,14 +5,13 @@ Extracted from server.py. All /plans/* CRUD endpoints live here as a
 FastAPI APIRouter.
 """
 
+import logging
 import time
 import uuid
-import logging
 from typing import Optional
 
+from core.models import PLAN_STATUSES, PlanCreate, PlanUpdate
 from fastapi import APIRouter, HTTPException
-
-from core.models import PlanCreate, PlanUpdate, PLAN_STATUSES
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -35,8 +34,9 @@ def init(plans_dict, save_fn):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/plans")
-async def list_plans(status: Optional[str] = None, session_id: Optional[str] = None):
+async def list_plans(status: str | None = None, session_id: str | None = None):
     """List all plans, optionally filtered by status or session."""
     result = list(_plans.values())
     if status:
@@ -91,7 +91,7 @@ async def update_plan(plan_id: str, req: PlanUpdate):
         if req.status not in PLAN_STATUSES:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid status '{req.status}'. Must be one of: {', '.join(sorted(PLAN_STATUSES))}"
+                detail=f"Invalid status '{req.status}'. Must be one of: {', '.join(sorted(PLAN_STATUSES))}",
             )
         plan["status"] = req.status
     if req.sections is not None:
@@ -113,7 +113,7 @@ async def approve_plan(plan_id: str):
     if plan["status"] not in ("draft",):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot approve a plan with status '{plan['status']}'. Only draft plans can be approved."
+            detail=f"Cannot approve a plan with status '{plan['status']}'. Only draft plans can be approved.",
         )
     plan["status"] = "approved"
     plan["updated_at"] = time.time()
@@ -130,7 +130,7 @@ async def execute_plan(plan_id: str):
     if plan["status"] not in ("approved",):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot execute a plan with status '{plan['status']}'. Only approved plans can be executed."
+            detail=f"Cannot execute a plan with status '{plan['status']}'. Only approved plans can be executed.",
         )
     plan["status"] = "executing"
     plan["updated_at"] = time.time()

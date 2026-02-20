@@ -36,15 +36,18 @@ def init(wild_v2_engine, active_alerts_dict, runs_dict, WildV2Engine_cls):
 # Request models
 # ---------------------------------------------------------------------------
 
+
 class WildV2StartRequest(BaseModel):
     goal: str
-    chat_session_id: Optional[str] = None
+    chat_session_id: str | None = None
     max_iterations: int = 25
     wait_seconds: float = 30.0
     evo_sweep_enabled: bool = False
 
+
 class WildV2SteerRequest(BaseModel):
     context: str
+
 
 class WildV2ResolveRequest(BaseModel):
     event_ids: list
@@ -53,6 +56,7 @@ class WildV2ResolveRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Wild Loop V2 Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/wild/v2/start")
 async def wild_v2_start(req: WildV2StartRequest):
@@ -98,25 +102,29 @@ async def wild_v2_events(session_id: str):
     # Collect pending alerts
     for alert_id, alert in _active_alerts.items():
         if alert.get("status") == "pending":
-            events.append({
-                "id": alert_id,
-                "type": "alert",
-                "title": f"Alert: {alert.get('type', 'unknown')}",
-                "detail": alert.get("message", ""),
-                "run_id": alert.get("run_id"),
-                "created_at": alert.get("created_at", time.time()),
-            })
+            events.append(
+                {
+                    "id": alert_id,
+                    "type": "alert",
+                    "title": f"Alert: {alert.get('type', 'unknown')}",
+                    "detail": alert.get("message", ""),
+                    "run_id": alert.get("run_id"),
+                    "created_at": alert.get("created_at", time.time()),
+                }
+            )
     # Collect completed/failed runs
     for rid, run in _runs.items():
         if run.get("status") in ("finished", "failed"):
-            events.append({
-                "id": f"run-{rid}-{run.get('status')}",
-                "type": "run_complete",
-                "title": f"Run {run.get('status')}: {run.get('name', rid)}",
-                "detail": f"Status: {run.get('status')}",
-                "run_id": rid,
-                "created_at": time.time(),
-            })
+            events.append(
+                {
+                    "id": f"run-{rid}-{run.get('status')}",
+                    "type": "run_complete",
+                    "title": f"Run {run.get('status')}: {run.get('name', rid)}",
+                    "detail": f"Status: {run.get('status')}",
+                    "run_id": rid,
+                    "created_at": time.time(),
+                }
+            )
     return events
 
 
@@ -159,6 +167,7 @@ async def wild_v2_steer(req: WildV2SteerRequest):
 # ---------------------------------------------------------------------------
 # Evolutionary Sweep Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/wild/v2/evo-sweep/{session_id}")
 async def wild_v2_evo_sweep_status(session_id: str):

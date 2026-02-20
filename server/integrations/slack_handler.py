@@ -18,6 +18,7 @@ logger = logging.getLogger("research-agent-server")
 try:
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
+
     HAS_SLACK_SDK = True
 except ImportError:
     HAS_SLACK_SDK = False
@@ -29,12 +30,12 @@ class SlackNotifier:
     """Manages Slack Bot token, channel, and message dispatch."""
 
     def __init__(self) -> None:
-        self._client: Optional[Any] = None
-        self._bot_token: Optional[str] = None
-        self._channel: Optional[str] = None
-        self._signing_secret: Optional[str] = None
-        self._team_name: Optional[str] = None
-        self._bot_user_id: Optional[str] = None
+        self._client: Any | None = None
+        self._bot_token: str | None = None
+        self._channel: str | None = None
+        self._signing_secret: str | None = None
+        self._team_name: str | None = None
+        self._bot_user_id: str | None = None
         self._enabled: bool = False
         # Per-event notification toggles (default all on when enabled)
         self.notify_on_complete: bool = True
@@ -53,17 +54,14 @@ class SlackNotifier:
         notify_on_complete: bool = True,
         notify_on_failed: bool = True,
         notify_on_alert: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Validate the bot token and store configuration.
 
         Returns a dict with status information.
         Raises RuntimeError on validation failure.
         """
         if not HAS_SLACK_SDK:
-            raise RuntimeError(
-                "slack-sdk is not installed. "
-                "Run: pip install slack-sdk>=3.27.0"
-            )
+            raise RuntimeError("slack-sdk is not installed. Run: pip install slack-sdk>=3.27.0")
 
         if not bot_token or not bot_token.strip():
             raise ValueError("Bot token is required")
@@ -93,7 +91,9 @@ class SlackNotifier:
 
         logger.info(
             "Slack configured: team=%s bot=%s channel=%s",
-            self._team_name, self._bot_user_id, self._channel,
+            self._team_name,
+            self._bot_user_id,
+            self._channel,
         )
         return {
             "ok": True,
@@ -117,7 +117,7 @@ class SlackNotifier:
     def is_enabled(self) -> bool:
         return self._enabled and self._client is not None
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Return current status (safe to expose to frontend)."""
         if not self._enabled:
             return {"enabled": False, "channel": None, "team": None}
@@ -127,13 +127,14 @@ class SlackNotifier:
             "channel": self._channel or "",
             "bot_user_id": self._bot_user_id or "",
             "token_hint": (self._bot_token[:8] + "..." + self._bot_token[-4:])
-                if self._bot_token and len(self._bot_token) > 12 else "***",
+            if self._bot_token and len(self._bot_token) > 12
+            else "***",
             "notify_on_complete": self.notify_on_complete,
             "notify_on_failed": self.notify_on_failed,
             "notify_on_alert": self.notify_on_alert,
         }
 
-    def get_persisted_config(self) -> Optional[Dict[str, Any]]:
+    def get_persisted_config(self) -> dict[str, Any] | None:
         """Return configuration dict suitable for saving to settings.json."""
         if not self._enabled:
             return None
@@ -146,7 +147,7 @@ class SlackNotifier:
             "notify_on_alert": self.notify_on_alert,
         }
 
-    def load_from_saved(self, data: Optional[Dict[str, Any]]) -> None:
+    def load_from_saved(self, data: dict[str, Any] | None) -> None:
         """Restore configuration from saved settings.json data."""
         if not data or not isinstance(data, dict):
             return
@@ -175,8 +176,8 @@ class SlackNotifier:
         title: str,
         message: str,
         severity: str = "info",
-        fields: Optional[Dict[str, str]] = None,
-        channel_override: Optional[str] = None,
+        fields: dict[str, str] | None = None,
+        channel_override: str | None = None,
     ) -> bool:
         """Post a Block Kit notification to Slack.
 
@@ -212,12 +213,14 @@ class SlackNotifier:
                 field_elements.append({"type": "mrkdwn", "text": f"*{k}*\n{v}"})
             blocks.append({"type": "section", "fields": field_elements})
 
-        blocks.append({
-            "type": "context",
-            "elements": [
-                {"type": "mrkdwn", "text": f"📡 Research Agent • {time.strftime('%Y-%m-%d %H:%M:%S')}"},
-            ],
-        })
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {"type": "mrkdwn", "text": f"📡 Research Agent • {time.strftime('%Y-%m-%d %H:%M:%S')}"},
+                ],
+            }
+        )
 
         target_channel = channel_override or self._channel
         try:
@@ -239,7 +242,7 @@ class SlackNotifier:
     # Event-specific helpers
     # ------------------------------------------------------------------
 
-    def send_run_completed(self, run: Dict[str, Any]) -> bool:
+    def send_run_completed(self, run: dict[str, Any]) -> bool:
         """Notify when an experiment run completes successfully."""
         if not self.notify_on_complete:
             return False
@@ -251,7 +254,7 @@ class SlackNotifier:
             hrs, m = divmod(mins, 60)
             duration = f"{hrs}h {m}m {s}s" if hrs else f"{m}m {s}s"
 
-        fields: Dict[str, str] = {"Run": name, "Status": "✅ Completed"}
+        fields: dict[str, str] = {"Run": name, "Status": "✅ Completed"}
         if duration:
             fields["Duration"] = duration
         if run.get("command"):
@@ -264,7 +267,7 @@ class SlackNotifier:
             fields=fields,
         )
 
-    def send_run_failed(self, run: Dict[str, Any]) -> bool:
+    def send_run_failed(self, run: dict[str, Any]) -> bool:
         """Notify when an experiment run fails."""
         if not self.notify_on_failed:
             return False
@@ -272,7 +275,7 @@ class SlackNotifier:
         error = run.get("error", "Unknown error")
         exit_code = run.get("exit_code")
 
-        fields: Dict[str, str] = {"Run": name, "Status": "❌ Failed"}
+        fields: dict[str, str] = {"Run": name, "Status": "❌ Failed"}
         if exit_code is not None:
             fields["Exit Code"] = str(exit_code)
         if error:
@@ -287,7 +290,7 @@ class SlackNotifier:
             fields=fields,
         )
 
-    def send_alert(self, alert: Dict[str, Any], run: Optional[Dict[str, Any]] = None) -> bool:
+    def send_alert(self, alert: dict[str, Any], run: dict[str, Any] | None = None) -> bool:
         """Notify when an experiment alert is created."""
         if not self.notify_on_alert:
             return False
@@ -298,7 +301,7 @@ class SlackNotifier:
         message_text = alert.get("message", "No details")
         choices = alert.get("choices", [])
 
-        fields: Dict[str, str] = {"Severity": severity.upper()}
+        fields: dict[str, str] = {"Severity": severity.upper()}
         if run_name:
             fields["Run"] = run_name
         if choices:
@@ -312,7 +315,7 @@ class SlackNotifier:
             fields=fields,
         )
 
-    def send_test(self) -> Dict[str, Any]:
+    def send_test(self) -> dict[str, Any]:
         """Send a test notification. Returns result dict."""
         if not self.is_enabled:
             return {"ok": False, "error": "Slack is not configured"}

@@ -1,6 +1,7 @@
 import json
-import matplotlib.pyplot as plt
+
 import matplotlib
+import matplotlib.pyplot as plt
 
 matplotlib.use("Agg")
 
@@ -8,8 +9,8 @@ matplotlib.use("Agg")
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
 # Collect data from wandb files
-import os
 import glob
+import os
 
 wandb_dirs = sorted(glob.glob(".mock_wandb/run-20260217-01*"))
 
@@ -73,9 +74,7 @@ for step_count in sorted(main_data.keys()):
     steps, losses = main_data[step_count]
     label = f"{int(step_count)} steps"
     color = colors.get(step_count, "gray")
-    ax2.plot(
-        steps, losses, label=label, color=color, marker="o", markersize=3, alpha=0.7
-    )
+    ax2.plot(steps, losses, label=label, color=color, marker="o", markersize=3, alpha=0.7)
 
 ax2.axhline(y=1.05, color="r", linestyle="--", label="Floor (1.05)")
 ax2.axvline(x=18, color="gray", linestyle=":", label="Convergence (step 18)")

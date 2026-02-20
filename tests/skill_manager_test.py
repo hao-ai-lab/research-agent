@@ -1,15 +1,16 @@
 """Tests for PromptSkillManager CRUD, search, and internal skill protection."""
 
+import importlib.util
 import os
 import shutil
-import tempfile
-import pytest
 
 # We need to import from server.server directly since server/ is not
 # a Python package (no __init__.py).
 import sys
-import importlib.util
+import tempfile
 from unittest.mock import MagicMock
+
+import pytest
 
 _repo = os.path.join(os.path.dirname(__file__), "..")
 _server_dir = os.path.join(_repo, "server")
@@ -32,6 +33,7 @@ INTERNAL_SKILL_IDS = _server_mod.INTERNAL_SKILL_IDS
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def tmp_skills_dir(tmp_path):
@@ -63,6 +65,7 @@ def manager(tmp_skills_dir):
 # Internal flag tests
 # ---------------------------------------------------------------------------
 
+
 class TestInternalFlag:
     def test_internal_flag_set_for_internal_skills(self, manager):
         """Internal skills should have internal=True."""
@@ -85,6 +88,7 @@ class TestInternalFlag:
 # ---------------------------------------------------------------------------
 # Create tests
 # ---------------------------------------------------------------------------
+
 
 class TestCreateSkill:
     def test_create_skill(self, manager, tmp_skills_dir):
@@ -124,6 +128,7 @@ class TestCreateSkill:
 # Delete tests
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteSkill:
     def test_delete_user_skill(self, manager, tmp_skills_dir):
         """Deleting a user skill should remove folder and cache entry."""
@@ -155,6 +160,7 @@ class TestDeleteSkill:
 # Search tests
 # ---------------------------------------------------------------------------
 
+
 class TestSearch:
     def test_search_by_name(self, manager):
         """Search should find skills by name substring."""
@@ -183,8 +189,7 @@ class TestSearch:
 
     def test_search_scoring_order(self, manager):
         """Exact name match should score higher than body match."""
-        manager.create(name="alert finder", description="finds alerts",
-                       template="nothing here")
+        manager.create(name="alert finder", description="finds alerts", template="nothing here")
         results = manager.search("alert finder")
         # Exact name match ("alert finder") should be first
         assert results[0]["id"] == "alert_finder"
@@ -206,9 +211,11 @@ class TestSearch:
 # Install from git (mocked)
 # ---------------------------------------------------------------------------
 
+
 class TestInstallFromGit:
     def test_install_from_git_success(self, manager, tmp_skills_dir, monkeypatch):
         """Successful git clone should parse SKILL.md and add to cache."""
+
         def mock_subprocess_run(cmd, **kwargs):
             # Simulate git clone by creating the directory + SKILL.md
             dest = cmd[-1]
@@ -219,9 +226,11 @@ class TestInstallFromGit:
             class Result:
                 returncode = 0
                 stderr = ""
+
             return Result()
 
         import subprocess
+
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
         result = manager.install_from_git("https://github.com/user/my-skill.git")
@@ -232,11 +241,11 @@ class TestInstallFromGit:
     def test_install_duplicate_raises(self, manager, monkeypatch):
         """Installing to an existing ID should raise ValueError."""
         with pytest.raises(ValueError, match="already exists"):
-            manager.install_from_git("https://github.com/user/ra_mode_plan.git",
-                                     name="ra_mode_plan")
+            manager.install_from_git("https://github.com/user/ra_mode_plan.git", name="ra_mode_plan")
 
     def test_install_no_skill_md_raises(self, manager, tmp_skills_dir, monkeypatch):
         """If the cloned repo has no SKILL.md, raise FileNotFoundError."""
+
         def mock_subprocess_run(cmd, **kwargs):
             dest = cmd[-1]
             os.makedirs(dest, exist_ok=True)
@@ -245,9 +254,11 @@ class TestInstallFromGit:
             class Result:
                 returncode = 0
                 stderr = ""
+
             return Result()
 
         import subprocess
+
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
         with pytest.raises(FileNotFoundError, match="SKILL.md"):
@@ -257,13 +268,16 @@ class TestInstallFromGit:
 
     def test_install_git_failure_raises(self, manager, monkeypatch):
         """Git clone failure should raise RuntimeError."""
+
         def mock_subprocess_run(cmd, **kwargs):
             class Result:
                 returncode = 128
                 stderr = "fatal: repository not found"
+
             return Result()
 
         import subprocess
+
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
         with pytest.raises(RuntimeError, match="git clone failed"):

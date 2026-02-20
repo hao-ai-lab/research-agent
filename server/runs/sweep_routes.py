@@ -11,11 +11,10 @@ import time
 import uuid
 from typing import Optional
 
+from core import config
+from core.models import RunCreate, SweepCreate, SweepUpdate
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-
-from core import config
-from core.models import SweepCreate, SweepUpdate, RunCreate
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -72,6 +71,7 @@ def init(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def expand_parameter_grid(parameters: dict, max_runs: int) -> list:
     """Expand parameter dict into list of parameter combinations."""
     keys = list(parameters.keys())
@@ -90,20 +90,20 @@ def build_command_with_params(base_command: str, params: dict) -> str:
 # Request models
 # ---------------------------------------------------------------------------
 
+
 class WildSweepCreate(BaseModel):
     name: str = "Wild Loop Sweep"
     goal: str = ""
-    chat_session_id: Optional[str] = None
+    chat_session_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/sweeps")
-async def list_sweeps(
-    limit: int = Query(50, description="Max sweeps to return")
-):
+async def list_sweeps(limit: int = Query(50, description="Max sweeps to return")):
     """List all sweeps."""
     _recompute_all_sweep_states()
     backfilled = False
@@ -230,7 +230,7 @@ async def create_sweep(req: SweepCreate):
         command = build_command_with_params(req.base_command, params)
 
         run_data = {
-            "name": f"{req.name} #{i+1}",
+            "name": f"{req.name} #{i + 1}",
             "command": command,
             "workdir": req.workdir or config.WORKDIR,
             "status": "queued" if requested_status == "running" else "ready",
@@ -292,10 +292,7 @@ async def update_sweep(sweep_id: str, req: SweepUpdate):
     sweep = _sweeps[sweep_id]
     current_status = _normalize_sweep_status(sweep.get("status"))
     base_command_update_requested = req.base_command is not None
-    non_command_structural_update_requested = any(
-        field is not None
-        for field in [req.parameters, req.max_runs]
-    )
+    non_command_structural_update_requested = any(field is not None for field in [req.parameters, req.max_runs])
     structural_update_requested = base_command_update_requested or non_command_structural_update_requested
 
     if current_status == "running" and structural_update_requested:
@@ -310,10 +307,7 @@ async def update_sweep(sweep_id: str, req: SweepUpdate):
     if sweep.get("run_ids") and non_command_structural_update_requested:
         raise HTTPException(
             status_code=409,
-            detail=(
-                "Cannot mutate structure for a sweep that already has runs. "
-                "Create a draft revision instead."
-            ),
+            detail=("Cannot mutate structure for a sweep that already has runs. Create a draft revision instead."),
         )
 
     if req.status is not None:
@@ -469,10 +463,7 @@ async def add_run_to_sweep(run_id: str, sweep_id: str = Query(..., description="
     if old_sweep_id and old_sweep_id in _sweeps and run.get("status") in _RUN_STATUS_ACTIVE.union({"queued"}):
         raise HTTPException(
             status_code=409,
-            detail=(
-                "Cannot move an active/queued run between sweeps. "
-                "Stop it first or rerun into a new sweep."
-            ),
+            detail=("Cannot move an active/queued run between sweeps. Stop it first or rerun into a new sweep."),
         )
 
     if old_sweep_id and old_sweep_id in _sweeps:

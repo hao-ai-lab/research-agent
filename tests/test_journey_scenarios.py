@@ -16,8 +16,9 @@ Run:
 """
 
 import time
-import requests
+
 import pytest
+import requests
 
 SERVER = "http://127.0.0.1:10000"
 HEADERS = {"Content-Type": "application/json"}
@@ -40,6 +41,7 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def api(method: str, path: str, json_body: dict | None = None) -> dict:
     url = f"{SERVER}{path}"
@@ -69,6 +71,7 @@ def event_kinds_for(events: list[dict]) -> set[str]:
 # 1. Multi-run chain with parent links
 # ===================================================================
 
+
 def test_multi_run_chain():
     """
     Create A -> B -> C with parent_run_id links.
@@ -97,10 +100,12 @@ def test_multi_run_chain():
     # Verify parent_run_id is preserved on the run objects
     fetched_b = api("GET", f"/runs/{run_b['id']}")
     fetched_c = api("GET", f"/runs/{run_c['id']}")
-    assert fetched_b.get("parent_run_id") == run_a["id"], \
+    assert fetched_b.get("parent_run_id") == run_a["id"], (
         f"Run B parent_run_id: expected {run_a['id']}, got {fetched_b.get('parent_run_id')}"
-    assert fetched_c.get("parent_run_id") == run_b["id"], \
+    )
+    assert fetched_c.get("parent_run_id") == run_b["id"], (
         f"Run C parent_run_id: expected {run_b['id']}, got {fetched_c.get('parent_run_id')}"
+    )
     print("  [OK] Parent links preserved on run objects")
 
     # Verify journey events exist for each run in the chain
@@ -126,6 +131,7 @@ def test_multi_run_chain():
 # ===================================================================
 # 2. Failed runs and error propagation
 # ===================================================================
+
 
 def test_failed_run_journey():
     """
@@ -164,7 +170,7 @@ def test_failed_run_journey():
     meta = failed_event.get("metadata", {})
     assert meta.get("exit_code") == 137, f"Failed event missing exit_code: {meta}"
     assert meta.get("error") == "OOM killed by system", f"Failed event missing error: {meta}"
-    print(f"  [OK] run_failed event has correct metadata: exit_code=137, error present")
+    print("  [OK] run_failed event has correct metadata: exit_code=137, error present")
 
     # Verify timestamps make sense (ended_at > started_at)
     assert fetched.get("started_at") is not None, "started_at should be set"
@@ -178,6 +184,7 @@ def test_failed_run_journey():
 # ===================================================================
 # 3. Chat session -> run linking
 # ===================================================================
+
 
 def test_chat_session_run_link():
     """
@@ -202,15 +209,17 @@ def test_chat_session_run_link():
 
     # Verify run carries chat_session_id
     fetched = api("GET", f"/runs/{run_id}")
-    assert fetched.get("chat_session_id") == session_id, \
+    assert fetched.get("chat_session_id") == session_id, (
         f"Expected chat_session_id={session_id}, got {fetched.get('chat_session_id')}"
+    )
     print("  [OK] Run object has correct chat_session_id")
 
     # Filter journey by run_id -- events should also carry session_id
     loop_by_run = journey_loop(run_id=run_id)
     for event in loop_by_run["events"]:
-        assert event.get("session_id") == session_id, \
+        assert event.get("session_id") == session_id, (
             f"Event {event['kind']} missing session_id: {event.get('session_id')}"
+        )
     print(f"  [OK] All {len(loop_by_run['events'])} run events carry session_id={session_id}")
 
     # Filter journey by session_id -- should find the same run events
@@ -221,18 +230,22 @@ def test_chat_session_run_link():
     print(f"  [OK] Journey filtered by session_id returns run events ({len(loop_by_session['events'])} events)")
 
     # Post a recommendation linked to this session
-    rec = api("POST", "/journey/recommendations", {
-        "title": "Try larger hidden layer for MNIST",
-        "action": "Increase hidden dim from 128 to 256 and re-run.",
-        "source": "agent",
-        "priority": "low",
-        "session_id": session_id,
-        "run_id": run_id,
-    })
+    rec = api(
+        "POST",
+        "/journey/recommendations",
+        {
+            "title": "Try larger hidden layer for MNIST",
+            "action": "Increase hidden dim from 128 to 256 and re-run.",
+            "source": "agent",
+            "priority": "low",
+            "session_id": session_id,
+            "run_id": run_id,
+        },
+    )
     loop_check = journey_loop(session_id=session_id)
     rec_ids = {r["id"] for r in loop_check["recommendations"]}
     assert rec["id"] in rec_ids, "Recommendation not found when filtering by session_id"
-    print(f"  [OK] Recommendation visible under session filter")
+    print("  [OK] Recommendation visible under session filter")
 
     print("  === test_chat_session_run_link PASSED ===")
 
@@ -240,6 +253,7 @@ def test_chat_session_run_link():
 # ===================================================================
 # 4. Recommendation lifecycle (reject, modify, dismiss)
 # ===================================================================
+
 
 def test_recommendation_lifecycle():
     """
@@ -281,13 +295,17 @@ def test_recommendation_lifecycle():
 
     rec_ids = []
     for s in scenarios:
-        rec = api("POST", "/journey/recommendations", {
-            "title": s["title"],
-            "action": s["action"],
-            "source": "agent",
-            "priority": "medium",
-            "run_id": run_id,
-        })
+        rec = api(
+            "POST",
+            "/journey/recommendations",
+            {
+                "title": s["title"],
+                "action": s["action"],
+                "source": "agent",
+                "priority": "medium",
+                "run_id": run_id,
+            },
+        )
         assert rec["status"] == "pending"
         rec_ids.append(rec["id"])
         print(f"  [OK] Created: {rec['id']} - {s['title']}")
@@ -301,8 +319,9 @@ def test_recommendation_lifecycle():
             body["modified_action"] = s["modified_action"]
 
         updated = api("POST", f"/journey/recommendations/{rec_id}/respond", body)
-        assert updated["status"] == s["respond_status"], \
+        assert updated["status"] == s["respond_status"], (
             f"Expected status={s['respond_status']}, got {updated['status']}"
+        )
         assert updated["responded_at"] is not None
         if s.get("modified_action"):
             assert updated["modified_action"] == s["modified_action"]
@@ -320,23 +339,25 @@ def test_recommendation_lifecycle():
     }
     missing = expected_response_kinds - kinds
     assert not missing, f"Missing recommendation response event kinds: {missing}"
-    print(f"  [OK] All 4 response event kinds present")
+    print("  [OK] All 4 response event kinds present")
 
     # Verify summary stats
     summary = loop["summary"]
     assert summary["recommendations"] >= 4, f"Expected >=4 recs, got {summary['recommendations']}"
     assert summary["accepted_recommendations"] >= 1
     assert summary["rejected_recommendations"] >= 1
-    print(f"  [OK] Summary: {summary['recommendations']} recs, "
-          f"{summary['accepted_recommendations']} accepted, "
-          f"{summary['rejected_recommendations']} rejected")
+    print(
+        f"  [OK] Summary: {summary['recommendations']} recs, "
+        f"{summary['accepted_recommendations']} accepted, "
+        f"{summary['rejected_recommendations']} rejected"
+    )
 
     # Verify the modified recommendation preserved the modified_action
     recs_list = api("GET", f"/journey/recommendations?run_id={run_id}")
     modified_recs = [r for r in recs_list if r["status"] == "modified"]
     assert len(modified_recs) >= 1, "No modified recommendation found"
     assert modified_recs[0]["modified_action"] == "Add dropout(0.1) after each hidden layer."
-    print(f"  [OK] Modified recommendation has correct modified_action")
+    print("  [OK] Modified recommendation has correct modified_action")
 
     # Verify acceptance_rate: 1 accepted out of 4 = 0.25
     # (but there may be recs from other tests, so just check it's > 0)

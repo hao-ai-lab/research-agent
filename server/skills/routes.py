@@ -14,7 +14,7 @@ from skills.manager import PromptSkillManager
 router = APIRouter()
 
 # Module-level reference set by server.py during app startup
-_manager: Optional[PromptSkillManager] = None
+_manager: PromptSkillManager | None = None
 
 
 def init(manager: PromptSkillManager) -> None:
@@ -32,6 +32,7 @@ def _get_manager() -> PromptSkillManager:
 # Request / Response Models
 # ---------------------------------------------------------------------------
 
+
 class PromptSkillUpdate(BaseModel):
     template: str
 
@@ -41,13 +42,13 @@ class PromptSkillCreate(BaseModel):
     description: str = ""
     template: str = ""
     category: str = "skill"
-    variables: Optional[List[str]] = None
+    variables: list[str] | None = None
 
 
 class PromptSkillInstall(BaseModel):
     source: str = "git"  # "git" for now; "zip" later
     url: str
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class SkillFileWrite(BaseModel):
@@ -57,6 +58,7 @@ class SkillFileWrite(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/prompt-skills")
 async def list_prompt_skills():
@@ -144,7 +146,7 @@ async def delete_prompt_skill(skill_id: str):
 
 
 @router.post("/prompt-skills/{skill_id}/render")
-async def render_prompt_skill(skill_id: str, variables: Dict[str, str]):
+async def render_prompt_skill(skill_id: str, variables: dict[str, str]):
     """Render a prompt skill template with the given variables."""
     rendered = _get_manager().render(skill_id, variables)
     if rendered is None:

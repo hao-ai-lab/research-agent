@@ -15,6 +15,7 @@ mcp = FastMCP("slurm-cli")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _run(cmd: list[str], timeout: int = 30) -> dict[str, Any]:
     """Run a SLURM CLI command and return parsed JSON."""
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -61,6 +62,7 @@ def _job_state(job: dict[str, Any]) -> str:
 # Tools
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 def list_jobs(
     user: str | None = None,
@@ -89,7 +91,7 @@ def list_jobs(
     data = _run(cmd)
     jobs = data.get("jobs", [])[:limit]
 
-    lines = [f"# SLURM Jobs", "", f"Found **{len(jobs)}** jobs:", ""]
+    lines = ["# SLURM Jobs", "", f"Found **{len(jobs)}** jobs:", ""]
     if not jobs:
         lines.append("No jobs found matching the specified criteria.")
         return "\n".join(lines)
@@ -225,7 +227,9 @@ def submit_job(script: str) -> str:
     try:
         result = subprocess.run(
             ["sbatch", tmp_path],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode != 0:
             return f"# Submission Failed\n\n```\n{result.stderr.strip()}\n```"
@@ -250,7 +254,9 @@ def cancel_job(job_id: str) -> str:
     """
     result = subprocess.run(
         ["scancel", job_id],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if result.returncode != 0:
         return f"# Cancel Failed\n\nJob `{job_id}`: {result.stderr.strip()}"
@@ -269,8 +275,12 @@ def cluster_status(partition: str | None = None) -> str:
     entries = data.get("sinfo", [])
 
     if partition:
-        entries = [e for e in entries if e.get("partition", {}).get("name") == partition
-                   or (isinstance(e.get("partition"), str) and e["partition"] == partition)]
+        entries = [
+            e
+            for e in entries
+            if e.get("partition", {}).get("name") == partition
+            or (isinstance(e.get("partition"), str) and e["partition"] == partition)
+        ]
 
     # Group by partition
     partitions: dict[str, dict[str, Any]] = {}
@@ -280,8 +290,13 @@ def cluster_status(partition: str | None = None) -> str:
 
         if p_name not in partitions:
             partitions[p_name] = {
-                "nodes_total": 0, "nodes_idle": 0, "nodes_alloc": 0, "nodes_other": 0,
-                "cpus_total": 0, "cpus_idle": 0, "cpus_alloc": 0,
+                "nodes_total": 0,
+                "nodes_idle": 0,
+                "nodes_alloc": 0,
+                "nodes_other": 0,
+                "cpus_total": 0,
+                "cpus_idle": 0,
+                "cpus_alloc": 0,
                 "gres": set(),
             }
         p = partitions[p_name]

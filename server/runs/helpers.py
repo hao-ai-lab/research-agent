@@ -16,23 +16,22 @@ import time
 from typing import Any, Optional
 
 import libtmux
-from fastapi import HTTPException
-
 from core import config
 from core.config import (
     SERVER_CALLBACK_URL,
-    USER_AUTH_TOKEN,
     TMUX_SESSION_NAME,
+    USER_AUTH_TOKEN,
 )
 from core.models import GpuwrapConfig
 from core.state import (
-    runs,
-    sweeps,
-    save_runs_state,
-    _normalize_cluster_type,
-    _cluster_type_label,
     _cluster_type_description,
+    _cluster_type_label,
+    _normalize_cluster_type,
+    runs,
+    save_runs_state,
+    sweeps,
 )
+from fastapi import HTTPException
 
 logger = logging.getLogger("research-agent-server")
 
@@ -49,7 +48,7 @@ SWEEP_STATUS_TERMINAL = {"completed", "failed", "canceled"}
 SWEEP_STATUS_EDITABLE = {"draft", "pending"}
 
 
-def _coerce_exit_code(raw_value: object) -> Optional[int]:
+def _coerce_exit_code(raw_value: object) -> int | None:
     if raw_value is None:
         return None
     if isinstance(raw_value, bool):
@@ -69,7 +68,7 @@ def _coerce_exit_code(raw_value: object) -> Optional[int]:
     return None
 
 
-def _terminal_status_from_exit_code(exit_code: Optional[int]) -> Optional[str]:
+def _terminal_status_from_exit_code(exit_code: int | None) -> str | None:
     if exit_code is None:
         return None
     return "finished" if exit_code == 0 else "failed"
@@ -91,9 +90,9 @@ def _reconcile_run_terminal_state(run_id: str, run: dict) -> bool:
             completion_file = completion_candidate
 
     if completion_file:
-        completion_exit_code: Optional[int] = None
+        completion_exit_code: int | None = None
         try:
-            with open(completion_file, "r", encoding="utf-8", errors="replace") as f:
+            with open(completion_file, encoding="utf-8", errors="replace") as f:
                 completion_exit_code = _coerce_exit_code(f.read())
         except Exception as e:
             logger.warning("Failed to read completion file for %s: %s", run_id, e)
@@ -152,7 +151,7 @@ def _reconcile_all_run_terminal_states() -> bool:
     return changed
 
 
-def _normalize_sweep_status(raw_status: Optional[str]) -> str:
+def _normalize_sweep_status(raw_status: str | None) -> str:
     if not raw_status:
         return "pending"
     normalized = raw_status.strip().lower()
@@ -163,7 +162,7 @@ def _normalize_sweep_status(raw_status: Optional[str]) -> str:
     return "pending"
 
 
-def _coerce_optional_text(value: object) -> Optional[str]:
+def _coerce_optional_text(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
@@ -173,7 +172,7 @@ def _coerce_optional_text(value: object) -> Optional[str]:
     return stripped or None
 
 
-def _coerce_optional_int(value: object) -> Optional[int]:
+def _coerce_optional_int(value: object) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -193,7 +192,7 @@ def _coerce_optional_int(value: object) -> Optional[int]:
     return None
 
 
-def _coerce_optional_bool(value: object) -> Optional[bool]:
+def _coerce_optional_bool(value: object) -> bool | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -209,7 +208,7 @@ def _coerce_optional_bool(value: object) -> Optional[bool]:
     return None
 
 
-def _json_clone(value: object) -> Optional[dict]:
+def _json_clone(value: object) -> dict | None:
     if not isinstance(value, dict):
         return None
     try:
@@ -220,12 +219,12 @@ def _json_clone(value: object) -> Optional[dict]:
 
 def _derive_sweep_creation_context(
     *,
-    name: Optional[str],
-    base_command: Optional[str],
-    goal: Optional[str],
-    max_runs: Optional[int],
-    ui_config: Optional[dict],
-    parameters: Optional[dict],
+    name: str | None,
+    base_command: str | None,
+    goal: str | None,
+    max_runs: int | None,
+    ui_config: dict | None,
+    parameters: dict | None,
     created_at: float,
 ) -> dict:
     ui = ui_config if isinstance(ui_config, dict) else {}
@@ -238,11 +237,7 @@ def _derive_sweep_creation_context(
     max_runs_from_ui = _coerce_optional_int(ui.get("maxRuns"))
     parallel_runs = _coerce_optional_int(ui.get("parallelRuns"))
 
-    hyperparameter_count = (
-        len(ui_hyperparameters)
-        if isinstance(ui_hyperparameters, list)
-        else len(parameter_grid)
-    )
+    hyperparameter_count = len(ui_hyperparameters) if isinstance(ui_hyperparameters, list) else len(parameter_grid)
     metric_count = len(ui_metrics) if isinstance(ui_metrics, list) else None
     insight_count = len(ui_insights) if isinstance(ui_insights, list) else None
 
@@ -328,7 +323,7 @@ def _infer_sweep_status(previous_status: str, progress: dict) -> str:
     return "canceled"
 
 
-def recompute_sweep_state(sweep_id: str) -> Optional[dict]:
+def recompute_sweep_state(sweep_id: str) -> dict | None:
     """Refresh a single sweep's progress and derived status."""
     sweep = sweeps.get(sweep_id)
     if not sweep:
@@ -358,7 +353,7 @@ def recompute_all_sweep_states() -> None:
         recompute_sweep_state(sweep_id)
 
 
-def _sync_run_membership_with_sweep(run_id: str, sweep_id: Optional[str]) -> None:
+def _sync_run_membership_with_sweep(run_id: str, sweep_id: str | None) -> None:
     if not sweep_id:
         return
     if sweep_id not in sweeps:
@@ -373,12 +368,12 @@ def _sync_run_membership_with_sweep(run_id: str, sweep_id: Optional[str]) -> Non
 # Cluster Detection Helpers
 # =============================================================================
 
+
 def _run_command_capture(args: list[str], timeout: float = 2.0) -> tuple[bool, str]:
     try:
         proc = subprocess.run(
             args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
@@ -389,7 +384,7 @@ def _run_command_capture(args: list[str], timeout: float = 2.0) -> tuple[bool, s
         return False, ""
 
 
-def _count_gpu_devices() -> Optional[int]:
+def _count_gpu_devices() -> int | None:
     if not shutil.which("nvidia-smi"):
         return None
     ok, output = _run_command_capture(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], timeout=2.5)
@@ -399,7 +394,7 @@ def _count_gpu_devices() -> Optional[int]:
     return len(lines) if lines else 0
 
 
-def _count_slurm_nodes() -> Optional[int]:
+def _count_slurm_nodes() -> int | None:
     if not shutil.which("sinfo"):
         return None
     ok, output = _run_command_capture(["sinfo", "-h", "-N"], timeout=2.0)
@@ -409,7 +404,7 @@ def _count_slurm_nodes() -> Optional[int]:
     return len(lines) if lines else 0
 
 
-def _count_kubernetes_nodes() -> Optional[int]:
+def _count_kubernetes_nodes() -> int | None:
     if not shutil.which("kubectl"):
         return None
     ok, output = _run_command_capture(["kubectl", "get", "nodes", "--no-headers"], timeout=2.5)
@@ -425,15 +420,14 @@ def _count_ssh_hosts() -> int:
         return 0
     try:
         count = 0
-        with open(ssh_config, "r", encoding="utf-8", errors="replace") as f:
+        with open(ssh_config, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line.lower().startswith("host "):
                     continue
                 host_targets = [segment for segment in line[5:].split(" ") if segment]
                 has_real_target = any(
-                    target not in {"*", "?"} and "*" not in target and "?" not in target
-                    for target in host_targets
+                    target not in {"*", "?"} and "*" not in target and "?" not in target for target in host_targets
                 )
                 if has_real_target:
                     count += 1
@@ -540,6 +534,7 @@ def _current_run_summary() -> dict:
 # Tmux Helpers
 # =============================================================================
 
+
 def get_tmux_server():
     """Get or create tmux server connection."""
     try:
@@ -549,7 +544,7 @@ def get_tmux_server():
         return None
 
 
-def get_or_create_session(session_name: Optional[str] = None):
+def get_or_create_session(session_name: str | None = None):
     """Get or create the research-agent tmux session."""
     if session_name is None:
         session_name = TMUX_SESSION_NAME
@@ -568,7 +563,7 @@ def get_or_create_session(session_name: Optional[str] = None):
         return None
 
 
-def _normalize_gpuwrap_config(config: Any) -> Optional[dict]:
+def _normalize_gpuwrap_config(config: Any) -> dict | None:
     """Validate and normalize per-run gpuwrap settings."""
     if config is None:
         return None
@@ -583,14 +578,14 @@ def _normalize_gpuwrap_config(config: Any) -> Optional[dict]:
     return data or None
 
 
-def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
+def launch_run_in_tmux(run_id: str, run_data: dict) -> str | None:
     """Launch a run in a new tmux window with sidecar."""
     session = get_or_create_session()
     if not session:
         raise Exception("Tmux session not available. Start tmux first.")
 
     # Create window name
-    run_name = run_data.get("name", run_id)[:20].replace(" ", "-")
+    run_data.get("name", run_id)[:20].replace(" ", "-")
     tmux_window_name = f"ra-{run_id[:8]}"
 
     logger.info(f"Launching run {run_id} in window {tmux_window_name}")
@@ -638,11 +633,11 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     else:
         sidecar_cmd = (
             f'{shlex.quote(sys.executable)} "{sidecar_path}" '
-            f'--job_id {shlex.quote(run_id)} '
-            f'--server_url {shlex.quote(server_url)} '
-            f'--command_file {shlex.quote(command_file)} '
-            f'--agent_run_dir {shlex.quote(run_dir)} '
-            f'--workdir {shlex.quote(run_workdir)}'
+            f"--job_id {shlex.quote(run_id)} "
+            f"--server_url {shlex.quote(server_url)} "
+            f"--command_file {shlex.quote(command_file)} "
+            f"--agent_run_dir {shlex.quote(run_dir)} "
+            f"--workdir {shlex.quote(run_workdir)}"
         )
     if USER_AUTH_TOKEN:
         sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"

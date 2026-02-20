@@ -16,8 +16,9 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -28,27 +29,28 @@ logger = logging.getLogger("evo_sweep")
 # Data types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class EvoSweepConfig:
     """Configuration for an evolutionary sweep."""
 
     # What to optimise
-    target_script: str              # path to the script to run
-    fitness_metric: str             # metric name to optimise (e.g. "accuracy", "loss")
+    target_script: str  # path to the script to run
+    fitness_metric: str  # metric name to optimise (e.g. "accuracy", "loss")
     fitness_direction: str = "max"  # "max" or "min"
 
     # Search space (JSON-serialisable dict of param → range)
-    search_space: Dict[str, Any] = field(default_factory=dict)
+    search_space: dict[str, Any] = field(default_factory=dict)
 
     # Evolution parameters
     population_size: int = 4
     generations: int = 3
-    top_k: int = 2                 # survivors per generation
+    top_k: int = 2  # survivors per generation
     mutation_strength: float = 0.3  # hint for the LLM mutator
 
     # Execution
     sweep_name: str = ""
-    timeout_per_run: int = 600     # seconds
+    timeout_per_run: int = 600  # seconds
     workdir: str = "."
 
 
@@ -57,21 +59,21 @@ class Candidate:
     """A single candidate in the population."""
 
     id: str
-    config: Dict[str, Any]
-    run_id: Optional[str] = None
-    fitness: Optional[float] = None
+    config: dict[str, Any]
+    run_id: str | None = None
+    fitness: float | None = None
     generation: int = 0
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
 
 
 @dataclass
 class EvoSweepResult:
     """Result of an evolutionary sweep."""
 
-    best_config: Dict[str, Any]
-    best_fitness: Optional[float]
-    fitness_history: List[Dict[str, Any]]  # per-generation stats
-    all_candidates: List[Dict[str, Any]]
+    best_config: dict[str, Any]
+    best_fitness: float | None
+    fitness_history: list[dict[str, Any]]  # per-generation stats
+    all_candidates: list[dict[str, Any]]
     sweep_id: str
     generations_completed: int
     status: str = "completed"  # completed | failed | cancelled
@@ -81,7 +83,8 @@ class EvoSweepResult:
 # Signal parser — extracts <evo_sweep>...</evo_sweep> from agent output
 # ---------------------------------------------------------------------------
 
-def parse_evo_sweep(text: str) -> Optional[EvoSweepConfig]:
+
+def parse_evo_sweep(text: str) -> EvoSweepConfig | None:
     """Parse <evo_sweep>...</evo_sweep> JSON config from agent output.
 
     Expected format:
@@ -135,6 +138,7 @@ def parse_evo_sweep(text: str) -> Optional[EvoSweepConfig]:
 # Controller
 # ---------------------------------------------------------------------------
 
+
 class EvoSweepController:
     """Runs a population-based evolutionary sweep using the server's sweep/run API."""
 
@@ -142,17 +146,17 @@ class EvoSweepController:
         self,
         server_url: str,
         auth_token: str = "",
-        llm_mutate_fn: Optional[Callable] = None,
+        llm_mutate_fn: Callable | None = None,
     ):
         self._server_url = server_url
         self._auth_token = auth_token
         self._llm_mutate_fn = llm_mutate_fn
 
-        self._sweep_id: Optional[str] = None
+        self._sweep_id: str | None = None
         self._cancelled = False
 
     @property
-    def sweep_id(self) -> Optional[str]:
+    def sweep_id(self) -> str | None:
         return self._sweep_id
 
     def cancel(self):
@@ -173,8 +177,8 @@ class EvoSweepController:
           4. Return best result
         """
         self._cancelled = False
-        all_candidates: List[Candidate] = []
-        fitness_history: List[Dict[str, Any]] = []
+        all_candidates: list[Candidate] = []
+        fitness_history: list[dict[str, Any]] = []
 
         sweep_name = config.sweep_name or f"evo-sweep-{uuid.uuid4().hex[:6]}"
 
@@ -230,18 +234,14 @@ class EvoSweepController:
                 "population_size": len(population),
                 "scored": len(scored),
                 "best_fitness": survivors[0].fitness if survivors else None,
-                "mean_fitness": (
-                    sum(c.fitness for c in scored) / len(scored) if scored else None
-                ),
+                "mean_fitness": (sum(c.fitness for c in scored) / len(scored) if scored else None),
             }
             fitness_history.append(gen_stats)
             logger.info("[evo-sweep] Generation %d: %s", gen + 1, gen_stats)
 
             # 3d. Mutate survivors → next generation (unless last gen)
             if gen < config.generations - 1 and survivors and not self._cancelled:
-                next_pop = await self._mutate_population(
-                    survivors, config, gen + 1
-                )
+                next_pop = await self._mutate_population(survivors, config, gen + 1)
                 all_candidates.extend(next_pop)
                 population = next_pop
                 logger.info("[evo-sweep] Mutated %d candidates for generation %d", len(next_pop), gen + 2)
@@ -279,7 +279,9 @@ class EvoSweepController:
 
         logger.info(
             "[evo-sweep] %s — best fitness: %s, total candidates: %d",
-            status, result.best_fitness, len(all_candidates),
+            status,
+            result.best_fitness,
+            len(all_candidates),
         )
         return result
 
@@ -306,12 +308,10 @@ class EvoSweepController:
             resp.raise_for_status()
             return resp.json().get("id", resp.json().get("sweep_id", ""))
 
-    async def _launch_run(self, config: EvoSweepConfig, candidate: Candidate) -> Optional[str]:
+    async def _launch_run(self, config: EvoSweepConfig, candidate: Candidate) -> str | None:
         """Launch a single run for a candidate."""
         # Build command with config params as env vars or CLI args
-        config_args = " ".join(
-            f"--{k}={v}" for k, v in candidate.config.items()
-        )
+        config_args = " ".join(f"--{k}={v}" for k, v in candidate.config.items())
         command = f"cd {config.workdir} && python {config.target_script} {config_args}"
 
         async with httpx.AsyncClient() as client:
@@ -329,9 +329,7 @@ class EvoSweepController:
             data = resp.json()
             return data.get("id") or data.get("run_id")
 
-    async def _wait_and_collect_fitness(
-        self, run_id: str, metric: str, timeout: int
-    ) -> Optional[float]:
+    async def _wait_and_collect_fitness(self, run_id: str, metric: str, timeout: int) -> float | None:
         """Poll run status until complete, then extract the fitness metric."""
         deadline = time.time() + timeout
         async with httpx.AsyncClient() as client:
@@ -351,6 +349,7 @@ class EvoSweepController:
                 except Exception as err:
                     logger.warning("[evo-sweep] Poll error for run %s: %s", run_id, err)
                 import asyncio
+
                 await asyncio.sleep(5)
             else:
                 logger.warning("[evo-sweep] Run %s timed out after %ds", run_id, timeout)
@@ -369,13 +368,15 @@ class EvoSweepController:
                     values = series[metric]
                     if values:
                         # Return the last value
-                        return float(values[-1].get("value", values[-1]) if isinstance(values[-1], dict) else values[-1])
+                        return float(
+                            values[-1].get("value", values[-1]) if isinstance(values[-1], dict) else values[-1]
+                        )
         except Exception as err:
             logger.warning("[evo-sweep] Failed to get metrics for run %s: %s", run_id, err)
 
         return None
 
-    def _generate_initial_population(self, config: EvoSweepConfig) -> List[Candidate]:
+    def _generate_initial_population(self, config: EvoSweepConfig) -> list[Candidate]:
         """Generate initial population from the search space."""
         import random
 
@@ -396,20 +397,22 @@ class EvoSweepController:
                     params[param] = values  # fixed value
 
             cid = f"gen0-{i}-{uuid.uuid4().hex[:4]}"
-            candidates.append(Candidate(
-                id=cid,
-                config=params,
-                generation=0,
-            ))
+            candidates.append(
+                Candidate(
+                    id=cid,
+                    config=params,
+                    generation=0,
+                )
+            )
 
         return candidates
 
     async def _mutate_population(
         self,
-        survivors: List[Candidate],
+        survivors: list[Candidate],
         config: EvoSweepConfig,
         next_generation: int,
-    ) -> List[Candidate]:
+    ) -> list[Candidate]:
         """Mutate survivors to create the next generation.
 
         If an LLM mutate function is provided, use it.
@@ -422,10 +425,10 @@ class EvoSweepController:
 
     def _random_mutate(
         self,
-        survivors: List[Candidate],
+        survivors: list[Candidate],
         config: EvoSweepConfig,
         next_generation: int,
-    ) -> List[Candidate]:
+    ) -> list[Candidate]:
         """Simple random perturbation of survivor configs."""
         import random
 
@@ -447,28 +450,27 @@ class EvoSweepController:
                             mutated[param] = random.randint(int(low), int(high))
 
             cid = f"gen{next_generation}-{len(next_pop)}-{uuid.uuid4().hex[:4]}"
-            next_pop.append(Candidate(
-                id=cid,
-                config=mutated,
-                generation=next_generation,
-                parent_id=parent.id,
-            ))
+            next_pop.append(
+                Candidate(
+                    id=cid,
+                    config=mutated,
+                    generation=next_generation,
+                    parent_id=parent.id,
+                )
+            )
 
         return next_pop
 
     async def _llm_mutate(
         self,
-        survivors: List[Candidate],
+        survivors: list[Candidate],
         config: EvoSweepConfig,
         next_generation: int,
-    ) -> List[Candidate]:
+    ) -> list[Candidate]:
         """Use the LLM to intelligently mutate survivors."""
         # Prepare context for the LLM
         context = {
-            "survivors": [
-                {"id": s.id, "config": s.config, "fitness": s.fitness}
-                for s in survivors
-            ],
+            "survivors": [{"id": s.id, "config": s.config, "fitness": s.fitness} for s in survivors],
             "fitness_metric": config.fitness_metric,
             "fitness_direction": config.fitness_direction,
             "search_space": config.search_space,
@@ -483,12 +485,14 @@ class EvoSweepController:
                 for i, cfg in enumerate(new_configs[: config.population_size]):
                     parent = survivors[i % len(survivors)]
                     cid = f"gen{next_generation}-{i}-{uuid.uuid4().hex[:4]}"
-                    candidates.append(Candidate(
-                        id=cid,
-                        config=cfg if isinstance(cfg, dict) else cfg.get("config", {}),
-                        generation=next_generation,
-                        parent_id=parent.id,
-                    ))
+                    candidates.append(
+                        Candidate(
+                            id=cid,
+                            config=cfg if isinstance(cfg, dict) else cfg.get("config", {}),
+                            generation=next_generation,
+                            parent_id=parent.id,
+                        )
+                    )
                 return candidates
         except Exception as err:
             logger.warning("[evo-sweep] LLM mutation failed: %s, falling back to random", err)

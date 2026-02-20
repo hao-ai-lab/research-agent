@@ -10,25 +10,22 @@ This script is spawned by the server in a tmux window to:
 
 import argparse
 import glob
+import hashlib
 import json
 import logging
+import math
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
-import math
-import hashlib
-import subprocess
-import requests
+
 import libtmux
+import requests
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger("job-sidecar")
 
 LOSS_ALERT_THRESHOLD = 8.0
@@ -67,7 +64,7 @@ def report_status(
     data = {"status": status}
     if extra_data:
         data.update(extra_data)
-    
+
     try:
         logger.info(f"Reporting status: {status} with data: {extra_data}")
         requests.post(
@@ -120,7 +117,7 @@ def wait_for_response(run_dir: str, alert_id: str, timeout_seconds: int = 600) -
     while time.time() < deadline:
         if os.path.exists(response_file):
             try:
-                with open(response_file, "r") as f:
+                with open(response_file) as f:
                     return f.read().strip()
             except Exception:
                 pass
@@ -145,7 +142,7 @@ def read_recent_metrics(metrics_path: str, max_lines: int = 25, max_bytes: int =
     try:
         size = os.path.getsize(metrics_path)
         start = max(0, size - max_bytes)
-        with open(metrics_path, "r") as f:
+        with open(metrics_path) as f:
             f.seek(start)
             chunk = f.read()
     except Exception as e:
@@ -172,7 +169,10 @@ def extract_loss(metrics: dict) -> float | None:
             return float(value)
     return None
 
-def seen_recent_signature(state: dict, namespace: str, signature: str, ttl_seconds: int = ALERT_SIGNATURE_TTL_SECONDS) -> bool:
+
+def seen_recent_signature(
+    state: dict, namespace: str, signature: str, ttl_seconds: int = ALERT_SIGNATURE_TTL_SECONDS
+) -> bool:
     """Dedupe alerts by signature in-memory for a short window."""
     now = time.time()
     recent = state.setdefault("recent_signatures", {})
@@ -182,6 +182,7 @@ def seen_recent_signature(state: dict, namespace: str, signature: str, ttl_secon
         return True
     recent[key] = now
     return False
+
 
 def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
     """Deterministic alerts for hard metric anomalies."""
@@ -223,11 +224,7 @@ def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
             high_entry = max_entry
 
     is_high = high_entry is not None
-    is_spike = (
-        len(previous) >= RULE_MIN_PREV_POINTS
-        and mean_prev > 0
-        and current >= mean_prev * LOSS_SPIKE_MULTIPLIER
-    )
+    is_spike = len(previous) >= RULE_MIN_PREV_POINTS and mean_prev > 0 and current >= mean_prev * LOSS_SPIKE_MULTIPLIER
     if not (is_high or is_spike):
         return None
 
@@ -235,10 +232,7 @@ def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
         high_step, high_loss = high_entry
         signature = f"high:{round(high_loss, 4)}"
         step_prefix = f"step={high_step}, " if isinstance(high_step, (int, float)) else ""
-        message = (
-            f"High loss detected ({step_prefix}loss={high_loss:.4f}, "
-            f"threshold={LOSS_ALERT_THRESHOLD:.1f})."
-        )
+        message = f"High loss detected ({step_prefix}loss={high_loss:.4f}, threshold={LOSS_ALERT_THRESHOLD:.1f})."
     else:
         signature = f"spike:{round(current, 4)}:{round(mean_prev, 4)}"
         message = f"Loss spike detected (loss={current:.4f}, rolling_avg={mean_prev:.4f})."
@@ -255,6 +249,7 @@ def rulebased_alerts(job_id: str, wandb_dir: str, state: dict) -> dict | None:
         "signature": signature,
     }
 
+
 def should_run_alert_judge(job_id: str, metrics_file: str) -> bool:
     file_size = os.path.getsize(metrics_file)
     last_size = _last_metrics_pos.get(job_id, 0)
@@ -270,6 +265,7 @@ def should_run_alert_judge(job_id: str, metrics_file: str) -> bool:
         return False
     _last_judge_check[job_id] = now
     return True
+
 
 def parse_alert_judge_decision(output: str) -> dict | None:
     if not output or "NOTHING" in output:
@@ -299,6 +295,7 @@ def parse_alert_judge_decision(output: str) -> dict | None:
         "choices": choices,
     }
 
+
 def run_alert_judge(context: str, workdir: str | None = None) -> dict | None:
     prompt = (
         "[SYSTEM] You are an ML training alert judge. "
@@ -327,6 +324,7 @@ def run_alert_judge(context: str, workdir: str | None = None) -> dict | None:
     output = (res.stdout or "").strip()
     logger.info("alert_judge output: %s", output)
     return parse_alert_judge_decision(output)
+
 
 def alert_judge(job_id: str, wandb_dir: str, workdir: str, state: dict) -> dict:
     """LLM-based alert gate for softer anomalies."""
@@ -439,7 +437,7 @@ def get_current_pane():
     pane_id = os.environ.get("TMUX_PANE")
     if not pane_id:
         return None
-    
+
     try:
         server = libtmux.Server()
         for session in server.sessions:
@@ -514,9 +512,7 @@ def _resolve_wandb_metrics_source(wandb_dir: str) -> tuple[str | None, str]:
     return None, ""
 
 
-def _read_wandb_binary_history(
-    wandb_file: str, records_read: int
-) -> tuple[list[dict], int]:
+def _read_wandb_binary_history(wandb_file: str, records_read: int) -> tuple[list[dict], int]:
     """Read history rows from a binary .wandb protobuf file.
 
     Uses the wandb SDK DataStore to scan records incrementally.
@@ -597,11 +593,13 @@ def post_metrics_delta(
 
     Returns the updated lines_posted count.
     """
-    logger.info(f"[metrics] post_metrics_delta called: job_id={job_id}, wandb_dir={wandb_dir}, lines_posted={lines_posted}")
+    logger.info(
+        f"[metrics] post_metrics_delta called: job_id={job_id}, wandb_dir={wandb_dir}, lines_posted={lines_posted}"
+    )
 
     metrics_path, kind = _resolve_wandb_metrics_source(wandb_dir)
     if not metrics_path:
-        logger.info(f"[metrics] No metrics source found — skipping POST")
+        logger.info("[metrics] No metrics source found — skipping POST")
         return lines_posted
 
     rows: list[dict] = []
@@ -610,7 +608,7 @@ def post_metrics_delta(
     if kind == "jsonl":
         # --- JSONL text file path (online runs / custom setups) ---
         try:
-            with open(metrics_path, "r") as f:
+            with open(metrics_path) as f:
                 all_lines = f.readlines()
         except OSError as e:
             logger.error(f"[metrics] Failed to read metrics file {metrics_path}: {e}")
@@ -630,7 +628,9 @@ def post_metrics_delta(
             except json.JSONDecodeError:
                 parse_errors += 1
         new_total = len(all_lines)
-        logger.info(f"[metrics] JSONL: {len(rows)} valid rows from {len(new_lines)} new lines ({parse_errors} parse errors)")
+        logger.info(
+            f"[metrics] JSONL: {len(rows)} valid rows from {len(new_lines)} new lines ({parse_errors} parse errors)"
+        )
 
     elif kind == "wandb_binary":
         # --- Binary .wandb protobuf path (offline runs) ---
@@ -638,7 +638,7 @@ def post_metrics_delta(
         logger.info(f"[metrics] Binary: {len(rows)} history rows (records_read {lines_posted} → {new_total})")
 
     if not rows:
-        logger.info(f"[metrics] No new rows — skipping POST")
+        logger.info("[metrics] No new rows — skipping POST")
         return new_total if new_total > lines_posted else lines_posted
 
     if rows:
@@ -667,14 +667,10 @@ def check_wandb_in_pane(pane_id: str, workdir: str = None) -> str | None:
     """Detect WandB run directory from tmux pane output."""
     try:
         import subprocess
-        res = subprocess.run(
-            ["tmux", "capture-pane", "-pt", pane_id, "-J"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+
+        res = subprocess.run(["tmux", "capture-pane", "-pt", pane_id, "-J"], capture_output=True, text=True, timeout=5)
         content = res.stdout
-        
+
         if "WANDB_RUN_DIR:" in content:
             match = re.search(r"WANDB_RUN_DIR: (\S+)", content)
             if match:
@@ -732,10 +728,18 @@ def _env_float(name: str, default: float) -> float:
 
 def resolve_gpuwrap_settings(gpuwrap_config: dict | None) -> dict:
     config = gpuwrap_config if isinstance(gpuwrap_config, dict) else {}
-    enabled = _truthy(config["enabled"]) if "enabled" in config else _truthy(os.environ.get("RESEARCH_AGENT_GPUWRAP_ENABLED", "1"))
+    enabled = (
+        _truthy(config["enabled"])
+        if "enabled" in config
+        else _truthy(os.environ.get("RESEARCH_AGENT_GPUWRAP_ENABLED", "1"))
+    )
     retries = int(config.get("retries", _env_int("RESEARCH_AGENT_GPUWRAP_RETRIES", 2)))
-    retry_delay_seconds = float(config.get("retry_delay_seconds", _env_float("RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS", 8.0)))
-    max_memory_used_mb = int(config.get("max_memory_used_mb", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB", 200)))
+    retry_delay_seconds = float(
+        config.get("retry_delay_seconds", _env_float("RESEARCH_AGENT_GPUWRAP_RETRY_DELAY_SECONDS", 8.0))
+    )
+    max_memory_used_mb = int(
+        config.get("max_memory_used_mb", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_MEMORY_USED_MB", 200))
+    )
     max_utilization = int(config.get("max_utilization", _env_int("RESEARCH_AGENT_GPUWRAP_MAX_UTILIZATION", 40)))
     return {
         "enabled": enabled,
@@ -814,10 +818,7 @@ def emit_gpu_retry_alert(
     trigger_alert(
         server_url=server_url,
         job_id=job_id,
-        message=(
-            f"GPU contention detected ({reason}). "
-            f"Auto-retrying attempt {attempt + 1}/{total_attempts}."
-        ),
+        message=(f"GPU contention detected ({reason}). Auto-retrying attempt {attempt + 1}/{total_attempts}."),
         choices=["Acknowledge"],
         severity="warning",
         auth_token=auth_token,
@@ -837,50 +838,48 @@ def monitor_job(
     # Persist sidecar logs to a file so they can be streamed to the frontend.
     sidecar_log_file = os.path.join(run_dir, "sidecar.log")
     file_handler = logging.FileHandler(sidecar_log_file, mode="a")
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
-    ))
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     logger.addHandler(file_handler)
 
     logger.info(f"Starting job monitor for {job_id}")
     logger.info(f"Command: {command}")
     logger.info(f"Workdir: {workdir}")
     logger.info(f"Run dir: {run_dir}")
-    
+
     # Find our current pane
     current_pane = get_current_pane()
     if not current_pane:
         logger.error("Could not identify current tmux pane")
         report_status(server_url, job_id, "failed", {"error": "No tmux pane found"}, auth_token=auth_token)
         return
-    
+
     window = current_pane.window
-    
+
     # Split window to create job pane
     job_pane = window.split(attach=False)
     logger.info(f"Created job pane: {job_pane.pane_id}")
-    
+
     # Change to workdir if specified
     if workdir:
         logger.info(f"Changing directory to: {workdir}")
         job_pane.send_keys(f"cd {workdir}")
         time.sleep(0.2)
-    
+
     # Setup paths
     completion_file = os.path.join(run_dir, "job.done")
     log_file = os.path.join(run_dir, "run.log")
-    
+
     # Clean up old completion file
     if os.path.exists(completion_file):
         os.remove(completion_file)
-    
+
     # Setup log capture via pipe-pane
     try:
         logger.info(f"Piping pane output to {log_file}")
         job_pane.cmd("pipe-pane", f"cat >> {log_file}")
     except Exception as e:
         logger.error(f"Failed to setup pipe-pane: {e}")
-    
+
     # Inject WANDB env vars so output goes to a predictable location
     wandb_data_dir = os.path.join(run_dir, "wandb_data")
     os.makedirs(wandb_data_dir, exist_ok=True)
@@ -889,13 +888,13 @@ def monitor_job(
     job_pane.send_keys(f"export WANDB_RUN_ID={shlex.quote(job_id)}")
     time.sleep(0.1)
     logger.info(f"Set WANDB_DIR={wandb_data_dir}, WANDB_RUN_ID={job_id}")
-    
+
     settings = resolve_gpuwrap_settings(gpuwrap_config)
     logger.info("GPU settings: %s", settings)
 
     # Report running status
     report_status(server_url, job_id, "running", {"tmux_pane": job_pane.pane_id}, auth_token=auth_token)
-    
+
     # Monitoring/retry state
     found_wandb_dir = None
     check_interval = 2
@@ -973,12 +972,12 @@ def monitor_job(
                 # Check if pane still exists
                 window = current_pane.window
                 pane_exists = any(p.pane_id == job_pane.pane_id for p in window.panes)
-                
+
                 if not pane_exists:
                     logger.error("Job pane disappeared")
                     report_status(server_url, job_id, "failed", {"error": "Pane disappeared"}, auth_token=auth_token)
                     return
-                
+
                 # Detect WandB — filesystem scan first, tmux fallback
                 if not found_wandb_dir:
                     logger.debug(f"[metrics-loop] Scanning for wandb dir: run_dir={run_dir}, job_id={job_id}")
@@ -987,15 +986,19 @@ def monitor_job(
                         found_wandb_dir = check_wandb_in_pane(job_pane.pane_id, workdir)
                     if found_wandb_dir:
                         logger.info(f"[metrics-loop] ✅ Detected WandB dir: {found_wandb_dir}")
-                        report_status(server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token)
+                        report_status(
+                            server_url, job_id, "running", {"wandb_dir": found_wandb_dir}, auth_token=auth_token
+                        )
                     else:
-                        logger.debug(f"[metrics-loop] WandB dir not found yet")
+                        logger.debug("[metrics-loop] WandB dir not found yet")
 
                 # Manual alert trigger path (for testing and operations)
                 if maybe_trigger_manual_alert(server_url, job_id, workdir, run_dir, auth_token=auth_token):
                     logger.info("Stopping job due to manual alert response")
                     job_pane.cmd("kill-pane")
-                    report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                    report_status(
+                        server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token
+                    )
                     return
 
                 # Rule-based alerts first, then LLM alert judge.
@@ -1004,18 +1007,32 @@ def monitor_job(
                     if apply_alert_decision(server_url, job_id, run_dir, rule_decision, auth_token=auth_token):
                         logger.info("Stopping job due to rulebased alert response")
                         job_pane.cmd("kill-pane")
-                        report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                        report_status(
+                            server_url,
+                            job_id,
+                            "stopped",
+                            {"error": "Stopped via alert response"},
+                            auth_token=auth_token,
+                        )
                         return
 
                     judge_decision = alert_judge(job_id, found_wandb_dir, workdir, alert_state)
                     if apply_alert_decision(server_url, job_id, run_dir, judge_decision, auth_token=auth_token):
                         logger.info("Stopping job due to alert_judge response")
                         job_pane.cmd("kill-pane")
-                        report_status(server_url, job_id, "stopped", {"error": "Stopped via alert response"}, auth_token=auth_token)
+                        report_status(
+                            server_url,
+                            job_id,
+                            "stopped",
+                            {"error": "Stopped via alert response"},
+                            auth_token=auth_token,
+                        )
                         return
 
                     # POST new metric rows to server
-                    logger.info(f"[metrics-loop] Calling post_metrics_delta (found_wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted})")
+                    logger.info(
+                        f"[metrics-loop] Calling post_metrics_delta (found_wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted})"
+                    )
                     prev_lines = metrics_lines_posted
                     metrics_lines_posted = post_metrics_delta(
                         server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token
@@ -1023,17 +1040,17 @@ def monitor_job(
                     if metrics_lines_posted != prev_lines:
                         logger.info(f"[metrics-loop] lines_posted advanced: {prev_lines} → {metrics_lines_posted}")
                 else:
-                    logger.debug(f"[metrics-loop] Skipping metrics POST — no wandb_dir found yet")
+                    logger.debug("[metrics-loop] Skipping metrics POST — no wandb_dir found yet")
 
             except Exception as e:
                 logger.error(f"Error in monitoring loop: {e}")
-            
+
             time.sleep(check_interval)
 
         # Attempt completed
         attempt_exit_code = "unknown"
         try:
-            with open(completion_file, "r") as f:
+            with open(completion_file) as f:
                 attempt_exit_code = f.read().strip()
         except Exception:
             attempt_exit_code = "unknown"
@@ -1057,7 +1074,7 @@ def monitor_job(
             time.sleep(settings["retry_delay_seconds"])
             continue
         break
-    
+
     # Final status
     if final_exit_code == "0":
         logger.info("Job completed successfully")
@@ -1071,12 +1088,16 @@ def monitor_job(
 
     # Final metrics flush
     if found_wandb_dir:
-        logger.info(f"[metrics-final] Final metrics flush: wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted}")
-        final_posted = post_metrics_delta(server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token)
+        logger.info(
+            f"[metrics-final] Final metrics flush: wandb_dir={found_wandb_dir}, lines_posted={metrics_lines_posted}"
+        )
+        final_posted = post_metrics_delta(
+            server_url, job_id, found_wandb_dir, metrics_lines_posted, auth_token=auth_token
+        )
         logger.info(f"[metrics-final] Final flush done: lines_posted {metrics_lines_posted} → {final_posted}")
     else:
-        logger.info(f"[metrics-final] No wandb_dir found during entire run — skipping final flush")
-    
+        logger.info("[metrics-final] No wandb_dir found during entire run — skipping final flush")
+
     logger.info("Sidecar exiting")
 
 
@@ -1094,10 +1115,10 @@ def main(argv: list[str] | None = None):
         help="Optional X-Auth-Token for server callbacks",
     )
     args = parser.parse_args(argv)
-    
+
     # Read command from file
     try:
-        with open(args.command_file, "r") as f:
+        with open(args.command_file) as f:
             command = f.read().strip()
     except Exception as e:
         logger.error(f"Failed to read command file: {e}")
@@ -1113,7 +1134,7 @@ def main(argv: list[str] | None = None):
     gpuwrap_config = None
     if args.gpuwrap_config_file:
         try:
-            with open(args.gpuwrap_config_file, "r") as f:
+            with open(args.gpuwrap_config_file) as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 gpuwrap_config = loaded
@@ -1121,7 +1142,7 @@ def main(argv: list[str] | None = None):
                 logger.warning("Ignoring gpuwrap config (not an object): %s", args.gpuwrap_config_file)
         except Exception as e:
             logger.warning("Failed to load gpuwrap config file %s: %s", args.gpuwrap_config_file, e)
-    
+
     # Run monitor
     monitor_job(
         server_url=args.server_url,

@@ -8,9 +8,8 @@ FastAPI APIRouter.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
-
 from core.models import MemoryCreateRequest, MemoryUpdateRequest
+from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -31,14 +30,24 @@ def init(memory_store):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/memories")
-async def list_memories(active_only: bool = False, source: Optional[str] = None):
+async def list_memories(active_only: bool = False, source: str | None = None):
     """List all memories, optionally filtered."""
     entries = _memory_store.list(active_only=active_only, source=source)
-    return [{"id": m.id, "title": m.title, "content": m.content,
-             "source": m.source, "tags": m.tags, "session_id": m.session_id,
-             "created_at": m.created_at, "is_active": m.is_active}
-            for m in entries]
+    return [
+        {
+            "id": m.id,
+            "title": m.title,
+            "content": m.content,
+            "source": m.source,
+            "tags": m.tags,
+            "session_id": m.session_id,
+            "created_at": m.created_at,
+            "is_active": m.is_active,
+        }
+        for m in entries
+    ]
 
 
 @router.post("/memories")

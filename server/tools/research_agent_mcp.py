@@ -72,9 +72,7 @@ def _api_request(
 
     if not response.ok:
         detail = _decode_error_detail(response)
-        raise RuntimeError(
-            f"Backend returned HTTP {response.status_code} for {method.upper()} {url}: {detail}"
-        )
+        raise RuntimeError(f"Backend returned HTTP {response.status_code} for {method.upper()} {url}: {detail}")
 
     content_type = response.headers.get("Content-Type", "").lower()
     if "application/json" in content_type:

@@ -15,8 +15,9 @@ import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +26,17 @@ logger = logging.getLogger(__name__)
 # Data Model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MemoryEntry:
     """A single memory / lesson / rule."""
+
     id: str
     title: str
     content: str
-    source: str                     # "reflection" | "user" | "agent"
-    tags: List[str] = field(default_factory=list)  # e.g. ["lesson", "preference", "convention"]
-    session_id: str = ""            # originating wild loop session (if any)
+    source: str  # "reflection" | "user" | "agent"
+    tags: list[str] = field(default_factory=list)  # e.g. ["lesson", "preference", "convention"]
+    session_id: str = ""  # originating wild loop session (if any)
     created_at: float = 0.0
     is_active: bool = True
 
@@ -58,6 +61,7 @@ class MemoryEntry:
 # Memory Store
 # ---------------------------------------------------------------------------
 
+
 class MemoryStore:
     """JSON-backed memory store with CRUD operations.
 
@@ -70,7 +74,7 @@ class MemoryStore:
 
     def __init__(self, get_workdir: Callable[[], str]):
         self._get_workdir = get_workdir
-        self._memories: Dict[str, MemoryEntry] = {}
+        self._memories: dict[str, MemoryEntry] = {}
 
     # -- Persistence -------------------------------------------------------
 
@@ -115,7 +119,7 @@ class MemoryStore:
         title: str,
         content: str,
         source: str = "user",
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
         session_id: str = "",
     ) -> MemoryEntry:
         """Create a new memory entry and persist."""
@@ -134,16 +138,16 @@ class MemoryStore:
         logger.info("[memory] Added memory %s: %s (source=%s)", entry.id, title, source)
         return entry
 
-    def get(self, memory_id: str) -> Optional[MemoryEntry]:
+    def get(self, memory_id: str) -> MemoryEntry | None:
         """Get a memory by ID."""
         return self._memories.get(memory_id)
 
     def list(
         self,
         active_only: bool = False,
-        tags: Optional[List[str]] = None,
-        source: Optional[str] = None,
-    ) -> List[MemoryEntry]:
+        tags: list[str] | None = None,
+        source: str | None = None,
+    ) -> list[MemoryEntry]:
         """List memories with optional filters."""
         result = list(self._memories.values())
         if active_only:
@@ -157,7 +161,7 @@ class MemoryStore:
         result.sort(key=lambda m: m.created_at, reverse=True)
         return result
 
-    def toggle(self, memory_id: str) -> Optional[MemoryEntry]:
+    def toggle(self, memory_id: str) -> MemoryEntry | None:
         """Toggle a memory's active state. Returns updated entry or None."""
         entry = self._memories.get(memory_id)
         if not entry:
@@ -167,7 +171,7 @@ class MemoryStore:
         logger.info("[memory] Toggled memory %s: is_active=%s", memory_id, entry.is_active)
         return entry
 
-    def update(self, memory_id: str, **kwargs) -> Optional[MemoryEntry]:
+    def update(self, memory_id: str, **kwargs) -> MemoryEntry | None:
         """Update fields on a memory. Returns updated entry or None."""
         entry = self._memories.get(memory_id)
         if not entry:

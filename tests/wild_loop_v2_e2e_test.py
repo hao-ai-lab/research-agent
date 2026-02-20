@@ -48,8 +48,8 @@ GOAL = (
 )
 
 MAX_ITERATIONS = 10
-WAIT_SECONDS = 30.0   # wait between iterations when WAITING
-POLL_INTERVAL = 30    # seconds between status polls
+WAIT_SECONDS = 30.0  # wait between iterations when WAITING
+POLL_INTERVAL = 30  # seconds between status polls
 TIMEOUT_MINUTES = 30
 
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
@@ -74,6 +74,7 @@ def _headers() -> dict:
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
+
 
 def log(msg: str):
     ts = datetime.now().strftime("%H:%M:%S")
@@ -119,12 +120,26 @@ def stream_output(proc: subprocess.Popen, label: str, log_file_path: str):
             log_f.flush()
             # Print interesting lines to console
             lower = line.lower()
-            if any(kw in lower for kw in (
-                "wild-v2", "wild_v2", "sweep", "run ",
-                "opencode", "iteration", "planning", "error",
-                "failed", "prompt", "session", "sse:",
-                "created", "started", "finished",
-            )):
+            if any(
+                kw in lower
+                for kw in (
+                    "wild-v2",
+                    "wild_v2",
+                    "sweep",
+                    "run ",
+                    "opencode",
+                    "iteration",
+                    "planning",
+                    "error",
+                    "failed",
+                    "prompt",
+                    "session",
+                    "sse:",
+                    "created",
+                    "started",
+                    "finished",
+                )
+            ):
                 ts = datetime.now().strftime("%H:%M:%S")
                 print(f"  [{ts}] [{label}] {line.strip()}", flush=True)
 
@@ -144,7 +159,8 @@ def start_opencode() -> subprocess.Popen:
     log(f"   opencode PID: {proc.pid}")
     # Stream logs in background thread
     t = threading.Thread(
-        target=stream_output, args=(proc, "OC", os.path.join(LOG_DIR, "opencode.log")),
+        target=stream_output,
+        args=(proc, "OC", os.path.join(LOG_DIR, "opencode.log")),
         daemon=True,
     )
     t.start()
@@ -162,9 +178,12 @@ def start_server() -> subprocess.Popen:
         env["RESEARCH_AGENT_USER_AUTH_TOKEN"] = AUTH_TOKEN
     proc = subprocess.Popen(
         [
-            SERVER_PYTHON, "server.py",
-            "--workdir", WORKDIR,
-            "--port", str(SERVER_PORT),
+            SERVER_PYTHON,
+            "server.py",
+            "--workdir",
+            WORKDIR,
+            "--port",
+            str(SERVER_PORT),
         ],
         cwd=os.path.abspath(SERVER_DIR),
         env=env,
@@ -176,7 +195,8 @@ def start_server() -> subprocess.Popen:
     log(f"   server PID: {proc.pid}")
     # Stream logs in background thread
     t = threading.Thread(
-        target=stream_output, args=(proc, "SRV", os.path.join(LOG_DIR, "server.log")),
+        target=stream_output,
+        args=(proc, "SRV", os.path.join(LOG_DIR, "server.log")),
         daemon=True,
     )
     t.start()
@@ -203,6 +223,7 @@ def wait_for_service(url: str, name: str, timeout: int = 60):
 # API helpers
 # ---------------------------------------------------------------------------
 
+
 def api_get(path: str, quiet: bool = False):
     try:
         r = requests.get(f"{SERVER_URL}{path}", headers=_headers(), timeout=10)
@@ -227,6 +248,7 @@ def api_post(path: str, data: dict = None):
 # ---------------------------------------------------------------------------
 # Main test flow
 # ---------------------------------------------------------------------------
+
 
 def run_test():
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -258,11 +280,14 @@ def run_test():
 
     # 3. Start the V2 wild loop
     log("📡 Starting V2 wild loop via POST /wild/v2/start ...")
-    start_result = api_post("/wild/v2/start", {
-        "goal": GOAL,
-        "max_iterations": MAX_ITERATIONS,
-        "wait_seconds": WAIT_SECONDS,
-    })
+    start_result = api_post(
+        "/wild/v2/start",
+        {
+            "goal": GOAL,
+            "max_iterations": MAX_ITERATIONS,
+            "wait_seconds": WAIT_SECONDS,
+        },
+    )
     if not start_result:
         log("❌ Failed to start V2 wild loop!")
         return
@@ -297,12 +322,16 @@ def run_test():
         # Print update
         if current_iter != last_iteration or poll_count % 5 == 0:
             log_separator()
-            log(f"📊 Poll #{poll_count} | Status: {loop_status} | Iter: {current_iter}/{MAX_ITERATIONS} | Active: {is_active}")
+            log(
+                f"📊 Poll #{poll_count} | Status: {loop_status} | Iter: {current_iter}/{MAX_ITERATIONS} | Active: {is_active}"
+            )
 
             if history:
                 latest = history[-1]
-                log(f"   Latest: iter={latest.get('iteration')} promise={latest.get('promise', 'none')} "
-                    f"dur={latest.get('duration_s', '?')}s files={len(latest.get('files_modified', []))}")
+                log(
+                    f"   Latest: iter={latest.get('iteration')} promise={latest.get('promise', 'none')} "
+                    f"dur={latest.get('duration_s', '?')}s files={len(latest.get('files_modified', []))}"
+                )
                 summary = latest.get("summary", "")
                 if summary:
                     log(f"   Summary: {summary[:250]}")
@@ -325,8 +354,10 @@ def run_test():
                 rid = r.get("id", "")
                 if rid and rid not in runs_seen:
                     runs_seen.add(rid)
-                    log(f"   🏃 NEW RUN: {rid} — {r.get('name', 'unnamed')} | "
-                        f"status={r.get('status')} | sweep={r.get('sweep_id', 'none')}")
+                    log(
+                        f"   🏃 NEW RUN: {rid} — {r.get('name', 'unnamed')} | "
+                        f"status={r.get('status')} | sweep={r.get('sweep_id', 'none')}"
+                    )
 
         # Check iteration log via API
         if poll_count % 3 == 0:
@@ -370,15 +401,19 @@ def run_test():
     if isinstance(final_sweeps, list) and final_sweeps:
         log("\n📦 Sweeps:")
         for s in final_sweeps:
-            log(f"   • {s.get('id', '??')} — {s.get('name', 'unnamed')} "
-                f"(status={s.get('status')}, runs={len(s.get('run_ids', []))})")
+            log(
+                f"   • {s.get('id', '??')} — {s.get('name', 'unnamed')} "
+                f"(status={s.get('status')}, runs={len(s.get('run_ids', []))})"
+            )
 
     if isinstance(final_runs, list) and final_runs:
         log("\n🏃 Runs:")
         for r in final_runs:
-            log(f"   • {r.get('id', '??')} — {r.get('name', 'unnamed')} "
+            log(
+                f"   • {r.get('id', '??')} — {r.get('name', 'unnamed')} "
                 f"(status={r.get('status')}, sweep={r.get('sweep_id', 'none')}, "
-                f"cmd={r.get('command', '')[:80]})")
+                f"cmd={r.get('command', '')[:80]})"
+            )
 
     # Check the plan
     plan = api_get(f"/wild/v2/plan/{session_id}", quiet=True)
@@ -423,6 +458,7 @@ if __name__ == "__main__":
     except Exception as e:
         log(f"❌ Test error: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         cleanup()

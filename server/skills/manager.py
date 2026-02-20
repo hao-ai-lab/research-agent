@@ -13,7 +13,6 @@ import subprocess
 from typing import Dict, Optional
 
 import yaml
-
 from core.config import _SERVER_FILE_DIR
 
 logger = logging.getLogger("research-agent-server")
@@ -36,9 +35,9 @@ class PromptSkillManager:
     with YAML frontmatter and {{variable}} placeholders.
     """
 
-    def __init__(self, skills_dir: Optional[str] = None):
+    def __init__(self, skills_dir: str | None = None):
         self.skills_dir = skills_dir or os.path.join(_SERVER_FILE_DIR, "prompt_skills")
-        self._skills: Dict[str, dict] = {}
+        self._skills: dict[str, dict] = {}
         self.load_all()
 
     def load_all(self) -> None:
@@ -62,7 +61,7 @@ class PromptSkillManager:
 
     def _parse_file(self, filepath: str, folder_name: str) -> dict:
         """Parse a SKILL.md file with YAML frontmatter."""
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
         # Split YAML frontmatter from body
@@ -95,10 +94,7 @@ class PromptSkillManager:
     def list(self) -> list:
         """Return all skills (without internal paths)."""
         exclude = {"filepath", "folder"}
-        return [
-            {k: v for k, v in skill.items() if k not in exclude}
-            for skill in self._skills.values()
-        ]
+        return [{k: v for k, v in skill.items() if k not in exclude} for skill in self._skills.values()]
 
     def create(
         self,
@@ -106,7 +102,7 @@ class PromptSkillManager:
         description: str = "",
         template: str = "",
         category: str = "skill",
-        variables: Optional[list] = None,
+        variables: list | None = None,
     ) -> dict:
         """Create a new skill folder with SKILL.md.
 
@@ -156,7 +152,7 @@ class PromptSkillManager:
         del self._skills[skill_id]
         return True
 
-    def install_from_git(self, url: str, name: Optional[str] = None) -> dict:
+    def install_from_git(self, url: str, name: str | None = None) -> dict:
         """Clone a skill from a git URL.
 
         If *name* is not provided, derive it from the repo name.
@@ -172,7 +168,9 @@ class PromptSkillManager:
         dest = os.path.join(self.skills_dir, skill_id)
         result = subprocess.run(
             ["git", "clone", "--depth", "1", url, dest],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if result.returncode != 0:
             raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
@@ -227,7 +225,7 @@ class PromptSkillManager:
         scored.sort(key=lambda t: t[0], reverse=True)
         return [s[1] for s in scored[:limit]]
 
-    def get(self, skill_id: str) -> Optional[dict]:
+    def get(self, skill_id: str) -> dict | None:
         """Get a single skill by ID."""
         skill = self._skills.get(skill_id)
         if skill is None:
@@ -235,7 +233,7 @@ class PromptSkillManager:
         exclude = {"filepath", "folder"}
         return {k: v for k, v in skill.items() if k not in exclude}
 
-    def update(self, skill_id: str, template: str) -> Optional[dict]:
+    def update(self, skill_id: str, template: str) -> dict | None:
         """Update a skill's template and write back to disk."""
         skill = self._skills.get(skill_id)
         if skill is None:
@@ -243,7 +241,7 @@ class PromptSkillManager:
 
         # Rebuild the file content with original frontmatter + new template
         filepath = skill["filepath"]
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
         # Extract original frontmatter
@@ -266,7 +264,7 @@ class PromptSkillManager:
         exclude = {"filepath", "folder"}
         return {k: v for k, v in skill.items() if k not in exclude}
 
-    def list_files(self, skill_id: str) -> Optional[list]:
+    def list_files(self, skill_id: str) -> list | None:
         """List all files in a skill's folder."""
         skill = self._skills.get(skill_id)
         if skill is None:
@@ -278,22 +276,26 @@ class PromptSkillManager:
             if rel_root == ".":
                 rel_root = ""
             for d in sorted(dirs):
-                entries.append({
-                    "name": d,
-                    "path": os.path.join(rel_root, d) if rel_root else d,
-                    "type": "directory",
-                })
+                entries.append(
+                    {
+                        "name": d,
+                        "path": os.path.join(rel_root, d) if rel_root else d,
+                        "type": "directory",
+                    }
+                )
             for fname in sorted(files):
                 fpath = os.path.join(root, fname)
-                entries.append({
-                    "name": fname,
-                    "path": os.path.join(rel_root, fname) if rel_root else fname,
-                    "type": "file",
-                    "size": os.path.getsize(fpath),
-                })
+                entries.append(
+                    {
+                        "name": fname,
+                        "path": os.path.join(rel_root, fname) if rel_root else fname,
+                        "type": "file",
+                        "size": os.path.getsize(fpath),
+                    }
+                )
         return entries
 
-    def read_file(self, skill_id: str, file_path: str) -> Optional[str]:
+    def read_file(self, skill_id: str, file_path: str) -> str | None:
         """Read a file from a skill's folder."""
         skill = self._skills.get(skill_id)
         if skill is None:
@@ -306,10 +308,10 @@ class PromptSkillManager:
             return None
         if not os.path.isfile(real_path):
             return None
-        with open(real_path, "r", encoding="utf-8") as f:
+        with open(real_path, encoding="utf-8") as f:
             return f.read()
 
-    def write_file(self, skill_id: str, file_path: str, content: str) -> Optional[bool]:
+    def write_file(self, skill_id: str, file_path: str, content: str) -> bool | None:
         """Write a file in a skill's folder."""
         skill = self._skills.get(skill_id)
         if skill is None:
@@ -332,7 +334,7 @@ class PromptSkillManager:
                 logger.error(f"Failed to re-parse SKILL.md for {skill_id}: {e}")
         return True
 
-    def render(self, skill_id: str, variables: Dict[str, str]) -> Optional[str]:
+    def render(self, skill_id: str, variables: dict[str, str]) -> str | None:
         """Render a skill template with the given variables.
 
         Replaces {{variable_name}} with the provided value.

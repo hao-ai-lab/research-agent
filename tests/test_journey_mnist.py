@@ -16,8 +16,9 @@ Run:
 import math
 import random
 import time
-import requests
+
 import pytest
+import requests
 
 SERVER = "http://127.0.0.1:10000"
 HEADERS = {"Content-Type": "application/json"}
@@ -41,6 +42,7 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Mock MNIST training (no torch needed)
 # ---------------------------------------------------------------------------
+
 
 def mock_mnist_training(epochs: int = EPOCHS) -> list[dict]:
     """Simulate a small MLP on MNIST. Returns realistic per-epoch metrics."""
@@ -79,6 +81,7 @@ def mock_mnist_training(epochs: int = EPOCHS) -> list[dict]:
 # API helpers
 # ---------------------------------------------------------------------------
 
+
 def api(method: str, path: str, json_body: dict | None = None) -> dict:
     url = f"{SERVER}{path}"
     resp = requests.request(method, url, json=json_body, headers=HEADERS, timeout=30)
@@ -90,6 +93,7 @@ def api(method: str, path: str, json_body: dict | None = None) -> dict:
 # Main test
 # ---------------------------------------------------------------------------
 
+
 def test_journey_mnist_loop():
     # -- 1. Health check --
     status = api("GET", "/health")
@@ -97,10 +101,14 @@ def test_journey_mnist_loop():
     print("[OK] Server is healthy")
 
     # -- 2. Create a run --
-    run = api("POST", "/runs", {
-        "name": "MNIST Journey Test",
-        "command": "python tests/test_journey_mnist.py",
-    })
+    run = api(
+        "POST",
+        "/runs",
+        {
+            "name": "MNIST Journey Test",
+            "command": "python tests/test_journey_mnist.py",
+        },
+    )
     run_id = run["id"]
     assert run_id, "Run creation returned no id"
     print(f"[OK] Created run {run_id}")
@@ -122,50 +130,66 @@ def test_journey_mnist_loop():
 
     # -- 6. Post a journey observation event --
     final = epoch_metrics[-1]
-    event = api("POST", "/journey/events", {
-        "kind": "user_observation",
-        "actor": "human",
-        "run_id": run_id,
-        "note": f"Val accuracy reached {final['val/acc']:.2%} after {EPOCHS} epochs",
-        "metadata": {"val_acc": final["val/acc"], "val_loss": final["val/loss"]},
-    })
+    event = api(
+        "POST",
+        "/journey/events",
+        {
+            "kind": "user_observation",
+            "actor": "human",
+            "run_id": run_id,
+            "note": f"Val accuracy reached {final['val/acc']:.2%} after {EPOCHS} epochs",
+            "metadata": {"val_acc": final["val/acc"], "val_loss": final["val/loss"]},
+        },
+    )
     assert event.get("id"), "Journey event creation returned no id"
     print(f"[OK] Journey event: {event['id']}")
 
     # -- 7. Create a recommendation --
-    rec = api("POST", "/journey/recommendations", {
-        "title": "Try data augmentation to improve generalization",
-        "action": "Add random rotation and horizontal flip to the MNIST training pipeline, then re-run for 5 epochs.",
-        "rationale": f"Val accuracy ({final['val/acc']:.2%}) is close to train accuracy, but augmentation may push it higher.",
-        "source": "agent",
-        "priority": "medium",
-        "confidence": 0.75,
-        "run_id": run_id,
-        "evidence_refs": [run_id],
-    })
+    rec = api(
+        "POST",
+        "/journey/recommendations",
+        {
+            "title": "Try data augmentation to improve generalization",
+            "action": "Add random rotation and horizontal flip to the MNIST training pipeline, then re-run for 5 epochs.",
+            "rationale": f"Val accuracy ({final['val/acc']:.2%}) is close to train accuracy, but augmentation may push it higher.",
+            "source": "agent",
+            "priority": "medium",
+            "confidence": 0.75,
+            "run_id": run_id,
+            "evidence_refs": [run_id],
+        },
+    )
     rec_id = rec["id"]
     assert rec_id, "Recommendation creation returned no id"
     assert rec["status"] == "pending"
     print(f"[OK] Recommendation: {rec_id} (status=pending)")
 
     # -- 8. Accept the recommendation --
-    updated_rec = api("POST", f"/journey/recommendations/{rec_id}/respond", {
-        "status": "accepted",
-        "user_note": "Good idea, will try augmentation next.",
-    })
+    updated_rec = api(
+        "POST",
+        f"/journey/recommendations/{rec_id}/respond",
+        {
+            "status": "accepted",
+            "user_note": "Good idea, will try augmentation next.",
+        },
+    )
     assert updated_rec["status"] == "accepted"
     assert updated_rec["responded_at"] is not None
     print("[OK] Recommendation accepted")
 
     # -- 9. Record a decision --
-    decision = api("POST", "/journey/decisions", {
-        "title": "Add data augmentation to MNIST pipeline",
-        "chosen_action": "Implement random rotation and re-train for 5 epochs on CPU.",
-        "rationale": "Agent recommendation accepted; augmentation is low-cost and may improve robustness.",
-        "status": "recorded",
-        "recommendation_id": rec_id,
-        "run_id": run_id,
-    })
+    decision = api(
+        "POST",
+        "/journey/decisions",
+        {
+            "title": "Add data augmentation to MNIST pipeline",
+            "chosen_action": "Implement random rotation and re-train for 5 epochs on CPU.",
+            "rationale": "Agent recommendation accepted; augmentation is low-cost and may improve robustness.",
+            "status": "recorded",
+            "recommendation_id": rec_id,
+            "run_id": run_id,
+        },
+    )
     dec_id = decision["id"]
     assert dec_id, "Decision creation returned no id"
     print(f"[OK] Decision: {dec_id}")
@@ -189,9 +213,13 @@ def test_journey_mnist_loop():
 
     event_kinds = {e["kind"] for e in events}
     expected_kinds = {
-        "run_created", "run_running", "run_finished",
-        "user_observation", "agent_recommendation_issued",
-        "user_accepted_recommendation", "decision_recorded",
+        "run_created",
+        "run_running",
+        "run_finished",
+        "user_observation",
+        "agent_recommendation_issued",
+        "user_accepted_recommendation",
+        "decision_recorded",
     }
     missing = expected_kinds - event_kinds
     assert not missing, f"Missing event kinds: {missing}"

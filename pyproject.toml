@@ -1,0 +1,39 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# E = pycodestyle errors, F = pyflakes, W = pycodestyle warnings,
+# I = isort, UP = pyupgrade
+select = ["E", "F", "W", "I", "UP"]
+
+ignore = [
+    "E402",   # module-level import not at top — server.py uses late imports by design
+    "E501",   # line too long — handled by formatter; don't double-report
+    "F401",   # unused import — many re-exports in __init__.py and server.py
+    "F811",   # redefinition of unused name — `config` is used as both module and local var
+    "E741",   # ambiguous variable name
+    "UP035",  # deprecated typing generics (Dict → dict) — migrate incrementally
+    "UP031",  # percent format — migrate incrementally
+]
+
+[tool.ruff.lint.per-file-ignores]
+"server/server.py" = ["E402", "F401"]
+"server/*/__init__.py" = ["F401"]
+"tests/*" = ["F401", "F811"]  # fixtures look like redefinitions / unused imports
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.vulture]
+min_confidence = 80
+paths = ["server", "tests"]
+ignore_names = [
+    "Any",
+    "Dict",
+    "List",
+    "Optional",
+    "Union",
+    "Callable",
+]

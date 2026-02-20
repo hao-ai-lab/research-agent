@@ -12,33 +12,32 @@ import time
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
-
 from core import config
 from core.config import (
-    OPENCODE_URL,
-    MODEL_PROVIDER,
     MODEL_ID,
+    MODEL_PROVIDER,
+    OPENCODE_URL,
     apply_runtime_research_agent_key,
     get_auth,
 )
 from core.models import (
-    JourneyNextActionsRequest,
-    JourneyEventCreate,
-    JourneyRecommendationCreate,
-    JourneyRecommendationRespondRequest,
-    JourneyDecisionCreate,
+    JOURNEY_DECISION_STATUS_VALUES,
     JOURNEY_PRIORITY_VALUES,
     JOURNEY_REC_STATUS_VALUES,
-    JOURNEY_DECISION_STATUS_VALUES,
+    JourneyDecisionCreate,
+    JourneyEventCreate,
+    JourneyNextActionsRequest,
+    JourneyRecommendationCreate,
+    JourneyRecommendationRespondRequest,
 )
 from core.state import (
+    _journey_new_id,
+    journey_decisions,
     journey_events,
     journey_recommendations,
-    journey_decisions,
     save_journey_state,
-    _journey_new_id,
 )
+from fastapi import APIRouter, HTTPException, Query
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -66,6 +65,7 @@ def init(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_actions_from_text(raw_text: str, max_actions: int) -> list[str]:
     text = str(raw_text or "").strip()
@@ -120,7 +120,7 @@ def _extract_actions_from_text(raw_text: str, max_actions: int) -> list[str]:
     return fallback
 
 
-def _journey_record_matches(item: dict, session_id: Optional[str], run_id: Optional[str]) -> bool:
+def _journey_record_matches(item: dict, session_id: str | None, run_id: str | None) -> bool:
     if session_id and item.get("session_id") != session_id:
         return False
     if run_id and item.get("run_id") != run_id:
@@ -128,7 +128,9 @@ def _journey_record_matches(item: dict, session_id: Optional[str], run_id: Optio
     return True
 
 
-def _journey_summary(filtered_events: List[dict], filtered_recommendations: List[dict], filtered_decisions: List[dict]) -> dict:
+def _journey_summary(
+    filtered_events: list[dict], filtered_recommendations: list[dict], filtered_decisions: list[dict]
+) -> dict:
     rec_total = len(filtered_recommendations)
     accepted = sum(1 for r in filtered_recommendations if r.get("status") == "accepted")
     executed = sum(1 for r in filtered_recommendations if r.get("status") == "executed")
@@ -148,6 +150,7 @@ def _journey_summary(filtered_events: List[dict], filtered_recommendations: List
 # Journey Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/journey/next-actions")
 async def journey_next_actions(req: JourneyNextActionsRequest):
     """Generate next-best research directions from journey context using OpenCode."""
@@ -164,24 +167,28 @@ async def journey_next_actions(req: JourneyNextActionsRequest):
     for event in events[-20:]:
         if not isinstance(event, dict):
             continue
-        compact_events.append({
-            "time": event.get("time"),
-            "actor": event.get("actor"),
-            "event": event.get("event"),
-            "note": event.get("note"),
-        })
+        compact_events.append(
+            {
+                "time": event.get("time"),
+                "actor": event.get("actor"),
+                "event": event.get("event"),
+                "note": event.get("note"),
+            }
+        )
 
     compact_steps: list[dict[str, Any]] = []
     for step in steps[-20:]:
         if not isinstance(step, dict):
             continue
-        compact_steps.append({
-            "type": step.get("type"),
-            "status": step.get("status"),
-            "title": step.get("title"),
-            "effort_minutes": step.get("effort_minutes"),
-            "confidence": step.get("confidence"),
-        })
+        compact_steps.append(
+            {
+                "type": step.get("type"),
+                "status": step.get("status"),
+                "title": step.get("title"),
+                "effort_minutes": step.get("effort_minutes"),
+                "confidence": step.get("confidence"),
+            }
+        )
 
     prompt_payload = {
         "title": title,
@@ -227,7 +234,9 @@ async def journey_next_actions(req: JourneyNextActionsRequest):
             await _send_prompt_to_opencode(client, opencode_session_id, prompt, MODEL_PROVIDER, MODEL_ID)
 
             chunks: list[str] = []
-            async for event, text_delta, _thinking_delta, _tool_update in _stream_opencode_events(client, opencode_session_id):
+            async for event, text_delta, _thinking_delta, _tool_update in _stream_opencode_events(
+                client, opencode_session_id
+            ):
                 if event.get("type") == "part_delta" and event.get("ptype") == "text" and text_delta:
                     chunks.append(text_delta)
                 if event.get("type") == "session_status" and event.get("status") == "idle":
@@ -258,22 +267,17 @@ async def journey_next_actions(req: JourneyNextActionsRequest):
 
 @router.get("/journey/loop")
 async def get_journey_loop(
-    session_id: Optional[str] = Query(None, description="Filter by chat session id"),
-    run_id: Optional[str] = Query(None, description="Filter by run id"),
+    session_id: str | None = Query(None, description="Filter by chat session id"),
+    run_id: str | None = Query(None, description="Filter by run id"),
     limit: int = Query(300, ge=1, le=2000, description="Max records per list"),
 ):
     """Return structured journey loop data for growth tracking."""
-    filtered_events = [
-        event for event in journey_events.values()
-        if _journey_record_matches(event, session_id, run_id)
-    ]
+    filtered_events = [event for event in journey_events.values() if _journey_record_matches(event, session_id, run_id)]
     filtered_recommendations = [
-        rec for rec in journey_recommendations.values()
-        if _journey_record_matches(rec, session_id, run_id)
+        rec for rec in journey_recommendations.values() if _journey_record_matches(rec, session_id, run_id)
     ]
     filtered_decisions = [
-        decision for decision in journey_decisions.values()
-        if _journey_record_matches(decision, session_id, run_id)
+        decision for decision in journey_decisions.values() if _journey_record_matches(decision, session_id, run_id)
     ]
 
     filtered_events.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
@@ -307,14 +311,11 @@ async def create_journey_event(req: JourneyEventCreate):
 
 @router.get("/journey/recommendations")
 async def list_journey_recommendations(
-    session_id: Optional[str] = Query(None, description="Filter by chat session id"),
-    run_id: Optional[str] = Query(None, description="Filter by run id"),
+    session_id: str | None = Query(None, description="Filter by chat session id"),
+    run_id: str | None = Query(None, description="Filter by run id"),
     limit: int = Query(200, ge=1, le=2000),
 ):
-    rows = [
-        row for row in journey_recommendations.values()
-        if _journey_record_matches(row, session_id, run_id)
-    ]
+    rows = [row for row in journey_recommendations.values() if _journey_record_matches(row, session_id, run_id)]
     rows.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return rows[:limit]
 
@@ -443,14 +444,11 @@ async def generate_journey_recommendations(req: JourneyNextActionsRequest):
 
 @router.get("/journey/decisions")
 async def list_journey_decisions(
-    session_id: Optional[str] = Query(None, description="Filter by chat session id"),
-    run_id: Optional[str] = Query(None, description="Filter by run id"),
+    session_id: str | None = Query(None, description="Filter by chat session id"),
+    run_id: str | None = Query(None, description="Filter by run id"),
     limit: int = Query(200, ge=1, le=2000),
 ):
-    rows = [
-        row for row in journey_decisions.values()
-        if _journey_record_matches(row, session_id, run_id)
-    ]
+    rows = [row for row in journey_decisions.values() if _journey_record_matches(row, session_id, run_id)]
     rows.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return rows[:limit]
 

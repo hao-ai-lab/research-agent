@@ -20,7 +20,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Module-level reference to the shared runs dict.  Wired at init().
 # ---------------------------------------------------------------------------
-_runs: Dict[str, dict] = {}
+_runs: dict[str, dict] = {}
 
 
 def init(runs_dict):
@@ -32,6 +32,7 @@ def init(runs_dict):
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
 
 def _read_log_paginated(run_id: str, log_filename: str, offset: int, limit: int):
     """Common implementation for paginated log reading."""
@@ -59,11 +60,11 @@ def _read_log_paginated(run_id: str, log_filename: str, offset: int, limit: int)
         else:
             actual_offset = min(offset, total_size)
 
-        with open(log_file, "r", errors="replace") as f:
+        with open(log_file, errors="replace") as f:
             f.seek(actual_offset)
             content = f.read(limit)
 
-        bytes_read = len(content.encode('utf-8'))
+        bytes_read = len(content.encode("utf-8"))
         end_offset = actual_offset + bytes_read
 
         return {
@@ -71,12 +72,17 @@ def _read_log_paginated(run_id: str, log_filename: str, offset: int, limit: int)
             "offset": actual_offset,
             "total_size": total_size,
             "has_more_before": actual_offset > 0,
-            "has_more_after": end_offset < total_size
+            "has_more_after": end_offset < total_size,
         }
     except Exception as e:
         logger.error(f"Error reading {log_filename} for {run_id}: {e}")
-        return {"content": f"Error reading logs: {e}", "offset": 0, "total_size": 0,
-                "has_more_before": False, "has_more_after": False}
+        return {
+            "content": f"Error reading logs: {e}",
+            "offset": 0,
+            "total_size": 0,
+            "has_more_before": False,
+            "has_more_after": False,
+        }
 
 
 def _stream_log(run_id: str, log_filename: str):
@@ -97,9 +103,9 @@ def _stream_log(run_id: str, log_filename: str):
 
         # Send initial content
         if os.path.exists(log_file):
-            with open(log_file, "r", errors="replace") as f:
+            with open(log_file, errors="replace") as f:
                 content = f.read()
-                last_size = len(content.encode('utf-8'))
+                last_size = len(content.encode("utf-8"))
                 yield f"data: {json.dumps({'type': 'initial', 'content': content})}\n\n"
 
         # Stream updates
@@ -109,7 +115,7 @@ def _stream_log(run_id: str, log_filename: str):
             current_run = _runs.get(run_id, {})
             if current_run.get("status") in ["finished", "failed", "stopped"]:
                 if os.path.exists(log_file):
-                    with open(log_file, "r", errors="replace") as f:
+                    with open(log_file, errors="replace") as f:
                         f.seek(last_size)
                         new_content = f.read()
                         if new_content:
@@ -120,7 +126,7 @@ def _stream_log(run_id: str, log_filename: str):
             if os.path.exists(log_file):
                 current_size = os.path.getsize(log_file)
                 if current_size > last_size:
-                    with open(log_file, "r", errors="replace") as f:
+                    with open(log_file, errors="replace") as f:
                         f.seek(last_size)
                         new_content = f.read()
                         last_size = current_size
@@ -133,11 +139,12 @@ def _stream_log(run_id: str, log_filename: str):
 # Log Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/runs/{run_id}/logs")
 async def get_run_logs(
     run_id: str,
     offset: int = Query(-10000, description="Byte offset. Negative = from end."),
-    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
+    limit: int = Query(10000, description="Max bytes to return (max 100KB)"),
 ):
     """Get run logs with byte-offset pagination."""
     return _read_log_paginated(run_id, "run.log", offset, limit)
@@ -153,7 +160,7 @@ async def stream_run_logs(run_id: str):
 async def get_sidecar_logs(
     run_id: str,
     offset: int = Query(-10000, description="Byte offset. Negative = from end."),
-    limit: int = Query(10000, description="Max bytes to return (max 100KB)")
+    limit: int = Query(10000, description="Max bytes to return (max 100KB)"),
 ):
     """Get sidecar logs with byte-offset pagination."""
     return _read_log_paginated(run_id, "sidecar.log", offset, limit)
@@ -168,6 +175,7 @@ async def stream_sidecar_logs(run_id: str):
 # ---------------------------------------------------------------------------
 # Artifact Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/runs/{run_id}/artifacts")
 async def list_artifacts(run_id: str):
@@ -186,18 +194,16 @@ async def list_artifacts(run_id: str):
                 path = os.path.join(artifacts_dir, name)
                 # Resolve symlinks to get actual path
                 actual_path = os.path.realpath(path) if os.path.islink(path) else path
-                artifacts.append({
-                    "name": name,
-                    "path": actual_path,
-                    "type": "other"  # TODO: detect type
-                })
+                artifacts.append(
+                    {
+                        "name": name,
+                        "path": actual_path,
+                        "type": "other",  # TODO: detect type
+                    }
+                )
 
     # Add wandb_dir if present
     if run.get("wandb_dir"):
-        artifacts.append({
-            "name": "wandb",
-            "path": run["wandb_dir"],
-            "type": "wandb"
-        })
+        artifacts.append({"name": "wandb", "path": run["wandb_dir"], "type": "wandb"})
 
     return artifacts

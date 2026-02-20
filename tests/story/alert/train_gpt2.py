@@ -10,7 +10,7 @@ import argparse
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 DEFAULT_INTERACTIVE_HOLD_SECONDS = 5
 
@@ -48,7 +48,7 @@ def main() -> None:
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run_stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     wandb_dir = os.path.join(script_dir, ".mock_wandb", f"run-{run_stamp}")
     os.makedirs(wandb_dir, exist_ok=True)
     metrics_path = os.path.join(wandb_dir, "metrics.jsonl")
