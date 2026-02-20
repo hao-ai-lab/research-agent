@@ -501,12 +501,12 @@ function renderStreamingText(text: string): React.ReactNode {
             }
 
             elements.push(
-                <div key={`table-${currentTableKey}`} className="my-2 w-full overflow-x-auto">
-                    <table className="w-full border-collapse text-sm">
+                <div key={`table-${currentTableKey}`} className="my-2 w-full overflow-hidden">
+                    <table className="w-full table-fixed border-collapse text-sm">
                         <thead>
                             <tr className="border-b border-border/70">
                                 {headers.map((header, headerIndex) => (
-                                    <th key={`th-${headerIndex}`} className="px-2 py-1 text-left font-semibold text-foreground">
+                                    <th key={`th-${headerIndex}`} className="px-2 py-1 text-left font-semibold text-foreground break-words [overflow-wrap:anywhere]">
                                         {renderStreamingInlineMarkdown(header, `table-head-${currentTableKey}-${headerIndex}`)}
                                     </th>
                                 ))}
@@ -517,7 +517,7 @@ function renderStreamingText(text: string): React.ReactNode {
                                 {bodyRows.map((row, rowIndex) => (
                                     <tr key={`tr-${rowIndex}`} className="border-b border-border/40">
                                         {headers.map((_, colIndex) => (
-                                            <td key={`td-${rowIndex}-${colIndex}`} className="px-2 py-1 align-top text-foreground/90">
+                                            <td key={`td-${rowIndex}-${colIndex}`} className="px-2 py-1 align-top text-foreground/90 break-words [overflow-wrap:anywhere]">
                                                 {renderStreamingInlineMarkdown(row[colIndex] ?? '', `table-cell-${currentTableKey}-${rowIndex}-${colIndex}`)}
                                             </td>
                                         ))}
@@ -640,7 +640,7 @@ function renderStreamingInlineMarkdown(text: string, keyPrefix: string): React.R
             elements.push(
                 <code
                     key={tokenKey}
-                    className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
+                    className="rounded border border-orange-300/70 bg-orange-100/85 px-1.5 py-0.5 font-mono text-sm text-orange-700 break-all [overflow-wrap:anywhere] dark:border-[#39ff14]/35 dark:bg-[#0b1a0f] dark:text-[#39ff14]"
                 >
                     {token.slice(1, -1)}
                 </code>
