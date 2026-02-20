@@ -48,6 +48,7 @@ import {
 } from "@/lib/reference-token-colors";
 import { useAppSettings } from "@/lib/app-settings";
 import { useIsMobile } from "@/components/ui/use-mobile";
+import { WorkdirPicker } from "@/components/workdir-picker";
 
 // Re-export types matching the original chat-input.tsx so imports stay compatible.
 export type ChatMode = "agent" | "wild" | "sweep" | "plan";
@@ -92,6 +93,8 @@ interface ChatInputProps {
   selectedModel?: SessionModelSelection | null;
   isModelUpdating?: boolean;
   onModelChange?: (model: SessionModelSelection) => Promise<void> | void;
+  selectedWorkdir?: string | null;
+  onWorkdirChange?: (path: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +160,8 @@ export function ChatInput({
   selectedModel = null,
   isModelUpdating = false,
   onModelChange,
+  selectedWorkdir = null,
+  onWorkdirChange,
 }: ChatInputProps) {
   const { settings } = useAppSettings();
   const isMobile = useIsMobile();
@@ -783,9 +788,9 @@ export function ChatInput({
     selectedModel ||
     (defaultModelOption
       ? {
-          provider_id: defaultModelOption.provider_id,
-          model_id: defaultModelOption.model_id,
-        }
+        provider_id: defaultModelOption.provider_id,
+        model_id: defaultModelOption.model_id,
+      }
       : null);
   const modelOptionsByProvider = useMemo(() => {
     const groups = new Map<string, ChatModelOption[]>();
@@ -952,11 +957,10 @@ export function ChatInput({
                     type="button"
                     onClick={() => insertMention(item)}
                     onMouseEnter={() => setSelectedMentionIndex(index)}
-                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${
-                      index === selectedMentionIndex
-                        ? "bg-secondary"
-                        : "hover:bg-secondary/50"
-                    }`}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${index === selectedMentionIndex
+                      ? "bg-secondary"
+                      : "hover:bg-secondary/50"
+                      }`}
                   >
                     <span
                       className="flex items-center justify-center h-5 w-5 rounded shrink-0"
@@ -1013,23 +1017,22 @@ export function ChatInput({
                       key={type}
                       type="button"
                       onClick={() => setMentionFilter(type)}
-                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${
-                        mentionFilter === type
-                          ? "border-transparent"
-                          : "border-transparent text-muted-foreground hover:bg-secondary"
-                      }`}
+                      className={`shrink-0 max-w-[88px] rounded border px-2 py-0.5 text-[10px] transition-colors ${mentionFilter === type
+                        ? "border-transparent"
+                        : "border-transparent text-muted-foreground hover:bg-secondary"
+                        }`}
                       style={
                         mentionFilter === type
                           ? type === "all"
                             ? {
-                                backgroundColor: "hsl(var(--secondary))",
-                                color: "hsl(var(--foreground))",
-                                borderColor: "hsl(var(--border))",
-                              }
+                              backgroundColor: "hsl(var(--secondary))",
+                              color: "hsl(var(--foreground))",
+                              borderColor: "hsl(var(--border))",
+                            }
                             : {
-                                color: mentionTypeColorMap[type],
-                                borderColor: `${mentionTypeColorMap[type]}66`,
-                              }
+                              color: mentionTypeColorMap[type],
+                              borderColor: `${mentionTypeColorMap[type]}66`,
+                            }
                           : undefined
                       }
                     >
@@ -1160,15 +1163,14 @@ export function ChatInput({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                  mode === "agent"
-                    ? "border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
-                    : mode === "wild"
-                      ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300"
-                      : mode === "plan"
-                        ? "border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300"
-                        : "border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300"
-                }`}
+                className={`chat-toolbar-pill flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${mode === "agent"
+                  ? "border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
+                  : mode === "wild"
+                    ? "border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300"
+                    : mode === "plan"
+                      ? "border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300"
+                      : "border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300"
+                  }`}
               >
                 {mode === "agent" ? (
                   <MessageSquare className="h-3 w-3" />
@@ -1246,6 +1248,15 @@ export function ChatInput({
             </PopoverContent>
           </Popover>
 
+          {/* Workdir picker */}
+          {onWorkdirChange && (
+            <WorkdirPicker
+              value={selectedWorkdir ?? null}
+              onSelect={onWorkdirChange}
+              disabled={!!messages?.length}
+            />
+          )}
+
           {/* Model selector */}
           {onModelChange && modelOptions.length > 0 && (
             <Popover open={isModelOpen} onOpenChange={setIsModelOpen}>
@@ -1281,7 +1292,7 @@ export function ChatInput({
                           const isSelected = Boolean(
                             effectiveSelectedModel &&
                             option.provider_id ===
-                              effectiveSelectedModel.provider_id &&
+                            effectiveSelectedModel.provider_id &&
                             option.model_id === effectiveSelectedModel.model_id,
                           );
                           return (
@@ -1369,13 +1380,12 @@ export function ChatInput({
               !message.trim() && !replyExcerpt && attachments.length === 0
             }
             size="icon"
-            className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${
-              isStreaming && onQueue
-                ? "bg-amber-500 text-white hover:bg-amber-600"
-                : isWildLoopActive && onSteer
-                  ? "bg-orange-500 text-white hover:bg-orange-600"
-                  : "bg-primary text-primary-foreground hover:bg-primary/90"
-            }`}
+            className={`chat-toolbar-icon ml-auto shrink-0 rounded-lg disabled:opacity-30 relative ${isStreaming && onQueue
+              ? "bg-amber-500 text-white hover:bg-amber-600"
+              : isWildLoopActive && onSteer
+                ? "bg-orange-500 text-white hover:bg-orange-600"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+              }`}
             title="Send message"
           >
             {isStreaming && onQueue ? (

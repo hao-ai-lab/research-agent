@@ -44,6 +44,7 @@ export interface ChatSession {
     model_provider?: string
     model_id?: string
     status?: ChatSessionStatus
+    workdir?: string
 }
 
 export interface SessionModelSelection {
@@ -144,7 +145,7 @@ export async function listSessions(): Promise<ChatSession[]> {
 /**
  * Create a new chat session
  */
-export async function createSession(title?: string, model?: SessionModelSelection): Promise<ChatSession> {
+export async function createSession(title?: string, model?: SessionModelSelection, workdir?: string): Promise<ChatSession> {
     const body: Record<string, unknown> = {}
     if (title) {
         body.title = title
@@ -153,6 +154,9 @@ export async function createSession(title?: string, model?: SessionModelSelectio
         body.model_provider = model.provider_id
         body.model_id = model.model_id
     }
+    if (workdir) {
+        body.workdir = workdir
+    }
     const response = await fetch(`${API_URL()}/sessions`, {
         method: 'POST',
         headers: getHeaders(true),
@@ -160,6 +164,36 @@ export async function createSession(title?: string, model?: SessionModelSelectio
     })
     if (!response.ok) {
         throw new Error(`Failed to create session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+
+/**
+ * List immediate subdirectories of a path (for workdir picker).
+ * Defaults to the server's WORKDIR if no path given.
+ */
+export interface DirectoryEntry {
+    name: string
+    path: string
+}
+
+export interface ListDirectoriesResponse {
+    base_path: string
+    dirs: DirectoryEntry[]
+    server_workdir: string
+}
+
+export async function listDirectories(path?: string): Promise<ListDirectoriesResponse> {
+    const url = new URL(`${API_URL()}/fs/list-dirs`)
+    if (path) {
+        url.searchParams.set('path', path)
+    }
+    const response = await fetch(url.toString(), {
+        headers: getHeaders(),
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to list directories: ${response.statusText}`)
     }
     return response.json()
 }

@@ -343,6 +343,40 @@ async def reset_session_workdir(session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Filesystem browsing (for workdir picker)
+# ---------------------------------------------------------------------------
+
+@router.get("/fs/list-dirs")
+async def list_directories(path: str = Query("", description="Absolute directory path to list")):
+    """List immediate subdirectories of a given path. Used by the frontend workdir picker."""
+    import os as _os
+
+    base = path.strip() or config.WORKDIR
+    base = _os.path.abspath(base)
+
+    # Security: reject path traversal attempts
+    if ".." in base.split(_os.sep):
+        raise HTTPException(status_code=400, detail="Path traversal not allowed")
+
+    if not _os.path.isdir(base):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    dirs = []
+    try:
+        for entry in sorted(_os.scandir(base), key=lambda e: e.name.lower()):
+            if entry.is_dir(follow_symlinks=False):
+                dirs.append({"name": entry.name, "path": entry.path})
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    return {
+        "base_path": base,
+        "dirs": dirs,
+        "server_workdir": config.WORKDIR,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Mode Registry: data-driven prompt builder
 # ---------------------------------------------------------------------------
 

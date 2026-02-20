@@ -798,7 +798,7 @@ export async function listSessions(): Promise<ChatSession[]> {
     }))
 }
 
-export async function createSession(title?: string, model?: SessionModelSelection): Promise<ChatSession> {
+export async function createSession(title?: string, model?: SessionModelSelection, workdir?: string): Promise<ChatSession> {
     await delay(150)
     const id = `session-${generateId()}`
     const selectedModel = model ?? DEFAULT_MODEL_SELECTION
@@ -820,6 +820,21 @@ export async function createSession(title?: string, model?: SessionModelSelectio
         model_provider: session.model_provider,
         model_id: session.model_id,
         status: 'idle',
+        workdir: workdir || '/workspace',
+    }
+}
+
+export async function listDirectories(path?: string): Promise<import('./api').ListDirectoriesResponse> {
+    await delay(100)
+    const base = path || '/workspace'
+    return {
+        base_path: base,
+        dirs: [
+            { name: 'src', path: `${base}/src` },
+            { name: 'lib', path: `${base}/lib` },
+            { name: 'tests', path: `${base}/tests` },
+        ],
+        server_workdir: '/workspace',
     }
 }
 
@@ -1463,8 +1478,8 @@ export async function updateSweep(sweepId: string, request: UpdateSweepRequest):
             sweep.creation_context.command = baseCommand
         }
         if (sweep.ui_config && typeof sweep.ui_config === 'object') {
-            ;(sweep.ui_config as Record<string, unknown>).command = baseCommand
-            ;(sweep.ui_config as Record<string, unknown>).updatedAt = Date.now()
+            ; (sweep.ui_config as Record<string, unknown>).command = baseCommand
+                ; (sweep.ui_config as Record<string, unknown>).updatedAt = Date.now()
         }
 
         sweep.run_ids.forEach((runId) => {

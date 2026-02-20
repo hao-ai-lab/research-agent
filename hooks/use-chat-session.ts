@@ -82,7 +82,7 @@ export interface UseChatSessionResult {
     savedSessionIds: string[]
     currentSessionId: string | null
     currentSession: ChatSession | null
-    createNewSession: () => Promise<string | null>
+    createNewSession: (workdir?: string) => Promise<string | null>
     startNewChat: () => void
     selectSession: (sessionId: string) => Promise<void>
     saveSession: (sessionId: string) => Promise<void>
@@ -820,10 +820,10 @@ export function useChatSession(): UseChatSessionResult {
     }, [savedSessionIds])
 
     // Create new session - returns the new session ID
-    const createNewSession = useCallback(async (): Promise<string | null> => {
+    const createNewSession = useCallback(async (workdir?: string): Promise<string | null> => {
         try {
             setError(null)
-            const newSession = await createSession(undefined, selectedModel || undefined)
+            const newSession = await createSession(undefined, selectedModel || undefined, workdir)
             setArchivedSessionIds((prev) => prev.filter((id) => id !== newSession.id))
             setSessions(prev => [newSession, ...prev.filter((session) => session.id !== newSession.id)])
             setCurrentSessionId(newSession.id)
