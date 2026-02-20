@@ -92,6 +92,12 @@ def init_paths(workdir: str):
     os.chdir(WORKDIR)
 
 
+def resolve_session_workdir(session: dict) -> str:
+    """Resolve working directory for a chat session, falling back to global WORKDIR."""
+    session_workdir = (session.get("workdir") or "").strip()
+    return session_workdir if session_workdir else WORKDIR
+
+
 # =============================================================================
 # Auth Helpers
 # =============================================================================

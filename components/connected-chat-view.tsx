@@ -146,6 +146,9 @@ export function ConnectedChatView({
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
 
+    // Pending workdir for the next session to be created
+    const [pendingWorkdir, setPendingWorkdir] = useState<string | null>(null)
+
     // Web notification hook
     const { notify } = useWebNotification(webNotificationsEnabled)
 
@@ -417,10 +420,11 @@ export function ConnectedChatView({
         setStarterDraftInsert(null)
         let sessionId = currentSessionId
         if (!sessionId) {
-            sessionId = await createNewSession()
+            sessionId = await createNewSession(pendingWorkdir || undefined)
             if (!sessionId) {
                 return
             }
+            setPendingWorkdir(null)
         }
 
         const effectiveMode = msgMode || mode
@@ -459,7 +463,7 @@ export function ConnectedChatView({
         // Send the message normally — in wild mode (already running), the V2 backend
         // handles all subsequent iterations autonomously
         await sendMessage(message, effectiveMode, sessionId)
-    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage, selectSession])
+    }, [currentSessionId, createNewSession, sendMessage, mode, wildLoop, onUserMessage, selectSession, pendingWorkdir])
 
     const handleReplyToSelection = useCallback((selectedText: string) => {
         if (!currentSessionId) return
@@ -623,6 +627,8 @@ export function ConnectedChatView({
                 selectedModel={selectedModel}
                 isModelUpdating={isModelUpdating}
                 onModelChange={setSelectedModel}
+                selectedWorkdir={pendingWorkdir}
+                onWorkdirChange={setPendingWorkdir}
             />
         </>
     )

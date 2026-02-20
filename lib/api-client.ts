@@ -59,6 +59,8 @@ export type {
     JourneyRecommendationRespondRequest,
     JourneyDecisionCreateRequest,
     JourneyGenerateRecommendationsResponse,
+    DirectoryEntry,
+    ListDirectoriesResponse,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -114,6 +116,9 @@ export const checkApiHealth = async (): Promise<boolean> => {
 
 export const listRuns = (...args: Parameters<typeof realApi.listRuns>) =>
     getApi().listRuns(...args)
+
+export const listDirectories = (...args: Parameters<typeof realApi.listDirectories>) =>
+    getApi().listDirectories(...args)
 
 export const createRun = (...args: Parameters<typeof realApi.createRun>) =>
     getApi().createRun(...args)

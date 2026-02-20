@@ -24,6 +24,7 @@ from core.config import (
     apply_runtime_research_agent_key,
     get_auth,
     get_session_model,
+    resolve_session_workdir,
 )
 from core.state import (
     chat_sessions,
@@ -53,10 +54,11 @@ async def get_opencode_session_for_chat(chat_session_id: str) -> str:
 
     async with httpx.AsyncClient() as client:
         await apply_runtime_research_agent_key(client)
-        # Bind new OpenCode sessions to this server's workdir to avoid stale project reuse.
+        # Bind new OpenCode sessions to the session's workdir (per-chat override or server default).
+        effective_workdir = resolve_session_workdir(session)
         resp = await client.post(
             f"{OPENCODE_URL}/session",
-            params={"directory": os.path.abspath(config.WORKDIR)},
+            params={"directory": os.path.abspath(effective_workdir)},
             json={},
             auth=get_auth(),
         )

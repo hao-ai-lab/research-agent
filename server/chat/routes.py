@@ -27,12 +27,14 @@ from core.config import (
     get_auth,
     get_session_model,
     load_available_opencode_models,
+    resolve_session_workdir,
 )
 from core.models import (
     CreateSessionRequest,
     UpdateSessionRequest,
     ChatRequest,
     SessionModelUpdate,
+    SessionWorkdirUpdate,
     SystemPromptUpdate,
 )
 from core.state import (
@@ -150,6 +152,7 @@ async def list_sessions():
             "model_provider": session_model_provider,
             "model_id": session_model_id,
             "status": resolve_session_status(sid, session),
+            "workdir": resolve_session_workdir(session),
         })
     sessions.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return sessions
@@ -170,7 +173,8 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
     session_model_id = str(requested_model_id or MODEL_ID).strip() or MODEL_ID
     session_id = uuid.uuid4().hex[:12]
     title = req.title if req and req.title else "New Chat"
-    chat_sessions[session_id] = {
+    requested_workdir = (req.workdir.strip() if req and req.workdir else "") or None
+    session_data = {
         "title": title,
         "created_at": time.time(),
         "messages": [],
@@ -180,6 +184,9 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "model_id": session_model_id,
         "last_status": "idle",
     }
+    if requested_workdir:
+        session_data["workdir"] = requested_workdir
+    chat_sessions[session_id] = session_data
     save_chat_state()
     emit_chat_event("chat_created", session_id, model_provider=session_model_provider, model_id=session_model_id)
     return {
@@ -190,6 +197,7 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "model_provider": session_model_provider,
         "model_id": session_model_id,
         "status": "idle",
+        "workdir": resolve_session_workdir(session_data),
     }
 
 
@@ -211,6 +219,7 @@ async def get_session(session_id: str):
         "model_provider": session_model_provider,
         "model_id": session_model_id,
         "active_stream": active_stream,
+        "workdir": resolve_session_workdir(session),
     }
 
 
@@ -293,6 +302,84 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
     return {"system_prompt": req.system_prompt}
 
 
+@router.get("/sessions/{session_id}/workdir")
+async def get_session_workdir(session_id: str):
+    """Get the effective working directory for a chat session."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = chat_sessions[session_id]
+    return {
+        "workdir": resolve_session_workdir(session),
+        "is_override": bool((session.get("workdir") or "").strip()),
+        "server_default": config.WORKDIR,
+    }
+
+
+@router.put("/sessions/{session_id}/workdir")
+async def update_session_workdir(session_id: str, req: SessionWorkdirUpdate):
+    """Update the working directory for a chat session."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    workdir = req.workdir.strip()
+    if not workdir:
+        raise HTTPException(status_code=400, detail="workdir cannot be empty")
+    chat_sessions[session_id]["workdir"] = workdir
+    save_chat_state()
+    return {
+        "workdir": workdir,
+        "is_override": True,
+        "server_default": config.WORKDIR,
+    }
+
+
+@router.delete("/sessions/{session_id}/workdir")
+async def reset_session_workdir(session_id: str):
+    """Reset the working directory for a chat session to the server default."""
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    chat_sessions[session_id].pop("workdir", None)
+    save_chat_state()
+    return {
+        "workdir": config.WORKDIR,
+        "is_override": False,
+        "server_default": config.WORKDIR,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Filesystem browsing (for workdir picker)
+# ---------------------------------------------------------------------------
+
+@router.get("/fs/list-dirs")
+async def list_directories(path: str = Query("", description="Absolute directory path to list")):
+    """List immediate subdirectories of a given path. Used by the frontend workdir picker."""
+    import os as _os
+
+    base = path.strip() or config.WORKDIR
+    base = _os.path.abspath(base)
+
+    # Security: reject path traversal attempts
+    if ".." in base.split(_os.sep):
+        raise HTTPException(status_code=400, detail="Path traversal not allowed")
+
+    if not _os.path.isdir(base):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    dirs = []
+    try:
+        for entry in sorted(_os.scandir(base), key=lambda e: e.name.lower()):
+            if entry.is_dir(follow_symlinks=False):
+                dirs.append({"name": entry.name, "path": entry.path})
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    return {
+        "base_path": base,
+        "dirs": dirs,
+        "server_workdir": config.WORKDIR,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Mode Registry: data-driven prompt builder
 # ---------------------------------------------------------------------------
@@ -301,7 +388,7 @@ async def update_system_prompt(session_id: str, req: SystemPromptUpdate):
 class ModeConfig:
     """Declares how to build a mode-specific prompt preamble."""
     skill_id: str
-    build_state: Callable[[str], dict]  # (message) -> template variables
+    build_state: Callable  # (message, session=None) -> template variables
 
 
 def _build_experiment_context() -> str:
@@ -341,16 +428,17 @@ def _build_experiment_context() -> str:
     return "\n".join(lines)
 
 
-def _build_agent_state(_message: str) -> dict:
+def _build_agent_state(_message: str, session: Optional[dict] = None) -> dict:
     """Build template variables for agent (default chat) mode."""
     return {
         "experiment_context": _build_experiment_context(),
         "server_url": SERVER_CALLBACK_URL,
         "auth_token": USER_AUTH_TOKEN or "",
+        "workdir": resolve_session_workdir(session or {}),
     }
 
 
-def _build_plan_state(message: str) -> dict:
+def _build_plan_state(message: str, session: Optional[dict] = None) -> dict:
     """Build template variables for plan mode."""
     # Summarize existing plans for context
     existing_plans_summary = "No existing plans."
@@ -365,6 +453,7 @@ def _build_plan_state(message: str) -> dict:
         "existing_plans": existing_plans_summary,
         "server_url": SERVER_CALLBACK_URL,
         "auth_token": USER_AUTH_TOKEN or "",
+        "workdir": resolve_session_workdir(session or {}),
     }
 
 
@@ -385,7 +474,7 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
 
     config = MODE_REGISTRY.get(mode)
     if config:
-        variables = config.build_state(message)
+        variables = config.build_state(message, session=session)
         skill = _prompt_skill_manager.get(config.skill_id)
         rendered = _prompt_skill_manager.render(config.skill_id, variables)
         if rendered:

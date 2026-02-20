@@ -88,6 +88,7 @@ from core.config import (  # noqa: E402
     _parse_optional_int,
     load_available_opencode_models,
     get_session_model,
+    resolve_session_workdir,
 )
 
 

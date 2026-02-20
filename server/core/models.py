@@ -36,6 +36,7 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
     model_provider: Optional[str] = None
     model_id: Optional[str] = None
+    workdir: Optional[str] = None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -44,6 +45,10 @@ class UpdateSessionRequest(BaseModel):
 
 class SystemPromptUpdate(BaseModel):
     system_prompt: str = ""
+
+
+class SessionWorkdirUpdate(BaseModel):
+    workdir: str
 
 
 class SessionModelUpdate(BaseModel):
