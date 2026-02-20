@@ -77,7 +77,7 @@ export function OnboardingHelpDialog({ open, onOpenChange }: OnboardingHelpDialo
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-6xl p-0 h-[85vh] flex flex-col overflow-hidden gap-0">
+            <DialogContent className="w-[85vw] p-0 h-[85vh] flex flex-col overflow-hidden gap-0">
                 <DialogHeader className="px-6 py-4 border-b border-border/60 shrink-0">
                     <DialogTitle className="text-xl">Help & Documentation</DialogTitle>
                     <DialogDescription>
