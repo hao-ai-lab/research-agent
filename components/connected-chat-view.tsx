@@ -107,7 +107,7 @@ export function ConnectedChatView({
     const isMobile = useIsMobile()
     const [showTerminationDialog, setShowTerminationDialog] = useState(false)
     const [mobilePanelTab, setMobilePanelTab] = useState<'chat' | 'context'>('chat')
-    const [localContextPanelHidden, setLocalContextPanelHidden] = useState(false)
+    const [localContextPanelHidden, setLocalContextPanelHidden] = useState(true)
     // Use parent-controlled state if provided, otherwise fall back to local state
     const contextPanelHidden = contextPanelHiddenProp ?? localContextPanelHidden
     const setContextPanelHidden = onContextPanelHiddenChange ?? setLocalContextPanelHidden
@@ -122,7 +122,7 @@ export function ConnectedChatView({
     const [isExcerptPreviewOpen, setIsExcerptPreviewOpen] = useState(false)
     const { settings, setSettings } = useAppSettings()
     const showStarterCards = settings.appearance.starterCardFlavor !== 'none'
-    const showChatContextPanel = settings.developer?.showChatContextPanel === true
+    const showChatContextPanel = true  // always available; visibility controlled by contextPanelHidden
     const starterCardFlavor = settings.appearance.starterCardFlavor || 'novice'
     const customTemplates = settings.appearance.starterCardTemplates ?? {}
     const handleEditTemplate = useCallback((cardId: string, template: string | null) => {
@@ -145,7 +145,6 @@ export function ConnectedChatView({
     // Counter to force re-render when provenance is added (ref alone won't trigger)
     // Track the previous streaming state to detect when streaming finishes
     const prevStreamingRef = useRef(false)
-    const wasChatContextPanelEnabledRef = useRef(showChatContextPanel)
 
     // Web notification hook
     const { notify } = useWebNotification(webNotificationsEnabled)
@@ -203,17 +202,7 @@ export function ConnectedChatView({
         window.localStorage.setItem(STORAGE_KEY_CHAT_CONTEXT_PANEL_HIDDEN, String(localContextPanelHidden))
     }, [localContextPanelHidden, contextPanelHiddenProp])
 
-    useEffect(() => {
-        if (showChatContextPanel && !wasChatContextPanelEnabledRef.current) {
-            setContextPanelHidden(false)
-        } else if (!showChatContextPanel) {
-            setContextPanelHidden(true)
-            if (mobilePanelTab === 'context') {
-                setMobilePanelTab('chat')
-            }
-        }
-        wasChatContextPanelEnabledRef.current = showChatContextPanel
-    }, [showChatContextPanel, mobilePanelTab])
+
 
     const getScrollViewport = useCallback((): HTMLDivElement | null => {
         if (!scrollRef.current) return null
