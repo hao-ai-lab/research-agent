@@ -1011,7 +1011,7 @@ export function RunsView({
         <button
           type="button"
           onClick={() => toggleRunSection(sectionKey)}
-          className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+          className="mb-1 flex w-full items-center justify-between rounded-md px-1 py-0.5 text-left hover:bg-secondary/40"
         >
           <div className="flex items-center gap-2">
             {icon}
@@ -1074,7 +1074,7 @@ export function RunsView({
             handleRunClick(run)
           }
         }}
-        className={`w-full rounded-xl border bg-card p-3 text-left transition-colors active:scale-[0.99] ${isSelectedForManage
+        className={`w-full rounded-lg border bg-card px-2.5 py-2 text-left transition-colors active:scale-[0.99] ${isSelectedForManage
           ? 'border-accent bg-accent/10'
           : 'border-border hover:border-muted-foreground/50'
           }`}
@@ -2117,13 +2117,13 @@ export function RunsView({
               </div> */}
 
               {/* Runs & Sweeps Grid – above Charts per issue #249 */}
-              <div className="grid gap-3 lg:grid-cols-2">
+              <div className="grid gap-2 lg:grid-cols-2">
                 {/* Runs Section */}
                 <div>
                   <button
                     type="button"
                     onClick={() => toggleTopSection('runs')}
-                    className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+                    className="mb-1 flex w-full items-center justify-between rounded-md px-1 py-0.5 text-left hover:bg-secondary/40"
                   >
                     <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Runs</h3>
                     {isTopSectionExpanded('runs') ? (
@@ -2133,7 +2133,7 @@ export function RunsView({
                     )}
                   </button>
                   {isTopSectionExpanded('runs') && (
-                    <div className="rounded-xl border border-border bg-card">
+                    <div className="rounded-lg border border-border bg-card">
                       <div className="border-b border-border px-4 py-2">
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1.5 min-w-0 flex-1 flex-wrap">
@@ -2412,7 +2412,7 @@ export function RunsView({
                         </div>
                       </div>
 
-                      <div className="p-4 space-y-5">
+                      <div className="p-3 space-y-3">
                         {detailsView === 'priority' ? (
                           <>
                             {renderRunSubsection('priority:favorites', 'Favorites', <Star className="h-4 w-4 text-yellow-500" />, favoriteRuns)}
@@ -2475,7 +2475,7 @@ export function RunsView({
                   <button
                     type="button"
                     onClick={() => toggleTopSection('sweeps')}
-                    className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+                    className="mb-1 flex w-full items-center justify-between rounded-md px-1 py-0.5 text-left hover:bg-secondary/40"
                   >
                     <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Sweeps</h3>
                     <div className="flex items-center gap-2">
@@ -2488,7 +2488,7 @@ export function RunsView({
                     </div>
                   </button>
                   {isTopSectionExpanded('sweeps') && (
-                    <div className="rounded-xl border border-border bg-card p-3">
+                    <div className="rounded-lg border border-border bg-card p-2.5">
                       <div className="mb-2 flex items-center justify-end gap-0.5">
                         <Button
                           variant="ghost"
@@ -2533,7 +2533,7 @@ export function RunsView({
                 <button
                   type="button"
                   onClick={() => toggleTopSection('charts')}
-                  className="mb-2 flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-secondary/40"
+                  className="mb-1 flex w-full items-center justify-between rounded-md px-1 py-0.5 text-left hover:bg-secondary/40"
                 >
                   <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Charts</h3>
                   {isTopSectionExpanded('charts') ? (
