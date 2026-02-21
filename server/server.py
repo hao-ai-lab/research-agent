@@ -722,6 +722,9 @@ def main():
     global TMUX_SESSION_NAME
 
     if "--run-sidecar" in sys.argv:
+        # DEPRECATED: sidecar now runs in-process via launch_run_in_tmux().
+        # This path is kept for backward compatibility with frozen binaries.
+        logger.warning("--run-sidecar is deprecated; sidecar now runs in-process")
         sidecar_index = sys.argv.index("--run-sidecar")
         sidecar_argv = sys.argv[sidecar_index + 1 :]
         import tools.job_sidecar as job_sidecar
