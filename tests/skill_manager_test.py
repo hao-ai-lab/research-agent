@@ -5,30 +5,14 @@ import shutil
 import tempfile
 import pytest
 
-# We need to import from server.server directly since server/ is not
-# a Python package (no __init__.py).
 import sys
-import importlib.util
-from unittest.mock import MagicMock
 
 _repo = os.path.join(os.path.dirname(__file__), "..")
 _server_dir = os.path.join(_repo, "server")
 sys.path.insert(0, _repo)
 sys.path.insert(0, _server_dir)
 
-# Stub out heavy C-extension / optional deps that PromptSkillManager doesn't need.
-for _mod_name in ["libtmux", "sse_starlette", "sse_starlette.sse", "dotenv"]:
-    if _mod_name not in sys.modules:
-        sys.modules[_mod_name] = MagicMock()
-
-# Load server.py by filepath so we avoid the "server is not a package" problem.
-_spec = importlib.util.spec_from_file_location("server_module", os.path.join(_server_dir, "server.py"))
-_server_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_server_mod)
-
-PromptSkillManager = _server_mod.PromptSkillManager
-INTERNAL_SKILL_IDS = _server_mod.INTERNAL_SKILL_IDS
-INTERNAL_SKILL_PREFIXES = _server_mod.INTERNAL_SKILL_PREFIXES
+from skills.manager import PromptSkillManager, INTERNAL_SKILL_IDS, INTERNAL_SKILL_PREFIXES
 
 # ---------------------------------------------------------------------------
 # Fixtures
