@@ -82,57 +82,7 @@ Sometimes the user may specify the `CUDA_VISIBLE_DEVICES` in the run command. In
 
 ---
 
-## 🚨 CRITICAL: Job Submission via API
-
-> **NEVER run training, evaluation, or experiment scripts directly (e.g. `python train.py`, `bash run.sh`, `torchrun ...`).**
-> **ALL experiments MUST be submitted through the server API.**
-> **Runs not created via API are invisible to users and not auditable.**
-
-### Discovering endpoints
-
-Before constructing API calls, fetch the live API documentation:
-
-```bash
-curl -sf {{server_url}}/docs > /dev/null
-curl -sf {{server_url}}/openapi.json > /dev/null
-```
-
-### Creating a sweep
-
-```bash
-curl -X POST {{server_url}}/sweeps/wild \
-  -H "Content-Type: application/json" \
-  {{auth_header}} \
-  -d '{"name": "sweep-name", "goal": "what this tests"}'
-```
-
-### Creating a run
-
-```bash
-curl -X POST {{server_url}}/runs \
-  -H "Content-Type: application/json" \
-  {{auth_header}} \
-  -d '{
-    "name": "trial-name",
-    "command": "cd /path/to/workdir && python train.py --lr 0.001",
-    "sweep_id": "<sweep_id>",
-    "auto_start": true,
-    "gpuwrap_config": {"enabled": true}
-  }'
-```
-
-### Grid search
-
-- One configuration = one run.
-- Create multiple runs via repeated `POST {{server_url}}/runs`, one per config.
-- Do not wrap grid search in a local shell loop that bypasses the API.
-
-### Monitoring
-
-```bash
-curl -X GET {{server_url}}/runs {{auth_header}}
-curl -X GET {{server_url}}/runs/{id}/logs {{auth_header}}
-```
+{{partial_experiment_tracking}}
 
 ## Available API Endpoints
 
@@ -140,31 +90,7 @@ curl -X GET {{server_url}}/runs/{id}/logs {{auth_header}}
 
 ---
 
-## Python Environment
-
-Before running experiments, ensure the correct Python environment is active.
-
-### Detection
-
-Check for environment files in the project root:
-- `pyproject.toml` → use `uv` or `pip install -e .`
-- `requirements.txt` → use `uv pip install -r requirements.txt` or `pip install -r requirements.txt`
-- `environment.yml` → use `micromamba` or `conda`
-- `setup.py` → use `pip install -e .`
-
-### Setup preference order
-
-1. `uv` — `uv venv .venv && source .venv/bin/activate && uv pip install -r requirements.txt`
-2. `micromamba` / `conda`
-3. System `pip` (least preferred)
-
-### Important
-
-- **Always include environment activation in run commands.** The `command` field in `POST /runs` runs in a fresh shell, so activation must be explicit:
-  ```
-  "command": "source .venv/bin/activate && cd /path/to/workdir && python train.py --lr 0.001"
-  ```
-- Check for existing virtual environments before creating new ones (`ls .venv/`, `conda env list`).
+{{partial_environment_setup}}
 
 ---
 
@@ -183,6 +109,10 @@ Periodically reflect on whether the current workflow can be improved. After comp
    history | grep -i 'python.*train\|sbatch\|srun\|torchrun\|accelerate' | tail -20
    find . -name '*.sbatch' -o -name '*.slurm' -o -name 'submit*.sh' | head -10
    ```
+
+---
+
+{{partial_system_issue_reporting}}
 
 ---
 
