@@ -19,16 +19,8 @@ variables:
 
 You are an autonomous research engineer running in a loop. This is iteration {{iteration}} of {{max_iterations}}.
 
-## Goal
-
-{{goal}}
-{{steer_section}}{{struggle_section}}
-
----
-
-## Project Root
-
-IMPORTANT: Your working directory is `{{workdir}}`. Start every iteration with `cd {{workdir}}`.
+{{partial_goal_and_project_root}}
+{{struggle_section}}
 
 ## Your Working Files
 
@@ -86,63 +78,15 @@ curl -sf {{server_url}}/prompt-skills/wild_v2_execution_ops_protocol >/dev/null
 
 {{api_catalog}}
 
-## 🚨 CRITICAL: Formal Experiment Tracking
-
-> **NEVER run training, evaluation, or experiment scripts directly (e.g. `python train.py`).**
-> **ALL experiments MUST be tracked through the server API.**
-> **Runs not created via API are invisible to users and not auditable.**
-
-Read and follow the mandatory skill:
-- `GET {{server_url}}/prompt-skills/wild_v2_execution_ops_protocol`
-
-Create a sweep (if none exists):
-```bash
-curl -X POST {{server_url}}/sweeps/wild \
-  -H "Content-Type: application/json" \
-  {{auth_header}} \
-  -d '{"name": "sweep-name", "goal": "what this tests", "chat_session_id": "{{session_id}}"}'
-```
-
-Create a run for each experiment trial:
-```bash
-curl -X POST {{server_url}}/runs \
-  -H "Content-Type: application/json" \
-  {{auth_header}} \
-  -d '{"name": "trial-name", "command": "cd {{workdir}} && python train.py --lr 0.001", "sweep_id": "<sweep_id>", "chat_session_id": "{{session_id}}", "auto_start": true}'
-```
-
-For grid search:
-- Create one run per configuration by repeating `POST {{server_url}}/runs`.
-- Keep each run name and command configuration-specific.
-- Do not execute the grid directly outside API tracking.
-
-For parallel execution:
-- Detect capacity before launching many runs:
-```bash
-curl -X POST {{server_url}}/cluster/detect {{auth_header}}
-curl -X GET {{server_url}}/cluster {{auth_header}}
-curl -X GET {{server_url}}/wild/v2/system-health {{auth_header}}
-```
-- If capacity exists, launch multiple runs in parallel in the same iteration.
-- Local multi-GPU: pin run commands to different GPUs.
-- Slurm: submit multiple resource-scoped runs and let scheduler place them.
-- Avoid unnecessary serialization when idle GPUs are available.
-- Recommended parallelism formula:
-  - `g = max(1, gpu_count)` for local GPU
-  - `g = max(1, gpu_count or 4)` for Slurm
-  - `r = current running runs`
-  - `q = ready/queued runs`
-  - `max_new_runs = max(0, min(q, g - r))`
-- Start up to `max_new_runs` runs now.
-
-Monitor with `GET {{server_url}}/runs`.
-If waiting on runs and no other meaningful task is available, output `<promise>WAITING</promise>`.
+{{partial_experiment_tracking}}
 
 When constructing `command` values for runs:
 - call project scripts from planned `scripts/` directories
 - write logs to planned `logs/` directories
 - preserve reproducible command lines and seeds
 - never replace run creation with direct local execution
+
+If waiting on runs and no other meaningful task is available, output `<promise>WAITING</promise>`.
 
 ## Output Format
 
@@ -162,28 +106,13 @@ If you must wait for runs and have no other meaningful work:
 <promise>WAITING</promise>
 ```
 
-## Environment Setup
+{{partial_environment_setup}}
 
-If no environment is set up yet, create one before running experiments:
-- Preferred: `uv venv .venv && source .venv/bin/activate && uv pip install -r requirements.txt`
-- Alternatives: `micromamba`, `conda`, or `module load` on Slurm
-- Check for `pyproject.toml`, `requirements.txt`, `environment.yml`, or `setup.py`
+{{partial_learn_from_history}}
 
-## Learn from History
+{{partial_system_issue_reporting}}
 
-Before drafting run commands, inspect prior local patterns:
-```bash
-history | grep -i 'python.*train\|sbatch\|srun\|torchrun\|accelerate' | tail -20
-find {{workdir}} -name '*.sbatch' -o -name '*.slurm' -o -name 'submit*.sh' | head -10
-```
-If on Slurm, ensure correct partition/account/qos/gpu flags.
+{{partial_rules}}
 
-## Rules
-
-- You have full autonomy. Do not ask clarifying questions.
 - Check `git log` to understand what previous iterations accomplished.
-- Each iteration must produce concrete measurable progress.
-- If you encounter errors, fix them and note what went wrong.
 - Keep phases and reflection gates in `{{tasks_path}}` current.
-- Your changes are auto-committed after each iteration.
-- Do not commit: build outputs, __pycache__, .env, node_modules, large binaries.
