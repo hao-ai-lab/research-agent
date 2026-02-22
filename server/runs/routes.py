@@ -5,6 +5,7 @@ Extracted from server.py. All /runs/* CRUD + lifecycle, /alerts/*,
 /wild-mode, and metrics endpoints live here.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -54,6 +55,44 @@ _load_run_metrics = None
 _find_wandb_dir_from_run_dir = None
 _get_wandb_curve_data = None
 _wandb_metrics_cache = None
+_parse_metrics_rows = None
+
+# Agent-backed run management (Phase 3)
+_agent_runtime = None
+
+# Mapping from agent_id → legacy run_id for backward compat
+_agent_to_run_id: dict[str, str] = {}
+
+# Lock for state mutations to prevent concurrent dict mutation races
+_state_lock = asyncio.Lock()
+
+def _get_session_agent_for_run(chat_session_id=None):
+    """Get an L1 SessionAgent from the per-session registry for run management.
+
+    Falls back to the first available session agent if no chat_session_id given.
+    Returns None if no agents available (falls back to tmux execution).
+    """
+    try:
+        from agent.wild_routes import _session_agents, _get_or_create_session_agent
+        if chat_session_id and chat_session_id in _session_agents:
+            return _session_agents[chat_session_id]
+        # Use first available L1 (for backward compat with non-chat runs)
+        if _session_agents:
+            return next(iter(_session_agents.values()))
+        # Don't auto-create an L1 for non-wild runs — fall back to tmux
+        return None
+    except Exception:
+        return None
+
+
+# Status mapping: AgentStatus → legacy run status
+_AGENT_STATUS_TO_RUN_STATUS = {
+    "idle": "ready",
+    "running": "running",
+    "paused": "running",
+    "done": "finished",
+    "failed": "failed",
+}
 
 
 def init(
@@ -67,6 +106,8 @@ def init(
     run_status_terminal_set,
     load_run_metrics_fn, find_wandb_dir_from_run_dir_fn,
     get_wandb_curve_data_fn, wandb_metrics_cache_dict,
+    parse_metrics_rows_fn=None,
+    agent_runtime=None, session_agent=None,
 ):
     """Wire in all shared state, helpers and callbacks from server.py."""
     global _runs, _sweeps, _active_alerts
@@ -79,6 +120,8 @@ def init(
     global _RUN_STATUS_TERMINAL
     global _load_run_metrics, _find_wandb_dir_from_run_dir
     global _get_wandb_curve_data, _wandb_metrics_cache
+    global _parse_metrics_rows
+    global _agent_runtime
 
     _runs = runs_dict
     _sweeps = sweeps_dict
@@ -101,6 +144,54 @@ def init(
     _find_wandb_dir_from_run_dir = find_wandb_dir_from_run_dir_fn
     _get_wandb_curve_data = get_wandb_curve_data_fn
     _wandb_metrics_cache = wandb_metrics_cache_dict
+    _parse_metrics_rows = parse_metrics_rows_fn
+    _agent_runtime = agent_runtime
+
+
+def _sync_agent_run_statuses():
+    """Sync agent-backed run statuses into the legacy runs dict.
+
+    For runs that have an `agent_id`, query the agent runtime for current
+    status and update the legacy dict accordingly.
+    """
+    if not _agent_runtime:
+        return
+
+    for run_id, run in _runs.items():
+        agent_id = run.get("agent_id")
+        if not agent_id:
+            continue
+
+        info = _agent_runtime.get_agent(agent_id)
+        if info is None:
+            continue
+
+        agent_status = info.status.value if hasattr(info.status, 'value') else str(info.status)
+        legacy_status = _AGENT_STATUS_TO_RUN_STATUS.get(agent_status, run.get("status"))
+
+        if legacy_status != run.get("status"):
+            run["status"] = legacy_status
+            if legacy_status == "running" and not run.get("started_at"):
+                run["started_at"] = time.time()
+            elif legacy_status in ("finished", "failed") and not run.get("ended_at"):
+                run["ended_at"] = time.time()
+
+            # Try to get exit code from agent results
+            if legacy_status in ("finished", "failed"):
+                from agentsys.types import EntryType as ET
+                results = _agent_runtime.store.query(
+                    agent_id=agent_id,
+                    type=ET.RESULT,
+                    limit=1,
+                )
+                if results:
+                    result_data = results[0].data
+                    if "exit_code" in result_data:
+                        run["exit_code"] = result_data["exit_code"]
+                    if "run_dir" in result_data:
+                        run["run_dir"] = result_data["run_dir"]
+                    if "error" in result_data:
+                        run["error"] = result_data["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -112,13 +203,18 @@ async def list_runs(
     archived: bool = Query(False, description="Include archived runs"),
     limit: int = Query(100, description="Max runs to return")
 ):
-    """List all runs."""
-    _reconcile_all_run_terminal_states()
-    result = []
-    for run_id, run in _runs.items():
-        if not archived and run.get("is_archived", False):
-            continue
-        result.append(_run_response_payload(run_id, run))
+    """List all runs (legacy dict + agent-backed)."""
+    async with _state_lock:
+        _reconcile_all_run_terminal_states()
+
+        # Sync agent-backed run statuses into legacy dict
+        _sync_agent_run_statuses()
+
+        result = []
+        for run_id, run in _runs.items():
+            if not archived and run.get("is_archived", False):
+                continue
+            result.append(_run_response_payload(run_id, run))
 
     result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return result[:limit]
@@ -177,14 +273,36 @@ async def create_run(req: RunCreate):
     logger.info(f"Created run {run_id}: {req.name} (status: {initial_status})")
 
     if initial_status == "queued":
-        try:
-            _launch_run_in_tmux(run_id, run_data)
-            if run_data.get("sweep_id"):
-                _recompute_sweep_state(run_data["sweep_id"])
-            _save_runs_state()
-        except Exception as e:
-            logger.error(f"Failed to auto-start run {run_id}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+        # Try agent-backed execution first (Phase 3)
+        _session_agent = _get_session_agent_for_run(req.chat_session_id)
+        if _session_agent is not None and not req.sweep_id:
+            try:
+                agent_id = await _session_agent.start_run(
+                    command=req.command,
+                    name=req.name,
+                    workdir=req.workdir or config.WORKDIR,
+                    gpuwrap_config=gpuwrap_config,
+                )
+                run_data["status"] = "launching"
+                run_data["agent_id"] = agent_id
+                _agent_to_run_id[agent_id] = run_id
+                _save_runs_state()
+            except Exception as e:
+                logger.warning(f"Agent-backed run failed, falling back to tmux: {e}")
+                try:
+                    _launch_run_in_tmux(run_id, run_data)
+                except Exception as e2:
+                    logger.error(f"Failed to start run {run_id}: {e2}")
+                    raise HTTPException(status_code=500, detail=str(e2))
+        else:
+            try:
+                _launch_run_in_tmux(run_id, run_data)
+                if run_data.get("sweep_id"):
+                    _recompute_sweep_state(run_data["sweep_id"])
+                _save_runs_state()
+            except Exception as e:
+                logger.error(f"Failed to auto-start run {run_id}: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
     return _run_response_payload(run_id, run_data)
 
@@ -193,6 +311,7 @@ async def create_run(req: RunCreate):
 async def get_run(run_id: str):
     """Get run details."""
     _reconcile_all_run_terminal_states()
+    _sync_agent_run_statuses()
     if run_id not in _runs:
         raise HTTPException(status_code=404, detail="Run not found")
     return _run_response_payload(run_id, _runs[run_id])
@@ -262,13 +381,19 @@ async def queue_run(run_id: str):
 
 @router.post("/runs/{run_id}/start")
 async def start_run(run_id: str):
-    """Start a queued run."""
+    """Start a queued or ready run."""
     if run_id not in _runs:
         raise HTTPException(status_code=404, detail="Run not found")
 
     run = _runs[run_id]
     if run["status"] not in ["queued", "ready"]:
         raise HTTPException(status_code=400, detail=f"Run cannot be started (status: {run['status']})")
+
+    # Already agent-backed? Don't double-launch.
+    if run.get("agent_id") and _agent_runtime:
+        info = _agent_runtime.get_agent(run["agent_id"])
+        if info and info.status.value in ("running", "idle"):
+            return {"message": "Run already running via agent", "agent_id": run["agent_id"]}
 
     if run["status"] == "ready":
         run["status"] = "queued"
@@ -281,6 +406,34 @@ async def start_run(run_id: str):
             note=run.get("name") or run_id,
         )
 
+    # Try agent-backed execution first
+    _session_agent = _get_session_agent_for_run(run.get("chat_session_id"))
+    if _session_agent is not None and not run.get("sweep_id"):
+        try:
+            gpuwrap_config = run.get("gpuwrap_config")
+            agent_id = await _session_agent.start_run(
+                command=run.get("command", ""),
+                name=run.get("name", run_id),
+                workdir=run.get("workdir", config.WORKDIR),
+                gpuwrap_config=gpuwrap_config,
+            )
+            run["status"] = "launching"
+            run["agent_id"] = agent_id
+            _agent_to_run_id[agent_id] = run_id
+            _record_journey_event(
+                kind="run_launched",
+                actor="system",
+                session_id=run.get("chat_session_id"),
+                run_id=run_id,
+                note=run.get("name") or run_id,
+                metadata={"agent_id": agent_id},
+            )
+            _save_runs_state()
+            return {"message": "Run started via agent", "agent_id": agent_id}
+        except Exception as e:
+            logger.warning(f"Agent-backed start failed for {run_id}, falling back to tmux: {e}")
+
+    # Fallback: tmux-based launch
     try:
         tmux_window = _launch_run_in_tmux(run_id, run)
         _record_journey_event(
@@ -310,6 +463,23 @@ async def stop_run(run_id: str):
     if run["status"] not in ["launching", "running"]:
         raise HTTPException(status_code=400, detail=f"Run is not active (status: {run['status']})")
 
+    # Stop agent-backed run if applicable
+    agent_id = run.get("agent_id")
+    if agent_id and _agent_runtime:
+        info = _agent_runtime.get_agent(agent_id)
+        if info and info.status.value in ("running", "idle", "paused"):
+            try:
+                ok = await _agent_runtime.stop(agent_id)
+                if ok:
+                    logger.info(f"Stopped agent {agent_id} for run {run_id}")
+                else:
+                    logger.warning(f"Agent {agent_id} stop returned False")
+            except Exception as e:
+                logger.warning(f"Failed to stop agent {agent_id}: {e}")
+        else:
+            logger.info(f"Agent {agent_id} already terminated (status={info.status.value if info else 'unknown'})")
+
+    # Also stop tmux window if it exists (legacy or tmux_debug mode)
     tmux_window = run.get("tmux_window")
     if tmux_window:
         session = _get_or_create_session()
@@ -534,6 +704,29 @@ async def create_alert(run_id: str, req: CreateAlertRequest):
     _active_alerts[alert_id] = alert_payload
     _save_alerts_state()
     logger.info(f"Created alert {alert_id} for run {run_id}: {req.message}")
+
+    # --- Alert → Steer escalation (wire agentsys 3-level comms) ---
+    if severity in ("warning", "critical") and _agent_runtime:
+        run = _runs.get(run_id)
+        agent_id = run.get("agent_id") if run else None
+        if agent_id:
+            info = _agent_runtime.get_agent(agent_id)
+            if info and (hasattr(info, 'status') and
+                         info.status.value in ("running", "paused")):
+                from agentsys.types import SteerUrgency
+                urgency = (SteerUrgency.CRITICAL if severity == "critical"
+                           else SteerUrgency.PRIORITY)
+                steer_msg = f"[ALERT:{severity.upper()}] {req.message}"
+                try:
+                    asyncio.create_task(
+                        _agent_runtime.steer(agent_id, steer_msg, urgency)
+                    )
+                    logger.info("Alert %s escalated to agent %s urgency=%s",
+                                alert_id, agent_id, severity)
+                except Exception as e:
+                    logger.warning("Failed to escalate alert %s to agent: %s",
+                                   alert_id, e)
+
     return {"alert_id": alert_id}
 
 
@@ -627,6 +820,23 @@ async def get_run_metrics(run_id: str):
     run = _runs[run_id]
     run_dir = run.get("run_dir") or os.path.join(config.DATA_DIR, "runs", run_id)
     parsed = _load_run_metrics(run_dir)
+
+    # FileStore fallback: query agent-backed metrics when disk is empty
+    if (not parsed or not parsed.get("metricSeries")) and _agent_runtime and _parse_metrics_rows:
+        agent_id = run.get("agent_id")
+        if agent_id:
+            from agentsys.types import EntryType
+            entries = _agent_runtime.store.query(
+                agent_id=agent_id, type=EntryType.METRICS, limit=200,
+            )
+            if entries:
+                rows = []
+                for e in entries:
+                    if "rows" in e.data:
+                        rows.extend(e.data["rows"])
+                    else:
+                        rows.append(e.data)
+                parsed = _parse_metrics_rows(rows)
 
     if not parsed or not parsed.get("metricSeries"):
         wandb_dir = run.get("wandb_dir") or _find_wandb_dir_from_run_dir(run_dir)

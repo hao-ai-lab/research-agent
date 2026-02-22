@@ -18,15 +18,17 @@ logger = logging.getLogger("research-agent-server")
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
-# Module-level reference to the shared runs dict.  Wired at init().
+# Module-level references.  Wired at init().
 # ---------------------------------------------------------------------------
 _runs: Dict[str, dict] = {}
+_agent_runtime = None
 
 
-def init(runs_dict):
-    """Wire in the shared runs dict from server.py."""
-    global _runs
+def init(runs_dict, agent_runtime=None):
+    """Wire in the shared runs dict and optional agent runtime from server.py."""
+    global _runs, _agent_runtime
     _runs = runs_dict
+    _agent_runtime = agent_runtime
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +142,25 @@ async def get_run_logs(
     limit: int = Query(10000, description="Max bytes to return (max 100KB)")
 ):
     """Get run logs with byte-offset pagination."""
-    return _read_log_paginated(run_id, "run.log", offset, limit)
+    result = _read_log_paginated(run_id, "run.log", offset, limit)
+
+    if _agent_runtime and run_id in _runs:
+        agent_id = _runs[run_id].get("agent_id")
+        if agent_id:
+            try:
+                from agentsys.types import EntryType
+                raw = _agent_runtime.store.query(
+                    agent_id=agent_id, type=EntryType.RAW_FILE, limit=20, order="desc",
+                )
+                if raw:
+                    result["agent_log_entries"] = [
+                        {"key": e.key, "data": e.data, "created_at": e.created_at, "tags": e.tags}
+                        for e in raw
+                    ]
+            except Exception:
+                pass
+
+    return result
 
 
 @router.get("/runs/{run_id}/logs/stream")

@@ -3,23 +3,21 @@
 The sidecar is "just an agent" — a long-running monitor that wraps a tmux
 process, tracks metrics, detects alerts, and reports status.  This Agent
 subclass wraps the existing `tools/job_sidecar.py` implementation so it
-participates in the AgentRuntime lifecycle and MessageBus communication.
+participates in the agentsys Runtime lifecycle and EventRelay communication.
 
 For backward compatibility, the tmux-based launch in `runs/helpers.py`
 still spawns job_sidecar.py as a subprocess.  New code can spawn
-SidecarAgent in-process via AgentRuntime instead.
+SidecarAgent via the agentsys Runtime instead.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
-from typing import Any, Optional
+from typing import Any
 
-from agent.core.agent import Agent
-from agent.core.message import Message
+from agentsys.agent import Agent
+from agentsys.types import EntryType
 
 logger = logging.getLogger("sidecar_agent")
 
@@ -37,6 +35,9 @@ class SidecarAgent(Agent):
         gpuwrap_config: dict — Optional GPU wrapper config
     """
 
+    role = "sidecar"
+    allowed_child_roles = frozenset()  # leaf node: cannot spawn children
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -50,34 +51,39 @@ class SidecarAgent(Agent):
         self._gpuwrap_config = c.get("gpuwrap_config")
 
     async def on_start(self) -> None:
-        await self.send(Message.status(
-            self.id, "starting",
-            job_id=self._job_id,
-            command=self._command,
-        ))
+        self._emit_event("sidecar_status", {
+            "status": "starting",
+            "job_id": self._job_id,
+            "command": self._command,
+        })
 
     async def on_stop(self) -> None:
-        await self.send(Message.status(
-            self.id, "stopped",
-            job_id=self._job_id,
-        ))
+        self._emit_event("sidecar_status", {
+            "status": "stopped",
+            "job_id": self._job_id,
+        })
 
     async def run(self) -> None:
         """Run monitor_job() in a thread to avoid blocking the event loop."""
-        await self.send(Message.status(self.id, "monitoring", job_id=self._job_id))
+        self._emit_event("sidecar_status", {
+            "status": "monitoring",
+            "job_id": self._job_id,
+        })
 
         try:
             # Import monitor_job from tools/job_sidecar
             from tools.job_sidecar import monitor_job
         except ImportError:
             try:
-                # Fallback: try relative import
                 import importlib
                 mod = importlib.import_module("tools.job_sidecar")
                 monitor_job = mod.monitor_job
             except ImportError as err:
                 logger.error("[sidecar-agent] Cannot import monitor_job: %s", err)
-                await self.send(Message.error(self.id, f"Import failed: {err}"))
+                self._emit_event("sidecar_error", {
+                    "error": f"Import failed: {err}",
+                    "job_id": self._job_id,
+                })
                 return
 
         # Run the synchronous monitor_job in a thread
@@ -95,25 +101,13 @@ class SidecarAgent(Agent):
                     gpuwrap_config=self._gpuwrap_config,
                 ),
             )
-            await self.send(Message.result(
-                self.id,
-                summary=f"Job {self._job_id} completed",
-                job_id=self._job_id,
-            ))
+            self._emit_event("sidecar_result", {
+                "summary": f"Job {self._job_id} completed",
+                "job_id": self._job_id,
+            })
         except Exception as err:
             logger.error("[sidecar-agent] monitor_job failed: %s", err, exc_info=True)
-            await self.send(Message.error(
-                self.id,
-                f"Job {self._job_id} failed: {err}",
-                job_id=self._job_id,
-            ))
-
-    def to_dict(self) -> dict[str, Any]:
-        d = super().to_dict()
-        d.update({
-            "job_id": self._job_id,
-            "command": self._command,
-            "workdir": self._workdir,
-            "run_dir": self._run_dir,
-        })
-        return d
+            self._emit_event("sidecar_error", {
+                "error": f"Job {self._job_id} failed: {err}",
+                "job_id": self._job_id,
+            })

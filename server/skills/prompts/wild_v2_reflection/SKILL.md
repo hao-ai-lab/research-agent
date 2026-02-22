@@ -32,12 +32,7 @@ You just completed iteration {{iteration}} of {{max_iterations}} and signaled DO
 
 {{user_availability}}
 
-{% if memories %}
-
-## Memory Bank (Lessons from Past Sessions)
-
 {{memories}}
-{% endif %}
 
 ---
 

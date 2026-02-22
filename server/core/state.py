@@ -21,7 +21,23 @@ logger = logging.getLogger("research-agent-server")
 
 # =============================================================================
 # Global State Dictionaries
+#
+# DEPRECATION NOTICE (Phase 7):
+# The `runs` and `sweeps` dicts are being replaced by the agentsys agent
+# hierarchy. New code should use agent_runtime.list_agents() and FileStore
+# queries instead of reading/writing these dicts directly.
+#
+# During the migration period, both systems are kept in sync:
+#   - POST /runs and POST /sweeps write to these dicts AND spawn agents.
+#   - GET /runs and GET /sweeps merge data from both sources.
+#
+# Once migration is stable:
+#   - save_runs_state() / load_runs_state() will be removed from server.py.
+#   - launch_run_in_tmux() wiring will be removed from routes.
+#   - _reconcile_run_terminal_states() will be replaced by agent lifecycle.
 # =============================================================================
+
+import warnings as _warnings
 
 chat_sessions: Dict[str, dict] = {}
 runs: Dict[str, dict] = {}
@@ -214,7 +230,13 @@ def load_chat_state():
 
 
 def save_runs_state():
-    """Persist runs and sweeps to disk."""
+    """Persist runs and sweeps to disk.
+
+    .. deprecated::
+        This function is being replaced by agentsys FileStore.
+        Agent-backed runs persist state via agent metadata + FileStore entries.
+        This function will be removed once migration is stable.
+    """
     try:
         with open(config.JOBS_DATA_FILE, "w") as f:
             json.dump({"runs": runs, "sweeps": sweeps}, f, indent=2, default=str)

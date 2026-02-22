@@ -1,85 +1,91 @@
 ---
 name: wild_v2_execution_ops_protocol
-description: Single source of truth protocol for Wild V2 preflight, sweep/run auditability, GPU discovery, and parallel scheduling
+description: Canonical protocol for experiment execution via executor agents, environment setup, and operational best practices
 category: protocol
 variables: []
 ---
 
 # Wild V2 Execution Ops Protocol
 
-This is the canonical protocol for execution operations in Wild V2.
-Use this skill as the source of truth instead of duplicating long operational instructions in prompts.
+This is the canonical protocol for experiment execution in Wild V2.
+You are the **BRAIN** — you design experiments. Executor agents are the **HANDS** — they run them.
 
-## A. Preflight
+## A. Core Rule: Delegate Execution
 
-Before planning or execution, verify:
+- **NEVER** run long-running scripts, tests, or experiment commands directly in your session.
+- **ALL** commands that should run independently MUST be delegated via `<experiments>` output blocks.
+- The research system parses your `<experiments>` specs and spawns dedicated executor agents to run each one.
+- Results from completed experiments are included in your next iteration's context.
 
-```bash
-curl -sf "$SERVER_URL/docs" >/dev/null
-curl -sf "$SERVER_URL/openapi.json" >/dev/null
-curl -sf "$SERVER_URL/prompt-skills/wild_v2_execution_ops_protocol" >/dev/null
-curl -sf "$SERVER_URL/wild/v2/system-health" >/dev/null
+## B. Experiment Spec Format
+
+Output experiment specs inside `<experiments>` tags:
+
+```
+<experiments>
+- goal: "Descriptive name for this experiment"
+  command: "cd /path/to/project && python -m pytest tests/ -v"
+  workdir: "/path/to/project"
+</experiments>
 ```
 
-If preflight fails, abort loop work immediately.
+### Fields
 
-## B. Auditability Rules
+| Field | Required | Description |
+|-------|----------|-------------|
+| `goal` | yes | Human-readable experiment name |
+| `command` | yes | Shell command to execute |
+| `workdir` | no | Working directory (defaults to project root) |
+| `parameters` | no | JSON dict of params appended as --key=value flags |
 
-- Every experiment trial must be a run created through `POST /runs`.
-- Runs must be attached to a sweep (`sweep_id`) created via `POST /sweeps/wild`.
-- For all create endpoints (`POST /runs`, `POST /sweeps`, `POST /sweeps/wild`, `POST /sweeps/{id}/runs`), include `chat_session_id` in the JSON body using the current chat session id.
-- Direct local execution without API run creation is non-compliant and not user-auditable.
+### Multiple experiments (parallel)
 
-## C. Grid Search Rule
+```
+<experiments>
+- goal: "Run unit tests"
+  command: "cd /path && python -m pytest tests/ -v"
+  workdir: "/path"
 
-- One configuration = one run.
-- For grid search, create multiple runs (repeat `POST /runs`), one per config.
-
-## D. Cluster/GPU Discovery
-
-```bash
-curl -X POST "$SERVER_URL/cluster/detect" -H "X-Auth-Token: $AUTH_TOKEN"
-curl -X GET "$SERVER_URL/cluster" -H "X-Auth-Token: $AUTH_TOKEN"
-curl -X GET "$SERVER_URL/wild/v2/system-health" -H "X-Auth-Token: $AUTH_TOKEN"
+- goal: "Run linting"
+  command: "cd /path && python -m py_compile mymodule.py"
+  workdir: "/path"
+</experiments>
 ```
 
-Use:
-- `cluster.type`
-- `cluster.gpu_count`
-- `system-health.running`
+## C. What You Do Directly vs. What You Delegate
 
-## E. Recommended Parallelism Formula
+| Action | Direct (you do it) | Delegate via `<experiments>` |
+|--------|--------------------|-----------------------------|
+| Read/explore code | Yes | - |
+| Edit/write code | Yes | - |
+| Install packages | Yes | - |
+| Create scripts | Yes | - |
+| Run tests | - | Yes |
+| Run benchmarks | - | Yes |
+| Run training | - | Yes |
+| Run evaluation | - | Yes |
+| Execute pipelines | - | Yes |
 
-Let:
-- `g = max(1, cluster.gpu_count or 1)` for `local_gpu`
-- `g = max(1, cluster.gpu_count or 4)` for `slurm` (conservative default if unknown)
-- `g = 1` for `cpu_only` or unknown
-- `r = system_health.running`
-- `q = number_of_ready_or_queued_runs`
+## D. Environment Setup
 
-Then:
+Before delegating experiments, ensure the environment is ready:
 
-```text
-target_parallel = g
-max_new_runs = max(0, min(q, target_parallel - r))
-```
+1. Check for `pyproject.toml`, `requirements.txt`, `environment.yml`, or `setup.py`
+2. Preferred setup: `uv venv .venv && source .venv/bin/activate && uv pip install -r requirements.txt`
+3. Alternatives: `pip install`, `conda`, `micromamba`
+4. You may set up the environment directly — only the experiment commands go through `<experiments>`
 
-Interpretation:
-- Start up to `max_new_runs` additional runs now.
-- If `max_new_runs == 0`, wait or stop low-priority runs before starting more.
+## E. Operational Best Practices
 
-## F. Scheduling Guidance
+- Use deterministic naming for outputs and logs
+- Capture stdout/stderr to files when useful
+- Keep artifacts organized (scripts/, logs/, outputs/, results/)
+- When constructing commands, use absolute paths and preserve reproducible seeds
+- Include `cd <workdir> &&` prefix in commands to ensure correct directory
 
-- Local multi-GPU: pin run commands per GPU (`CUDA_VISIBLE_DEVICES=i`).
-- Slurm: include scheduler resource flags in command and allow queue placement.
-- CPU-only: keep low parallelism unless clearly safe.
+## F. Monitoring and Results
 
-## G. Practical Launch Pattern
-
-1. Create sweep.
-2. Create run per config.
-3. Compute `max_new_runs`.
-4. If capacity available:
-   - set `auto_start=true` for up to `max_new_runs`, or
-   - create as ready and call `POST /runs/{id}/start` for selected runs.
-5. Monitor via `GET /runs` and `GET /wild/v2/system-health`.
+- Executor agents run experiments in parallel when possible
+- Results from completed experiments appear in your next iteration's context as `experiment_results`
+- If waiting for experiments and no other meaningful task exists, output `<promise>WAITING</promise>`
+- Plan for iterative experiment design: analyze results, refine approach, run next batch

@@ -29,8 +29,11 @@ import subprocess
 from typing import Any, Callable, Dict, Optional, AsyncIterator, List
 
 
-from agent.wild_loop_v2 import WildV2Engine
-from memory.store import MemoryStore
+from agentsys.runtime import Runtime
+from agentsys.filestore import FileStore
+from agent.core.event_relay import EventRelay
+from memory.adapter import MemoryStoreAdapter
+from memory.migrate import migrate_memory_json_to_filestore
 from integrations.slack_handler import slack_notifier
 
 import httpx
@@ -95,7 +98,30 @@ from core.config import (  # noqa: E402
 # FastAPI App
 # =============================================================================
 
-app = FastAPI(title="Research Agent Server")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app):
+    """FastAPI lifespan: shutdown Runtime on exit.
+
+    L1 SessionAgents are now created on-demand per chat session
+    in the wild_routes registry — no singleton startup needed.
+    """
+    yield
+    # Shutdown: stop all per-session L1 agents, then shutdown Runtime
+    try:
+        from agent.wild_routes import _session_agents, _stop_session_agent
+        for chat_sid in list(_session_agents.keys()):
+            await _stop_session_agent(chat_sid)
+    except Exception as e:
+        logger.warning("[agentsys] Error stopping session agents: %s", e)
+    if agent_runtime is not None:
+        await agent_runtime.shutdown()
+        logger.info("[agentsys] Runtime shutdown complete")
+
+
+app = FastAPI(title="Research Agent Server", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -250,26 +276,130 @@ def _start_sweep_sync(sweep_id: str, parallel: int = 1):
     sweep["parallel"] = parallel
 
 
-# Wild Loop V2 engine (ralph-style)
-wild_v2_engine = WildV2Engine(
-    opencode_url=OPENCODE_URL,
-    model_provider=MODEL_PROVIDER,
-    model_id=MODEL_ID,
-    get_workdir=lambda: config.WORKDIR,
-    server_url=SERVER_CALLBACK_URL,
-    auth_token=USER_AUTH_TOKEN,
-    get_auth=get_auth,
-    render_fn=prompt_skill_manager.render,
-    save_chat_state=lambda: save_chat_state(),
-    chat_sessions=chat_sessions,
-)
+# -- agentsys Runtime + FileStore + EventRelay --------------------------------
 
-# Memory store (persistent lessons / context)
-memory_store = MemoryStore(get_workdir=lambda: config.WORKDIR)
-memory_store.load()
+# EventRelay: replaces MessageBus for SSE streaming (stateless, safe at import)
+event_relay = EventRelay()
 
-# Inject memory store into V2 engine so reflections can write memories
-wild_v2_engine.memory_store = memory_store
+# These are initialized in _init_agentsys() after init_paths() sets config.WORKDIR
+filestore: FileStore = None  # type: ignore[assignment]
+memory_store: MemoryStoreAdapter = None  # type: ignore[assignment]
+agent_runtime: Runtime = None  # type: ignore[assignment]
+
+
+def _init_agentsys():
+    """Initialize agentsys Runtime, FileStore, MemoryStoreAdapter.
+
+    L1 SessionAgents are now created on-demand per chat session via the
+    registry in wild_routes.py, not as a singleton at startup.
+
+    Must be called after init_paths() so config.WORKDIR is correct.
+    """
+    global filestore, memory_store, agent_runtime
+
+    store_root = os.path.join(config.WORKDIR, ".agents", "store")
+    filestore = FileStore(store_root, "default")
+
+    # Migrate old memory.json → FileStore (one-time, idempotent)
+    migrate_memory_json_to_filestore(config.WORKDIR, filestore, "default")
+
+    # Memory store adapter (same interface as old MemoryStore, backed by FileStore)
+    memory_store = MemoryStoreAdapter(filestore, project="default")
+
+    # Agent Runtime: multiprocess supervisor for agent lifecycle management
+    agent_runtime = Runtime(
+        project="default",
+        store_root=store_root,
+    )
+
+    # Bridge Runtime events to EventRelay
+    _original_handle_event = agent_runtime._handle_event
+
+    async def _handle_event_with_relay(event):
+        await _original_handle_event(event)
+        # For custom events from subprocess agents, use the inner event_type
+        # so the frontend sees "iteration", "agent_status", etc. instead of "custom_event"
+        if event.type.value == "custom_event":
+            event_type = event.payload.get("event_type", "custom_event")
+        else:
+            event_type = event.type.value
+        await event_relay.emit({
+            "type": event_type,
+            "agent_id": event.agent_id,
+            **event.payload,
+            "timestamp": time.time(),
+        })
+
+    agent_runtime._handle_event = _handle_event_with_relay
+
+    # Re-wire routes that need runtime references
+    wild_routes.init(
+        agent_runtime, event_relay, active_alerts, runs,
+        _build_research_agent_config,
+    )
+    runtime_routes.init(agent_runtime, event_relay, runs)
+    memory_routes.init(memory_store)
+    log_routes.init(runs, agent_runtime=agent_runtime)
+
+    # Re-wire run/sweep routes with agent runtime (Phase 3)
+    run_routes.init(
+        runs_dict=runs,
+        sweeps_dict=sweeps,
+        active_alerts_dict=active_alerts,
+        save_runs_state_fn=save_runs_state,
+        save_alerts_state_fn=save_alerts_state,
+        save_settings_state_fn=save_settings_state,
+        launch_run_in_tmux_fn=launch_run_in_tmux,
+        recompute_sweep_state_fn=recompute_sweep_state,
+        reconcile_all_run_terminal_states_fn=_reconcile_all_run_terminal_states,
+        run_response_payload_fn=_run_response_payload,
+        sync_run_membership_with_sweep_fn=_sync_run_membership_with_sweep,
+        record_journey_event_fn=_record_journey_event,
+        normalize_gpuwrap_config_fn=_normalize_gpuwrap_config,
+        coerce_exit_code_fn=_coerce_exit_code,
+        slack_notifier=slack_notifier,
+        get_or_create_session_fn=get_or_create_session,
+        run_status_terminal_set=RUN_STATUS_TERMINAL,
+        load_run_metrics_fn=_load_run_metrics,
+        find_wandb_dir_from_run_dir_fn=_find_wandb_dir_from_run_dir,
+        get_wandb_curve_data_fn=_get_wandb_curve_data,
+        wandb_metrics_cache_dict=_wandb_metrics_cache,
+        parse_metrics_rows_fn=_parse_metrics_rows,
+        agent_runtime=agent_runtime,
+    )
+    sweep_routes.init(
+        sweeps_dict=sweeps,
+        runs_dict=runs,
+        save_runs_state_fn=save_runs_state,
+        recompute_sweep_state_fn=recompute_sweep_state,
+        recompute_all_sweep_states_fn=recompute_all_sweep_states,
+        normalize_sweep_status_fn=_normalize_sweep_status,
+        ensure_sweep_creation_context_fn=_ensure_sweep_creation_context,
+        derive_sweep_creation_context_fn=_derive_sweep_creation_context,
+        normalize_gpuwrap_config_fn=_normalize_gpuwrap_config,
+        launch_run_in_tmux_fn=launch_run_in_tmux,
+        run_status_active_set=RUN_STATUS_ACTIVE,
+        agent_runtime=agent_runtime,
+    )
+
+    logger.info("[agentsys] Initialized: store=%s, runtime=%s",
+                store_root, agent_runtime)
+
+
+def _build_research_agent_config(**kwargs):
+    """Build a serializable config dict for ResearchAgent."""
+    return {
+        "opencode_url": OPENCODE_URL,
+        "model_provider": MODEL_PROVIDER,
+        "model_id": MODEL_ID,
+        "workdir": config.WORKDIR,
+        "server_url": SERVER_CALLBACK_URL,
+        "auth_token": USER_AUTH_TOKEN or "",
+        "opencode_username": OPENCODE_USERNAME,
+        "opencode_password": OPENCODE_PASSWORD,
+        "skills_dir": os.path.join(_SERVER_FILE_DIR, "skills", "prompts"),
+        **kwargs,
+    }
 
 
 def _record_journey_event(
@@ -359,8 +489,11 @@ def load_runs_state():
 
 
 
-def _parse_metrics_history(metrics_file: str) -> dict:
-    """Parse a metrics JSONL file into chart-ready history and summary metrics."""
+def _parse_metrics_rows(rows: list[dict]) -> dict:
+    """Parse a list of metric dicts into chart-ready history and summary metrics.
+
+    This is the core logic shared by disk-based JSONL parsing and FileStore queries.
+    """
     loss_history: list[dict] = []
     metric_series: Dict[str, list[dict]] = {}
     latest_loss: Optional[float] = None
@@ -368,51 +501,39 @@ def _parse_metrics_history(metrics_file: str) -> dict:
     latest_epoch: Optional[float] = None
     fallback_step = 0
 
-    try:
-        with open(metrics_file, "r", errors="replace") as f:
-            for line in f:
-                raw = line.strip()
-                if not raw:
-                    continue
-                try:
-                    row = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(row, dict):
-                    continue
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
 
-                fallback_step += 1
-                step = _extract_step(row, fallback_step)
-                train_loss = _first_numeric(row, LOSS_KEYS)
-                val_loss = _first_numeric(row, VAL_LOSS_KEYS)
-                accuracy = _first_numeric(row, ACCURACY_KEYS)
-                epoch = _first_numeric(row, EPOCH_KEYS)
+        fallback_step += 1
+        step = _extract_step(row, fallback_step)
+        train_loss = _first_numeric(row, LOSS_KEYS)
+        val_loss = _first_numeric(row, VAL_LOSS_KEYS)
+        accuracy = _first_numeric(row, ACCURACY_KEYS)
+        epoch = _first_numeric(row, EPOCH_KEYS)
 
-                if train_loss is not None:
-                    point = {"step": step, "trainLoss": round(train_loss, 6)}
-                    if val_loss is not None:
-                        point["valLoss"] = round(val_loss, 6)
-                    loss_history.append(point)
-                    latest_loss = train_loss
+        if train_loss is not None:
+            point = {"step": step, "trainLoss": round(train_loss, 6)}
+            if val_loss is not None:
+                point["valLoss"] = round(val_loss, 6)
+            loss_history.append(point)
+            latest_loss = train_loss
 
-                if accuracy is not None:
-                    latest_accuracy = accuracy
+        if accuracy is not None:
+            latest_accuracy = accuracy
 
-                if epoch is not None:
-                    latest_epoch = epoch
+        if epoch is not None:
+            latest_epoch = epoch
 
-                for key, raw_value in row.items():
-                    if not _is_metric_key(key):
-                        continue
-                    numeric_value = _to_float(raw_value)
-                    if numeric_value is None:
-                        continue
-                    metric_series.setdefault(key, []).append(
-                        {"step": step, "value": round(numeric_value, 6)}
-                    )
-    except OSError as e:
-        logger.debug(f"Unable to read metrics file {metrics_file}: {e}")
-        return {}
+        for key, raw_value in row.items():
+            if not _is_metric_key(key):
+                continue
+            numeric_value = _to_float(raw_value)
+            if numeric_value is None:
+                continue
+            metric_series.setdefault(key, []).append(
+                {"step": step, "value": round(numeric_value, 6)}
+            )
 
     if latest_accuracy is not None and latest_accuracy <= 1.5:
         latest_accuracy *= 100.0
@@ -442,6 +563,27 @@ def _parse_metrics_history(metrics_file: str) -> dict:
         "epoch": latest_epoch,
     }
     return parsed
+
+
+def _parse_metrics_history(metrics_file: str) -> dict:
+    """Parse a metrics JSONL file into chart-ready history and summary metrics."""
+    rows: list[dict] = []
+    try:
+        with open(metrics_file, "r", errors="replace") as f:
+            for line in f:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    row = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                rows.append(row)
+    except OSError as e:
+        logger.debug(f"Unable to read metrics file {metrics_file}: {e}")
+        return {}
+
+    return _parse_metrics_rows(rows)
 
 
 def _get_wandb_curve_data(wandb_dir: Optional[str]) -> Optional[dict]:
@@ -489,6 +631,13 @@ def _run_response_payload(run_id: str, run: dict) -> dict:
     2. WandB files discovered via wandb_dir or run_dir
     """
     payload = {"id": run_id, **run}
+
+    # Enrich with agent scope if this is an agent-backed run
+    _aid = run.get("agent_id")
+    if _aid and agent_runtime:
+        _info = agent_runtime.get_agent(_aid)
+        if _info and _info.scope:
+            payload["agent_scope"] = _info.scope
 
     # Source 1: stored metrics from sidecar POSTs
     parsed = _load_run_metrics(run.get("run_dir"))
@@ -656,9 +805,8 @@ chat_routes.init(
     stream_runtime_events_fn=_stream_runtime_events,
     chat_stream_runtime_cls=ChatStreamRuntime,
     recompute_all_sweep_states_fn=recompute_all_sweep_states,
-    wild_v2_engine=wild_v2_engine,
+    agent_runtime=agent_runtime,
 )
-chat_routes.wire_v2_engine()
 app.include_router(chat_routes.router)
 
 
@@ -692,6 +840,7 @@ run_routes.init(
     find_wandb_dir_from_run_dir_fn=_find_wandb_dir_from_run_dir,
     get_wandb_curve_data_fn=_get_wandb_curve_data,
     wandb_metrics_cache_dict=_wandb_metrics_cache,
+    parse_metrics_rows_fn=_parse_metrics_rows,
 )
 app.include_router(run_routes.router)
 
@@ -706,8 +855,12 @@ app.include_router(run_routes.router)
 # =============================================================================
 
 import agent.wild_routes as wild_routes  # noqa: E402
-wild_routes.init(wild_v2_engine, active_alerts, runs, WildV2Engine)
+# Routers are registered now but endpoints return 503 until _init_agentsys()
+# wires the real Runtime in main().
 app.include_router(wild_routes.router)
+
+import agent.runtime_routes as runtime_routes  # noqa: E402
+app.include_router(runtime_routes.router)
 
 
 
@@ -717,7 +870,7 @@ app.include_router(wild_routes.router)
 # =============================================================================
 
 import memory.routes as memory_routes  # noqa: E402
-memory_routes.init(memory_store)
+# memory_routes.init() deferred to _init_agentsys() — routes return 404 until then
 app.include_router(memory_routes.router)
 
 
@@ -854,7 +1007,11 @@ def main():
     init_paths(args.workdir)
     SERVER_CALLBACK_URL = f"http://127.0.0.1:{args.port}"
     TMUX_SESSION_NAME = args.tmux_session
-    
+
+    # Initialize agentsys (FileStore, Runtime, MemoryStoreAdapter, SessionAgent)
+    # Must be after init_paths() so config.WORKDIR is correct
+    _init_agentsys()
+
     # Check required environment variables
     if not os.environ.get("RESEARCH_AGENT_KEY"):
         logger.info("💡 Tip: Want free Anthropic credits? Ask the maintainer for a gateway key.")

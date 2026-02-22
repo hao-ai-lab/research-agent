@@ -271,7 +271,7 @@
       "type": "local",
       "command": [
         "python3",
-        "./server/research_agent_mcp.py"
+        "./server/tools/research_agent_mcp.py"
       ],
       "enabled": true
     },
@@ -279,7 +279,7 @@
       "type": "local",
       "command": [
         "python3",
-        "./server/slurm_mcp_cli.py"
+        "./server/tools/slurm_mcp_cli.py"
       ],
       "enabled": true
     }

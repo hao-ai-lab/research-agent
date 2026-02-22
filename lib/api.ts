@@ -1493,6 +1493,45 @@ export interface UpdateSweepRequest {
 }
 
 // =============================================================================
+// Agent Tree Functions (Phase 5 — unified hierarchy)
+// =============================================================================
+
+export interface AgentTreeNode {
+    id: string
+    type: 'run' | 'sweep'
+    name: string
+    status: string
+    parent_id: string | null
+    children: string[]
+    config: Record<string, unknown>
+    progress?: {
+        total: number
+        completed: number
+        running: number
+        failed: number
+        queued: number
+    }
+}
+
+export interface AgentTreeResponse {
+    nodes: AgentTreeNode[]
+}
+
+/**
+ * Fetch the agent hierarchy tree for sidebar display
+ */
+export async function fetchAgentTree(): Promise<AgentTreeResponse> {
+    const response = await fetch(`${API_URL()}/agents/tree`, {
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        // Return empty tree on error (agent runtime may not be initialized yet)
+        return { nodes: [] }
+    }
+    return response.json()
+}
+
+// =============================================================================
 // Sweep Management Functions
 // =============================================================================
 

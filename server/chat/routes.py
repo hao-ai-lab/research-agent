@@ -8,10 +8,12 @@ and streaming endpoints live here.
 import asyncio
 import json
 import logging
+import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -65,7 +67,7 @@ _finalize_runtime = None
 _stream_runtime_events = None
 _ChatStreamRuntime = None
 _recompute_all_sweep_states = None
-_wild_v2_engine = None
+_agent_runtime = None
 
 
 def init(
@@ -81,7 +83,7 @@ def init(
     stream_runtime_events_fn,
     chat_stream_runtime_cls,
     recompute_all_sweep_states_fn,
-    wild_v2_engine,
+    agent_runtime=None,
 ):
     """Wire in shared callbacks from server.py."""
     global _prompt_skill_manager
@@ -89,7 +91,7 @@ def init(
     global _send_prompt_to_opencode, _stream_opencode_events, _should_stop_session
     global _append_runtime_event, _persist_active_stream_snapshot
     global _finalize_runtime, _stream_runtime_events, _ChatStreamRuntime
-    global _recompute_all_sweep_states, _wild_v2_engine
+    global _recompute_all_sweep_states, _agent_runtime
 
     _prompt_skill_manager = prompt_skill_manager
     _get_opencode_session_for_chat = get_opencode_session_for_chat_fn
@@ -103,7 +105,7 @@ def init(
     _stream_runtime_events = stream_runtime_events_fn
     _ChatStreamRuntime = chat_stream_runtime_cls
     _recompute_all_sweep_states = recompute_all_sweep_states_fn
-    _wild_v2_engine = wild_v2_engine
+    _agent_runtime = agent_runtime
 
 
 # ---------------------------------------------------------------------------
@@ -231,9 +233,15 @@ async def update_session(session_id: str, req: UpdateSessionRequest):
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a chat session."""
+    """Delete a chat session and stop its L1 agent if any."""
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
+    # Stop L1 SessionAgent for this chat session (if wild mode was used)
+    try:
+        from agent.wild_routes import _stop_session_agent
+        await _stop_session_agent(session_id)
+    except Exception as e:
+        logger.warning("Failed to stop L1 for deleted session %s: %s", session_id, e)
     del chat_sessions[session_id]
     save_chat_state()
     return {"message": "Session deleted"}
@@ -337,10 +345,261 @@ def _build_experiment_context() -> str:
     return "\n".join(lines)
 
 
-def _build_agent_state(_message: str) -> dict:
+# ---------------------------------------------------------------------------
+# Scoped @Reference Resolution
+# ---------------------------------------------------------------------------
+
+_REFERENCE_RE = re.compile(r"@(run|sweep|alert|chat):[A-Za-z0-9:._-]+")
+
+
+def _parse_references(message: str) -> List[Tuple[str, str]]:
+    """Extract deduplicated (type, id) tuples from @type:id references."""
+    seen: set[str] = set()
+    results: List[Tuple[str, str]] = []
+    for match in _REFERENCE_RE.finditer(message):
+        token = match.group(0)  # e.g. "@run:abc123"
+        if token in seen:
+            continue
+        seen.add(token)
+        ref_body = match.group(1)  # "run" from group, but we need full after @
+        # Split on first colon to get type and id
+        parts = token[1:].split(":", 1)  # strip leading @
+        if len(parts) == 2:
+            results.append((parts[0], parts[1]))
+    return results
+
+
+def _resolve_run_context(ref_id: str) -> str:
+    """Build detailed context for a single run, including FileStore data."""
+    run = runs.get(ref_id)
+    if not run:
+        return f"=== @run:{ref_id} — Not Found ===\n"
+
+    lines = [f"=== @run:{ref_id} — Detailed Context ==="]
+    lines.append(f"Name: {run.get('name', '?')}")
+    lines.append(f"Status: {run.get('status', '?')}")
+    lines.append(f"Command: {run.get('command', '?')}")
+    if run.get("workdir"):
+        lines.append(f"Workdir: {run['workdir']}")
+    if run.get("exit_code") is not None:
+        lines.append(f"Exit code: {run['exit_code']}")
+    if run.get("error"):
+        lines.append(f"Error: {run['error']}")
+    if run.get("sweep_id"):
+        lines.append(f"Sweep: {run['sweep_id']}")
+    if run.get("created_at"):
+        lines.append(f"Created: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(run['created_at']))}")
+    agent_id = run.get("agent_id")
+    if agent_id:
+        lines.append(f"Agent: {agent_id}")
+
+    # FileStore data (if agent_runtime is available)
+    if _agent_runtime and agent_id:
+        store = _agent_runtime.store
+        try:
+            from agentsys.types import EntryType
+
+            # Results
+            results = store.query(agent_id=agent_id, type=EntryType.RESULT, limit=5)
+            lines.append("\n-- Agent Results --")
+            if results:
+                for entry in results:
+                    data = entry.data or {}
+                    summary = ", ".join(f"{k}: {v}" for k, v in list(data.items())[:6])
+                    lines.append(f"  [{entry.type.value}] {summary[:200]}")
+            else:
+                lines.append("  (none)")
+
+            # Metrics
+            metrics = store.query(agent_id=agent_id, type=EntryType.METRICS, limit=10)
+            lines.append("\n-- Agent Metrics --")
+            if metrics:
+                for entry in metrics[:5]:
+                    data = entry.data or {}
+                    summary = ", ".join(f"{k}: {v}" for k, v in list(data.items())[:6])
+                    lines.append(f"  [{entry.type.value}] {summary[:200]}")
+            else:
+                lines.append("  (none)")
+
+            # Alerts
+            alerts = store.query(agent_id=agent_id, type=EntryType.ALERT, limit=5)
+            lines.append("\n-- Agent Alerts --")
+            if alerts:
+                for entry in alerts:
+                    data = entry.data or {}
+                    msg = data.get("message", str(data)[:150])
+                    lines.append(f"  [{entry.type.value}] {msg[:200]}")
+            else:
+                lines.append("  (none)")
+        except Exception as e:
+            lines.append(f"\n-- FileStore query error: {e} --")
+
+    # Tail run.log if available
+    run_dir = run.get("run_dir")
+    if run_dir:
+        log_path = os.path.join(run_dir, "run.log")
+        if os.path.isfile(log_path):
+            try:
+                with open(log_path, "r", errors="replace") as f:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    start = max(0, size - 2000)
+                    f.seek(start)
+                    tail = f.read()
+                lines.append("\n-- Run Log (last 2000 chars) --")
+                lines.append(tail.strip())
+            except Exception as e:
+                lines.append(f"\n-- Could not read run.log: {e} --")
+
+    lines.append(f"=== End @run:{ref_id} ===")
+    return "\n".join(lines)
+
+
+def _resolve_sweep_context(ref_id: str) -> str:
+    """Build detailed context for a sweep, including child runs."""
+    sweep = sweeps.get(ref_id)
+    if not sweep:
+        return f"=== @sweep:{ref_id} — Not Found ===\n"
+
+    lines = [f"=== @sweep:{ref_id} — Detailed Context ==="]
+    lines.append(f"Name: {sweep.get('name', '?')}")
+    lines.append(f"Status: {sweep.get('status', '?')}")
+    if sweep.get("base_command"):
+        lines.append(f"Base command: {sweep['base_command']}")
+    if sweep.get("parameters"):
+        lines.append(f"Parameters: {json.dumps(sweep['parameters'], default=str)[:300]}")
+    progress = sweep.get("progress", {})
+    if progress:
+        lines.append(f"Progress: {progress.get('completed', 0)}/{progress.get('total', 0)} done, {progress.get('failed', 0)} failed")
+
+    # Child runs
+    child_run_ids = sweep.get("run_ids", [])
+    child_runs = [(rid, runs.get(rid)) for rid in child_run_ids if runs.get(rid)]
+    lines.append(f"\n-- Child Runs ({len(child_runs)} total, showing up to 20) --")
+    for rid, r in child_runs[:20]:
+        status = r.get("status", "?")
+        exit_code = r.get("exit_code")
+        error = r.get("error", "")
+        line = f"  {rid}: {r.get('name', '?')} [{status}]"
+        if exit_code is not None:
+            line += f" exit={exit_code}"
+        if error:
+            line += f" error={error[:80]}"
+        lines.append(line)
+
+        # Brief FileStore result per child (limit=1)
+        agent_id = r.get("agent_id")
+        if _agent_runtime and agent_id:
+            try:
+                from agentsys.types import EntryType
+                child_results = _agent_runtime.store.query(agent_id=agent_id, type=EntryType.RESULT, limit=1)
+                if child_results:
+                    data = child_results[0].data or {}
+                    summary = ", ".join(f"{k}: {v}" for k, v in list(data.items())[:4])
+                    lines.append(f"    result: {summary[:150]}")
+            except Exception:
+                pass
+
+    # Coordinator agent results
+    coordinator_agent_id = sweep.get("agent_id")
+    if _agent_runtime and coordinator_agent_id:
+        try:
+            from agentsys.types import EntryType
+            coord_results = _agent_runtime.store.query(agent_id=coordinator_agent_id, type=EntryType.RESULT, limit=5)
+            if coord_results:
+                lines.append("\n-- Coordinator Results --")
+                for entry in coord_results:
+                    data = entry.data or {}
+                    summary = ", ".join(f"{k}: {v}" for k, v in list(data.items())[:6])
+                    lines.append(f"  [{entry.type.value}] {summary[:200]}")
+        except Exception:
+            pass
+
+    lines.append(f"=== End @sweep:{ref_id} ===")
+    return "\n".join(lines)
+
+
+def _resolve_alert_context(ref_id: str) -> str:
+    """Build detailed context for a single alert."""
+    alert = active_alerts.get(ref_id)
+    if not alert:
+        return f"=== @alert:{ref_id} — Not Found ===\n"
+
+    lines = [f"=== @alert:{ref_id} — Detailed Context ==="]
+    lines.append(f"Severity: {alert.get('severity', '?')}")
+    lines.append(f"Message: {alert.get('message', '?')}")
+    lines.append(f"Status: {alert.get('status', '?')}")
+    if alert.get("choices"):
+        lines.append(f"Choices: {alert['choices']}")
+    if alert.get("response"):
+        lines.append(f"Response: {alert['response']}")
+    if alert.get("suggested_actions"):
+        lines.append(f"Suggested actions: {alert['suggested_actions']}")
+    if alert.get("run_id"):
+        linked_run = runs.get(alert["run_id"])
+        if linked_run:
+            lines.append(f"Linked run: {alert['run_id']} ({linked_run.get('name', '?')}) [{linked_run.get('status', '?')}]")
+    lines.append(f"=== End @alert:{ref_id} ===")
+    return "\n".join(lines)
+
+
+def _resolve_chat_context(ref_id: str) -> str:
+    """Build context from a referenced chat session (last 10 messages)."""
+    session = chat_sessions.get(ref_id)
+    if not session:
+        return f"=== @chat:{ref_id} — Not Found ===\n"
+
+    lines = [f"=== @chat:{ref_id} — Chat Context ==="]
+    lines.append(f"Title: {session.get('title', 'Untitled')}")
+    messages = session.get("messages", [])
+    recent = messages[-10:]
+    for msg in recent:
+        role = msg.get("role", "?")
+        content = str(msg.get("content", ""))[:500]
+        lines.append(f"  [{role}] {content}")
+    if not recent:
+        lines.append("  (no messages)")
+    lines.append(f"=== End @chat:{ref_id} ===")
+    return "\n".join(lines)
+
+
+_REFERENCE_RESOLVERS = {
+    "run": _resolve_run_context,
+    "sweep": _resolve_sweep_context,
+    "alert": _resolve_alert_context,
+    "chat": _resolve_chat_context,
+}
+
+
+def _resolve_scoped_context(message: str) -> str:
+    """Parse @references in message and return scoped context block.
+
+    Returns empty string if no references found (backward compatible).
+    """
+    refs = _parse_references(message)
+    if not refs:
+        return ""
+
+    sections: List[str] = []
+    for ref_type, ref_id in refs:
+        resolver = _REFERENCE_RESOLVERS.get(ref_type)
+        if resolver:
+            sections.append(resolver(ref_id))
+        else:
+            sections.append(f"=== @{ref_type}:{ref_id} — Unknown reference type ===\n")
+
+    return (
+        "\n--- Referenced Context (resolved from @mentions) ---\n\n"
+        + "\n\n".join(sections)
+        + "\n\n--- End Referenced Context ---\n"
+    )
+
+
+def _build_agent_state(message: str) -> dict:
     """Build template variables for agent (default chat) mode."""
+    scoped = _resolve_scoped_context(message)
     return {
-        "experiment_context": _build_experiment_context(),
+        "experiment_context": scoped + _build_experiment_context(),
         "server_url": SERVER_CALLBACK_URL,
         "auth_token": USER_AUTH_TOKEN or "",
     }
@@ -348,6 +607,7 @@ def _build_agent_state(_message: str) -> dict:
 
 def _build_plan_state(message: str) -> dict:
     """Build template variables for plan mode."""
+    scoped = _resolve_scoped_context(message)
     # Summarize existing plans for context
     existing_plans_summary = "No existing plans."
     if plans:
@@ -357,7 +617,7 @@ def _build_plan_state(message: str) -> dict:
         existing_plans_summary = "\n".join(lines)
     return {
         "goal": message,
-        "experiment_context": _build_experiment_context(),
+        "experiment_context": scoped + _build_experiment_context(),
         "existing_plans": existing_plans_summary,
         "server_url": SERVER_CALLBACK_URL,
         "auth_token": USER_AUTH_TOKEN or "",
@@ -508,6 +768,20 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
                 session.setdefault("messages", []).append(assistant_msg)
 
 
+        # L1 post-processing: parse spawn/steer/stop actions from wild/auto mode responses
+        if mode in ("wild", "auto") and runtime.full_text:
+            try:
+                from agent.wild_routes import _get_session_agent
+                agent = _get_session_agent(session_id)
+                if agent:
+                    actions = await agent.handle_llm_response(runtime.full_text)
+                    for action in actions:
+                        await _append_runtime_event(runtime, {"type": "l1_action", **action})
+                    if actions:
+                        logger.info("[chat-worker] L1 executed %d actions for session %s", len(actions), session_id)
+            except Exception as e:
+                logger.error("[chat-worker] L1 post-processing failed for session %s: %s", session_id, e, exc_info=True)
+
         # Auto-name: fetch title from OpenCode only once (after the first exchange)
         session = chat_sessions.get(session_id)
         if isinstance(session, dict) and not session.get("title"):
@@ -550,78 +824,63 @@ async def _start_chat_worker(session_id: str, content: str, mode: str = "agent")
     return runtime
 
 
-async def _send_chat_for_v2(chat_session_id: str, prompt: str, display_message: str) -> str:
-    """Route a V2 iteration through the frontend's chat session for live streaming.
+async def trigger_synthetic_chat_turn(
+    session_id: str,
+    system_message: str,
+    *,
+    mode: str = "auto",
+) -> None:
+    """Trigger a synthetic chat turn from the system (not user-initiated).
 
-    1. Adds a user message to the chat session (so the frontend shows the iteration)
-    2. Starts the chat worker (which streams the response via SSE)
-    3. Waits for completion
-    4. Returns the full response text
+    Used by L1's reactive callback when a child (L2/L3) finishes.
+    Builds an L1 prompt with the system message injected, runs it through
+    OpenCode, and streams the response. The frontend picks it up via SSE.
 
-    This is the callback passed to WildV2Engine.send_chat_message.
+    Args:
+        session_id: Chat session ID.
+        system_message: System-generated message with child results.
+        mode: Chat mode for prompt selection (auto/wild).
     """
-    logger.info("[wild-v2-chat] _send_chat_for_v2 called: session=%s, prompt_len=%d, display=%s",
-                chat_session_id, len(prompt), display_message)
+    session = chat_sessions.get(session_id)
+    if not session or not isinstance(session, dict):
+        logger.warning("[synthetic-turn] Session %s not found, skipping", session_id)
+        return
 
-    if chat_session_id not in chat_sessions:
-        logger.error("[wild-v2-chat] Chat session %s not found!", chat_session_id)
-        raise ValueError(f"Chat session {chat_session_id} not found")
+    # Check if there's already an active stream — if so, skip to avoid conflict
+    existing = active_chat_streams.get(session_id)
+    if existing and existing.status == "running":
+        logger.info("[synthetic-turn] Session %s has active stream, deferring", session_id)
+        return
 
-    session = chat_sessions[chat_session_id]
+    # Build the L1 prompt with the system message
+    from agent.wild_routes import _get_session_agent
+    agent = _get_session_agent(session_id)
+    if not agent:
+        logger.warning("[synthetic-turn] No L1 agent for session %s", session_id)
+        return
 
-    # Check if there's already an active stream on this session
-    existing_runtime = active_chat_streams.get(chat_session_id)
-    if existing_runtime and existing_runtime.status == "running":
-        logger.warning("[wild-v2-chat] Session %s already has an active stream (run=%s), waiting for it to finish...",
-                       chat_session_id, existing_runtime.run_id)
-        # Wait for the existing task to complete before starting a new one
-        existing_task = active_chat_tasks.get(chat_session_id)
-        if existing_task:
-            try:
-                await existing_task
-                logger.info("[wild-v2-chat] Previous task finished, proceeding")
-            except Exception:
-                logger.warning("[wild-v2-chat] Previous task failed, proceeding anyway")
+    skill_id = "l1_wild_session" if mode == "wild" else "l1_auto_session"
+    content, provenance = await agent.build_wild_prompt(
+        system_message, session_id, _prompt_skill_manager, skill_id=skill_id
+    )
 
-    # Add user message showing the iteration context
-    user_msg = {
-        "role": "user",
-        "content": display_message,
+    # Record the system message in session history
+    session.setdefault("messages", []).append({
+        "role": "system",
+        "content": system_message,
         "timestamp": time.time(),
-        "wild_v2": True,
-    }
-    session.setdefault("messages", []).append(user_msg)
-    save_chat_state()
-    logger.debug("[wild-v2-chat] Added user message to chat session")
+        "synthetic": True,
+    })
 
-    # Start the chat worker — this sends the full prompt to OpenCode and streams
-    # the response via SSE, so the frontend picks it up live
-    logger.info("[wild-v2-chat] Starting chat worker for session %s", chat_session_id)
-    runtime = await _start_chat_worker(chat_session_id, prompt, mode="agent")
-    logger.info("[wild-v2-chat] Chat worker started: run_id=%s", runtime.run_id)
+    # Start background chat worker (same as user-initiated)
+    try:
+        runtime = await _start_chat_worker(session_id, content, mode=mode)
+        if provenance:
+            await _append_runtime_event(runtime, {"type": "provenance", "synthetic": True, **provenance})
+        logger.info("[synthetic-turn] Started synthetic chat turn for session %s", session_id)
+    except Exception as e:
+        logger.error("[synthetic-turn] Failed to start synthetic turn for %s: %s", session_id, e)
 
-    # Wait for the background task to finish
-    task = active_chat_tasks.get(chat_session_id)
-    if task:
-        logger.info("[wild-v2-chat] Waiting for chat worker task to complete...")
-        try:
-            await task
-            logger.info("[wild-v2-chat] Chat worker task completed successfully")
-        except Exception as err:
-            logger.error("[wild-v2-chat] Chat worker task failed: %s", err, exc_info=True)
-    else:
-        logger.warning("[wild-v2-chat] No task found in active_chat_tasks for session %s", chat_session_id)
-
-    full_text = runtime.full_text or ""
-    logger.info("[wild-v2-chat] Got %d chars from chat session %s (status=%s)",
-                len(full_text), chat_session_id, runtime.status)
-    return full_text
-
-
-def wire_v2_engine():
-    """Wire the chat streaming callback into the V2 engine. Called after init()."""
-    if _wild_v2_engine:
-        _wild_v2_engine._send_chat_message = _send_chat_for_v2
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +929,18 @@ async def chat_endpoint(req: ChatRequest):
         elif req.plan_mode:
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
-    content, provenance = _build_chat_prompt(session, llm_input, effective_mode, session_id=session_id)
+
+    if effective_mode in ("wild", "auto"):
+        # Route through L1 SessionAgent — per-session registry
+        from agent.wild_routes import _get_or_create_session_agent
+        agent = _get_or_create_session_agent(session_id)
+        # wild = forced research (l1_wild_session), auto = agent decides (l1_auto_session)
+        skill_id = "l1_wild_session" if effective_mode == "wild" else "l1_auto_session"
+        content, provenance = await agent.build_wild_prompt(
+            llm_input, session_id, _prompt_skill_manager, skill_id=skill_id
+        )
+    else:
+        content, provenance = _build_chat_prompt(session, llm_input, effective_mode, session_id=session_id)
     runtime = await _start_chat_worker(session_id, content, mode=effective_mode)
 
     # Emit provenance as the first SSE event so the frontend can attach it

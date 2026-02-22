@@ -23,7 +23,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
-    mode: str = "agent"  # "agent" | "wild" | "plan" | "sweep"
+    mode: str = "agent"  # "agent" | "auto" | "wild" | "plan" | "sweep"
     # When provided, this is used for LLM prompt construction instead of message.
     # `message` is still stored as the user-visible content in the session history.
     prompt_override: Optional[str] = None

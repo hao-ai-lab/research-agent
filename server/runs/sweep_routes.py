@@ -1,11 +1,11 @@
 """
 Research Agent Server — Sweep Endpoints
 
-Extracted from server.py. All /sweeps/* CRUD + lifecycle endpoints and
-their helper functions (expand_parameter_grid, build_command_with_params).
+Extracted from server.py. All /sweeps/* CRUD + lifecycle endpoints.
+Grid expansion and command building are imported from agentsys.
 """
 
-import itertools
+import asyncio
 import logging
 import time
 import uuid
@@ -16,6 +16,8 @@ from pydantic import BaseModel
 
 from core import config
 from core.models import SweepCreate, SweepUpdate, RunCreate
+from agentsys.agents.executor import build_command_with_params
+from agentsys.agents.sweep_coordinator import expand_parameter_grid
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
@@ -35,6 +37,47 @@ _normalize_gpuwrap_config = None
 _launch_run_in_tmux = None
 _RUN_STATUS_ACTIVE = None
 
+# Agent-backed sweep management (Phase 3)
+_agent_runtime = None
+
+# Mapping from agent_id → legacy sweep_id for backward compat
+_agent_to_sweep_id: dict[str, str] = {}
+
+# Lock for state mutations to prevent concurrent dict mutation races
+_state_lock = asyncio.Lock()
+
+def _get_session_agent_for_sweep():
+    """Get an L1 SessionAgent from the per-session registry for sweep management.
+
+    Returns the first available L1, or None if none exist.
+    """
+    try:
+        from agent.wild_routes import _session_agents
+        if _session_agents:
+            return next(iter(_session_agents.values()))
+        return None
+    except Exception:
+        return None
+
+
+# Status mapping: AgentStatus → legacy sweep status
+_AGENT_STATUS_TO_SWEEP_STATUS = {
+    "idle": "pending",
+    "running": "running",
+    "paused": "running",
+    "done": "completed",
+    "failed": "failed",
+}
+
+# Status mapping: AgentStatus → legacy run status (for sweep child runs)
+_AGENT_STATUS_TO_RUN_STATUS = {
+    "idle": "ready",
+    "running": "running",
+    "paused": "running",
+    "done": "finished",
+    "failed": "failed",
+}
+
 
 def init(
     sweeps_dict,
@@ -48,6 +91,8 @@ def init(
     normalize_gpuwrap_config_fn,
     launch_run_in_tmux_fn,
     run_status_active_set,
+    agent_runtime=None,
+    session_agent=None,
 ):
     """Wire in all shared state and helper functions from server.py."""
     global _sweeps, _runs, _save_runs_state
@@ -55,6 +100,7 @@ def init(
     global _normalize_sweep_status, _ensure_sweep_creation_context
     global _derive_sweep_creation_context, _normalize_gpuwrap_config
     global _launch_run_in_tmux, _RUN_STATUS_ACTIVE
+    global _agent_runtime
     _sweeps = sweeps_dict
     _runs = runs_dict
     _save_runs_state = save_runs_state_fn
@@ -66,24 +112,105 @@ def init(
     _normalize_gpuwrap_config = normalize_gpuwrap_config_fn
     _launch_run_in_tmux = launch_run_in_tmux_fn
     _RUN_STATUS_ACTIVE = run_status_active_set
+    _agent_runtime = agent_runtime
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Agent ↔ Legacy Sync
 # ---------------------------------------------------------------------------
 
-def expand_parameter_grid(parameters: dict, max_runs: int) -> list:
-    """Expand parameter dict into list of parameter combinations."""
-    keys = list(parameters.keys())
-    values = [parameters[k] if isinstance(parameters[k], list) else [parameters[k]] for k in keys]
-    combinations = list(itertools.product(*values))[:max_runs]
-    return [dict(zip(keys, combo)) for combo in combinations]
+def _sync_agent_sweep_statuses():
+    """Sync agent-backed sweep/run statuses into the legacy dicts.
 
+    For sweeps with an `agent_id`, queries the agent runtime for the
+    coordinator status and its executor children, then updates the
+    legacy sweep + run dicts accordingly.
+    """
+    if not _agent_runtime:
+        return
 
-def build_command_with_params(base_command: str, params: dict) -> str:
-    """Insert parameters into command string."""
-    param_str = " ".join([f"--{k}={v}" for k, v in params.items()])
-    return f"{base_command} {param_str}".strip()
+    for sweep_id, sweep in _sweeps.items():
+        agent_id = sweep.get("agent_id")
+        if not agent_id:
+            continue
+
+        info = _agent_runtime.get_agent(agent_id)
+        if info is None:
+            continue
+
+        # Sync sweep status from coordinator agent
+        agent_status = info.status.value if hasattr(info.status, "value") else str(info.status)
+        new_sweep_status = _AGENT_STATUS_TO_SWEEP_STATUS.get(agent_status, sweep.get("status"))
+        if new_sweep_status != sweep.get("status"):
+            sweep["status"] = new_sweep_status
+
+        # Sync child executor statuses to legacy runs (match by index)
+        legacy_run_ids = sweep.get("run_ids", [])
+        children = info.children  # ordered list of executor agent IDs
+
+        for i, child_id in enumerate(children):
+            if i >= len(legacy_run_ids):
+                break
+            run_id = legacy_run_ids[i]
+            run = _runs.get(run_id)
+            if not run:
+                continue
+
+            child_info = _agent_runtime.get_agent(child_id)
+            if child_info is None:
+                continue
+
+            child_status = child_info.status.value if hasattr(child_info.status, "value") else str(child_info.status)
+            legacy_status = _AGENT_STATUS_TO_RUN_STATUS.get(child_status, run.get("status"))
+
+            if legacy_status != run.get("status"):
+                run["status"] = legacy_status
+                # Link legacy run to its executor agent
+                run["agent_id"] = child_id
+                if legacy_status == "running" and not run.get("started_at"):
+                    run["started_at"] = time.time()
+                elif legacy_status in ("finished", "failed") and not run.get("ended_at"):
+                    run["ended_at"] = time.time()
+
+                # Pull result data from FileStore
+                if legacy_status in ("finished", "failed"):
+                    try:
+                        from agentsys.types import EntryType as ET
+                        results = _agent_runtime.store.query(
+                            agent_id=child_id,
+                            type=ET.RESULT,
+                            limit=1,
+                        )
+                        if results:
+                            result_data = results[0].data
+                            if "exit_code" in result_data:
+                                run["exit_code"] = result_data["exit_code"]
+                            if "run_dir" in result_data:
+                                run["run_dir"] = result_data["run_dir"]
+                            if "error" in result_data:
+                                run["error"] = result_data["error"]
+                    except Exception as e:
+                        logger.warning(f"Failed to query results for executor {child_id}: {e}")
+
+        # Update sweep progress from children
+        if children:
+            progress = sweep.get("progress", {})
+            completed = sum(1 for rid in legacy_run_ids if _runs.get(rid, {}).get("status") == "finished")
+            failed = sum(1 for rid in legacy_run_ids if _runs.get(rid, {}).get("status") == "failed")
+            running = sum(1 for rid in legacy_run_ids if _runs.get(rid, {}).get("status") in ("running", "launching"))
+            total = len(legacy_run_ids)
+            progress.update({
+                "total": total,
+                "completed": completed,
+                "failed": failed,
+                "running": running,
+                "ready": total - completed - failed - running,
+                "queued": 0,
+                "launching": 0,
+                "canceled": 0,
+            })
+            sweep["progress"] = progress
+
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +233,7 @@ async def list_sweeps(
 ):
     """List all sweeps."""
     _recompute_all_sweep_states()
+    _sync_agent_sweep_statuses()
     backfilled = False
     result = []
     for sweep_id, sweep in _sweeps.items():
@@ -279,6 +407,34 @@ async def create_sweep(req: SweepCreate):
     _recompute_sweep_state(sweep_id)
     _save_runs_state()
 
+    # Spawn a SweepCoordinatorAgent for agent-backed execution (Phase 3)
+    _session_agent = _get_session_agent_for_sweep()
+    if _session_agent is not None and requested_status == "running":
+        try:
+            agent_id = await _session_agent.start_sweep(
+                name=req.name,
+                base_command=req.base_command,
+                parameters=req.parameters or {},
+                workdir=req.workdir or config.WORKDIR,
+                parallel=1,
+                max_runs=req.max_runs,
+                legacy_run_ids=run_ids,
+            )
+            sweep_data["agent_id"] = agent_id
+            _agent_to_sweep_id[agent_id] = sweep_id
+            _save_runs_state()
+            logger.info(f"Spawned SweepCoordinatorAgent {agent_id} for sweep {sweep_id}")
+        except Exception as e:
+            logger.warning(f"Failed to spawn SweepCoordinator for sweep {sweep_id}: {e}")
+            # Fall back to tmux-based launch for each run
+            for rid in run_ids:
+                run = _runs.get(rid)
+                if run and run["status"] == "queued":
+                    try:
+                        _launch_run_in_tmux(rid, run)
+                    except Exception as e2:
+                        logger.error(f"Failed to launch run {rid} via tmux: {e2}")
+
     logger.info(f"Created sweep {sweep_id}: {req.name} with {len(run_ids)} runs (status={requested_status})")
     return {"id": sweep_id, **sweep_data}
 
@@ -374,6 +530,7 @@ async def get_sweep(sweep_id: str):
     if sweep_id not in _sweeps:
         raise HTTPException(status_code=404, detail="Sweep not found")
 
+    _sync_agent_sweep_statuses()
     sweep = _recompute_sweep_state(sweep_id) or _sweeps[sweep_id]
     if _ensure_sweep_creation_context(sweep):
         _save_runs_state()
@@ -389,10 +546,48 @@ async def start_sweep(sweep_id: str, parallel: int = Query(1, description="Max p
     sweep = _sweeps[sweep_id]
     if _normalize_sweep_status(sweep.get("status")) == "draft":
         raise HTTPException(status_code=400, detail="Draft sweep has no runnable jobs yet")
+
+    # If already agent-backed, don't double-launch
+    if sweep.get("agent_id") and _agent_runtime:
+        info = _agent_runtime.get_agent(sweep["agent_id"])
+        if info and info.status.value in ("running", "idle"):
+            return {"message": "Sweep already running via agent", "sweep_id": sweep_id}
+
+    run_ids = sweep.get("run_ids", [])
+
+    # Try agent-backed execution first
+    _session_agent = _get_session_agent_for_sweep()
+    if _session_agent is not None and not sweep.get("agent_id"):
+        try:
+            agent_id = await _session_agent.start_sweep(
+                name=sweep.get("name", sweep_id),
+                base_command=sweep.get("base_command", ""),
+                parameters=sweep.get("parameters", {}),
+                workdir=sweep.get("workdir", config.WORKDIR),
+                parallel=parallel,
+                max_runs=sweep.get("max_runs", 10),
+                legacy_run_ids=run_ids,
+            )
+            sweep["agent_id"] = agent_id
+            sweep["status"] = "running"
+            _agent_to_sweep_id[agent_id] = sweep_id
+            # Mark runs as queued
+            for rid in run_ids:
+                run = _runs.get(rid)
+                if run and run["status"] == "ready":
+                    run["status"] = "queued"
+                    run["queued_at"] = time.time()
+            _save_runs_state()
+            logger.info(f"Started sweep {sweep_id} via agent {agent_id}")
+            return {"message": f"Started sweep via agent", "sweep_id": sweep_id, "agent_id": agent_id}
+        except Exception as e:
+            logger.warning(f"Agent-backed sweep start failed, falling back to tmux: {e}")
+
+    # Fallback: tmux-based launch
     started = 0
     attempted = 0
 
-    for run_id in sweep.get("run_ids", []):
+    for run_id in run_ids:
         if run_id in _runs:
             run = _runs[run_id]
             if run["status"] in ["ready", "queued"] and started < parallel:

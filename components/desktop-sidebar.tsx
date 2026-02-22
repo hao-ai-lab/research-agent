@@ -775,31 +775,155 @@ export function DesktopSidebar({
               </section>
             )}
 
+            {/* Experiments tree: unified runs + sweeps (Phase 5) */}
             {!isIconRail && showSidebarRunsSweepsPreview && (
               <section>
                 <div className="mb-2 flex items-center justify-between px-1">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Runs
+                    Experiments
                   </p>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                        onClick={() => onOpenCreateRun?.()}
-                        disabled={!onOpenCreateRun}
-                        title="Create run"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        <span className="sr-only">Create run</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Create run</TooltipContent>
-                  </Tooltip>
+                  <div className="flex gap-0.5">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                          onClick={() => onOpenCreateRun?.()}
+                          disabled={!onOpenCreateRun}
+                          title="Create run"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span className="sr-only">Create run</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Create run</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  {recentRuns.map((run) => {
+                <div className="space-y-0.5">
+                  {/* Sweep nodes (collapsible, with child runs) */}
+                  {recentSweeps.length > 0 && (
+                    <p className="px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Sweeps</p>
+                  )}
+                  {recentSweeps.map((sweep) => {
+                    const sweepStatus = getSweepStatusMeta(sweep.status)
+                    const sweepTitle = sweep.config.name || sweep.creationContext.name || sweep.id
+                    const sweepCommand = sweep.config.command || sweep.creationContext.command
+                    const childRunIds = sweep.runIds || []
+                    const childRuns = runs.filter((r) => childRunIds.includes(r.id))
+
+                    return (
+                      <div key={sweep.id}>
+                        {/* Sweep header */}
+                        <div className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50">
+                          <HoverCard openDelay={200} closeDelay={100}>
+                            <HoverCardTrigger asChild>
+                              <button
+                                type="button"
+                                title={sweepTitle}
+                                className="min-w-0 flex-1 text-left"
+                                onClick={() => void onNavigateToSweep?.(sweep.id)}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center ${sweepStatus.className}`}>
+                                        {sweepStatus.icon}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{sweepStatus.label}</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <p className="min-w-0 truncate text-sm font-medium text-foreground">{sweepTitle}</p>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{sweepTitle}</TooltipContent>
+                                  </Tooltip>
+                                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                                    {sweep.progress.completed}/{sweep.progress.total}
+                                  </span>
+                                </div>
+                              </button>
+                            </HoverCardTrigger>
+                            <HoverCardContent side="right" align="start" className="w-80 p-3">
+                              <div className="space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium text-foreground">{sweepTitle}</p>
+                                    <p className="truncate text-[11px] text-muted-foreground">{sweep.id}</p>
+                                  </div>
+                                  <span className={`inline-flex shrink-0 items-center gap-1 text-xs ${sweepStatus.className}`}>
+                                    {sweepStatus.icon}
+                                    {sweepStatus.label}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {sweep.progress.completed}/{sweep.progress.total} runs completed
+                                </p>
+                                <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
+                                  {sweepCommand}
+                                </p>
+                              </div>
+                            </HoverCardContent>
+                          </HoverCard>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-[16px]"
+                            onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
+                          >
+                            @
+                          </Button>
+                        </div>
+                        {/* Child runs (indented) */}
+                        {childRuns.slice(0, 5).map((run) => {
+                          const runStatus = getRunStatusMeta(run.status)
+                          const runTitle = run.alias || run.name
+                          return (
+                            <div
+                              key={run.id}
+                              className="flex items-center gap-1 rounded-md pl-6 pr-2 py-1 text-sm transition-colors hover:bg-secondary/50"
+                            >
+                              <button
+                                type="button"
+                                title={runTitle}
+                                className="min-w-0 flex-1 text-left"
+                                onClick={() => onNavigateToRun(run.id)}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center ${runStatus.className}`}>
+                                    {runStatus.icon}
+                                  </span>
+                                  <p className="min-w-0 truncate text-xs text-muted-foreground">{runTitle}</p>
+                                </div>
+                              </button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 px-1.5 text-[14px] text-muted-foreground/60 hover:text-foreground"
+                                onClick={() => onInsertReference(`@run:${run.id} `)}
+                              >
+                                @
+                              </Button>
+                            </div>
+                          )
+                        })}
+                        {childRuns.length > 5 && (
+                          <p className="pl-6 text-[10px] text-muted-foreground">+{childRuns.length - 5} more</p>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {/* Standalone runs (no sweep parent) */}
+                  {recentRuns.filter((run) => !run.sweepId).length > 0 && (
+                    <>
+                      {recentSweeps.length > 0 && <div className="my-1 border-t border-border/40" />}
+                      <p className="px-2 pb-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Runs</p>
+                    </>
+                  )}
+                  {recentRuns.filter((run) => !run.sweepId).map((run) => {
                     const pendingAlertCount = pendingAlertsByRun[run.id] || run.alerts?.length || 0
                     const hasPendingAlerts = pendingAlertCount > 0
                     const runStatus = getRunStatusMeta(run.status)
@@ -878,108 +1002,8 @@ export function DesktopSidebar({
                       </div>
                     )
                   })}
-                  {recentRuns.length === 0 && (
-                    <p className="px-2 py-1 text-xs text-muted-foreground">No recent runs yet.</p>
-                  )}
-                </div>
-              </section>
-            )}
-
-            {!isIconRail && showSidebarRunsSweepsPreview && (
-              <section>
-                <div className="mb-2 flex items-center justify-between px-1">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Sweeps
-                  </p>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                        onClick={() => onOpenCreateSweep?.()}
-                        disabled={!onOpenCreateSweep}
-                        title="Create sweep"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        <span className="sr-only">Create sweep</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Create sweep</TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="space-y-1">
-                  {recentSweeps.map((sweep) => {
-                    const sweepStatus = getSweepStatusMeta(sweep.status)
-                    const sweepTitle = sweep.config.name || sweep.creationContext.name || sweep.id
-                    const sweepCommand = sweep.config.command || sweep.creationContext.command
-
-                    return (
-                      <div
-                        key={sweep.id}
-                        className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-secondary/50"
-                      >
-                        <HoverCard openDelay={200} closeDelay={100}>
-                          <HoverCardTrigger asChild>
-                            <button
-                              type="button"
-                              title={sweepTitle}
-                              className="min-w-0 flex-1 text-left"
-                              onClick={() => void onNavigateToSweep?.(sweep.id)}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center ${sweepStatus.className}`}>
-                                      {sweepStatus.icon}
-                                    </span>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{sweepStatus.label}</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <p className="min-w-0 truncate text-sm text-foreground">{sweepTitle}</p>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{sweepTitle}</TooltipContent>
-                                </Tooltip>
-                              </div>
-                              <p className="truncate text-[10px] text-muted-foreground">{sweep.id}</p>
-                            </button>
-                          </HoverCardTrigger>
-                          <HoverCardContent side="right" align="start" className="w-80 p-3">
-                            <div className="space-y-2">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-foreground">{sweepTitle}</p>
-                                  <p className="truncate text-[11px] text-muted-foreground">{sweep.id}</p>
-                                </div>
-                                <span className={`inline-flex shrink-0 items-center gap-1 text-xs ${sweepStatus.className}`}>
-                                  {sweepStatus.icon}
-                                  {sweepStatus.label}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground">
-                                {sweep.progress.completed}/{sweep.progress.total} runs completed
-                              </p>
-                              <p className="line-clamp-2 font-mono text-[11px] text-muted-foreground">
-                                {sweepCommand}
-                              </p>
-                            </div>
-                          </HoverCardContent>
-                        </HoverCard>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-[16px]"
-                          onClick={() => onInsertReference(`@sweep:${sweep.id} `)}
-                        >
-                          @
-                        </Button>
-                      </div>
-                    )
-                  })}
-                  {recentSweeps.length === 0 && (
-                    <p className="px-2 py-1 text-xs text-muted-foreground">No sweeps yet.</p>
+                  {recentRuns.length === 0 && recentSweeps.length === 0 && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">No experiments yet.</p>
                   )}
                 </div>
               </section>

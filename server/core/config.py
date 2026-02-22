@@ -48,7 +48,7 @@ OPENCODE_USERNAME = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 OPENCODE_PASSWORD = os.environ.get("OPENCODE_SERVER_PASSWORD")
 
 MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "opencode")
-MODEL_ID = os.environ.get("MODEL_ID", "minimax-m2.5-free")
+MODEL_ID = os.environ.get("MODEL_ID", "gpt-5-nano")
 
 # Runtime gateway key override from frontend (`X-Research-Agent-Key`).
 RUNTIME_RESEARCH_AGENT_KEY = os.environ.get("RESEARCH_AGENT_KEY", "").strip()

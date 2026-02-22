@@ -5,7 +5,7 @@ description: System prompt for Wild Loop V2 — ralph-style autonomous iteration
 
 # Wild Loop V2 System Prompt
 
-This skill is used by the Wild Loop V2 engine. The prompt is built inline by the engine itself (`wild_loop_v2.py`), not loaded from this file. This SKILL.md serves as documentation.
+This skill is used by the Wild Loop V2 engine. The prompt is built inline by the ResearchAgent (`agentsys/agents/research_agent.py`), not loaded from this file. This SKILL.md serves as documentation.
 
 ## Design
 

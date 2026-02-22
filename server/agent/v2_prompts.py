@@ -15,46 +15,237 @@ from typing import Callable, Optional
 # Signal parsers
 # ---------------------------------------------------------------------------
 
+def _last_match(pattern: str, text: str) -> Optional[re.Match]:
+    """Return the LAST regex match in *text*, or None.
+
+    OpenCode SSE streams include the user prompt (which contains template
+    examples with the same XML tags) before the assistant's actual response.
+    Using `re.search` would return the first match from the prompt template,
+    not the LLM's real output.  We use `re.findall` / `re.finditer` and
+    take the last hit so we always parse the assistant's answer.
+    """
+    matches = list(re.finditer(pattern, text))
+    return matches[-1] if matches else None
+
+
 def parse_promise(text: str) -> Optional[str]:
-    """Parse <promise>...</promise> from agent output."""
-    m = re.search(r"<promise>([\s\S]*?)</promise>", text)
+    """Parse <promise>...</promise> from agent output (last occurrence)."""
+    m = _last_match(r"<promise>([\s\S]*?)</promise>", text)
     if m:
         return m.group(1).strip().upper()
     return None
 
 
 def parse_plan(text: str) -> Optional[str]:
-    """Parse <plan>...</plan> from agent output."""
-    m = re.search(r"<plan>([\s\S]*?)</plan>", text)
+    """Parse <plan>...</plan> from agent output (last occurrence)."""
+    m = _last_match(r"<plan>([\s\S]*?)</plan>", text)
     return m.group(1).strip() if m else None
 
 
 def parse_summary(text: str) -> Optional[str]:
-    """Parse <summary>...</summary> from agent output."""
-    m = re.search(r"<summary>([\s\S]*?)</summary>", text)
+    """Parse <summary>...</summary> from agent output (last occurrence)."""
+    m = _last_match(r"<summary>([\s\S]*?)</summary>", text)
     return m.group(1).strip() if m else None
 
 
 def parse_reflection(text: str) -> Optional[str]:
-    """Parse <reflection>...</reflection> from agent output."""
-    m = re.search(r"<reflection>([\s\S]*?)</reflection>", text)
+    """Parse <reflection>...</reflection> from agent output (last occurrence)."""
+    m = _last_match(r"<reflection>([\s\S]*?)</reflection>", text)
     return m.group(1).strip() if m else None
 
 
 def parse_continue(text: str) -> bool:
-    """Parse <continue>yes|no</continue> from reflection output.
+    """Parse <continue>yes|no</continue> from reflection output (last occurrence).
 
     Returns True if the agent wants to continue, False otherwise.
     Defaults to False (stop) if the tag is missing or unparseable.
     """
-    m = re.search(r"<continue>([\s\S]*?)</continue>", text)
+    m = _last_match(r"<continue>([\s\S]*?)</continue>", text)
     if not m:
         return False
     return m.group(1).strip().lower() in ("yes", "true", "1")
 
 
+def parse_experiments(text: str) -> list[dict]:
+    """Parse <experiments> block from L2's iteration response (last occurrence).
+
+    The LLM outputs structured experiment specs inside <experiments> tags.
+    Each experiment is a YAML-like block starting with ``- goal:``.
+
+    Supported fields per experiment:
+        goal:       str  — human-readable experiment name (required)
+        command:    str  — shell command to execute (required for subprocess)
+        workdir:    str  — working directory (optional, defaults to ".")
+        parameters: dict — key=value pairs appended as --key=value (optional)
+
+    Returns list of experiment spec dicts. Empty list if no block found.
+    """
+    m = _last_match(r"<experiments>([\s\S]*?)</experiments>", text)
+    if not m:
+        return []
+    block = m.group(1).strip()
+    if not block:
+        return []
+
+    experiments: list[dict] = []
+    current: dict | None = None
+
+    for line in block.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # New experiment entry starts with "- goal:"
+        if stripped.startswith("- goal:"):
+            if current is not None:
+                experiments.append(current)
+            current = {"goal": stripped[len("- goal:"):].strip().strip('"').strip("'")}
+            continue
+
+        # Continuation fields (indented, key: value)
+        if current is not None and ":" in stripped:
+            key, _, value = stripped.partition(":")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key in ("goal", "command", "workdir"):
+                current[key] = value
+            elif key == "parameters":
+                # Try to parse inline dict: {k: v, k2: v2}
+                try:
+                    import json as _json
+                    current["parameters"] = _json.loads(value)
+                except Exception:
+                    current["parameters"] = {}
+
+    if current is not None:
+        experiments.append(current)
+
+    return experiments
+
+
+def parse_spawn_research(text: str) -> list[dict]:
+    """Parse <spawn_research> blocks from L1 SessionAgent output.
+
+    Expected format:
+        <spawn_research>
+        goal: Run a full experiment testing different learning rates
+        max_iterations: 25
+        </spawn_research>
+
+    Returns list of dicts with 'goal' and optional 'max_iterations'.
+    """
+    results = []
+    for m in re.finditer(r"<spawn_research>([\s\S]*?)</spawn_research>", text):
+        block = m.group(1).strip()
+        spec: dict = {}
+        for line in block.split("\n"):
+            stripped = line.strip()
+            if not stripped or ":" not in stripped:
+                continue
+            key, _, value = stripped.partition(":")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key == "goal":
+                spec["goal"] = value
+            elif key == "max_iterations":
+                try:
+                    spec["max_iterations"] = int(value)
+                except ValueError:
+                    pass
+        if spec.get("goal"):
+            results.append(spec)
+    return results
+
+
+def parse_spawn_command(text: str) -> list[dict]:
+    """Parse <spawn_command> blocks from L1 SessionAgent output.
+
+    Expected format:
+        <spawn_command>
+        goal: Run the test suite
+        command: cd /workspace && python -m pytest tests/ -v
+        workdir: /workspace
+        </spawn_command>
+
+    Returns list of dicts with 'goal', 'command', and optional 'workdir'.
+    """
+    results = []
+    for m in re.finditer(r"<spawn_command>([\s\S]*?)</spawn_command>", text):
+        block = m.group(1).strip()
+        spec: dict = {}
+        for line in block.split("\n"):
+            stripped = line.strip()
+            if not stripped or ":" not in stripped:
+                continue
+            key, _, value = stripped.partition(":")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key in ("goal", "command", "workdir"):
+                spec[key] = value
+        if spec.get("goal") and spec.get("command"):
+            results.append(spec)
+    return results
+
+
+def parse_steer_child(text: str) -> list[dict]:
+    """Parse <steer_child> blocks from L1 SessionAgent output.
+
+    Expected format:
+        <steer_child>
+        experiment_id: abc123
+        context: Focus on the learning rate range 0.001-0.01
+        </steer_child>
+
+    Returns list of dicts with 'experiment_id' and 'context'.
+    """
+    results = []
+    for m in re.finditer(r"<steer_child>([\s\S]*?)</steer_child>", text):
+        block = m.group(1).strip()
+        spec: dict = {}
+        for line in block.split("\n"):
+            stripped = line.strip()
+            if not stripped or ":" not in stripped:
+                continue
+            key, _, value = stripped.partition(":")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key in ("experiment_id", "context"):
+                spec[key] = value
+        if spec.get("experiment_id") and spec.get("context"):
+            results.append(spec)
+    return results
+
+
+def parse_stop_child(text: str) -> list[dict]:
+    """Parse <stop_child> blocks from L1 SessionAgent output.
+
+    Expected format:
+        <stop_child>
+        experiment_id: abc123
+        </stop_child>
+
+    Returns list of dicts with 'experiment_id'.
+    """
+    results = []
+    for m in re.finditer(r"<stop_child>([\s\S]*?)</stop_child>", text):
+        block = m.group(1).strip()
+        spec: dict = {}
+        for line in block.split("\n"):
+            stripped = line.strip()
+            if not stripped or ":" not in stripped:
+                continue
+            key, _, value = stripped.partition(":")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key == "experiment_id":
+                spec["experiment_id"] = value
+        if spec.get("experiment_id"):
+            results.append(spec)
+    return results
+
+
 def parse_memories(text: str) -> list:
-    """Parse <memories>...</memories> from reflection output.
+    """Parse <memories>...</memories> from reflection output (last occurrence).
 
     Expected format inside the tag:
         - [tag] Title or lesson text
@@ -62,7 +253,7 @@ def parse_memories(text: str) -> list:
 
     Returns a list of dicts: [{"tag": "lesson", "title": "...", "content": "..."}]
     """
-    m = re.search(r"<memories>([\s\S]*?)</memories>", text)
+    m = _last_match(r"<memories>([\s\S]*?)</memories>", text)
     if not m:
         return []
     block = m.group(1).strip()
@@ -128,6 +319,10 @@ def build_reflection_prompt(
             "Continue if there's clearly more important work; stop and ask if unsure."
         )
 
+    memories_section = ""
+    if ctx.memories_text:
+        memories_section = f"\n## Memory Bank (Lessons from Past Sessions)\n\n{ctx.memories_text}\n"
+
     variables = {
         "goal": ctx.goal,
         "iteration": str(ctx.iteration),
@@ -137,7 +332,7 @@ def build_reflection_prompt(
         "workdir": ctx.workdir,
         "user_availability": avail_str,
         "autonomy_level": ctx.autonomy_level,
-        "memories": ctx.memories_text,
+        "memories": memories_section,
     }
 
     if render_fn:
@@ -202,6 +397,9 @@ class PromptContext:
     # Memory bank (active lessons from past sessions)
     memories_text: str = ""  # formatted string for prompt injection
 
+    # Experiment results from previous iteration's L3 agents
+    experiment_results: str = ""  # formatted markdown for prompt injection
+
 
 # ---------------------------------------------------------------------------
 # Computed sections (injected as template variables)
@@ -250,60 +448,40 @@ def _struggle_section(ctx: PromptContext) -> str:
 
 
 def _api_catalog(ctx: PromptContext) -> str:
-    """Build the full API catalog the agent can use via MCP tools or curl."""
+    """Build the API catalog for the agent.
+
+    Focuses on endpoints the agent actually needs: session lifecycle,
+    events, and system health.  Experiment execution goes through
+    <experiments> blocks, not direct API calls.
+    """
     s = ctx.server_url
     sid = ctx.session_id
     auth_header = f'-H "X-Auth-Token: {ctx.auth_token}"' if ctx.auth_token else ""
     auth_note = f"""### Authentication
 
-**All API requests require the auth header.** Include this in every `curl` call:
+**Include this header in every `curl` call:**
 ```
 {auth_header}
 ```
 
 """ if ctx.auth_token else ""
-    return f"""{auth_note}### Preferred Tool Calls (MCP)
-- `mcp__research-agent__create_run` — Fixed-schema run creation (`name`, `command`, `workdir`, `sweep_id`, `launch_policy`)
-- `mcp__research-agent__start_run` — Start a run by id
-- Prefer MCP tools for run creation/start to avoid ad-hoc command construction.
-
-### Chat linkage (required for create endpoints)
-- For this session, include `"chat_session_id": "{sid}"` in bodies for `POST /runs`, `POST /sweeps`, `POST /sweeps/wild`, and `POST /sweeps/{{id}}/runs`.
-- Use `null` only when intentionally creating entities not tied to this chat.
-
-### Sweeps (experiment groups)
-- `POST {s}/sweeps/wild` — Create a tracking sweep (body: `{{"name": "...", "goal": "...", "chat_session_id": "{sid}"}}`)
-- `POST {s}/sweeps` — Create a parameterized sweep (body includes `chat_session_id`)
-- `GET  {s}/sweeps` — List all sweeps
-- `GET  {s}/sweeps/{{id}}` — Get sweep details & progress
-
-### Runs (individual jobs)
-- `POST {s}/runs` — Create a run (body: `{{"name": "...", "command": "...", "sweep_id": "...", "chat_session_id": "{sid}", "auto_start": true}}`)
-- `POST {s}/runs/{{id}}/start` — Start a queued/ready run
-- `POST {s}/runs/{{id}}/stop` — Stop a running job
-- `GET  {s}/runs` — List all runs
-- `GET  {s}/runs/{{id}}` — Get run details & status
-
-### Alerts & Events
-- `GET  {s}/wild/v2/events/{sid}` — Pending events for this session
-- `POST {s}/wild/v2/events/{sid}/resolve` — Mark events handled (body: `{{"event_ids": ["<id>"]}}`)
+    return f"""{auth_note}### Session Lifecycle
+- `GET  {s}/wild/v2/status` — Current session state, plan, and history
+- `POST {s}/wild/v2/steer` — Inject user context for next iteration (body: `{{"context": "..."}}`)
 - `GET  {s}/wild/v2/system-health` — System utilization (running/queued/completed/failed counts)
 
-### Cluster & Capacity
-- `GET  {s}/cluster` — Cluster metadata and run summary
-- `POST {s}/cluster/detect` — Auto-detect cluster type/capacity
-- `POST {s}/cluster` — Update cluster metadata manually
+### Events
+- `GET  {s}/wild/v2/events/{sid}` — Pending events for this session
+- `POST {s}/wild/v2/events/{sid}/resolve` — Mark events handled (body: `{{"event_ids": ["<id>"]}}`)
 
-### Skills (prompt templates)
-- `GET  {s}/prompt-skills` — List available prompt skills
-- `GET  {s}/prompt-skills/search?q=query` — Search skills by name/description
-- `GET  {s}/prompt-skills/{{id}}` — Fetch one skill (includes full template text)
-- `GET  {s}/prompt-skills/{{id}}/files` — List files for a skill
-- `GET  {s}/prompt-skills/{{id}}/files/{{path}}` — Read a skill file
+### Experiment Execution
+- **Do NOT create runs/sweeps via API.** Use `<experiments>` output blocks instead.
+- The research system automatically spawns executor agents for each experiment spec.
+- Results appear in your next iteration's context.
 
-### Docs & Schema
-- `GET  {s}/docs` — API docs UI (health/preflight probe)
-- `GET  {s}/openapi.json` — OpenAPI schema (health/preflight probe)"""
+### Reference (read-only)
+- `GET  {s}/docs` — API documentation
+- `GET  {s}/prompt-skills` — List available prompt skills"""
 
 
 def _evo_sweep_section(ctx: PromptContext) -> str:
@@ -392,6 +570,7 @@ def build_planning_prompt(
         "api_catalog": _api_catalog(ctx),
         "auth_header": auth_header_val,
         "memories": ctx.memories_text,
+        "experiment_results": ctx.experiment_results,
         "evo_sweep_enabled": "true" if ctx.evo_sweep_enabled else "false",
         "evo_sweep_section": _evo_sweep_section(ctx),
     }
@@ -435,6 +614,7 @@ def build_iteration_prompt(
         "api_catalog": _api_catalog(ctx),
         "auth_header": auth_header_val,
         "memories": ctx.memories_text,
+        "experiment_results": ctx.experiment_results,
         "evo_sweep_enabled": "true" if ctx.evo_sweep_enabled else "false",
         "evo_sweep_section": _evo_sweep_section(ctx),
     }

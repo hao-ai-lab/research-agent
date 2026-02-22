@@ -63,8 +63,8 @@ cd v0-research-agent-mobile/server
 
 Then in another terminal:
 ```bash
-cd v0-research-agent-mobile
-NEXT_PUBLIC_API_URL=http://127.0.0.1:10000 NEXT_PUBLIC_USE_MOCK=false npm run dev -- --port 3000
+
+
 ```
 
 ## Environment Variables

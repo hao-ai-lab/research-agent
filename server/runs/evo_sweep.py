@@ -136,17 +136,28 @@ def parse_evo_sweep(text: str) -> Optional[EvoSweepConfig]:
 # ---------------------------------------------------------------------------
 
 class EvoSweepController:
-    """Runs a population-based evolutionary sweep using the server's sweep/run API."""
+    """Runs a population-based evolutionary sweep.
+
+    Supports two modes:
+      - HTTP mode (legacy): communicates with the server via HTTP API.
+      - Agent mode (Phase 6): uses parent_agent.spawn_child() to spawn
+        ExecutorAgents directly. No HTTP round-trip.
+
+    Set ``parent_agent`` to enable agent mode. When set, ``server_url``
+    is not used for run creation/monitoring.
+    """
 
     def __init__(
         self,
         server_url: str,
         auth_token: str = "",
         llm_mutate_fn: Optional[Callable] = None,
+        parent_agent: Optional[Any] = None,
     ):
         self._server_url = server_url
         self._auth_token = auth_token
         self._llm_mutate_fn = llm_mutate_fn
+        self._parent_agent = parent_agent  # Phase 6: optional agent-backed mode
 
         self._sweep_id: Optional[str] = None
         self._cancelled = False
@@ -307,13 +318,32 @@ class EvoSweepController:
             return resp.json().get("id", resp.json().get("sweep_id", ""))
 
     async def _launch_run(self, config: EvoSweepConfig, candidate: Candidate) -> Optional[str]:
-        """Launch a single run for a candidate."""
-        # Build command with config params as env vars or CLI args
+        """Launch a single run for a candidate.
+
+        Uses agent-backed spawning if parent_agent is set (Phase 6),
+        otherwise falls back to HTTP API.
+        """
         config_args = " ".join(
             f"--{k}={v}" for k, v in candidate.config.items()
         )
         command = f"cd {config.workdir} && python {config.target_script} {config_args}"
 
+        # Agent mode (Phase 6): spawn ExecutorAgent via parent_agent
+        if self._parent_agent is not None:
+            try:
+                from agentsys.agents.executor import ExecutorAgent
+                handle = await self._parent_agent.spawn_child(
+                    ExecutorAgent,
+                    goal=f"evo-{candidate.id}",
+                    backend="subprocess",
+                    command=command,
+                    workdir=config.workdir,
+                )
+                return handle.id
+            except Exception as e:
+                logger.warning("[evo-sweep] Agent spawn failed, falling back to HTTP: %s", e)
+
+        # HTTP mode (legacy)
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self._server_url}/runs",

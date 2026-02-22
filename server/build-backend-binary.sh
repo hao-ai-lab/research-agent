@@ -65,14 +65,30 @@ log "Building one-file backend binary"
   --hidden-import runs.log_routes \
   --hidden-import runs.evo_sweep \
   --hidden-import agent \
-  --hidden-import agent.wild_loop_v2 \
   --hidden-import agent.wild_routes \
+  --hidden-import agent.runtime_routes \
   --hidden-import agent.v2_prompts \
+  --hidden-import agent.core.event_relay \
+  --hidden-import agentsys \
+  --hidden-import agentsys.types \
+  --hidden-import agentsys.filestore \
+  --hidden-import agentsys.memory \
+  --hidden-import agentsys.ipc \
+  --hidden-import agentsys.agent \
+  --hidden-import agentsys.proxy \
+  --hidden-import agentsys.worker \
+  --hidden-import agentsys.runtime \
+  --hidden-import agentsys.agents \
+  --hidden-import agentsys.agents.orchestrator \
+  --hidden-import agentsys.agents.executor \
+  --hidden-import agentsys.agents.sidecar \
+  --hidden-import agentsys.agents.research_agent \
   --hidden-import skills \
   --hidden-import skills.manager \
   --hidden-import skills.routes \
   --hidden-import memory \
-  --hidden-import memory.store \
+  --hidden-import memory.adapter \
+  --hidden-import memory.migrate \
   --hidden-import memory.routes \
   --hidden-import integrations \
   --hidden-import integrations.slack_handler \
