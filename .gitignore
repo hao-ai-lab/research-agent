@@ -43,15 +43,15 @@ Thumbs.db
 .worktrees/
 
 # ── Agent / AI tool state ────────────────────────────────────
-.agents/
+# .agents/
 .ralph/
 .codex/
 
 # ── Mock / ephemeral test data ───────────────────────────────
 .mock_wandb/
-
-# ── Data / datasets ──────────────────────────────────────────
-**/data/MNIST/
+tests/story/**/.agents/
 
 # ── Misc generated ───────────────────────────────────────────
 *.log
+*-ubyte
+*-ubyte.gz
