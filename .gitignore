@@ -1,0 +1,57 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+
+# ── Next.js ───────────────────────────────────────────────────
+.next/
+out/
+next-env.d.ts
+
+# ── Build / Compile ──────────────────────────────────────────
+*.tsbuildinfo
+dist/
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+*.so
+
+# ── Testing / Linting caches ─────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+.coverage
+
+# ── Environment / Secrets ────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── OS junk ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Worktrees (local dev helper) ─────────────────────────────
+.worktrees/
+
+# ── Agent / AI tool state ────────────────────────────────────
+.agents/
+.ralph/
+.codex/
+
+# ── Mock / ephemeral test data ───────────────────────────────
+.mock_wandb/
+
+# ── Data / datasets ──────────────────────────────────────────
+**/data/MNIST/
+
+# ── Misc generated ───────────────────────────────────────────
+*.log
