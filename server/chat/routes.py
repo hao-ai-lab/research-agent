@@ -24,7 +24,7 @@ from core.config import (
     OPENCODE_URL,
     MODEL_PROVIDER,
     MODEL_ID,
-    SERVER_CALLBACK_URL,
+    get_server_callback_url,
     USER_AUTH_TOKEN,
     get_auth,
     get_session_model,
@@ -46,11 +46,15 @@ from core.state import (
     plans,
     runs,
     sweeps,
+    cluster_state,
     save_chat_state,
 )
 
 logger = logging.getLogger("research-agent-server")
 router = APIRouter()
+
+# Telemetry lifecycle events
+from integrations.telemetry import emit_chat_event  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Module-level references.  Wired at init().
@@ -180,6 +184,7 @@ async def create_session(req: Optional[CreateSessionRequest] = None):
         "last_status": "idle",
     }
     save_chat_state()
+    emit_chat_event("chat_created", session_id, model_provider=session_model_provider, model_id=session_model_id)
     return {
         "id": session_id,
         "title": title,
@@ -668,19 +673,76 @@ def _resolve_scoped_context(message: str) -> str:
     )
 
 
+def _build_api_catalog(server_url: str) -> str:
+    """Build a static API catalog for chat mode prompts."""
+    s = server_url
+    return f"""| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `{s}/runs` | GET | List all runs |
+| `{s}/runs` | POST | Create a run (`name`, `command`, `workdir`, `sweep_id`, `auto_start`, `gpuwrap_config`) |
+| `{s}/runs/{{id}}` | GET | Get run details & status |
+| `{s}/runs/{{id}}/start` | POST | Start a queued/ready run |
+| `{s}/runs/{{id}}/stop` | POST | Stop a running job |
+| `{s}/runs/{{id}}/logs` | GET | Get run logs |
+| `{s}/runs/{{id}}/rerun` | POST | Rerun a finished/failed run |
+| `{s}/sweeps` | GET | List all sweeps |
+| `{s}/sweeps` | POST | Create a parameterized sweep |
+| `{s}/sweeps/wild` | POST | Create a tracking sweep (`name`, `goal`) |
+| `{s}/sweeps/{{id}}` | GET | Get sweep details & progress |
+| `{s}/alerts` | GET | List alerts |
+| `{s}/plans` | GET | List experiment plans |
+| `{s}/plans` | POST | Create a new plan |
+| `{s}/cluster` | GET | Get cluster state & run summary |
+| `{s}/cluster/detect` | POST | Auto-detect cluster type/capacity |
+| `{s}/docs` | GET | API docs UI |
+| `{s}/openapi.json` | GET | OpenAPI schema |"""
+
+
+def _build_cluster_summary() -> str:
+    """Build a human-readable summary of current cluster state."""
+    cs = cluster_state
+    ctype = cs.get("type", "unknown")
+    gpu_count = cs.get("gpu_count")
+    status = cs.get("status", "unknown")
+    source = cs.get("source", "unset")
+
+    if ctype == "unknown" and source == "unset":
+        return (
+            "Cluster has not been detected yet. "
+            "Run `POST /cluster/detect` to discover compute topology."
+        )
+
+    parts = [f"**Cluster type**: `{ctype}`"]
+    if gpu_count is not None:
+        parts.append(f"**GPU count**: {gpu_count}")
+    parts.append(f"**Status**: {status}")
+    if cs.get("label"):
+        parts.append(f"**Label**: {cs['label']}")
+    return "\n".join(f"- {p}" for p in parts)
+
+
 def _build_agent_state(message: str) -> dict:
     """Build template variables for agent (default chat) mode."""
     scoped = _resolve_scoped_context(message)
+    server_url = get_server_callback_url()
+    token = USER_AUTH_TOKEN or ""
+    auth_header = f'-H "X-Auth-Token: {token}"' if token else ""
     return {
         "experiment_context": scoped + _build_experiment_context(),
-        "server_url": SERVER_CALLBACK_URL,
-        "auth_token": USER_AUTH_TOKEN or "",
+        "server_url": server_url,
+        "auth_token": token,
+        "api_catalog": _build_api_catalog(server_url),
+        "cluster_state": _build_cluster_summary(),
+        "auth_header": auth_header,
     }
 
 
 def _build_plan_state(message: str) -> dict:
     """Build template variables for plan mode."""
     scoped = _resolve_scoped_context(message)
+    server_url = get_server_callback_url()
+    token = USER_AUTH_TOKEN or ""
+    auth_header = f'-H "X-Auth-Token: {token}"' if token else ""
     # Summarize existing plans for context
     existing_plans_summary = "No existing plans."
     if plans:
@@ -692,8 +754,11 @@ def _build_plan_state(message: str) -> dict:
         "goal": message,
         "experiment_context": scoped + _build_experiment_context(),
         "existing_plans": existing_plans_summary,
-        "server_url": SERVER_CALLBACK_URL,
-        "auth_token": USER_AUTH_TOKEN or "",
+        "server_url": server_url,
+        "auth_token": token,
+        "api_catalog": _build_api_catalog(server_url),
+        "cluster_state": _build_cluster_summary(),
+        "auth_header": auth_header,
     }
 
 
@@ -712,8 +777,16 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
     mode_note = ""
     provenance = None
 
+    # Only prepend the mode preamble on the first message of the session.
+    # OpenCode maintains multi-turn history, so subsequent turns already
+    # have the system context from the first exchange.
+    # NOTE: The current user message is already appended to session["messages"]
+    # before this function is called (see chat_endpoint line 663-664), so the
+    # first turn has exactly 1 message; subsequent turns have > 1.
+    is_first_turn = len(session.get("messages", [])) <= 1
+
     config = MODE_REGISTRY.get(mode)
-    if config:
+    if config and is_first_turn:
         variables = config.build_state(message)
         skill = _prompt_skill_manager.get(config.skill_id)
         rendered = _prompt_skill_manager.render(config.skill_id, variables)
@@ -743,8 +816,9 @@ def _build_chat_prompt(session: dict, message: str, mode: str = "agent", session
             "prompt_type": mode,
         }
 
+    # Chat linking note only needed on first turn — OpenCode retains it in context.
     chat_linking_note = ""
-    if session_id:
+    if session_id and is_first_turn:
         chat_linking_note = (
             "[CHAT LINKAGE]\n"
             "For experiment API creations (`POST /runs`, `POST /sweeps`, "
@@ -784,6 +858,7 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
     """Run the OpenCode stream for a chat session independent of HTTP clients."""
     session_stop_flags.pop(session_id, None)
     logger.debug("Starting background chat worker for session %s run %s (mode=%s)", session_id, runtime.run_id, mode)
+    emit_chat_event("chat_message_sent", session_id, metadata={"mode": mode, "run_id": runtime.run_id})
 
     try:
         session = chat_sessions.get(session_id)
@@ -822,6 +897,7 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
         runtime.status = "failed"
         runtime.error = str(e)
         logger.error("Chat worker failed for session %s: %s", session_id, e, exc_info=True)
+        emit_chat_event("chat_failed", session_id, metadata={"error": str(e)[:200]})
         await _append_runtime_event(runtime, {"type": "error", "message": str(e)})
     finally:
         # Auto-abort OpenCode session on any non-clean exit
@@ -899,6 +975,7 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
         save_chat_state()
 
         await _append_runtime_event(runtime, {"type": "session_status", "status": "idle"})
+        emit_chat_event("chat_completed", session_id, metadata={"status": runtime.status, "run_id": runtime.run_id})
         await _finalize_runtime(session_id, runtime)
 
         active_chat_tasks.pop(session_id, None)

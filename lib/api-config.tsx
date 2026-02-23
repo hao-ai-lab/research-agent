@@ -7,6 +7,9 @@ const STORAGE_KEY_API_URL = 'research-agent-api-url'
 const STORAGE_KEY_USE_MOCK = 'research-agent-use-mock'
 const STORAGE_KEY_AUTH_TOKEN = 'research-agent-auth-token'
 const STORAGE_KEY_RESEARCH_AGENT_KEY = 'research-agent-key'
+const STORAGE_KEY_TELEMETRY_URL = 'research-agent-telemetry-url'
+
+const DEFAULT_TELEMETRY_URL = process.env.NEXT_PUBLIC_TELEMETRY_URL || ''
 
 // Default values (can be overridden via env vars for CI)
 const DEFAULT_API_URL = process.env.NEXT_PUBLIC_DEFAULT_SERVER_URL || 'http://localhost:10000'
@@ -186,6 +189,17 @@ export function getResearchAgentKey(): string {
         return ''
     }
     return localStorage.getItem(STORAGE_KEY_RESEARCH_AGENT_KEY) || ''
+}
+
+/**
+ * Get the telemetry endpoint URL from localStorage or env default.
+ * Returns empty string when telemetry is disabled.
+ */
+export function getTelemetryUrl(): string {
+    if (typeof window === 'undefined') {
+        return ''
+    }
+    return localStorage.getItem(STORAGE_KEY_TELEMETRY_URL) || DEFAULT_TELEMETRY_URL
 }
 
 export function ApiConfigProvider({ children }: { children: React.ReactNode }) {

@@ -42,19 +42,35 @@ export function useSweeps(): UseSweepsResult {
   const [error, setError] = useState<string | null>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
   const sweepsRef = useRef<Sweep[]>([])
+  const inFlightFetchRef = useRef<Promise<void> | null>(null)
+  const lastFetchedAtRef = useRef(0)
+  const BASELINE_POLL_MS = 15000
+  const ACTIVE_POLL_MS = 5000
   sweepsRef.current = sweeps
 
   const fetchSweeps = useCallback(async () => {
+    if (inFlightFetchRef.current) {
+      return inFlightFetchRef.current
+    }
+    const request = (async () => {
+      try {
+        const apiSweeps = await listSweeps()
+        const mapped = apiSweeps.map(mapApiSweepToUiSweep)
+        setSweeps(mapped)
+        setError(null)
+        lastFetchedAtRef.current = Date.now()
+      } catch (e) {
+        console.error('Failed to fetch sweeps:', e)
+        setError(e instanceof Error ? e.message : 'Failed to fetch sweeps')
+      } finally {
+        setIsLoading(false)
+      }
+    })()
+    inFlightFetchRef.current = request
     try {
-      const apiSweeps = await listSweeps()
-      const mapped = apiSweeps.map(mapApiSweepToUiSweep)
-      setSweeps(mapped)
-      setError(null)
-    } catch (e) {
-      console.error('Failed to fetch sweeps:', e)
-      setError(e instanceof Error ? e.message : 'Failed to fetch sweeps')
+      await request
     } finally {
-      setIsLoading(false)
+      inFlightFetchRef.current = null
     }
   }, [])
 
@@ -63,17 +79,32 @@ export function useSweeps(): UseSweepsResult {
 
     pollingRef.current = setInterval(() => {
       const hasActiveSweeps = sweepsRef.current.some((sweep) => isSweepActive(sweep.status))
-      if (hasActiveSweeps) {
+      const msSinceLastFetch = Date.now() - lastFetchedAtRef.current
+      const shouldBaselineRefresh = msSinceLastFetch >= BASELINE_POLL_MS
+      if (hasActiveSweeps || shouldBaselineRefresh) {
         fetchSweeps()
       }
-    }, 5000)
+    }, ACTIVE_POLL_MS)
+
+    const refreshOnFocus = () => {
+      fetchSweeps()
+    }
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchSweeps()
+      }
+    }
+    window.addEventListener('focus', refreshOnFocus)
+    document.addEventListener('visibilitychange', refreshOnVisible)
 
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current)
       }
+      window.removeEventListener('focus', refreshOnFocus)
+      document.removeEventListener('visibilitychange', refreshOnVisible)
     }
-  }, [fetchSweeps])
+  }, [fetchSweeps, ACTIVE_POLL_MS, BASELINE_POLL_MS])
 
   const saveDraftSweep = useCallback(async (config: SweepConfig, chatSessionId?: string | null): Promise<Sweep> => {
     const existing = findSweepForConfig(sweepsRef.current, config)

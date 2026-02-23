@@ -20,7 +20,7 @@ from fastapi import HTTPException
 
 from core import config
 from core.config import (
-    SERVER_CALLBACK_URL,
+    get_server_callback_url,
     USER_AUTH_TOKEN,
     TMUX_SESSION_NAME,
 )
@@ -455,7 +455,20 @@ def _infer_cluster_from_environment() -> dict:
         "/var/run/secrets/kubernetes.io/serviceaccount/token"
     )
     has_ray_env = bool(os.environ.get("RAY_ADDRESS"))
-    has_ray_cli = bool(shutil.which("ray"))
+    has_ray_cluster = False
+    if has_ray_env or shutil.which("ray"):
+        # Check for a *running* Ray cluster, not just the package being installed.
+        try:
+            proc = subprocess.run(
+                ["ray", "status"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=3.0,
+                check=False,
+            )
+            has_ray_cluster = proc.returncode == 0
+        except Exception:
+            has_ray_cluster = False
 
     detected_type = "unknown"
     confidence = 0.35
@@ -478,18 +491,24 @@ def _infer_cluster_from_environment() -> dict:
         detected_type = "slurm"
         confidence = 0.9 if has_slurm_env else 0.8
         details["signals"].append("slurm")
-    elif has_ray_env or has_ray_cli:
+    elif gpu_count is not None and gpu_count > 0:
+        # Local GPUs detected — check if a Ray cluster is also running.
+        if has_ray_cluster:
+            detected_type = "ray"
+            confidence = 0.88 if has_ray_env else 0.78
+            details["signals"].append("ray")
+        else:
+            detected_type = "local_gpu"
+            confidence = 0.78 if gpu_count > 1 else 0.68
+            details["signals"].append("nvidia-smi")
+    elif has_ray_cluster:
         detected_type = "ray"
-        confidence = 0.85 if has_ray_env else 0.65
+        confidence = 0.85 if has_ray_env else 0.70
         details["signals"].append("ray")
     elif ssh_hosts >= 3:
         detected_type = "shared_head_node"
         confidence = 0.64
         details["signals"].append("ssh-host-fanout")
-    elif gpu_count is not None and gpu_count > 0:
-        detected_type = "local_gpu"
-        confidence = 0.78 if gpu_count > 1 else 0.68
-        details["signals"].append("nvidia-smi")
 
     if detected_type == "slurm":
         node_count = slurm_nodes
@@ -623,7 +642,7 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     sidecar_path = os.path.join(server_dir, "tools", "job_sidecar.py")
 
     # Build sidecar command
-    server_url = SERVER_CALLBACK_URL
+    server_url = get_server_callback_url()
     run_workdir = run_data.get("workdir") or config.WORKDIR
 
     if getattr(sys, "frozen", False):

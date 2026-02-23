@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, Type, Code, BarChart3, Sparkles, PanelLeftOpen, Pause, Play, Square, Target } from 'lucide-react'
+import { Menu, Bell, Download, Eye, Edit3, Plus, ChevronDown, ChevronRight, Type, Code, BarChart3, Sparkles, PanelLeftOpen, PanelRightOpen, PanelRightClose, Pause, Play, Square, Target, MessageSquarePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -42,6 +42,8 @@ const phaseConfig: Record<WildLoopPhase, { icon: string; label: string; color: s
   waiting_for_human: { icon: '🙋', label: 'Needs Input', color: 'text-red-400' },
 }
 
+const FEEDBACK_ISSUE_URL = 'https://github.com/hao-ai-lab/research-agent/issues/new'
+
 interface WildLoopNavProps {
   isActive: boolean
   isPaused: boolean
@@ -67,6 +69,9 @@ interface FloatingNavProps {
   onExportSession?: () => void
   collapseChats?: boolean
   onCollapseChatsChange?: (collapsed: boolean) => void
+  // Chat context panel toggle
+  contextPanelVisible?: boolean
+  onContextPanelToggle?: () => void
   // Session selector props (for chat tab)
   sessionTitle?: string
   currentSessionId?: string | null
@@ -91,6 +96,8 @@ export function FloatingNav({
   onExportSession,
   collapseChats = false,
   onCollapseChatsChange,
+  contextPanelVisible = false,
+  onContextPanelToggle,
   sessionTitle = 'New Chat',
   currentSessionId,
   sessions = [],
@@ -196,6 +203,18 @@ export function FloatingNav({
       {/* Spacer to push icons to the right */}
       <div className="flex-1" />
 
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button asChild variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+            <a href={FEEDBACK_ISSUE_URL} target="_blank" rel="noopener noreferrer">
+              <MessageSquarePlus className="h-4 w-4" />
+              <span className="sr-only">Submit feedback</span>
+            </a>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Submit feedback</TooltipContent>
+      </Tooltip>
+
       {/* Right side buttons - only show in chat */}
       {isChat && (
         <div className="flex items-center gap-1 shrink-0">
@@ -209,11 +228,28 @@ export function FloatingNav({
                   onClick={() => onCollapseChatsChange(!collapseChats)}
                   className={`h-8 w-8 ${collapseChats ? 'bg-secondary text-secondary-foreground' : ''}`}
                 >
-                  <PanelLeftOpen className="h-4 w-4" />
+                  <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${collapseChats ? 'rotate-90' : ''}`} />
                   <span className="sr-only">{collapseChats ? 'Expand all chats' : 'Collapse all chats'}</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{collapseChats ? 'Expand all chats' : 'Collapse all chats'}</TooltipContent>
+            </Tooltip>
+          )}
+          {/* Chat Context Panel Toggle */}
+          {onContextPanelToggle && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onContextPanelToggle}
+                  className={`h-8 w-8 ${contextPanelVisible ? 'bg-secondary text-secondary-foreground' : ''}`}
+                >
+                  {contextPanelVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+                  <span className="sr-only">{contextPanelVisible ? 'Hide context panel' : 'Show context panel'}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{contextPanelVisible ? 'Hide context panel' : 'Show context panel'}</TooltipContent>
             </Tooltip>
           )}
           {/* Export Button */}

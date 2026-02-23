@@ -11,7 +11,7 @@ import os
 import time
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -153,6 +153,15 @@ class WildV2StartRequest(BaseModel):
     max_iterations: int = 25
     wait_seconds: float = 30.0
     evo_sweep_enabled: bool = False
+
+class WildV2StopRequest(BaseModel):
+    chat_session_id: Optional[str] = None
+
+class WildV2PauseRequest(BaseModel):
+    chat_session_id: Optional[str] = None
+
+class WildV2ResumeRequest(BaseModel):
+    chat_session_id: Optional[str] = None
 
 class WildV2SteerRequest(BaseModel):
     context: str
@@ -532,7 +541,7 @@ async def wild_v2_plan(session_id: str):
 
 
 @router.get("/wild/v2/iteration-log/{session_id}")
-async def wild_v2_iteration_log(session_id: str):
+async def wild_v2_iteration_log(session_id: str, chat_session_id: Optional[str] = Query(None)):
     """Get the iteration log markdown."""
     if _agent_runtime is None:
         return {"log": ""}
@@ -595,7 +604,7 @@ async def wild_v2_steer(req: WildV2SteerRequest):
 # ---------------------------------------------------------------------------
 
 @router.get("/wild/v2/evo-sweep/{session_id}")
-async def wild_v2_evo_sweep_status(session_id: str):
+async def wild_v2_evo_sweep_status(session_id: str, chat_session_id: Optional[str] = Query(None)):
     """Get the current evolutionary sweep status for a session."""
     if _agent_runtime is None:
         return {"active": False, "message": "Runtime not initialized"}
@@ -612,8 +621,7 @@ async def wild_v2_evo_sweep_status(session_id: str):
 
 
 @router.post("/wild/v2/evo-sweep/{session_id}/stop")
-async def wild_v2_evo_sweep_stop(session_id: str):
+async def wild_v2_evo_sweep_stop(session_id: str, chat_session_id: Optional[str] = Query(None)):
     """Stop an in-progress evolutionary sweep."""
     return {"stopped": False, "message": "Evo sweep stop via IPC not yet implemented"}
-
 

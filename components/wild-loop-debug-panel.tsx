@@ -405,7 +405,7 @@ export function WildLoopDebugPanel({
         setLoading(true)
         setError(null)
         const [v2Result, contextResult] = await Promise.allSettled([
-            getWildV2Status().catch(() => ({ active: false } as WildV2Status)),
+            getWildV2Status(currentSessionId ?? undefined).catch(() => ({ active: false } as WildV2Status)),
             onRefreshData ? onRefreshData() : Promise.resolve(),
         ])
 
@@ -424,7 +424,7 @@ export function WildLoopDebugPanel({
         setError(nextError)
         setLastRefreshed(new Date())
         setLoading(false)
-    }, [onRefreshData])
+    }, [onRefreshData, currentSessionId])
 
     // Auto-refresh on mount + interval
     useEffect(() => {

@@ -134,7 +134,7 @@ class TestWildV2Engine:
     def test_stop(self):
         self.engine.start(goal="Test", max_iterations=3)
         result = self.engine.stop()
-        assert result["status"] == "done"
+        assert result["status"] == "stopped"  # 'stopped' = user-stopped, 'done' = natural completion
         assert result["finished_at"] is not None
 
     def test_pause_resume(self):
@@ -171,6 +171,42 @@ class TestWildV2Engine:
         assert status["active"] is True
         assert status["goal"] == "Test"
         self.engine.stop()
+
+    def test_multi_session_lifecycle(self):
+        """Starting a session with chat_session_id registers it in _sessions dict."""
+        result_a = self.engine.start(goal="Goal A", chat_session_id="chat-a", max_iterations=3)
+        assert result_a["chat_session_id"] == "chat-a"
+        assert "chat-a" in self.engine._sessions
+
+        result_b = self.engine.start(goal="Goal B", chat_session_id="chat-b", max_iterations=3)
+        assert "chat-b" in self.engine._sessions
+
+        # Both exist independently
+        status_a = self.engine.get_status(chat_session_id="chat-a")
+        status_b = self.engine.get_status(chat_session_id="chat-b")
+        assert status_a["goal"] == "Goal A"
+        assert status_b["goal"] == "Goal B"
+
+        # Stop A — should remain in dict
+        self.engine.stop(chat_session_id="chat-a")
+        assert self.engine._sessions["chat-a"].status == "stopped"
+        assert self.engine._sessions["chat-b"].status == "running"
+
+        # B still active
+        status_b = self.engine.get_status(chat_session_id="chat-b")
+        assert status_b["active"] is True
+
+        # Pause/resume B by chat_session_id
+        self.engine.pause(chat_session_id="chat-b")
+        assert self.engine._sessions["chat-b"].status == "paused"
+        self.engine.resume(chat_session_id="chat-b")
+        assert self.engine._sessions["chat-b"].status == "running"
+
+        # Steer B by chat_session_id
+        self.engine.steer("New direction", chat_session_id="chat-b")
+        assert self.engine._sessions["chat-b"].steer_context == "New direction"
+
+        self.engine.stop(chat_session_id="chat-b")
 
     def test_system_health_from_runs_static(self):
         runs = {

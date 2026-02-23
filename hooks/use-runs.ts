@@ -141,20 +141,36 @@ export function useRuns(): UseRunsResult {
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const pollingRef = useRef<NodeJS.Timeout | null>(null)
+    const inFlightFetchRef = useRef<Promise<void> | null>(null)
+    const lastFetchedAtRef = useRef(0)
+    const BASELINE_POLL_MS = 15000
+    const ACTIVE_POLL_MS = 5000
 
     // Fetch runs from API
     const fetchRuns = useCallback(async () => {
+        if (inFlightFetchRef.current) {
+            return inFlightFetchRef.current
+        }
+        const request = (async () => {
+            try {
+                const apiRuns = await listRuns(true) // include archived
+                const metadata = loadRunMetadata()
+                const experimentRuns = apiRuns.map(apiRun => apiRunToExperimentRun(apiRun, metadata[apiRun.id]))
+                setRuns(experimentRuns)
+                setError(null)
+                lastFetchedAtRef.current = Date.now()
+            } catch (e) {
+                console.error('Failed to fetch runs:', e)
+                setError(e instanceof Error ? e.message : 'Failed to fetch runs')
+            } finally {
+                setIsLoading(false)
+            }
+        })()
+        inFlightFetchRef.current = request
         try {
-            const apiRuns = await listRuns(true) // include archived
-            const metadata = loadRunMetadata()
-            const experimentRuns = apiRuns.map(apiRun => apiRunToExperimentRun(apiRun, metadata[apiRun.id]))
-            setRuns(experimentRuns)
-            setError(null)
-        } catch (e) {
-            console.error('Failed to fetch runs:', e)
-            setError(e instanceof Error ? e.message : 'Failed to fetch runs')
+            await request
         } finally {
-            setIsLoading(false)
+            inFlightFetchRef.current = null
         }
     }, [])
 
@@ -166,22 +182,38 @@ export function useRuns(): UseRunsResult {
     useEffect(() => {
         fetchRuns()
 
-        // Poll every 5 seconds for active runs
+        // Poll frequently while runs are active, but still perform periodic baseline refreshes
+        // so newly-created runs from other clients/sessions appear in the sidebar.
         pollingRef.current = setInterval(() => {
             const hasActiveRuns = runsRef.current.some(r =>
                 r.status === 'running' || r.status === 'queued'
             )
-            if (hasActiveRuns) {
+            const msSinceLastFetch = Date.now() - lastFetchedAtRef.current
+            const shouldBaselineRefresh = msSinceLastFetch >= BASELINE_POLL_MS
+            if (hasActiveRuns || shouldBaselineRefresh) {
                 fetchRuns()
             }
-        }, 5000)
+        }, ACTIVE_POLL_MS)
+
+        const refreshOnFocus = () => {
+            fetchRuns()
+        }
+        const refreshOnVisible = () => {
+            if (document.visibilityState === 'visible') {
+                fetchRuns()
+            }
+        }
+        window.addEventListener('focus', refreshOnFocus)
+        document.addEventListener('visibilitychange', refreshOnVisible)
 
         return () => {
             if (pollingRef.current) {
                 clearInterval(pollingRef.current)
             }
+            window.removeEventListener('focus', refreshOnFocus)
+            document.removeEventListener('visibilitychange', refreshOnVisible)
         }
-    }, [fetchRuns])
+    }, [fetchRuns, ACTIVE_POLL_MS, BASELINE_POLL_MS])
 
     // Create a new run
     const createNewRun = useCallback(async (request: CreateRunRequest): Promise<ExperimentRun> => {
