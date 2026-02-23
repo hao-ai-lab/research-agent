@@ -367,6 +367,59 @@ async def stop_agent(agent_id: str):
 _AGENT_CLEANUP_TTL = 3600  # 1 hour
 
 
+# ---------------------------------------------------------------------------
+# Scheduler endpoints  (MUST be before /agents/{agent_id})
+# ---------------------------------------------------------------------------
+
+@router.get("/scheduler/queue")
+async def scheduler_queue(parent_id: str | None = None, status: str | None = None):
+    """List scheduler requests, optionally filtered."""
+    err = _require_runtime()
+    if err:
+        return err
+    scheduler = getattr(_agent_runtime, '_scheduler', None)
+    if scheduler is None:
+        return JSONResponse(status_code=503, content={"error": "Scheduler not initialized"})
+    from agentsys.scheduler import RequestStatus
+    status_filter = None
+    if status:
+        try:
+            status_filter = RequestStatus(status)
+        except ValueError:
+            return JSONResponse(status_code=400, content={
+                "error": f"Invalid status: {status}. Valid: {[s.value for s in RequestStatus]}"
+            })
+    requests = scheduler.list_requests(parent_id=parent_id, status=status_filter)
+    return [r.to_dict() for r in requests]
+
+
+@router.get("/scheduler/stats")
+async def scheduler_stats():
+    """GPU availability and queue summary."""
+    err = _require_runtime()
+    if err:
+        return err
+    scheduler = getattr(_agent_runtime, '_scheduler', None)
+    if scheduler is None:
+        return JSONResponse(status_code=503, content={"error": "Scheduler not initialized"})
+    return scheduler.stats()
+
+
+@router.get("/scheduler/queue/{request_id}")
+async def scheduler_request(request_id: str):
+    """Get a single scheduler request by ID."""
+    err = _require_runtime()
+    if err:
+        return err
+    scheduler = getattr(_agent_runtime, '_scheduler', None)
+    if scheduler is None:
+        return JSONResponse(status_code=503, content={"error": "Scheduler not initialized"})
+    req = scheduler.get_request(request_id)
+    if req is None:
+        return JSONResponse(status_code=404, content={"error": "Request not found"})
+    return req.to_dict()
+
+
 @router.post("/agents/cleanup")
 async def cleanup_agents(ttl: int = _AGENT_CLEANUP_TTL):
     """Remove completed/failed agents older than TTL from the registry.

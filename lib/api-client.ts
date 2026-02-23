@@ -148,6 +148,9 @@ export const respondToAlert = (...args: Parameters<typeof realApi.respondToAlert
 export const stopSession = (...args: Parameters<typeof realApi.stopSession>) =>
     getApi().stopSession(...args)
 
+export const teardownSession = (...args: Parameters<typeof realApi.teardownSession>) =>
+    getApi().teardownSession(...args)
+
 export const getWildMode = (...args: Parameters<typeof realApi.getWildMode>) =>
     getApi().getWildMode(...args)
 

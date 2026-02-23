@@ -30,6 +30,7 @@ import {
 import { extractContextReferences } from '@/lib/extract-context-references'
 import { ContextReferencesBar } from './context-references-bar'
 import { PromptProvenanceView } from './prompt-provenance-view'
+import { stripActionTags } from '@/lib/utils'
 
 interface ChatMessageProps {
   message: ChatMessageType
@@ -694,9 +695,9 @@ export function ChatMessage({
         )}
 
         {/* Text content — skip when parts are present since text parts already render it */}
-        {!(message.parts && message.parts.length > 0) && message.content && (
+        {!(message.parts && message.parts.length > 0) && message.content && stripActionTags(message.content) && (
           <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
-            {renderMarkdown(message.content)}
+            {renderMarkdown(stripActionTags(message.content))}
           </div>
         )}
 
@@ -906,9 +907,11 @@ function SavedPartRenderer({
   }
 
   if (part.type === 'text') {
+    const cleanContent = stripActionTags(part.content)
+    if (!cleanContent) return null
     return (
       <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
-        {renderMarkdown(part.content)}
+        {renderMarkdown(cleanContent)}
       </div>
     )
   }

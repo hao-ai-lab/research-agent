@@ -133,6 +133,95 @@ class ChildHandle:
 
 
 # ======================================================================
+# ScheduledChildHandle
+# ======================================================================
+
+class ScheduledChildHandle:
+    """Handle for a scheduler-managed spawn request.
+
+    Duck-type compatible with ChildHandle -- has .id, .status, .wait(), .cancel().
+    Before the request is approved, .id is the request_id.
+    After spawn, .id switches to the real agent_id.
+    """
+
+    def __init__(self, ticket, scheduler, store=None):
+        self._ticket = ticket
+        self._scheduler = scheduler
+        self._store = store
+
+    @property
+    def id(self) -> str:
+        req = self._scheduler.get_request(self._ticket.request_id)
+        if req and req.agent_id:
+            return req.agent_id
+        return self._ticket.request_id
+
+    @property
+    def status(self) -> AgentStatus:
+        req = self._scheduler.get_request(self._ticket.request_id)
+        if req is None:
+            return AgentStatus.FAILED
+        if req.status.value == "queued":
+            return AgentStatus.IDLE  # waiting in queue
+        if req.status.value == "running" and req.agent_id:
+            # Delegate to actual agent status
+            if self._store:
+                info = self._store.read_agent_info(req.agent_id)
+                if info:
+                    return info.status
+            return AgentStatus.RUNNING
+        if req.status.value == "done":
+            return AgentStatus.DONE
+        if req.status.value in ("failed", "rejected"):
+            return AgentStatus.FAILED
+        return AgentStatus.IDLE
+
+    async def wait(self, timeout: float | None = None) -> None:
+        """Poll scheduler request status, then poll agent status."""
+        import time as _time
+
+        deadline = None
+        if timeout is not None:
+            deadline = _time.monotonic() + timeout
+
+        # Phase 1: wait for request to leave QUEUED state
+        while True:
+            req = self._scheduler.get_request(self._ticket.request_id)
+            if req is None or req.status.value != "queued":
+                break
+            if deadline is not None and _time.monotonic() >= deadline:
+                raise asyncio.TimeoutError(f"Timeout waiting for {self._ticket.request_id}")
+            await asyncio.sleep(0.5)
+
+        # Phase 2: if running, wait for agent to finish
+        if req and req.status.value == "running" and req.agent_id and self._store:
+            while True:
+                info = self._store.read_agent_info(req.agent_id)
+                if info and info.status in (AgentStatus.DONE, AgentStatus.FAILED):
+                    return
+                # Also check if scheduler request itself ended
+                req = self._scheduler.get_request(self._ticket.request_id)
+                if req and req.status.value in ("done", "failed", "rejected"):
+                    return
+                if deadline is not None and _time.monotonic() >= deadline:
+                    raise asyncio.TimeoutError(f"Timeout waiting for {self._ticket.request_id}")
+                await asyncio.sleep(0.5)
+
+    async def cancel(self) -> None:
+        """Cancel the scheduler request (if queued) or stop the agent (if running)."""
+        req = self._scheduler.get_request(self._ticket.request_id)
+        if req is None:
+            return
+        if req.status.value == "queued":
+            self._scheduler.cancel(self._ticket.request_id)
+        elif req.status.value == "running" and req.agent_id:
+            # Delegate to runtime to stop the actual agent
+            runtime = self._scheduler._runtime
+            if runtime:
+                await runtime.stop(req.agent_id)
+
+
+# ======================================================================
 # Agent ABC
 # ======================================================================
 
@@ -366,11 +455,14 @@ class Agent(ABC):
         cls: type[Agent],
         goal: str,
         **config: Any,
-    ) -> ChildHandle:
+    ) -> ChildHandle | ScheduledChildHandle:
         """Spawn a child agent via the runtime.
 
         The child inherits scope from this agent and runs concurrently.
         No memory is shared — the child starts fresh.
+
+        Executor spawns are routed through the scheduler (if available)
+        for GPU-aware queuing. All other spawns go directly to Runtime.
 
         Args:
             cls:    Agent subclass to instantiate.
@@ -378,11 +470,23 @@ class Agent(ABC):
             **config: Passed to child's config dict.
 
         Returns:
-            ChildHandle for waiting on or cancelling the child.
+            ChildHandle or ScheduledChildHandle for waiting on or cancelling the child.
         """
         if not self._runtime:
             raise RuntimeError("Agent has no runtime -- cannot spawn child")
 
+        # Route executor spawns through scheduler if available
+        scheduler = getattr(self._runtime, '_scheduler', None)
+        if scheduler is not None and cls.role == "executor":
+            gpu_required = config.pop("gpu_required", 0)
+            ticket = await scheduler.submit(
+                cls, goal=goal, parent_id=self.id,
+                config=config or None, gpu_required=gpu_required,
+            )
+            store = self.memory.store if self.memory else None
+            return ScheduledChildHandle(ticket, scheduler, store=store)
+
+        # Non-executor spawns (L1->L2) go directly to Runtime
         child = await self._runtime.spawn(
             cls, goal=goal, parent_id=self.id, config=config or None,
         )

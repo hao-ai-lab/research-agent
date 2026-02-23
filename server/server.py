@@ -108,8 +108,15 @@ async def lifespan(app):
     L1 SessionAgents are now created on-demand per chat session
     in the wild_routes registry — no singleton startup needed.
     """
+    # Start scheduler tick loop (requires async context)
+    if agent_runtime is not None and agent_runtime._scheduler is not None:
+        agent_runtime._scheduler.start()
+        logger.info("[agentsys] Scheduler tick loop started")
     yield
-    # Shutdown: stop all per-session L1 agents, then shutdown Runtime
+    # Shutdown: stop scheduler, then all per-session L1 agents, then Runtime
+    if agent_runtime is not None and agent_runtime._scheduler is not None:
+        await agent_runtime._scheduler.shutdown()
+        logger.info("[agentsys] Scheduler shutdown complete")
     try:
         from agent.wild_routes import _session_agents, _stop_session_agent
         for chat_sid in list(_session_agents.keys()):
@@ -311,6 +318,14 @@ def _init_agentsys():
         project="default",
         store_root=store_root,
     )
+
+    # Scheduler: GPU-aware FIFO queue for L3 executor spawns
+    # Note: scheduler.start() is called in the lifespan handler (needs async context)
+    from pathlib import Path
+    from agentsys.scheduler import Scheduler
+    scheduler_dir = os.path.join(store_root, "_scheduler")
+    scheduler = Scheduler(agent_runtime, Path(scheduler_dir))
+    agent_runtime._scheduler = scheduler
 
     # Bridge Runtime events to EventRelay
     _original_handle_event = agent_runtime._handle_event

@@ -22,7 +22,7 @@ logger = logging.getLogger("research-agent-server")
 INTERNAL_SKILL_IDS = {
     "ra_mode_plan",
 }
-INTERNAL_SKILL_PREFIXES = ("ra_mode_", "wild_v2_")
+INTERNAL_SKILL_PREFIXES = ("ra_mode_", "wild_v2_", "l1_")
 
 
 def _is_internal_skill(skill_id: str) -> bool:

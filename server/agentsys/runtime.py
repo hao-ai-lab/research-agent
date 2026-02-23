@@ -58,6 +58,7 @@ class Runtime:
         self._agent_meta: dict[str, dict] = {}
         self._local_agents: dict[str, Agent] = {}  # in-process agents
         self._event_listener_task: asyncio.Task | None = None
+        self._scheduler: Any = None  # set by server.py after Scheduler creation
 
     # ------------------------------------------------------------------
     # Spawn
@@ -331,12 +332,18 @@ class Runtime:
             if meta is not None:
                 meta["status"] = AgentStatus.DONE.value
                 # Worker writes final .meta.json before exiting
+            # Notify scheduler to release GPU and update request status
+            if self._scheduler:
+                self._scheduler.on_agent_done(event.agent_id, failed=False)
 
         elif event.type == EventType.FAILED:
             meta = self._agent_meta.get(event.agent_id)
             if meta is not None:
                 meta["status"] = AgentStatus.FAILED.value
                 # Worker writes final .meta.json before exiting
+            # Notify scheduler to release GPU and update request status
+            if self._scheduler:
+                self._scheduler.on_agent_done(event.agent_id, failed=True)
 
         elif event.type == EventType.STOP_REQUEST:
             target_id = event.payload.get("target_id")
@@ -349,30 +356,53 @@ class Runtime:
             # Handle spawn request
             try:
                 child_cls = path_to_cls(payload["cls_path"])
-                child_info = await self.spawn(
-                    child_cls,
-                    goal=payload["goal"],
-                    parent_id=payload.get("parent_id"),
-                    config=payload.get("config"),
-                    auto_start=payload.get("auto_start", True),
-                    session=payload.get("session"),
-                    sweep=payload.get("sweep"),
-                    run=payload.get("run"),
-                )
 
-                # Send response back to requesting agent
-                requesting_agent_id = event.agent_id
-                cmd_q = self._cmd_queues.get(requesting_agent_id)
-                if cmd_q:
-                    cmd_q.put(Command(
-                        type=CmdType.SPAWN_RESPONSE,
-                        payload={
-                            "request_id": payload.get("request_id"),
-                            "child_id": child_info.id,
-                            "role": child_info.role,
-                            "cls_path": payload["cls_path"],
-                        },
-                    ))
+                # Route executor spawns through scheduler if available
+                if self._scheduler and child_cls.role == "executor":
+                    ticket = await self._scheduler.submit(
+                        child_cls,
+                        goal=payload["goal"],
+                        parent_id=payload.get("parent_id"),
+                        config=payload.get("config"),
+                        gpu_required=payload.get("gpu_required", 0),
+                    )
+                    # Send ticket info back instead of immediate spawn response
+                    requesting_agent_id = event.agent_id
+                    cmd_q = self._cmd_queues.get(requesting_agent_id)
+                    if cmd_q:
+                        cmd_q.put(Command(
+                            type=CmdType.SPAWN_RESPONSE,
+                            payload={
+                                "request_id": payload.get("request_id"),
+                                "child_id": ticket.request_id,  # temporary ID
+                                "scheduled": True,
+                            },
+                        ))
+                else:
+                    child_info = await self.spawn(
+                        child_cls,
+                        goal=payload["goal"],
+                        parent_id=payload.get("parent_id"),
+                        config=payload.get("config"),
+                        auto_start=payload.get("auto_start", True),
+                        session=payload.get("session"),
+                        sweep=payload.get("sweep"),
+                        run=payload.get("run"),
+                    )
+
+                    # Send response back to requesting agent
+                    requesting_agent_id = event.agent_id
+                    cmd_q = self._cmd_queues.get(requesting_agent_id)
+                    if cmd_q:
+                        cmd_q.put(Command(
+                            type=CmdType.SPAWN_RESPONSE,
+                            payload={
+                                "request_id": payload.get("request_id"),
+                                "child_id": child_info.id,
+                                "role": child_info.role,
+                                "cls_path": payload["cls_path"],
+                            },
+                        ))
             except Exception as e:
                 logger.exception("Spawn request failed: %s", e)
                 requesting_agent_id = event.agent_id
@@ -395,6 +425,10 @@ class Runtime:
         meta = self._agent_meta.get(agent_id)
         if not meta:
             return False
+
+        # Clean up scheduler requests for this agent
+        if self._scheduler:
+            self._scheduler.cleanup_parent(agent_id)
 
         # Cascade: collect all descendants, stop leaves first
         descendants = self._collect_descendants(agent_id)

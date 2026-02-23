@@ -37,7 +37,7 @@ class ResearchAgentConfig:
     """All configuration for a ResearchAgent, fully serializable."""
     opencode_url: str = "http://127.0.0.1:4096"
     model_provider: str = "opencode"
-    model_id: str = "gpt-5-nano"
+    model_id: str = "minimax-m2.5-free"
     workdir: str = "."
     server_url: str = "http://127.0.0.1:10000"
     auth_token: str = ""
@@ -647,11 +647,12 @@ class ResearchAgent(Agent):
         cfg = self.config
         opencode_url = cfg.get("opencode_url", "http://127.0.0.1:4096")
         model_provider = cfg.get("model_provider", "opencode")
-        model_id = cfg.get("model_id", "gpt-5-nano")
+        model_id = cfg.get("model_id", "minimax-m2.5-free")
         auth = self._get_opencode_auth()
 
         TTFT_TIMEOUT = 180   # 3 min max for first token
         TOTAL_TIMEOUT = 600  # 10 min max total
+        SSE_LINE_TIMEOUT = 120  # No SSE line for 2 min = stuck
 
         # Track text parts by part ID so final snapshots win over deltas.
         # Only parts with type="text" are collected (not reasoning/tool parts).
@@ -682,7 +683,8 @@ class ResearchAgent(Agent):
                     resp.raise_for_status()
 
                     # 3. Stream events with timeout
-                    async for line in sse.aiter_lines():
+                    line_iter = sse.aiter_lines().__aiter__()
+                    while True:
                         elapsed = time.time() - start_time
 
                         # Total timeout
@@ -695,6 +697,15 @@ class ResearchAgent(Agent):
                         if not first_text_at and elapsed > TTFT_TIMEOUT:
                             logger.error("[research-agent] SSE TTFT timeout after %.0fs — model may be down or rate-limited (session=%s)",
                                          elapsed, oc_session_id)
+                            break
+
+                        try:
+                            line = await asyncio.wait_for(line_iter.__anext__(), timeout=SSE_LINE_TIMEOUT)
+                        except asyncio.TimeoutError:
+                            logger.error("[research-agent] SSE line timeout (%ds), aborting session %s",
+                                         SSE_LINE_TIMEOUT, oc_session_id)
+                            break
+                        except StopAsyncIteration:
                             break
 
                         if not line.startswith("data: "):
@@ -763,6 +774,18 @@ class ResearchAgent(Agent):
                             continue
         except Exception as err:
             logger.error("[research-agent] OpenCode run failed: %s", err, exc_info=True)
+        finally:
+            # Auto-abort: kill the OpenCode session so tools stop running.
+            # Safe because L2 creates a new OpenCode session per iteration.
+            try:
+                async with httpx.AsyncClient(timeout=5) as abort_client:
+                    await abort_client.post(
+                        f"{opencode_url}/session/{oc_session_id}/abort",
+                        auth=auth,
+                    )
+                logger.info("[research-agent] Auto-aborted OpenCode session %s", oc_session_id)
+            except Exception:
+                pass
 
         elapsed = time.time() - start_time
         logger.info("[research-agent] SSE completed in %.1fs, %d text parts (session=%s)",

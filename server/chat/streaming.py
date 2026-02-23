@@ -598,11 +598,24 @@ async def stream_opencode_events(
     client: httpx.AsyncClient, session_id: str
 ) -> AsyncIterator[tuple[dict, str, str, Optional[dict]]]:
     """Stream parsed OpenCode events with text/thinking deltas and tool updates."""
+    SSE_INACTIVITY_TIMEOUT = 180  # 3 min — generous for long tool calls
+
     url = f"{OPENCODE_URL}/global/event"
     headers = {"Accept": "text/event-stream"}
 
     async with client.stream("GET", url, headers=headers, auth=get_auth()) as response:
-        async for line in response.aiter_lines():
+        line_iter = response.aiter_lines().__aiter__()
+        while True:
+            try:
+                line = await asyncio.wait_for(line_iter.__anext__(), timeout=SSE_INACTIVITY_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.error("[stream] SSE inactivity timeout (%ds) for OpenCode session %s",
+                             SSE_INACTIVITY_TIMEOUT, session_id)
+                yield {"type": "error", "message": f"OpenCode stream inactive for {SSE_INACTIVITY_TIMEOUT}s — aborting"}, "", "", None
+                return
+            except StopAsyncIteration:
+                return
+
             if not line.startswith("data: "):
                 continue
 

@@ -1121,6 +1121,14 @@ export async function stopSession(sessionId: string): Promise<{ message: string 
     return { message: 'Stop signal sent (mock)' }
 }
 
+export async function teardownSession(sessionId: string): Promise<{ message: string }> {
+    await delay(50)
+    if (!mockSessions.has(sessionId)) {
+        throw new Error('Session not found')
+    }
+    return { message: 'Session torn down (mock)' }
+}
+
 export async function getWildMode(): Promise<WildModeState> {
     await delay(50)
     return { enabled: wildModeEnabled }

@@ -270,7 +270,7 @@
     "research-agent": {
       "type": "local",
       "command": [
-        "python3",
+        "./.ra-venv/bin/python",
         "./server/tools/research_agent_mcp.py"
       ],
       "enabled": true
@@ -278,7 +278,7 @@
     "slurm-cli": {
       "type": "local",
       "command": [
-        "python3",
+        "./.ra-venv/bin/python",
         "./server/tools/slurm_mcp_cli.py"
       ],
       "enabled": true

@@ -1,11 +1,12 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Brain, Loader2, Wrench, Check, AlertCircle, ChevronDown, ChevronRight, FlaskConical, Zap, Navigation, Square } from 'lucide-react'
 import type { StreamingState, ToolCallState, StreamingPart } from '@/hooks/use-chat-session'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { CodeOutputBox } from '@/components/code-output-box'
 import { useAppSettings } from '@/lib/app-settings'
+import { stripActionTags } from '@/lib/utils'
 
 interface StreamingMessageProps {
     streamingState: StreamingState
@@ -80,9 +81,9 @@ export function StreamingMessage({ streamingState }: StreamingMessageProps) {
                                 ))}
                             </div>
                         )}
-                        {textContent && (
+                        {textContent && stripActionTags(textContent) && (
                             <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
-                                {renderStreamingText(textContent)}
+                                {renderStreamingText(stripActionTags(textContent))}
                                 <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
                             </div>
                         )}
@@ -113,16 +114,58 @@ function StreamingPartRenderer({ part }: { part: StreamingPart }) {
         return <StreamingToolPart part={part} />
     }
 
+    if (part.type === 'action') {
+        return <ActionIndicator part={part} />
+    }
+
     if (part.type === 'text') {
+        const cleanContent = stripActionTags(part.content)
+        if (!cleanContent) return null
         return (
             <div className="px-1 py-1 text-base leading-relaxed break-words overflow-hidden">
-                {renderStreamingText(part.content)}
+                {renderStreamingText(cleanContent)}
                 <span className="inline-block w-1.5 h-4 bg-foreground/50 animate-pulse ml-0.5" />
             </div>
         )
     }
 
     return null
+}
+
+/**
+ * Renders a clean status indicator when L1 spawns/steers/stops an agent.
+ */
+function ActionIndicator({ part }: { part: StreamingPart }) {
+    const actionType = part.actionType || 'unknown'
+
+    const iconMap: Record<string, React.ReactNode> = {
+        spawn_research: <FlaskConical className="h-3.5 w-3.5" />,
+        spawn_command: <Zap className="h-3.5 w-3.5" />,
+        steer_child: <Navigation className="h-3.5 w-3.5" />,
+        stop_child: <Square className="h-3.5 w-3.5" />,
+    }
+
+    const colorMap: Record<string, string> = {
+        spawn_research: 'text-violet-400 border-violet-400/30 bg-violet-400/10',
+        spawn_command: 'text-amber-400 border-amber-400/30 bg-amber-400/10',
+        steer_child: 'text-blue-400 border-blue-400/30 bg-blue-400/10',
+        stop_child: 'text-red-400 border-red-400/30 bg-red-400/10',
+    }
+
+    const icon = iconMap[actionType] || <Zap className="h-3.5 w-3.5" />
+    const colors = colorMap[actionType] || 'text-muted-foreground border-border bg-secondary/50'
+
+    return (
+        <div className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm font-medium ${colors}`}>
+            <span className="animate-pulse">{icon}</span>
+            <span>{part.content}</span>
+            {part.actionGoal && (
+                <span className="ml-1 truncate text-xs font-normal opacity-70 max-w-[250px]" title={part.actionGoal}>
+                    — {part.actionGoal.slice(0, 80)}{part.actionGoal.length > 80 ? '...' : ''}
+                </span>
+            )}
+        </div>
+    )
 }
 
 /**

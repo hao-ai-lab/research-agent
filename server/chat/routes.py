@@ -233,15 +233,47 @@ async def update_session(session_id: str, req: UpdateSessionRequest):
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a chat session and stop its L1 agent if any."""
+    """Delete a chat session and stop its L1 agent + children, OpenCode session, and all runtime state."""
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    # Stop L1 SessionAgent for this chat session (if wild mode was used)
+
+    # 1. Stop L1 SessionAgent + cascade to L2/L3 children
     try:
         from agent.wild_routes import _stop_session_agent
         await _stop_session_agent(session_id)
     except Exception as e:
         logger.warning("Failed to stop L1 for deleted session %s: %s", session_id, e)
+
+    # 2. Cancel any active chat worker task
+    task = active_chat_tasks.pop(session_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    # 3. Clean up active stream runtime
+    runtime = active_chat_streams.pop(session_id, None)
+    if runtime:
+        try:
+            await _finalize_runtime(session_id, runtime, retain=False)
+        except Exception as e:
+            logger.warning("Failed to finalize runtime for deleted session %s: %s", session_id, e)
+
+    # 4. Abort OpenCode session so the model stops generating
+    opencode_session_id = chat_sessions[session_id].get("opencode_session_id")
+    if opencode_session_id:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.post(
+                    f"{OPENCODE_URL}/session/{opencode_session_id}/abort",
+                    auth=get_auth(),
+                )
+                logger.info("Aborted OpenCode session %s for deleted chat %s: %s",
+                            opencode_session_id, session_id, resp.status_code)
+        except Exception as e:
+            logger.warning("Failed to abort OpenCode session for deleted chat %s: %s", session_id, e)
+
+    # 5. Clean up stop flag
+    session_stop_flags.pop(session_id, None)
+
     del chat_sessions[session_id]
     save_chat_state()
     return {"message": "Session deleted"}
@@ -269,7 +301,12 @@ async def get_session_model_endpoint(session_id: str):
 
 @router.put("/sessions/{session_id}/model")
 async def update_session_model(session_id: str, req: SessionModelUpdate):
-    """Update provider/model for subsequent prompts in a chat session."""
+    """Update provider/model for subsequent prompts in a chat session.
+
+    When the model changes, the existing OpenCode session is invalidated
+    because OpenCode may cache model state per session.  A fresh session
+    will be created automatically on the next prompt.
+    """
     if session_id not in chat_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -281,8 +318,44 @@ async def update_session_model(session_id: str, req: SessionModelUpdate):
     session = chat_sessions[session_id]
     if not isinstance(session, dict):
         raise HTTPException(status_code=500, detail="Session data is invalid")
+
+    old_provider, old_model = get_session_model(session)
+    model_changed = (provider_id != old_provider) or (model_id != old_model)
+
     session["model_provider"] = provider_id
     session["model_id"] = model_id
+
+    # Invalidate the OpenCode session so the next prompt creates a fresh one
+    # with the new model.  Without this the stale session hangs because
+    # OpenCode may not honour mid-session model switches.
+    if model_changed:
+        old_opencode_id = session.get("opencode_session_id")
+        if old_opencode_id:
+            session["opencode_session_id"] = None
+            logger.info(
+                "Model changed (%s/%s -> %s/%s) — invalidating OpenCode session %s for chat %s",
+                old_provider, old_model, provider_id, model_id,
+                old_opencode_id, session_id,
+            )
+            # Stop any in-flight stream that's using the old session
+            runtime = active_chat_streams.get(session_id)
+            if runtime and runtime.status == "running":
+                session_stop_flags[session_id] = True
+                runtime.status = "stopped"
+                task = active_chat_tasks.get(session_id)
+                if task and not task.done():
+                    task.cancel()
+
+            # Best-effort abort the old OpenCode session in the background
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    await client.post(
+                        f"{OPENCODE_URL}/session/{old_opencode_id}/abort",
+                        auth=get_auth(),
+                    )
+            except Exception as e:
+                logger.warning("Failed to abort old OpenCode session %s: %s", old_opencode_id, e)
+
     save_chat_state()
     return {"provider_id": provider_id, "model_id": model_id}
 
@@ -751,7 +824,48 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
         logger.error("Chat worker failed for session %s: %s", session_id, e, exc_info=True)
         await _append_runtime_event(runtime, {"type": "error", "message": str(e)})
     finally:
+        # Auto-abort OpenCode session on any non-clean exit
+        if runtime.status in ("stopped", "failed"):
+            session = chat_sessions.get(session_id)
+            oc_sid = session.get("opencode_session_id") if isinstance(session, dict) else None
+            if oc_sid:
+                try:
+                    async with httpx.AsyncClient(timeout=5) as abort_client:
+                        await abort_client.post(
+                            f"{OPENCODE_URL}/session/{oc_sid}/abort",
+                            auth=get_auth(),
+                        )
+                    logger.info("[chat-worker] Auto-aborted OpenCode session %s (status=%s)", oc_sid, runtime.status)
+                except Exception as abort_err:
+                    logger.warning("[chat-worker] Failed to auto-abort OpenCode session: %s", abort_err)
+
         parts = runtime.parts_accumulator.finalize()
+
+        # L1 post-processing: parse spawn/steer/stop actions BEFORE saving,
+        # because we need the raw text with tags for parsing, then strip
+        # the tags so the saved message is clean for the frontend.
+        if mode in ("agent", "wild", "auto") and runtime.full_text:
+            try:
+                from agent.wild_routes import _get_session_agent
+                agent = _get_session_agent(session_id)
+                if agent:
+                    actions = await agent.handle_llm_response(runtime.full_text)
+                    for action in actions:
+                        await _append_runtime_event(runtime, {"type": "l1_action", **action})
+                    if actions:
+                        logger.info("[chat-worker] L1 executed %d actions for session %s", len(actions), session_id)
+            except Exception as e:
+                logger.error("[chat-worker] L1 post-processing failed for session %s: %s", session_id, e, exc_info=True)
+
+        # Strip L1 action tags from text so the frontend gets clean content
+        if mode in ("agent", "wild", "auto"):
+            from agent.v2_prompts import strip_action_tags
+            runtime.full_text = strip_action_tags(runtime.full_text)
+            if parts:
+                for part in parts:
+                    if isinstance(part, dict) and part.get("type") == "text" and part.get("content"):
+                        part["content"] = strip_action_tags(part["content"])
+
         if runtime.full_text or runtime.full_thinking or parts:
             session = chat_sessions.get(session_id)
             if isinstance(session, dict):
@@ -766,21 +880,6 @@ async def _chat_worker(session_id: str, content: str, runtime, *, mode: str = "a
                     "timestamp": time.time(),
                 }
                 session.setdefault("messages", []).append(assistant_msg)
-
-
-        # L1 post-processing: parse spawn/steer/stop actions from wild/auto mode responses
-        if mode in ("wild", "auto") and runtime.full_text:
-            try:
-                from agent.wild_routes import _get_session_agent
-                agent = _get_session_agent(session_id)
-                if agent:
-                    actions = await agent.handle_llm_response(runtime.full_text)
-                    for action in actions:
-                        await _append_runtime_event(runtime, {"type": "l1_action", **action})
-                    if actions:
-                        logger.info("[chat-worker] L1 executed %d actions for session %s", len(actions), session_id)
-            except Exception as e:
-                logger.error("[chat-worker] L1 post-processing failed for session %s: %s", session_id, e, exc_info=True)
 
         # Auto-name: fetch title from OpenCode only once (after the first exchange)
         session = chat_sessions.get(session_id)
@@ -930,12 +1029,17 @@ async def chat_endpoint(req: ChatRequest):
             effective_mode = "plan"
     llm_input = req.prompt_override if req.prompt_override else req.message
 
-    if effective_mode in ("wild", "auto"):
+    if effective_mode in ("agent", "wild", "auto"):
         # Route through L1 SessionAgent — per-session registry
         from agent.wild_routes import _get_or_create_session_agent
         agent = _get_or_create_session_agent(session_id)
-        # wild = forced research (l1_wild_session), auto = agent decides (l1_auto_session)
-        skill_id = "l1_wild_session" if effective_mode == "wild" else "l1_auto_session"
+        # wild = forced research, auto = agent decides, agent = direct tool use only
+        if effective_mode == "wild":
+            skill_id = "l1_wild_session"
+        elif effective_mode == "auto":
+            skill_id = "l1_auto_session"
+        else:
+            skill_id = "l1_agent_session"
         content, provenance = await agent.build_wild_prompt(
             llm_input, session_id, _prompt_skill_manager, skill_id=skill_id
         )
@@ -984,3 +1088,52 @@ async def stop_session(session_id: str):
             logger.warning(f"Failed to abort OpenCode session {opencode_session_id}: {e}")
 
     return {"message": "Stop signal sent"}
+
+
+@router.post("/sessions/{session_id}/teardown")
+async def teardown_session(session_id: str):
+    """Tear down all running processes for a session but keep session data.
+
+    Stops the L1 SessionAgent + L2/L3 children, cancels any active chat
+    worker, and aborts the OpenCode session.  The session itself is preserved
+    so it can be viewed or unarchived later.
+    """
+    if session_id not in chat_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # 1. Stop L1 SessionAgent + cascade to L2/L3 children
+    try:
+        from agent.wild_routes import _stop_session_agent
+        await _stop_session_agent(session_id)
+    except Exception as e:
+        logger.warning("Failed to stop L1 during teardown for session %s: %s", session_id, e)
+
+    # 2. Stop any active chat stream
+    session_stop_flags[session_id] = True
+    task = active_chat_tasks.pop(session_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    runtime = active_chat_streams.pop(session_id, None)
+    if runtime:
+        if runtime.status == "running":
+            runtime.status = "stopped"
+        try:
+            await _finalize_runtime(session_id, runtime, retain=False)
+        except Exception as e:
+            logger.warning("Failed to finalize runtime during teardown for %s: %s", session_id, e)
+
+    # 3. Abort OpenCode session
+    opencode_session_id = chat_sessions[session_id].get("opencode_session_id")
+    if opencode_session_id:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(
+                    f"{OPENCODE_URL}/session/{opencode_session_id}/abort",
+                    auth=get_auth(),
+                )
+        except Exception as e:
+            logger.warning("Failed to abort OpenCode session during teardown for %s: %s", session_id, e)
+
+    session_stop_flags.pop(session_id, None)
+    return {"message": "Session torn down"}

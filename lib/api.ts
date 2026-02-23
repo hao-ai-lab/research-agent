@@ -98,7 +98,7 @@ export interface SessionWithMessages extends ChatSession {
     active_stream?: ActiveSessionStream | null
 }
 
-export type StreamEventType = 'part_delta' | 'part_update' | 'session_status' | 'error' | 'provenance'
+export type StreamEventType = 'part_delta' | 'part_update' | 'session_status' | 'error' | 'provenance' | 'l1_action'
 
 export interface StreamEvent {
     type: StreamEventType
@@ -124,6 +124,12 @@ export interface StreamEvent {
     template?: string | null
     variables?: Record<string, string>
     prompt_type?: string
+    // L1 action event fields (type === 'l1_action')
+    action?: string          // 'spawn_research' | 'spawn_command' | 'steer_child' | 'stop_child'
+    goal?: string
+    context?: string
+    agent_id?: string
+    experiment_id?: string
 }
 
 // API Functions
@@ -718,6 +724,21 @@ export async function stopSession(sessionId: string): Promise<{ message: string 
     })
     if (!response.ok) {
         throw new Error(`Failed to stop session: ${response.statusText}`)
+    }
+    return response.json()
+}
+
+/**
+ * Tear down all running processes for a session (L1 agent, children, OpenCode)
+ * but keep the session data intact for viewing/unarchiving.
+ */
+export async function teardownSession(sessionId: string): Promise<{ message: string }> {
+    const response = await fetch(`${API_URL()}/sessions/${sessionId}/teardown`, {
+        method: 'POST',
+        headers: getHeaders()
+    })
+    if (!response.ok) {
+        throw new Error(`Failed to tear down session: ${response.statusText}`)
     }
     return response.json()
 }

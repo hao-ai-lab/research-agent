@@ -102,14 +102,24 @@ def _get_session_agent(chat_session_id: str) -> "SessionAgent | None":
 async def _stop_session_agent(chat_session_id: str) -> bool:
     """Stop and remove the L1 SessionAgent for the given chat session.
 
+    Uses Runtime.stop() to cascade to all L2/L3 children (BFS descendant
+    traversal, stops leaves first).  Falls back to agent.stop() if
+    the runtime is unavailable.
+
     Returns True if an agent was found and stopped.
     """
     agent = _session_agents.pop(chat_session_id, None)
     if agent is None:
         return False
     try:
-        await agent.stop()
-        logger.info("[wild-routes] Stopped L1 SessionAgent for chat session %s", chat_session_id)
+        if _agent_runtime:
+            await _agent_runtime.stop(agent.id)
+            logger.info("[wild-routes] Stopped L1 SessionAgent + children for chat session %s (agent_id=%s)",
+                        chat_session_id, agent.id)
+        else:
+            await agent.stop()
+            logger.info("[wild-routes] Stopped L1 SessionAgent for chat session %s (no runtime cascade)",
+                        chat_session_id)
     except Exception as e:
         logger.warning("[wild-routes] Error stopping L1 for chat %s: %s", chat_session_id, e)
     return True

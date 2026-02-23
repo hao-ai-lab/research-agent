@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 from typing import Any, Literal
 
 import requests
@@ -164,6 +165,120 @@ def start_run(run_id: str) -> dict[str, Any]:
         "start": start_result,
         "run": current_run,
     }
+
+
+_DEFAULT_BASH_TIMEOUT = int(os.environ.get("RESEARCH_AGENT_QUICK_BASH_TIMEOUT", "30"))
+
+
+@mcp.tool()
+def quick_bash(
+    command: str,
+    workdir: str | None = None,
+    timeout_seconds: int = _DEFAULT_BASH_TIMEOUT,
+) -> dict[str, Any]:
+    """Execute a shell command directly and return stdout/stderr.
+
+    Use this tool for quick operations like listing files, reading short
+    outputs, checking git status, etc.  It runs the command as a subprocess
+    with an explicit timeout so it never hangs.
+
+    Args:
+        command: Shell command to execute (e.g. "ls -la", "cat file.py").
+        workdir: Working directory to run the command in.  If omitted the
+                 server's current working directory is used.
+        timeout_seconds: Max seconds before the command is killed (default 30).
+    """
+    cmd = command.strip()
+    if not cmd:
+        raise ValueError("`command` must be non-empty")
+
+    timeout_seconds = max(1, min(timeout_seconds, 120))
+
+    cwd = None
+    if workdir and workdir.strip():
+        resolved = os.path.abspath(workdir.strip())
+        if os.path.isdir(resolved):
+            cwd = resolved
+        else:
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"workdir does not exist: {resolved}",
+            }
+
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env={**os.environ, "TERM": "dumb"},
+        )
+        stdout = result.stdout
+        stderr = result.stderr
+        # Truncate very long output to avoid blowing up context
+        if len(stdout) > 50_000:
+            stdout = stdout[:50_000] + f"\n... (truncated, total {len(result.stdout)} chars)"
+        if len(stderr) > 10_000:
+            stderr = stderr[:10_000] + f"\n... (truncated, total {len(result.stderr)} chars)"
+        return {
+            "exit_code": result.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"Command timed out after {timeout_seconds}s: {cmd}",
+        }
+    except Exception as exc:
+        return {
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"Failed to execute command: {exc}",
+        }
+
+
+@mcp.tool()
+def list_directory(
+    path: str | None = None,
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    """List files and directories at the given path.
+
+    A lightweight alternative to bash 'ls' that never hangs.  Returns
+    structured data with file names, types, and sizes.
+
+    Args:
+        path: Directory to list.  Defaults to the server's working directory.
+        include_hidden: Whether to include dotfiles/dotdirs (default False).
+    """
+    target = os.path.abspath(path.strip()) if path and path.strip() else os.getcwd()
+    if not os.path.isdir(target):
+        return {"error": f"Not a directory: {target}", "entries": []}
+
+    entries = []
+    try:
+        for name in sorted(os.listdir(target)):
+            if not include_hidden and name.startswith("."):
+                continue
+            full = os.path.join(target, name)
+            try:
+                stat = os.stat(full)
+                entries.append({
+                    "name": name,
+                    "type": "dir" if os.path.isdir(full) else "file",
+                    "size": stat.st_size,
+                })
+            except OSError:
+                entries.append({"name": name, "type": "unknown", "size": 0})
+    except PermissionError as exc:
+        return {"error": str(exc), "entries": []}
+
+    return {"path": target, "count": len(entries), "entries": entries}
 
 
 def _parse_args() -> argparse.Namespace:

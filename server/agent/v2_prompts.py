@@ -244,6 +244,25 @@ def parse_stop_child(text: str) -> list[dict]:
     return results
 
 
+_ACTION_TAG_RE = re.compile(
+    r"<(?:spawn_research|spawn_command|steer_child|stop_child)>"
+    r"[\s\S]*?"
+    r"</(?:spawn_research|spawn_command|steer_child|stop_child)>",
+)
+
+
+def strip_action_tags(text: str) -> str:
+    """Remove all L1 action XML blocks from text.
+
+    Strips <spawn_research>, <spawn_command>, <steer_child>, <stop_child>
+    blocks so the user-facing message is clean.
+    """
+    cleaned = _ACTION_TAG_RE.sub("", text)
+    # Collapse runs of 3+ newlines left behind by removed blocks
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def parse_memories(text: str) -> list:
     """Parse <memories>...</memories> from reflection output (last occurrence).
 

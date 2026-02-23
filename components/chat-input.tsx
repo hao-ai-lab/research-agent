@@ -24,7 +24,6 @@ import {
   ListPlus,
   Trash2,
   ChevronDown,
-  ClipboardList,
   Cpu,
   Check,
   MoreHorizontal,
@@ -52,7 +51,7 @@ import {
 import { useAppSettings } from '@/lib/app-settings'
 import { useIsMobile } from '@/components/ui/use-mobile'
 
-export type ChatMode = 'agent' | 'wild' | 'sweep' | 'plan'
+export type ChatMode = 'agent' | 'wild' | 'auto'
 
 export type MentionType = ReferenceTokenType
 
@@ -208,13 +207,6 @@ export function ChatInput({
   const [modelLabelMode, setModelLabelMode] = useState<'model' | 'icon'>('model')
   const [isCompactControlsOpen, setIsCompactControlsOpen] = useState(false)
   const [isUltraCompactLayout, setIsUltraCompactLayout] = useState(false)
-
-  useEffect(() => {
-    // Sweep mode is no longer exposed in the UI.
-    if (mode === 'sweep') {
-      onModeChange('agent')
-    }
-  }, [mode, onModeChange])
 
   // Build mention items from data
   const mentionItems = useMemo<MentionItem[]>(() => {
@@ -1338,7 +1330,7 @@ export function ChatInput({
                   <div>
                     <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Mode</p>
                     <div className="grid grid-cols-3 gap-1">
-                      {(['agent', 'plan', 'wild'] as ChatMode[]).map((nextMode) => (
+                      {(['agent', 'wild', 'auto'] as ChatMode[]).map((nextMode) => (
                         <button
                           key={nextMode}
                           type="button"
@@ -1350,16 +1342,16 @@ export function ChatInput({
                               ? mode === nextMode
                                 ? 'border-border/60 bg-secondary text-foreground'
                                 : 'border-border/40 text-foreground/80 hover:bg-secondary/70'
-                              : nextMode === 'plan'
+                              : nextMode === 'wild'
                               ? mode === nextMode
-                                ? 'border-orange-500/45 bg-orange-500/18 text-orange-300'
-                                : 'border-orange-500/25 bg-orange-500/8 text-orange-300/80 hover:bg-orange-500/14'
+                                ? 'border-violet-500/45 bg-violet-500/18 text-violet-300'
+                                : 'border-violet-500/25 bg-violet-500/8 text-violet-300/80 hover:bg-violet-500/14'
                               : mode === nextMode
-                              ? 'border-violet-500/45 bg-violet-500/18 text-violet-300'
-                              : 'border-violet-500/25 bg-violet-500/8 text-violet-300/80 hover:bg-violet-500/14'
+                              ? 'border-blue-500/45 bg-blue-500/18 text-blue-300'
+                              : 'border-blue-500/25 bg-blue-500/8 text-blue-300/80 hover:bg-blue-500/14'
                           }`}
                         >
-                          {nextMode === 'agent' ? 'Agent' : nextMode === 'plan' ? 'Plan' : 'Wild'}
+                          {nextMode === 'agent' ? 'Agent' : nextMode === 'wild' ? 'Wild' : 'Auto'}
                         </button>
                       ))}
                     </div>
@@ -1445,20 +1437,18 @@ export function ChatInput({
                         ? 'border border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80'
                         : mode === 'wild'
                         ? 'border border-violet-500/35 bg-violet-500/15 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/24 dark:text-violet-300'
-                        : mode === 'plan'
-                        ? 'border border-orange-500/35 bg-orange-500/15 text-orange-700 dark:border-orange-400/50 dark:bg-orange-500/24 dark:text-orange-300'
-                        : 'border border-blue-500/35 bg-blue-500/14 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
+                        : 'border border-blue-500/35 bg-blue-500/15 text-blue-700 dark:border-blue-400/50 dark:bg-blue-500/24 dark:text-blue-300'
                     }`}
                   >
-                    {mode === 'agent' ? <MessageSquare className="h-3 w-3" /> : mode === 'wild' ? <Zap className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
-                    {mode === 'wild' ? 'Wild' : mode === 'plan' ? 'Plan' : 'Agent'}
+                    {mode === 'agent' ? <MessageSquare className="h-3 w-3" /> : mode === 'wild' ? <Zap className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+                    {mode === 'agent' ? 'Agent' : mode === 'wild' ? 'Wild' : 'Auto'}
                   </button>
                 </PopoverTrigger>
                 <PopoverContent side="top" align="start" className="w-56 p-1.5">
                   <div className="flex flex-col gap-0.5">
                     <button type="button" onClick={() => { onModeChange('agent'); setIsModeOpen(false) }} className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === 'agent' ? 'bg-secondary border border-border/60' : 'hover:bg-secondary'}`}><MessageSquare className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'agent' ? 'text-foreground' : 'text-muted-foreground'}`} /><div><p className="text-xs font-medium text-foreground">Agent Mode</p><p className="text-[10px] text-muted-foreground">Normal chat — ask and discuss</p></div></button>
-                    <button type="button" onClick={() => { onModeChange('plan'); setIsModeOpen(false) }} className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === 'plan' ? 'bg-orange-500/10 border border-orange-500/35 dark:bg-orange-500/18 dark:border-orange-400/45' : 'hover:bg-secondary'}`}><ClipboardList className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'plan' ? 'text-orange-600 dark:text-orange-300' : 'text-muted-foreground'}`} /><div><p className="text-xs font-medium text-foreground">Plan Mode</p><p className="text-[10px] text-muted-foreground">Think first — propose a plan before acting</p></div></button>
                     <button type="button" onClick={() => { onModeChange('wild'); setIsModeOpen(false) }} className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === 'wild' ? 'bg-violet-500/10 border border-violet-500/35 dark:bg-violet-500/18 dark:border-violet-400/45' : 'hover:bg-secondary'}`}><Zap className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'wild' ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground'}`} /><div><p className="text-xs font-medium text-foreground">Wild Mode</p><p className="text-[10px] text-muted-foreground">Autonomous loop — agent runs experiments</p></div></button>
+                    <button type="button" onClick={() => { onModeChange('auto'); setIsModeOpen(false) }} className={`flex items-start gap-2 rounded-md px-2 py-2 text-left transition-colors ${mode === 'auto' ? 'bg-blue-500/10 border border-blue-500/35 dark:bg-blue-500/18 dark:border-blue-400/45' : 'hover:bg-secondary'}`}><Sparkles className={`h-4 w-4 mt-0.5 shrink-0 ${mode === 'auto' ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground'}`} /><div><p className="text-xs font-medium text-foreground">Auto Mode</p><p className="text-[10px] text-muted-foreground">Agent decides — autonomous research loop</p></div></button>
                   </div>
                 </PopoverContent>
               </Popover>

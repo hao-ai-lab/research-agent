@@ -13,6 +13,7 @@ import {
     streamSession,
     checkApiHealth,
     stopSession,
+    teardownSession,
     type ChatSession,
     type ChatModelOption,
     type SessionModelSelection,
@@ -36,11 +37,11 @@ export interface ToolCallState {
     durationMs?: number
 }
 
-// Represents a single part during streaming (thinking, tool, or text)
+// Represents a single part during streaming (thinking, tool, text, or action)
 export interface StreamingPart {
     id: string
     sourceId?: string
-    type: 'thinking' | 'tool' | 'text'
+    type: 'thinking' | 'tool' | 'text' | 'action'
     content: string
     toolName?: string
     toolDescription?: string
@@ -51,6 +52,10 @@ export interface StreamingPart {
     toolStartedAt?: number
     toolEndedAt?: number
     toolDurationMs?: number
+    // action-specific fields
+    actionType?: string    // 'spawn_research' | 'spawn_command' | 'steer_child' | 'stop_child'
+    actionGoal?: string
+    actionAgentId?: string
 }
 
 export interface StreamingState {
@@ -629,6 +634,32 @@ export function useChatSession(): UseChatSessionResult {
             return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: true, provenance: undefined }
         }
 
+        if (event.type === 'l1_action') {
+            const actionType = event.action || 'unknown'
+            const actionLabels: Record<string, string> = {
+                spawn_research: 'Launching Research Agent',
+                spawn_command: 'Launching Command Runner',
+                steer_child: 'Steering Experiment',
+                stop_child: 'Stopping Experiment',
+            }
+            const label = actionLabels[actionType] || `Action: ${actionType}`
+            const goal = event.goal || event.context || ''
+
+            setStreamingState(prev => ({
+                ...prev,
+                parts: [...prev.parts, {
+                    id: `action-${Date.now()}-${actionType}`,
+                    type: 'action' as const,
+                    content: label,
+                    actionType,
+                    actionGoal: goal,
+                    actionAgentId: event.agent_id || event.experiment_id || undefined,
+                }],
+            }))
+
+            return { textDelta: '', thinkingDelta: '', sawToolPart: false, done: false, provenance: undefined }
+        }
+
         if (event.type === 'provenance') {
             const provenance: PromptProvenance = {
                 rendered: event.rendered || '',
@@ -923,7 +954,7 @@ export function useChatSession(): UseChatSessionResult {
         }
     }, [])
 
-    // Archive a session client-side (keeps backend data intact)
+    // Archive a session: hide from UI + tear down backend processes
     const archiveSession = useCallback(async (sessionId: string) => {
         setError(null)
 
@@ -931,6 +962,13 @@ export function useChatSession(): UseChatSessionResult {
             abortControllerRef.current.abort()
             abortControllerRef.current = null
         }
+
+        // Tear down backend processes (L1 agent, children, OpenCode session)
+        // but keep session data so it can be viewed/unarchived later.
+        // Fire-and-forget: don't block the UI on this.
+        teardownSession(sessionId).catch(err =>
+            console.warn('[chat-session] Failed to tear down archived session:', err)
+        )
 
         setArchivedSessionIds((prev) => (
             prev.includes(sessionId) ? prev : [...prev, sessionId]
