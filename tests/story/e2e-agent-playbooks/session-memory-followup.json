@@ -1,0 +1,87 @@
+{
+  "name": "session-memory-followup",
+  "description": "Verify the same chat session retains earlier instructions across turns.",
+  "server": {
+    "base_url": "http://127.0.0.1:10000"
+  },
+  "defaults": {
+    "mode": "agent",
+    "max_stream_retries": 3
+  },
+  "session": {
+    "title": "E2E Session Memory",
+    "system_prompt": "You are being evaluated for memory and format compliance."
+  },
+  "steps": [
+    {
+      "id": "store_token",
+      "message": "Remember token ALPHA-4281 for this chat session. Reply exactly `ACK ALPHA-4281`.",
+      "assertions": [
+        {
+          "id": "store_exact_ack",
+          "type": "assistant_regex",
+          "pattern": "^ACK ALPHA-4281$",
+          "flags": "m"
+        },
+        {
+          "id": "store_fast_first_token",
+          "type": "first_token_latency_lt_ms",
+          "expected": 15000
+        }
+      ]
+    },
+    {
+      "id": "recall_token",
+      "message": "What token did I ask you to remember? Reply with ONLY JSON object: {\"token\": \"...\"}.",
+      "assertions": [
+        {
+          "id": "recall_json",
+          "type": "response_is_json",
+          "required_fields": ["token"]
+        },
+        {
+          "id": "recall_correct_token",
+          "type": "response_json_field_equals",
+          "field": "token",
+          "expected": "ALPHA-4281"
+        },
+        {
+          "id": "recall_total_latency",
+          "type": "total_latency_lt_ms",
+          "expected": 45000
+        }
+      ]
+    }
+  ],
+  "evaluation_points": [
+    {
+      "id": "session-memory",
+      "description": "Agent preserves prior-turn state in the same session.",
+      "assertion_ids": [
+        "store_exact_ack",
+        "recall_correct_token"
+      ],
+      "max_score": 70,
+      "pass_threshold": 1.0
+    },
+    {
+      "id": "format-compliance",
+      "description": "Agent follows requested output formats.",
+      "assertion_ids": [
+        "recall_json"
+      ],
+      "max_score": 20,
+      "pass_threshold": 1.0
+    },
+    {
+      "id": "latency-basic",
+      "description": "Latency remains within baseline limits.",
+      "assertion_ids": [
+        "store_fast_first_token",
+        "recall_total_latency"
+      ],
+      "max_score": 10,
+      "pass_threshold": 1.0
+    }
+  ]
+}
