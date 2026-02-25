@@ -54,6 +54,22 @@ class TestPartDelta:
         assert result["ptype"] == "reasoning"
         assert result["delta"] == "Let me think"
 
+    def test_tool_output_delta(self):
+        event = _make_event("message.part.delta", {
+            "sessionID": SID,
+            "messageID": "msg_1",
+            "partID": "part_tool_1",
+            "field": "output",
+            "delta": "line 1\n",
+            "part": {"type": "tool", "id": "part_tool_1", "name": "bash", "sessionID": SID},
+        })
+        result = parse_opencode_event(event, SID)
+        assert result is not None
+        assert result["type"] == "part_delta"
+        assert result["ptype"] == "tool"
+        assert result["delta"] == "line 1\n"
+        assert result["id"] == "part_tool_1"
+
     def test_empty_delta_ignored(self):
         event = _make_event("message.part.delta", {
             "sessionID": SID,
