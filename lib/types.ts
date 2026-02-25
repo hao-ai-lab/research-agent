@@ -41,6 +41,7 @@ export interface ExperimentRun {
   startTime: Date;
   endTime?: Date;
   command: string;
+  workdir?: string;
   parentRunId?: string;
   originAlertId?: string;
   metrics?: {
@@ -80,6 +81,11 @@ export interface ExperimentRun {
   exit_code?: number | null;
   error?: string | null;
   wandb_dir?: string | null;
+  gpuwrap_config?: {
+    enabled?: boolean;
+    retries?: number | null;
+    retry_delay_seconds?: number;
+  } | null;
 }
 
 
