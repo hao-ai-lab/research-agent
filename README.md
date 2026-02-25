@@ -9,10 +9,79 @@ It combines:
 - OpenCode for agent execution and streaming
 - tmux-based background execution for long-running jobs
 
-Try it yourself
+## Quick Install
+
+Install with a single command:
+
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hao-ai-lab/research-agent/v0.1.0-0219/install.sh" | bash
+curl -fsSL "https://raw.githubusercontent.com/hao-ai-lab/research-agent/main/install.sh" | bash
 ```
+
+This downloads prebuilt binaries for the **stable** channel (latest release tag) and installs CLI links (`research-agent` and `ra`) to `~/.local/bin`.
+
+### Install Channels
+
+| Channel | Description | Example |
+| --- | --- | --- |
+| `stable` | Latest release tag (default) | `--channel stable` |
+| `latest` | Tip of `main` branch | `--channel latest` |
+| `commit:<SHA>` | Specific commit | `--channel commit:abcdef1234` |
+
+```bash
+# Install the latest development version
+curl -fsSL ".../install.sh" | bash -s -- --channel latest
+
+# Install a specific commit
+curl -fsSL ".../install.sh" | bash -s -- --channel commit:abcdef1234
+```
+
+### Install Modes
+
+| Mode | Description | Example |
+| --- | --- | --- |
+| `runtime` | Download prebuilt backend + frontend bundles (default) | `--mode runtime` |
+| `source` | Clone the repository and build from source | `--mode source` |
+
+```bash
+# Install from source on the latest channel
+curl -fsSL ".../install.sh" | bash -s -- --mode source --channel latest
+
+# Install from source at a specific commit
+curl -fsSL ".../install.sh" | bash -s -- --mode source --channel commit:abcdef1234
+```
+
+### Install Options
+
+| Option | Description |
+| --- | --- |
+| `--install-dir <path>` | Install location (default: `~/.research-agent/app`) |
+| `--channel <channel>` | Release channel: `stable`, `latest`, or `commit:<SHA>` |
+| `--mode <mode>` | Install mode: `runtime` or `source` |
+| `--repo-url <url>` | Source repository URL (for source mode) |
+| `--releases-base-url <url>` | Base URL for channel release artifacts |
+| `--backend-binary-url <url>` | Explicit backend binary download URL |
+| `--frontend-bundle-url <url>` | Explicit frontend bundle download URL |
+| `--dev` | Run prerequisite checks only (for contributors) |
+
+### After Installation
+
+Once installed, use the `research-agent` (or `ra`) CLI:
+
+```bash
+# Start all services for your project
+research-agent start --project-root "$PWD"
+
+# Check status
+research-agent status
+
+# Expose services via ngrok tunnel
+research-agent tunnel
+
+# Stop services
+research-agent stop
+```
+
+This starts OpenCode, backend, and frontend in a tmux session and writes runtime info to `.agents/ra-runtime.env`.
 
 Demo: https://hao-ai-lab--research-agent-main-preview-app.modal.run
 
@@ -40,24 +109,6 @@ Demo: https://hao-ai-lab--research-agent-main-preview-app.modal.run
 - OpenCode CLI (`opencode`)
 - `uv` (recommended for backend env setup)
 - `ngrok` (optional, only for `research-agent tunnel`)
-
-## Quick Start (Recommended)
-
-Use the lifecycle manager:
-
-```bash
-research-agent start --project-root "$PWD"
-```
-
-This starts OpenCode, backend, and frontend in a tmux session and writes runtime info to `.agents/ra-runtime.env`.
-
-Useful commands:
-
-```bash
-research-agent status
-research-agent tunnel
-research-agent stop
-```
 
 ## Local Developer Setup (Source Mode)
 
