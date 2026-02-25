@@ -7,11 +7,9 @@ Extracted from server.py. Pure helper functions with no route definitions.
 import json
 import logging
 import os
-import shlex
 import shutil
 import socket
 import subprocess
-import sys
 import time
 from typing import Any, Optional
 
@@ -603,7 +601,10 @@ def _normalize_gpuwrap_config(config: Any) -> Optional[dict]:
 
 
 def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
-    """Launch a run in a new tmux window with sidecar."""
+    """Launch a run in a new tmux window with in-process sidecar monitoring."""
+    import threading
+    from agent.sidecar_agent import monitor_job
+
     session = get_or_create_session()
     if not session:
         raise Exception("Tmux session not available. Start tmux first.")
@@ -614,15 +615,15 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
 
     logger.info(f"Launching run {run_id} in window {tmux_window_name}")
 
-    # Create window
+    # Create window — the active pane IS the job pane (no split needed)
     window = session.new_window(window_name=tmux_window_name, attach=False)
-    pane = window.active_pane
+    job_pane = window.active_pane
 
     # Setup run directory
     run_dir = os.path.join(config.DATA_DIR, "runs", run_id)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Write command to file
+    # Write command to file (kept for run artifact tracking)
     command_file = os.path.join(run_dir, "command.txt")
     with open(command_file, "w") as f:
         f.write(run_data["command"])
@@ -630,46 +631,29 @@ def launch_run_in_tmux(run_id: str, run_data: dict) -> Optional[str]:
     gpuwrap_config = _normalize_gpuwrap_config(run_data.get("gpuwrap_config"))
     if gpuwrap_config:
         run_data["gpuwrap_config"] = gpuwrap_config
-        gpuwrap_config_file = os.path.join(run_dir, "gpuwrap_config.json")
-        with open(gpuwrap_config_file, "w") as f:
-            json.dump(gpuwrap_config, f)
     else:
         run_data["gpuwrap_config"] = None
-        gpuwrap_config_file = None
 
-    # Get sidecar path — job_sidecar.py lives in tools/, not runs/
-    server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
-    sidecar_path = os.path.join(server_dir, "tools", "job_sidecar.py")
-
-    # Build sidecar command
+    # Spawn monitor_job in a background thread — sidecar runs in-process
     server_url = get_server_callback_url()
     run_workdir = run_data.get("workdir") or config.WORKDIR
 
-    if getattr(sys, "frozen", False):
-        sidecar_cmd = (
-            f"{shlex.quote(sys.executable)} --run-sidecar "
-            f"--job_id {shlex.quote(run_id)} "
-            f"--server_url {shlex.quote(server_url)} "
-            f"--command_file {shlex.quote(command_file)} "
-            f"--agent_run_dir {shlex.quote(run_dir)} "
-            f"--workdir {shlex.quote(run_workdir)}"
-        )
-    else:
-        sidecar_cmd = (
-            f'{shlex.quote(sys.executable)} "{sidecar_path}" '
-            f'--job_id {shlex.quote(run_id)} '
-            f'--server_url {shlex.quote(server_url)} '
-            f'--command_file {shlex.quote(command_file)} '
-            f'--agent_run_dir {shlex.quote(run_dir)} '
-            f'--workdir {shlex.quote(run_workdir)}'
-        )
-    if USER_AUTH_TOKEN:
-        sidecar_cmd += f" --auth_token {shlex.quote(USER_AUTH_TOKEN)}"
-    if gpuwrap_config_file:
-        sidecar_cmd += f" --gpuwrap_config_file {shlex.quote(gpuwrap_config_file)}"
-
-    logger.info(f"Executing sidecar: {sidecar_cmd}")
-    pane.send_keys(sidecar_cmd)
+    thread = threading.Thread(
+        target=monitor_job,
+        kwargs={
+            "server_url": server_url,
+            "job_id": run_id,
+            "command": run_data["command"],
+            "workdir": run_workdir,
+            "run_dir": run_dir,
+            "auth_token": USER_AUTH_TOKEN or None,
+            "gpuwrap_config": gpuwrap_config,
+            "job_pane": job_pane,
+        },
+        daemon=True,
+        name=f"sidecar-{run_id[:8]}",
+    )
+    thread.start()
 
     # Update run data
     run_data["status"] = "launching"
