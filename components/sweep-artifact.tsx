@@ -168,8 +168,8 @@ export function SweepArtifact({
                     <span>Hyperparameters</span>
                   </div>
                   <div className="space-y-1">
-                    {config.hyperparameters.map((param, i) => (
-                      <div key={i} className="flex items-center gap-2 text-[10px]">
+                    {config.hyperparameters.map((param) => (
+                      <div key={`param-${param.name}`} className="flex items-center gap-2 text-[10px]">
                         <span className="font-mono text-foreground">{param.name}</span>
                         <span className="text-muted-foreground">:</span>
                         {param.type === 'choice' && (
@@ -199,8 +199,8 @@ export function SweepArtifact({
                     <span>Metrics</span>
                   </div>
                   <div className="space-y-1">
-                    {config.metrics.map((metric, i) => (
-                      <div key={i} className="flex items-center gap-2 text-[10px]">
+                    {config.metrics.map((metric) => (
+                      <div key={`metric-${metric.name}`} className="flex items-center gap-2 text-[10px]">
                         <span className="font-mono text-foreground">{metric.name}</span>
                         {metric.isPrimary && (
                           <Badge className="text-[8px] h-4 bg-emerald-500/20 text-emerald-400 border-0">
@@ -222,8 +222,8 @@ export function SweepArtifact({
                     <span>Insight Rules</span>
                   </div>
                   <div className="space-y-1">
-                    {config.insights.map((insight, i) => (
-                      <div key={i} className="text-[10px] flex items-start gap-2">
+                    {config.insights.map((insight) => (
+                      <div key={`insight-${insight.type}-${insight.condition}`} className="text-[10px] flex items-start gap-2">
                         <Badge 
                           variant="outline" 
                           className={`text-[8px] shrink-0 ${

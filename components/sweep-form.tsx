@@ -1052,7 +1052,7 @@ export function SweepForm({
                   </thead>
                   <tbody>
                     {runCombinations.slice(0, 20).map((combo, i) => (
-                      <tr key={i} className="border-t border-border/50 hover:bg-secondary/20">
+                      <tr key={`combo-${paramNames.map(n => combo[n]).join('-')}`} className="border-t border-border/50 hover:bg-secondary/20">
                         <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
                         {paramNames.map((name) => (
                           <td key={name} className="px-2 py-1 font-mono">

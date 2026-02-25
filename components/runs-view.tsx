@@ -1038,6 +1038,7 @@ export function RunsView({
     const pendingAlertCount = pendingAlertsByRun[run.id] || 0
     const hasPendingAlerts = pendingAlertCount > 0
     const runAlerts = alerts.filter((alert) => alert.run_id === run.id)
+    const pendingRunAlerts = runAlerts.filter(a => a.status === 'pending')
     const isManageSelectionEnabled = manageMode
     const isSelectedForManage = selectedManageRunIds.has(run.id)
     const isExpanded = expandedRunIds.has(run.id)
@@ -1113,7 +1114,7 @@ export function RunsView({
                     {pendingAlertCount} Pending Alert{pendingAlertCount > 1 ? 's' : ''}
                   </p>
                   <div className="space-y-1.5">
-                    {runAlerts.filter(a => a.status === 'pending').slice(0, 3).map(alert => (
+                    {pendingRunAlerts.slice(0, 3).map(alert => (
                       <div key={alert.id} className="flex items-start gap-2 rounded-md bg-secondary/40 px-2 py-1.5">
                         <Badge
                           variant="outline"
@@ -1129,9 +1130,9 @@ export function RunsView({
                         <p className="text-[11px] text-muted-foreground line-clamp-2">{alert.message}</p>
                       </div>
                     ))}
-                    {runAlerts.filter(a => a.status === 'pending').length > 3 && (
+                    {pendingRunAlerts.length > 3 && (
                       <p className="text-[10px] text-muted-foreground">
-                        +{runAlerts.filter(a => a.status === 'pending').length - 3} more
+                        +{pendingRunAlerts.length - 3} more
                       </p>
                     )}
                   </div>
@@ -1153,8 +1154,8 @@ export function RunsView({
                 {hasPendingAlerts && (
                   <div className="mt-1 border-t border-border/50 pt-1">
                     <p className="text-[10px] font-medium text-warning">{pendingAlertCount} alert{pendingAlertCount > 1 ? 's' : ''}</p>
-                    {runAlerts.filter(a => a.status === 'pending')[0] && (
-                      <p className="text-[10px] text-muted-foreground line-clamp-1">{runAlerts.filter(a => a.status === 'pending')[0].message}</p>
+                    {pendingRunAlerts[0] && (
+                      <p className="text-[10px] text-muted-foreground line-clamp-1">{pendingRunAlerts[0].message}</p>
                     )}
                   </div>
                 )}

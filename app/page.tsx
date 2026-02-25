@@ -276,7 +276,7 @@ export default function ResearchChat() {
           : alert.message,
         timestamp: new Date(alert.timestamp * 1000),
         choices: alert.status === 'pending' ? alert.choices : undefined,
-        suggestedActions: alert.status === 'pending'
+        suggestedActions: alert.status === 'pending' && alert.choices
           ? alert.choices.map(choice => `Respond with: ${choice}`)
           : undefined,
       }
@@ -445,7 +445,7 @@ export default function ResearchChat() {
         `Message: ${event.summary}`,
         `Run: ${run?.name || event.runName} (${event.runId})`,
         run?.command ? `Command: ${run.command}` : undefined,
-        alert?.choices?.length ? `Allowed responses: ${alert.choices.join(', ')}` : undefined,
+        alert?.choices?.length ? `Allowed responses: ${alert.choices?.join(', ')}` : undefined,
         ``,
         `Provide a short analysis, then recommend the best response from the allowed list.`,
       ].filter(Boolean).join('\n')
@@ -647,8 +647,8 @@ export default function ResearchChat() {
     }, 0)
 
     if (streamingState.isStreaming) {
-      const streamTextLen = streamingState.textContent.length
-      const streamThinkLen = streamingState.thinkingContent.length
+      const streamTextLen = streamingState.textContent?.length || 0
+      const streamThinkLen = streamingState.thinkingContent?.length || 0
       return historyTokens + Math.ceil((streamTextLen + streamThinkLen) / 4)
     }
     return historyTokens
