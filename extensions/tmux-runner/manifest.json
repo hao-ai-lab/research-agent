@@ -1,0 +1,16 @@
+{
+    "name": "tmux-runner",
+    "version": "1.0.0",
+    "description": "tmux-based job execution for background processes",
+    "type": "extension",
+    "provides": {
+        "tools": [
+            "tmux_spawn",
+            "tmux_send",
+            "tmux_read",
+            "tmux_list",
+            "tmux_kill"
+        ],
+        "panels": []
+    }
+}

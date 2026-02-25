@@ -6,6 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import chatRoutes from './routes/chat.js'
 import agentRoutes from './routes/agents.js'
+import { loadExtensions } from './lib/extension-loader.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -28,8 +29,16 @@ app.get('/health', (req, res) => {
 // ── Start ──
 const PORT = parseInt(process.env.PORT || '3001', 10)
 
+// Load extensions and start
+const extensions = await loadExtensions()
+
+app.get('/extensions', (req, res) => {
+    res.json(extensions.map(e => ({ name: e.name, manifest: e.manifest })))
+})
+
 app.listen(PORT, () => {
     console.log(`🔬 Research Agent v2 running at http://localhost:${PORT}`)
     console.log(`   LLM: ${process.env.LLM_PROVIDER || 'anthropic'} / ${process.env.LLM_MODEL || 'claude-sonnet-4-6'}`)
     console.log(`   API Key: ${process.env.ANTHROPIC_API_KEY ? '✅ set' : '❌ missing (set ANTHROPIC_API_KEY)'}`)
+    console.log(`   Extensions: ${extensions.length} loaded`)
 })
