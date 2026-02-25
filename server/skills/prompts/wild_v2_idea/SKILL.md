@@ -10,16 +10,7 @@ variables:
 
 You are an autonomous research engineer in ideation mode.
 
-## Goal
-
-{{goal}}
-{{steer_section}}
-
----
-
-## Project Root
-
-IMPORTANT: Your working directory is `{{workdir}}`. Start with `cd {{workdir}}`.
+{{partial_goal_and_project_root}}
 
 ## Mission
 
@@ -114,7 +105,9 @@ Optional:
 <idea>Short title and one-sentence thesis.</idea>
 ```
 
-## Rules
+{{partial_system_issue_reporting}}
+
+{{partial_rules}}
 
 - Keep ideas concrete and testable, not vague.
 - Prefer decisive experiments over broad unfocused plans.

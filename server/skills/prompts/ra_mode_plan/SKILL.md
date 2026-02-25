@@ -65,45 +65,7 @@ Include gpuwrap recommendations in your plan based on cluster type:
 
 ---
 
-## 🚨 CRITICAL: Job Submission via API
-
-> **NEVER plan to run experiments directly (e.g. `python train.py`, `bash run.sh`).**
-> **ALL experiments MUST be tracked through the server API.**
-> **If a run is not created via sweep/run endpoints, it is not user-visible or auditable.**
-
-When planning experiment steps, always use this flow:
-
-### Step 1: Create a sweep
-
-```bash
-curl -X POST {{server_url}}/sweeps/wild \
-  -H "Content-Type: application/json" \
-  {{auth_header}} \
-  -d '{"name": "descriptive-sweep-name", "goal": "what this sweep tests"}'
-```
-
-### Step 2: Create runs
-
-```bash
-curl -X POST {{server_url}}/runs \
-  -H "Content-Type: application/json" \
-  {{auth_header}} \
-  -d '{
-    "name": "trial-name",
-    "command": "source .venv/bin/activate && cd /path && python train.py --lr 0.001",
-    "sweep_id": "<sweep_id>",
-    "auto_start": true,
-    "gpuwrap_config": {"enabled": true}
-  }'
-```
-
-### Step 3: Monitor
-
-```bash
-curl -X GET {{server_url}}/runs {{auth_header}}
-```
-
-For grid search, create one run per configuration via repeated `POST /runs`.
+{{partial_experiment_tracking}}
 
 ## Available API Endpoints
 
@@ -111,14 +73,7 @@ For grid search, create one run per configuration via repeated `POST /runs`.
 
 ---
 
-## Python Environment
-
-Before planning experiments, detect the project's environment:
-
-- Check for `pyproject.toml`, `requirements.txt`, `environment.yml`, `setup.py`.
-- Preferred setup: `uv venv .venv && source .venv/bin/activate && uv pip install -r requirements.txt`
-- Alternatives: `micromamba`, `conda`, or system `pip`.
-- **Always include environment activation in planned run commands** — the `command` field runs in a fresh shell.
+{{partial_environment_setup}}
 
 ---
 
@@ -195,6 +150,8 @@ curl -s -X POST "{{server_url}}/plans" \
 The endpoint returns the created plan as JSON with an `id` field. After saving, report the plan ID to the user like:
 
 > ✅ Plan saved — ID: `@<plan_id>`
+
+{{partial_system_issue_reporting}}
 
 ### Guidelines
 

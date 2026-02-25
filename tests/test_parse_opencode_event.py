@@ -12,7 +12,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "server"))
 
-from server import parse_opencode_event
+from chat.streaming import parse_opencode_event
 
 SID = "ses_test_session_123"
 

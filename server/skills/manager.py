@@ -39,15 +39,20 @@ class PromptSkillManager:
     def __init__(self, skills_dir: Optional[str] = None):
         self.skills_dir = skills_dir or os.path.join(_SERVER_FILE_DIR, "skills", "prompts")
         self._skills: Dict[str, dict] = {}
+        self._partials: Dict[str, str] = {}  # name -> content from _partials/*.md
         self.load_all()
 
     def load_all(self) -> None:
         """Load all SKILL.md files from skill subdirectories."""
         self._skills.clear()
+        self._partials.clear()
         if not os.path.isdir(self.skills_dir):
             logger.warning(f"Prompt skills directory not found: {self.skills_dir}")
             return
+        self._load_partials()
         for entry in sorted(os.listdir(self.skills_dir)):
+            if entry.startswith("_"):
+                continue  # skip _partials and other internal dirs
             skill_dir = os.path.join(self.skills_dir, entry)
             if not os.path.isdir(skill_dir):
                 continue
@@ -59,6 +64,30 @@ class PromptSkillManager:
                 self._skills[skill["id"]] = skill
             except Exception as e:
                 logger.error(f"Failed to parse prompt skill {entry}: {e}")
+
+    def _load_partials(self) -> None:
+        """Load reusable partial templates from _partials/*.md.
+
+        Each file becomes available as a variable ``partial_<stem>`` during
+        render, allowing SKILL.md templates to include shared sections via
+        ``{{partial_<stem>}}``.
+        """
+        partials_dir = os.path.join(self.skills_dir, "_partials")
+        if not os.path.isdir(partials_dir):
+            return
+        for fname in sorted(os.listdir(partials_dir)):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(partials_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            stem = fname[:-3]  # strip .md
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    self._partials[f"partial_{stem}"] = f.read().strip()
+                logger.debug(f"Loaded partial: partial_{stem}")
+            except Exception as e:
+                logger.error(f"Failed to load partial {fname}: {e}")
 
     def _parse_file(self, filepath: str, folder_name: str) -> dict:
         """Parse a SKILL.md file with YAML frontmatter."""
@@ -335,15 +364,24 @@ class PromptSkillManager:
     def render(self, skill_id: str, variables: Dict[str, str]) -> Optional[str]:
         """Render a skill template with the given variables.
 
-        Replaces {{variable_name}} with the provided value.
-        Missing variables are left as empty strings.
+        Partials (from ``_partials/*.md``) are injected first so that their
+        own ``{{variable}}`` placeholders are resolved by the caller's
+        variables in the second pass.  Caller-supplied variables take
+        precedence over partials with the same name.
         """
         skill = self._skills.get(skill_id)
         if skill is None:
             return None
         result = skill["template"]
+
+        # 1. Inject partials (shared sections)
+        for var_name, value in self._partials.items():
+            result = result.replace("{{" + var_name + "}}", value)
+
+        # 2. Inject caller-supplied variables (may also resolve vars inside partials)
         for var_name, value in variables.items():
             result = result.replace("{{" + var_name + "}}", str(value))
-        # Clean up any remaining unreplaced variables
+
+        # 3. Clean up any remaining unreplaced variables
         result = re.sub(r"\{\{[a-zA-Z_]+\}\}", "", result)
         return result
