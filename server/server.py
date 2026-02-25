@@ -112,8 +112,27 @@ async def lifespan(app):
     if agent_runtime is not None and agent_runtime._scheduler is not None:
         agent_runtime._scheduler.start()
         logger.info("[agentsys] Scheduler tick loop started")
+    # Start watchdog agent (requires async context for agent.start())
+    _watchdog_instance = None
+    if agent_runtime is not None:
+        for _local in agent_runtime._local_agents.values():
+            if _local.role == "watchdog":
+                _watchdog_instance = _local
+                break
+        if _watchdog_instance is not None:
+            try:
+                await _watchdog_instance.start()
+                logger.info("[agentsys] Watchdog agent started")
+            except Exception as e:
+                logger.warning("[agentsys] Failed to start watchdog: %s", e)
     yield
-    # Shutdown: stop scheduler, then all per-session L1 agents, then Runtime
+    # Shutdown: stop watchdog, scheduler, per-session L1 agents, then Runtime
+    if _watchdog_instance is not None:
+        try:
+            await _watchdog_instance.stop()
+            logger.info("[agentsys] Watchdog agent stopped")
+        except Exception as e:
+            logger.warning("[agentsys] Error stopping watchdog: %s", e)
     if agent_runtime is not None and agent_runtime._scheduler is not None:
         await agent_runtime._scheduler.shutdown()
         logger.info("[agentsys] Scheduler shutdown complete")
@@ -396,6 +415,24 @@ def _init_agentsys():
         run_status_active_set=RUN_STATUS_ACTIVE,
         agent_runtime=agent_runtime,
     )
+
+    # GlobalWatchdogAgent: in-process monitor for L3 executor health
+    from agentsys.agents.watchdog import GlobalWatchdogAgent
+    _watchdog = GlobalWatchdogAgent()
+    agent_runtime.register_local(
+        _watchdog,
+        goal="Monitor all L3 executor processes for hangs/crashes/orphans",
+        config={
+            "scan_interval_seconds": 15.0,
+            "hang_timeout_seconds": 7200,
+            "memory_stale_threshold_seconds": 600,
+            "warn_to_kill_grace_seconds": 300,
+            "orphan_grace_seconds": 60,
+            "llm_diagnosis_enabled": True,
+            "gpu_leak_check_enabled": True,
+        },
+    )
+    watchdog_routes.init(_watchdog)
 
     logger.info("[agentsys] Initialized: store=%s, runtime=%s",
                 store_root, agent_runtime)
@@ -876,6 +913,10 @@ app.include_router(wild_routes.router)
 
 import agent.runtime_routes as runtime_routes  # noqa: E402
 app.include_router(runtime_routes.router)
+
+import agentsys.agents.watchdog_routes as watchdog_routes  # noqa: E402
+# watchdog_routes.init() deferred to _init_agentsys() — routes return 503 until then
+app.include_router(watchdog_routes.router)
 
 
 
