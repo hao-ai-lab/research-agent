@@ -1,0 +1,21 @@
+{
+    "name": "file-creation",
+    "description": "Agent can create a file with specified content",
+    "seed": "researcher",
+    "prompt": "Create a file called hello.txt with the content 'Hello from the research agent!' — just create the file, nothing else.",
+    "assertions": [
+        {
+            "type": "file_exists",
+            "path": "hello.txt"
+        },
+        {
+            "type": "file_contains",
+            "path": "hello.txt",
+            "text": "Hello from the research agent!"
+        },
+        {
+            "type": "min_tool_calls",
+            "count": 1
+        }
+    ]
+}

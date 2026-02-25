@@ -1,0 +1,19 @@
+{
+    "name": "read-and-summarize",
+    "description": "Agent can read a file and summarize its contents",
+    "seed": "researcher",
+    "prompt": "Read the file 'data.csv' and tell me how many rows it has (not counting the header).",
+    "fixtures": {
+        "data.csv": "name,score,grade\nAlice,95,A\nBob,82,B\nCharlie,91,A\nDiana,78,C\nEve,88,B"
+    },
+    "assertions": [
+        {
+            "type": "response_contains",
+            "text": "5"
+        },
+        {
+            "type": "min_tool_calls",
+            "count": 1
+        }
+    ]
+}

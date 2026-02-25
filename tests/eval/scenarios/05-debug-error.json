@@ -1,0 +1,20 @@
+{
+    "name": "debug-error",
+    "description": "Debugger agent can identify and fix a bug in code",
+    "seed": "debugger",
+    "prompt": "The file 'buggy.py' has a bug — the function should return the sum of a list but it doesn't work correctly. Read it, identify the bug, and fix it.",
+    "fixtures": {
+        "buggy.py": "def sum_list(numbers):\n    total = 0\n    for n in numbers:\n        total = n  # bug: should be += not =\n    return total\n\nprint(sum_list([1, 2, 3, 4, 5]))\n"
+    },
+    "assertions": [
+        {
+            "type": "file_contains",
+            "path": "buggy.py",
+            "text": "+="
+        },
+        {
+            "type": "min_tool_calls",
+            "count": 2
+        }
+    ]
+}
