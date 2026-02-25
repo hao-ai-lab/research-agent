@@ -1,0 +1,6 @@
+[
+    "bash",
+    "readFile",
+    "writeFile",
+    "listFiles"
+]
