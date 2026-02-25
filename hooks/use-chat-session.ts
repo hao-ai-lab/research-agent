@@ -106,6 +106,8 @@ export interface UseChatSessionResult {
     // promptOverride: when set, this full prompt is sent to the LLM while `content` is stored as the visible user message
     sendMessage: (content: string, mode: ChatMode, sessionIdOverride?: string, promptOverride?: string) => Promise<void>
     stopStreaming: () => Promise<void>
+    compactContext: () => Promise<void>
+    isCompactingContext: boolean
 
     // Message queue - for queuing messages during streaming
     messageQueue: string[]
@@ -476,6 +478,87 @@ function buildStreamingStateFromActiveStream(activeStream: ActiveSessionStream):
 
 const RETRY_DELAYS = [2, 2, 4, 4, 8, 8] // seconds between retries
 
+const CONTEXT_COMPACTION_TRANSCRIPT_BUDGET = 24000
+const CONTEXT_COMPACTION_HEAD_BUDGET_RATIO = 0.35
+const CONTEXT_COMPACTION_LINE_MAX = 900
+const CONTEXT_COMPACTION_MIN_MESSAGES = 4
+
+function clampCompactionLine(text: string): string {
+    const normalized = text.replace(/\s+/g, ' ').trim()
+    if (!normalized) return ''
+    if (normalized.length <= CONTEXT_COMPACTION_LINE_MAX) return normalized
+    return `${normalized.slice(0, CONTEXT_COMPACTION_LINE_MAX - 1)}…`
+}
+
+function buildCompactionTranscript(messages: ChatMessageData[]): string {
+    const lines = messages
+        .map((msg, index) => {
+            const content = clampCompactionLine(msg.content || '')
+            if (!content) return null
+            return `[${index + 1}] ${msg.role.toUpperCase()}: ${content}`
+        })
+        .filter((line): line is string => Boolean(line))
+
+    const full = lines.join('\n')
+    if (full.length <= CONTEXT_COMPACTION_TRANSCRIPT_BUDGET) {
+        return full
+    }
+
+    const headBudget = Math.floor(CONTEXT_COMPACTION_TRANSCRIPT_BUDGET * CONTEXT_COMPACTION_HEAD_BUDGET_RATIO)
+    const tailBudget = CONTEXT_COMPACTION_TRANSCRIPT_BUDGET - headBudget
+
+    const head: string[] = []
+    let headChars = 0
+    for (const line of lines) {
+        const next = line.length + 1
+        if (headChars + next > headBudget) break
+        head.push(line)
+        headChars += next
+    }
+
+    const tail: string[] = []
+    let tailChars = 0
+    for (let i = lines.length - 1; i >= head.length; i -= 1) {
+        const line = lines[i]
+        const next = line.length + 1
+        if (tailChars + next > tailBudget) break
+        tail.unshift(line)
+        tailChars += next
+    }
+
+    const omittedCount = Math.max(lines.length - head.length - tail.length, 0)
+    const omittedMarker = omittedCount > 0
+        ? [`[... omitted ${omittedCount} middle messages for budget ...]`]
+        : []
+
+    return [...head, ...omittedMarker, ...tail].join('\n')
+}
+
+function buildContextCompactionPrompt(transcript: string): string {
+    return [
+        'You are compressing a chat transcript into compact working memory.',
+        'Do not solve the user tasks. Only compress context.',
+        '',
+        'Output Markdown using these exact sections:',
+        '## Durable Facts',
+        '## User Goals',
+        '## Decisions & Changes',
+        '## Open Loops',
+        '## Risks & Constraints',
+        '## Next Assistant Starting Point',
+        '',
+        'Rules:',
+        '- Keep total output under 350 words.',
+        '- Prefer concrete details over generic summaries.',
+        '- Include filenames, commands, IDs, and numbers when present.',
+        '- Exclude conversational fluff.',
+        '- If uncertain, mark as "Unverified".',
+        '',
+        'Transcript:',
+        transcript,
+    ].join('\n')
+}
+
 export function useChatSession(): UseChatSessionResult {
     // Connection state
     const [isConnected, setIsConnected] = useState(false)
@@ -492,6 +575,7 @@ export function useChatSession(): UseChatSessionResult {
     const [availableModels, setAvailableModels] = useState<ChatModelOption[]>([])
     const [selectedModel, setSelectedModelState] = useState<SessionModelSelection | null>(null)
     const [isModelUpdating, setIsModelUpdating] = useState(false)
+    const [isCompactingContext, setIsCompactingContext] = useState(false)
 
     // Streaming state
     const [streamingState, setStreamingState] = useState<StreamingState>(initialStreamingState)
@@ -1169,6 +1253,56 @@ export function useChatSession(): UseChatSessionResult {
         setStreamingState(initialStreamingState)
     }, [currentSessionId])
 
+    const compactContext = useCallback(async () => {
+        if (!currentSessionId) {
+            setError('No active session to compact.')
+            return
+        }
+        if (streamingState.isStreaming) {
+            setError('Stop the current response before compacting context.')
+            return
+        }
+        if (messages.length < CONTEXT_COMPACTION_MIN_MESSAGES) {
+            setError('Not enough history to compact yet.')
+            return
+        }
+
+        try {
+            setIsCompactingContext(true)
+            setError(null)
+
+            const sourceTitle = currentSession?.title?.trim()
+            const compactTitle = sourceTitle
+                ? `${sourceTitle} (compacted)`
+                : 'Compacted chat'
+
+            const newSession = await createSession(compactTitle, selectedModel || undefined)
+            setArchivedSessionIds((prev) => prev.filter((id) => id !== newSession.id))
+            setSessions((prev) => [newSession, ...prev.filter((session) => session.id !== newSession.id)])
+            setCurrentSessionId(newSession.id)
+            const createdModel = normalizeSessionModel(newSession)
+            if (createdModel) {
+                setSelectedModelState(createdModel)
+            }
+            setMessages([])
+            setStreamingState(initialStreamingState)
+
+            const transcript = buildCompactionTranscript(messages)
+            const promptOverride = buildContextCompactionPrompt(transcript)
+            await sendMessage(
+                'Compact this transcript into durable working memory for continued work.',
+                'agent',
+                newSession.id,
+                promptOverride,
+            )
+        } catch (err) {
+            console.error('Failed to compact context:', err)
+            setError(err instanceof Error ? err.message : 'Failed to compact context')
+        } finally {
+            setIsCompactingContext(false)
+        }
+    }, [currentSessionId, streamingState.isStreaming, messages, currentSession?.title, selectedModel, sendMessage])
+
     // Queue functions
     const queueMessage = useCallback((content: string) => {
         if (content.trim()) {
@@ -1221,6 +1355,8 @@ export function useChatSession(): UseChatSessionResult {
         streamingState,
         sendMessage,
         stopStreaming,
+        compactContext,
+        isCompactingContext,
         messageQueue,
         queueMessage,
         removeFromQueue,

@@ -169,6 +169,8 @@ export function ConnectedChatView({
         createNewSession,
         selectSession,
         stopStreaming,
+        compactContext,
+        isCompactingContext,
         queueMessage,
         messageQueue,
         removeFromQueue,
@@ -623,6 +625,8 @@ export function ConnectedChatView({
                 selectedModel={selectedModel}
                 isModelUpdating={isModelUpdating}
                 onModelChange={setSelectedModel}
+                onCompactContext={compactContext}
+                isCompactingContext={isCompactingContext}
             />
         </>
     )

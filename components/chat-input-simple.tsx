@@ -25,6 +25,7 @@ import {
   Check,
   Sparkles,
   Wand2,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,6 +93,8 @@ interface ChatInputProps {
   selectedModel?: SessionModelSelection | null;
   isModelUpdating?: boolean;
   onModelChange?: (model: SessionModelSelection) => Promise<void> | void;
+  onCompactContext?: () => Promise<void> | void;
+  isCompactingContext?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +160,8 @@ export function ChatInput({
   selectedModel = null,
   isModelUpdating = false,
   onModelChange,
+  onCompactContext,
+  isCompactingContext = false,
 }: ChatInputProps) {
   const { settings } = useAppSettings();
   const isMobile = useIsMobile();
@@ -804,6 +809,9 @@ export function ChatInput({
   // Mention type color map for filter pills
   // =========================================================================
   const mentionTypeColorMap = REFERENCE_TYPE_COLOR_MAP;
+  const shouldRecommendCompaction = messages.length >= 24;
+  const canCompactContext =
+    Boolean(onCompactContext) && !isStreaming && !isCompactingContext && messages.length >= 4;
 
   // =========================================================================
   // Render
@@ -1316,6 +1324,40 @@ export function ChatInput({
                 </div>
               </PopoverContent>
             </Popover>
+          )}
+
+          {/* Context compaction */}
+          {onCompactContext && (
+            <button
+              type="button"
+              onClick={() => {
+                void onCompactContext();
+              }}
+              disabled={!canCompactContext}
+              className={`chat-toolbar-pill flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                shouldRecommendCompaction
+                  ? "border-amber-500/40 bg-amber-500/12 text-amber-700 hover:bg-amber-500/18 dark:text-amber-300"
+                  : "border-border/60 bg-secondary text-foreground shadow-sm hover:bg-secondary/80"
+              }`}
+              title={
+                isCompactingContext
+                  ? "Compacting context..."
+                  : !canCompactContext && isStreaming
+                    ? "Stop streaming before compacting context"
+                    : !canCompactContext && messages.length < 4
+                      ? "Need more chat history to compact"
+                      : shouldRecommendCompaction
+                        ? "Recommended: chat history is getting long"
+                        : "Compact older context into a durable memory session"
+              }
+            >
+              {isCompactingContext ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              Compact
+            </button>
           )}
         </div>
 
