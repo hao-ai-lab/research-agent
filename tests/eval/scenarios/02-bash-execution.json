@@ -1,0 +1,16 @@
+{
+    "name": "bash-execution",
+    "description": "Agent can run bash commands and report output",
+    "seed": "researcher",
+    "prompt": "Run the command 'echo 42' and tell me what the output was.",
+    "assertions": [
+        {
+            "type": "response_contains",
+            "text": "42"
+        },
+        {
+            "type": "min_tool_calls",
+            "count": 1
+        }
+    ]
+}

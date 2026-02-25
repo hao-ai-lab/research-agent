@@ -1,0 +1,25 @@
+{
+    "name": "multi-file-task",
+    "description": "Agent can handle a multi-step task involving multiple files",
+    "seed": "researcher",
+    "prompt": "Create a directory called 'experiment' and inside it create two files: 'config.json' with {\"lr\": 0.001, \"epochs\": 10} and 'notes.md' with a one-line description of the experiment config.",
+    "assertions": [
+        {
+            "type": "file_exists",
+            "path": "experiment/config.json"
+        },
+        {
+            "type": "file_exists",
+            "path": "experiment/notes.md"
+        },
+        {
+            "type": "file_contains",
+            "path": "experiment/config.json",
+            "text": "0.001"
+        },
+        {
+            "type": "min_tool_calls",
+            "count": 2
+        }
+    ]
+}

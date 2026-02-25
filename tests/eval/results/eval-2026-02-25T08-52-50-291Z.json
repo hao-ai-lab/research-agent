@@ -1,0 +1,50 @@
+{
+  "timestamp": 1772009570293,
+  "results": [
+    {
+      "name": "file-creation",
+      "passed": false,
+      "error": "File not found: hello.txt",
+      "duration": 2225,
+      "toolCalls": 1,
+      "turns": 2,
+      "response": ""
+    },
+    {
+      "name": "bash-execution",
+      "passed": false,
+      "error": "Response missing text: \"42\"",
+      "duration": 1510,
+      "toolCalls": 1,
+      "turns": 2,
+      "response": ""
+    },
+    {
+      "name": "read-and-summarize",
+      "passed": false,
+      "error": "Response missing text: \"5\"",
+      "duration": 1499,
+      "toolCalls": 1,
+      "turns": 2,
+      "response": ""
+    },
+    {
+      "name": "multi-file-task",
+      "passed": false,
+      "error": "File not found: experiment/config.json",
+      "duration": 1979,
+      "toolCalls": 1,
+      "turns": 2,
+      "response": "I'll create the directory and both files simultaneously!"
+    },
+    {
+      "name": "debug-error",
+      "passed": false,
+      "error": "Expected ≥2 tool calls, got 1",
+      "duration": 3023,
+      "toolCalls": 1,
+      "turns": 2,
+      "response": "Let me start by reading the file to understand the current code."
+    }
+  ]
+}
