@@ -13,6 +13,7 @@ import {
     streamSession,
     checkApiHealth,
     stopSession,
+    reportBugIssue,
     type ChatSession,
     type ChatModelOption,
     type SessionModelSelection,
@@ -1008,6 +1009,41 @@ export function useChatSession(): UseChatSessionResult {
 
         // Track the current mode for queued messages
         currentModeRef.current = mode
+
+        if (mode === 'report') {
+            const timestamp = Date.now() / 1000
+            setError(null)
+            const userMessage: ChatMessageData = {
+                role: 'user',
+                content,
+                timestamp,
+            }
+            setMessages(prev => [...prev, userMessage])
+
+            try {
+                const issue = await reportBugIssue({
+                    description: content,
+                    session_id: targetSessionId,
+                })
+                const assistantMessage: ChatMessageData = {
+                    role: 'assistant',
+                    content: `Created Bug issue: ${issue.issue_url}`,
+                    timestamp: Date.now() / 1000,
+                }
+                setMessages(prev => [...prev, assistantMessage])
+                await refreshSessions()
+            } catch (err) {
+                const errorText = err instanceof Error ? err.message : 'Failed to create bug issue'
+                setError(errorText)
+                const assistantMessage: ChatMessageData = {
+                    role: 'assistant',
+                    content: `Bug report failed: ${errorText}`,
+                    timestamp: Date.now() / 1000,
+                }
+                setMessages(prev => [...prev, assistantMessage])
+            }
+            return
+        }
 
         const developEcho = parseDevelopCommand(content)
         if (developEcho !== null) {

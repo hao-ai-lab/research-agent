@@ -59,6 +59,8 @@ export type {
     JourneyRecommendationRespondRequest,
     JourneyDecisionCreateRequest,
     JourneyGenerateRecommendationsResponse,
+    ReportBugIssueRequest,
+    ReportBugIssueResponse,
 } from './api'
 
 // Dynamic API selection based on runtime config
@@ -231,3 +233,6 @@ export const listJourneyDecisions = (...args: Parameters<typeof realApi.listJour
 
 export const createJourneyDecision = (...args: Parameters<typeof realApi.createJourneyDecision>) =>
     getApi().createJourneyDecision(...args)
+
+export const reportBugIssue = (...args: Parameters<typeof realApi.reportBugIssue>) =>
+    getApi().reportBugIssue(...args)

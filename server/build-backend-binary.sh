@@ -78,6 +78,7 @@ log "Building one-file backend binary"
   --hidden-import integrations.slack_handler \
   --hidden-import integrations.slack_routes \
   --hidden-import integrations.git_routes \
+  --hidden-import integrations.github_routes \
   --hidden-import integrations.journey_routes \
   --hidden-import integrations.cluster_routes \
   --hidden-import integrations.plan_routes \
